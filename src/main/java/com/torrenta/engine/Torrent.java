@@ -17,6 +17,8 @@ package com.torrenta.engine;
  * @param completed when the download finished, epoch seconds; 0 if it has not
  * @param tracker the tracker last announced to, as a URL; empty if none
  * @param savePath where the files are
+ * @param paused stopped by the user (not by the queue)
+ * @param sequential pieces are fetched in order
  */
 public record Torrent(
         String id,
@@ -34,4 +36,6 @@ public record Torrent(
         long added,
         long completed,
         String tracker,
-        String savePath) {}
+        String savePath,
+        boolean paused,
+        boolean sequential) {}

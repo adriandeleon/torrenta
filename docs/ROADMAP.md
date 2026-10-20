@@ -73,7 +73,8 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Queue: move to top, up, down, bottom | ✓ | ✓ | 0.4 |
 | Per-torrent download and upload limits | ✓ | ✓ | 0.4 |
 | Per-torrent share limits: ratio, seeding time, inactive time; action on reaching them | ✓ | ✓ | 0.4 |
-| Sequential download, first and last piece first | ✓ | ✓ | 0.2 |
+| Sequential download | ✓ | ✓ | 0.2 |
+| First and last piece first | ✓ | ✓ | 0.4 |
 | Super seeding | ✗ | ✓ | 0.4 |
 | Copy name, info-hash (v1 and v2), magnet link | ◐ | ✓ | 0.2 |
 | Open destination folder, open file | ◐ | ✓ | 0.2 |
@@ -172,9 +173,11 @@ The point at which Torrenta can be left running.
    file; `TorrentStore` as the one owner of what is on disk; `--config-dir`.
 2. **Stable table** — done. Rows keyed by info-hash and updated in place; selection, sort and
    scroll survive a tick. Column chooser, column order and widths remembered. Filter box.
-3. **Actions and chords.** Pause, resume, force resume, remove, remove with data, recheck,
-   reannounce, sequential and first/last piece toggles, copy name/hash/magnet, open folder. Context
-   menu, menu bar, command palette. Multi-select.
+3. **Actions and chords** — done, except first/last piece first, which libtorrent has no flag
+   for (qBittorrent raises the priority of each file's edge pieces itself); it moves to 0.4 with the
+   per-torrent limits dialog. Pause, resume, force resume, remove, remove with data, recheck,
+   reannounce, sequential, copy name/hash/magnet, open folder. Context menu, menu bar, command
+   palette. Multi-select.
 4. **Engine alerts.** A listener thread turns libtorrent alerts into events: added, finished, error,
    metadata received, tracker error. Drives the status bar, the execution log window and later the
    notifications.

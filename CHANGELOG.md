@@ -18,6 +18,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   position and the sort survive. Fifteen columns (name, size, done, progress, state, seeds, peers,
   down, up, ETA, ratio, added, completed, tracker, save path), typed so sorting compares numbers;
   order, widths and visibility remembered. A name filter on `Ctrl+F`.
+- **Torrent actions**, on the selection: pause/resume (`Space`), force resume, force recheck, force
+  reannounce, sequential download, copy name/info-hash/magnet link, open the destination folder,
+  remove and remove with data (confirmed). In the Torrent menu, the right-click menu, and a
+  **command palette** on `Ctrl+Shift+P`.
 
 Project scaffold: a themed window with a menu bar, a torrent list and a status bar; the
 `--help`/`--version` command line, which also takes `.torrent` paths and magnet links; the Caret &

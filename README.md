@@ -65,7 +65,19 @@ window (`download.dir` in the settings file already works).
 | `Ctrl+O` (`Cmd+O` on macOS) | Add a `.torrent` file |
 | `Ctrl+M` | Add a magnet link |
 | `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
+| `Ctrl+Shift+P` | Command palette: every command, found by typing part of its name |
+| `Space` | Pause the selected torrents, or resume them if all are paused |
+| `Ctrl+Shift+U` | Force resume (ignore the queue) |
+| `Ctrl+Shift+R` / `Ctrl+Shift+A` | Force recheck / force reannounce |
+| `Ctrl+Shift+S` | Sequential download on or off |
+| `Ctrl+C` / `Ctrl+Shift+H` / `Ctrl+Shift+C` | Copy name / info-hash / magnet link |
+| `Ctrl+Shift+O` | Open the destination folder |
+| `Delete` / `Shift+Delete` | Remove, or remove with the downloaded files, after confirming |
+| `Ctrl+A` | Select all |
 | `Ctrl+Q` | Quit |
+
+Every action is in the Torrent menu, the list's right-click menu and the palette, and applies to
+the whole selection.
 
 The list's columns (fifteen, from the header's ⋮ menu) keep their order, widths and visibility in
 `settings.properties`.

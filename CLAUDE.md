@@ -12,7 +12,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   cannot take them — the plugin's `<options>` are fixed in the pom.
 - Smoke: `scripts/dev-run.sh -Dtorrenta.capture=/tmp/shot.png -- "magnet:?…"` (or
   `TORRENTA_CAPTURE=/tmp/shot.png ./mvnw javafx:run`) renders the real window, writes a PNG, prints
-  `capture:` lines (title, focus, engine, status bar) and exits.
+  `capture:` lines (title, focus, engine, status bar) and exits. `-Dtorrenta.captureAction=` runs
+  window actions first: `select-all`, `palette`, `palette:<query>`, or a command id such as
+  `pause-resume`; the palette's visible ranking is printed.
 
 Run Maven from the project root with a JDK 25.
 
@@ -21,7 +23,7 @@ Run Maven from the project root with a JDK 25.
 | Layer | What | Where |
 |---|---|---|
 | Entry | `--help`/`--version`, toolkit start, theme | `com.torrenta.App`, `com.torrenta.cli` |
-| UI | The window: menu bar, filter, torrent list, status bar; `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text | `com.torrenta.ui` |
+| UI | The window: menu bar, filter, torrent list, status bar, palette; `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
 | Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
@@ -72,6 +74,12 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 - **Nothing in the chrome may be focus-traversable** (Termina's rule holds here). The filter box
   took initial focus on a fresh launch because the table is hidden until the first torrent, so it
   was the first traversable node. It is `setFocusTraversable(false)`; Ctrl+F reaches it.
+- **Space and Delete are handled on the table, never as scene accelerators.** An accelerator fires
+  on any unconsumed key press, and a text field does not consume Space — so a space typed into the
+  filter would pause the selection. `Command.hint` carries the key's name for the menus.
+- **"Paused" means paused by a person.** libtorrent's queue pauses auto-managed torrents too;
+  `Torrent.paused` is `PAUSED && !AUTO_MANAGED`, and `pause()` clears `AUTO_MANAGED` first so the
+  queue does not resume what the user stopped.
 - **Rows are `TorrentRow` objects, never `Torrent` snapshots.** The list has an extractor on the
   row's torrent property, which is what makes the `SortedList` re-sort on an in-place update.
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
@@ -95,5 +103,4 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 Add dialogs (Ctrl+O / Ctrl+M only say so; inputs come from the command line), pause/resume/remove
 in the window (`Engine.remove` exists, nothing calls it yet), limits, a settings window, per-torrent
 detail, `-Pdist` with the native in the image.
-Row actions (context menu, chords) are next; `TorrentRows` keeps row identity, so the selection
-is safe to build on.
+Engine alerts to a log window (0.2 PR 4) are next. First/last piece first waits for 0.4.

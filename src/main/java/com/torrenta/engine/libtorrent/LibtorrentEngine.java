@@ -25,6 +25,7 @@ import org.libtorrent4j.AlertListener;
 import org.libtorrent4j.LibTorrent;
 import org.libtorrent4j.SessionHandle;
 import org.libtorrent4j.SessionManager;
+import org.libtorrent4j.TorrentFlags;
 import org.libtorrent4j.TorrentHandle;
 import org.libtorrent4j.TorrentInfo;
 import org.libtorrent4j.TorrentStatus;
@@ -40,6 +41,7 @@ import org.libtorrent4j.swig.error_code;
 import org.libtorrent4j.swig.libtorrent;
 import org.libtorrent4j.swig.resume_data_flags_t;
 import org.libtorrent4j.swig.status_flags_t;
+import org.libtorrent4j.swig.torrent_flags_t;
 import org.libtorrent4j.swig.torrent_handle;
 import org.libtorrent4j.swig.torrent_handle_vector;
 
@@ -186,6 +188,57 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
+    public void pause(String id) throws EngineException {
+        TorrentHandle h = handle(id);
+        // Out of the queue's hands first: an auto-managed torrent that is paused gets resumed by
+        // the queue at its next pass, which is not what "pause" means to a person.
+        h.unsetFlags(Flags.AUTO_MANAGED);
+        h.pause();
+    }
+
+    @Override
+    public void resume(String id) throws EngineException {
+        TorrentHandle h = handle(id);
+        h.setFlags(Flags.AUTO_MANAGED);
+        h.resume();
+    }
+
+    @Override
+    public void forceResume(String id) throws EngineException {
+        TorrentHandle h = handle(id);
+        h.unsetFlags(Flags.AUTO_MANAGED);
+        h.resume();
+    }
+
+    @Override
+    public void recheck(String id) throws EngineException {
+        handle(id).forceRecheck();
+    }
+
+    @Override
+    public void reannounce(String id) throws EngineException {
+        handle(id).forceReannounce();
+    }
+
+    @Override
+    public void setSequential(String id, boolean sequential) throws EngineException {
+        TorrentHandle h = handle(id);
+        if (sequential) h.setFlags(Flags.SEQUENTIAL_DOWNLOAD);
+        else h.unsetFlags(Flags.SEQUENTIAL_DOWNLOAD);
+    }
+
+    @Override
+    public String magnetLink(String id) throws EngineException {
+        return handle(id).makeMagnetUri();
+    }
+
+    private TorrentHandle handle(String id) throws EngineException {
+        TorrentHandle handle = find(running(), id);
+        if (handle == null) throw new EngineException("No such torrent: " + id);
+        return handle;
+    }
+
+    @Override
     public List<Torrent> torrents() {
         SessionManager s = session;
         if (s == null || !s.isRunning()) return List.of();
@@ -283,8 +336,20 @@ public final class LibtorrentEngine implements Engine {
         static final status_flags_t FLAGS = TorrentHandle.QUERY_NAME.or_(TorrentHandle.QUERY_SAVE_PATH);
     }
 
+    /** Same rule as {@link StatusQuery}: {@code TorrentFlags}' constants are SWIG objects. */
+    private static final class Flags {
+        static final torrent_flags_t PAUSED = TorrentFlags.PAUSED;
+        static final torrent_flags_t AUTO_MANAGED = TorrentFlags.AUTO_MANAGED;
+        static final torrent_flags_t SEQUENTIAL_DOWNLOAD = TorrentFlags.SEQUENTIAL_DOWNLOAD;
+    }
+
+    private static boolean has(torrent_flags_t flags, torrent_flags_t flag) {
+        return flags.and_(flag).non_zero();
+    }
+
     private static Torrent snapshot(TorrentHandle handle) {
         TorrentStatus status = handle.status(StatusQuery.FLAGS);
+        torrent_flags_t flags = status.flags();
         String id = status.getInfoHashes().getBest().toHex();
         String name = status.name();
         if (name == null || name.isEmpty()) name = id;
@@ -305,7 +370,10 @@ public final class LibtorrentEngine implements Engine {
                 status.addedTime(),
                 status.completedTime(),
                 tracker == null ? "" : tracker,
-                status.swig().getSave_path());
+                status.swig().getSave_path(),
+                // Paused by a person, not parked by the queue: the queue pauses auto-managed ones.
+                has(flags, Flags.PAUSED) && !has(flags, Flags.AUTO_MANAGED),
+                has(flags, Flags.SEQUENTIAL_DOWNLOAD));
     }
 
     /** libtorrent's seven states folded into the list's six. Package-private for the test. */

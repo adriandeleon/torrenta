@@ -39,3 +39,54 @@
 .torrent-table .progress-bar {
     -fx-pref-height: 12;
 }
+
+/*
+ * The command palette. Anchored near the top rather than centred: it is read while looking at the
+ * list underneath. Carried over from Termina.
+ */
+.palette-backdrop {
+    -fx-background-color: rgba(0, 0, 0, 0.32);
+}
+
+.palette-card {
+    -fx-background-color: -color-bg-default;
+    -fx-background-radius: 10;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 10;
+    -fx-padding: 10;
+    -fx-spacing: 8;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.45), 24, 0.2, 0, 8);
+    -fx-translate-y: 48;
+}
+
+.palette-input {
+    -fx-font-size: 1.1em;
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 7;
+}
+
+.palette-list {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+}
+
+.palette-list .list-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 4 8 4 8;
+}
+
+.palette-list .list-cell:filled:selected {
+    -fx-background-color: -color-accent-subtle;
+    -fx-background-radius: 6;
+}
+
+.palette-name {
+    -fx-text-fill: -color-fg-default;
+}
+
+/* The shortcut is a reminder, not the point of the row. */
+.palette-chord {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-family: monospace;
+    -fx-font-size: 0.9em;
+}

@@ -34,6 +34,8 @@ final class DevCapture {
     static final String CAPTURE_ENV = "TORRENTA_CAPTURE";
 
     static final String DELAY_PROPERTY = "torrenta.captureAfterMs";
+    /** Comma-separated window actions run halfway through the delay; see MainWindow.runForCapture. */
+    static final String ACTION_PROPERTY = "torrenta.captureAction";
 
     private DevCapture() {}
 
@@ -55,6 +57,18 @@ final class DevCapture {
      */
     static void schedule(Stage stage, MainWindow window) {
         long delay = Long.getLong(DELAY_PROPERTY, 3000);
+        String actions = System.getProperty(ACTION_PROPERTY);
+        if (actions != null) {
+            // Halfway: late enough for the engine and the first poll, early enough for the result
+            // to be painted and polled again before the shot.
+            PauseTransition act = new PauseTransition(Duration.millis(delay / 2));
+            act.setOnFinished(e -> {
+                for (String action : actions.split(",")) {
+                    if (!action.isBlank()) window.runForCapture(action.trim());
+                }
+            });
+            act.play();
+        }
         PauseTransition settle = new PauseTransition(Duration.millis(delay));
         settle.setOnFinished(e -> {
             try {

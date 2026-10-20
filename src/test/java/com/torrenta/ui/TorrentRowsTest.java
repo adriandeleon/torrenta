@@ -15,7 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class TorrentRowsTest {
 
     private static Torrent t(String id, long rate) {
-        return new Torrent(id, "name " + id, 100, 0, 0, TorrentState.DOWNLOADING, rate, 0, 0, 0, 0, 0, 0, 0, "", "");
+        return new Torrent(
+                id, "name " + id, 100, 0, 0, TorrentState.DOWNLOADING, rate, 0, 0, 0, 0, 0, 0, 0, "", "", false, false);
     }
 
     @Test
@@ -66,7 +67,24 @@ class TorrentRowsTest {
     @Test
     void nameFilterIsCaseInsensitiveSubstringAndBlankMatchesAll() {
         TorrentRow row = new TorrentRow(new Torrent(
-                "a", "Ubuntu 26.04 Desktop", 1, 0, 0, TorrentState.SEEDING, 0, 0, 0, 0, 0, 0, 0, 0, "", ""));
+                "a",
+                "Ubuntu 26.04 Desktop",
+                1,
+                0,
+                0,
+                TorrentState.SEEDING,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                "",
+                "",
+                false,
+                false));
         assertEquals(true, MainWindow.nameFilter("").test(row));
         assertEquals(true, MainWindow.nameFilter(null).test(row));
         assertEquals(true, MainWindow.nameFilter("  desktop ").test(row));
