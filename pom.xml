@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.torrenta</groupId>
+    <artifactId>torrenta</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>Torrenta</name>
+    <description>A keyboard-first, cross-platform BitTorrent client built on JavaFX</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>25</maven.compiler.release>
+        <!-- Indirected through a property: the format is ignored when maven.build.timestamp is
+             filtered into a resource directly. -->
+        <maven.build.timestamp.format>yyyy-MM-dd HH:mm 'UTC'</maven.build.timestamp.format>
+        <build.timestamp>${maven.build.timestamp}</build.timestamp>
+
+        <javafx.version>26.0.2</javafx.version>
+        <spotless.version>3.6.0</spotless.version>
+        <palantir.version>2.92.0</palantir.version>
+        <jacoco.version>0.8.13</jacoco.version>
+        <javafx.plugin.version>0.0.8</javafx.plugin.version>
+        <junit.version>5.14.4</junit.version>
+
+        <!-- The engine: libtorrent (the one behind qBittorrent and Deluge) through SWIG. One core
+             jar, plus one jar of native libraries per OS, chosen by the os-* profiles below. The
+             core jar does NOT extract the native from the jar: it System.load()s the path in
+             -Dlibtorrent4j.jni.path, or falls back to java.library.path. NativeLibrary does the
+             extraction. Natives exist for macOS arm64, Linux x86_64 (+ 32-bit arm) and Windows
+             x86_64 only. -->
+        <libtorrent4j.version>2.1.0-39</libtorrent4j.version>
+
+        <!-- Prism pipeline order (-Dprism.order). Set per-OS in the os-* profiles:
+             mac=mtl,es2,sw (Metal), windows=d3d,es2,sw, linux=es2,sw. This default covers
+             profile-less builds (e.g. plain `mvn test`, which doesn't render). -->
+        <prism.pipeline>es2,sw</prism.pipeline>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.libtorrent4j</groupId>
+            <artifactId>libtorrent4j</artifactId>
+            <version>${libtorrent4j.version}</version>
+        </dependency>
+        <!-- libtorrent4j-{macos,linux,windows}: see the os-* profiles. -->
+
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <resources>
+            <!-- build-info.properties is filtered so the version comes from this pom and nowhere
+                 else; every other file reads it through AppInfo. A release then means editing one
+                 number. Everything else is copied verbatim — filtering the CSS would mangle any
+                 ${...} it contains. -->
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>true</filtering>
+                <includes><include>com/torrenta/build-info.properties</include></includes>
+            </resource>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+                <excludes><exclude>com/torrenta/build-info.properties</exclude></excludes>
+            </resource>
+        </resources>
+        <plugins>
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>${spotless.version}</version>
+                <configuration>
+                    <java>
+                        <removeUnusedImports/>
+                        <palantirJavaFormat>
+                            <version>${palantir.version}</version>
+                        </palantirJavaFormat>
+                        <!-- importOrder runs AFTER Palantir so it has the final say on grouping;
+                             Palantir otherwise collapses everything into one alphabetical block.
+                             Groups, blank-line separated, longest prefix wins so javafx is not
+                             swallowed by java: JDK, then javafx, then everything else (third-party
+                             and com.torrenta), then static imports last. -->
+                        <importOrder>
+                            <order>java|javax,javafx,,\#</order>
+                        </importOrder>
+                        <toggleOffOn/>
+                    </java>
+                </configuration>
+                <executions>
+                    <execution>
+                        <!-- verify, not compile: `mvn javafx:run` and the compile loop stay
+                             untouched, and CI still refuses unformatted code. -->
+                        <id>spotless-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>${jacoco.version}</version>
+                <executions>
+                    <execution>
+                        <id>jacoco-prepare-agent</id>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>jacoco-report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <!-- A regression net, not a target: each floor sits well below the coverage
+                             actually measured. Only packages whose coverage does not depend on the
+                             platform or on a display are gated. -->
+                        <id>jacoco-check</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <haltOnFailure>true</haltOnFailure>
+                            <rules>
+                                <!-- The command line: pure parsing, fully covered. -->
+                                <rule>
+                                    <element>PACKAGE</element>
+                                    <includes>
+                                        <include>com.torrenta.cli</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.2</version>
+                <configuration>
+                    <!-- Tests run on the classpath (unnamed module) so they can reach
+                         package-private members and setAccessible freely. -->
+                    <useModulePath>false</useModulePath>
+                    <systemPropertyVariables>
+                        <!-- NativeLibrary unpacks the engine here instead of under ~/.torrenta. -->
+                        <torrenta.nativeDir>${project.build.directory}/native</torrenta.nativeDir>
+                    </systemPropertyVariables>
+                    <!-- The engine's JNI class calls System.load; see the javafx plugin options. -->
+                    <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-maven-plugin</artifactId>
+                <version>${javafx.plugin.version}</version>
+                <configuration>
+                    <mainClass>com.torrenta/com.torrenta.App</mainClass>
+                    <options>
+                        <!-- The engine's automatic module calls System.load; without this the JDK
+                             warns on every launch and says it will refuse in a future release.
+                             ALL-UNNAMED covers the jars this plugin puts on the classpath. -->
+                        <option>--enable-native-access=javafx.graphics,libtorrent4j,ALL-UNNAMED</option>
+                        <option>-Dprism.order=${prism.pipeline}</option>
+                    </options>
+                    <launcher>torrenta</launcher>
+                    <jlinkImageName>torrenta</jlinkImageName>
+                    <jlinkZipName>torrenta</jlinkZipName>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>os-mac</id>
+            <activation><os><family>mac</family></os></activation>
+            <properties>
+                <prism.pipeline>mtl,es2,sw</prism.pipeline>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>org.libtorrent4j</groupId>
+                    <artifactId>libtorrent4j-macos</artifactId>
+                    <version>${libtorrent4j.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>os-windows</id>
+            <activation><os><family>windows</family></os></activation>
+            <properties>
+                <prism.pipeline>d3d,es2,sw</prism.pipeline>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>org.libtorrent4j</groupId>
+                    <artifactId>libtorrent4j-windows</artifactId>
+                    <version>${libtorrent4j.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>os-linux</id>
+            <activation><os><family>unix</family><name>Linux</name></os></activation>
+            <properties>
+                <prism.pipeline>es2,sw</prism.pipeline>
+            </properties>
+            <dependencies>
+                <dependency>
+                    <groupId>org.libtorrent4j</groupId>
+                    <artifactId>libtorrent4j-linux</artifactId>
+                    <version>${libtorrent4j.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+
+        <!-- No `dist` profile yet. When the app has something to ship, take the jlink + jpackage
+             profile from Termina's pom.xml (same author, same layout): moditect for automatic
+             modules, per-OS icons, AOT cache training, installers behind -Dskip.installers. -->
+    </profiles>
+</project>

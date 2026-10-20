@@ -1,0 +1,9 @@
+# Authors
+
+Torrenta is written and maintained by:
+
+Adrian De Leon <adrian.deleon@gmail.com>
+
+Torrenta stands on a project it does not vendor: libtorrent, through Alden
+Torres's libtorrent4j binding. See NOTICE for the full list of third-party
+software and its licensing.

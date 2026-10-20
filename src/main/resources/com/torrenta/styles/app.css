@@ -1,0 +1,32 @@
+/*
+ * Main-window chrome. Written in the theme's semantic colour variables, so both themes are
+ * covered without a second stylesheet.
+ */
+
+.empty-state {
+    -fx-background-color: -color-bg-default;
+}
+
+.empty-title {
+    -fx-font-size: 1.4em;
+    -fx-text-fill: -color-fg-default;
+}
+
+.empty-hint {
+    -fx-text-fill: -color-fg-muted;
+}
+
+.status-bar {
+    -fx-background-color: -color-bg-subtle;
+    -fx-border-color: -color-border-default transparent transparent transparent;
+}
+
+.status-bar .label {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.95em;
+}
+
+.torrent-table {
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}

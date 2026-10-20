@@ -1,0 +1,21 @@
+Torrenta
+Copyright 2026 Adrian De Leon
+
+This product includes software from the following projects.
+
+--------------------------------------------------------------------------------
+libtorrent4j — https://github.com/aldenml/libtorrent4j
+Copyright Alden Torres
+Licensed under MIT. Used as an unmodified dependency, including its bundled
+native libraries, which statically link:
+  libtorrent — https://www.libtorrent.org — BSD-3-Clause, Copyright Arvid Norberg
+  Boost — https://www.boost.org — Boost Software License 1.0
+  OpenSSL — https://www.openssl.org — Apache-2.0
+
+--------------------------------------------------------------------------------
+Vendored source
+--------------------------------------------------------------------------------
+
+src/main/resources/com/torrenta/styles/editora-{light,dark}.css
+    Carried over from Editora and Termina (same author). Derived from AtlantaFX
+    (https://github.com/mkpaz/atlantafx), licensed under MIT.

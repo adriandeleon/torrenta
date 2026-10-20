@@ -1,0 +1,32 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Torrenta">
+  <!--
+    Family resemblance to Editora and Termina: the same Ink navy tile, the same corner radius, the
+    same teal gradient, and the same two-tone split — a muted periwinkle framing glyph with the teal
+    reserved for the focal element.
+
+    Editora frames a letterform in braces because it is an editor; Termina pairs a prompt chevron
+    with a block cursor because it is a terminal. Torrenta drops a teal arrow into a periwinkle
+    tray because it is a download client.
+
+    Two shapes only, so it still reads at 32px.
+  -->
+  <defs>
+    <linearGradient id="caretF" x1="256" y1="128" x2="256" y2="318" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5EEAD4"/>
+      <stop offset="1" stop-color="#22B8A6"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="#1B1E2A"/>
+
+  <!-- The tray: open at the top, where the arrow lands. -->
+  <path d="M146 302 L146 348 Q146 374 172 374 L340 374 Q366 374 366 348 L366 302"
+        fill="none" stroke="#9AA2D4" stroke-width="34"
+        stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- The arrow: shaft and head share one gradient so the colour runs continuously. -->
+  <rect x="232" y="128" width="48" height="150" rx="14" fill="url(#caretF)"/>
+  <path d="M186 232 L256 304 L326 232"
+        fill="none" stroke="url(#caretF)" stroke-width="46"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
