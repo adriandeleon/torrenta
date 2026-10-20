@@ -73,7 +73,8 @@ final class SettingsWindow {
         GENERAL(Group.APPLICATION, "General"),
         ADDING(Group.APPLICATION, "Adding torrents"),
         CONNECTION(Group.ENGINE, "Connection"),
-        PROTOCOL(Group.ENGINE, "Protocol");
+        PROTOCOL(Group.ENGINE, "Protocol"),
+        IP_FILTER(Group.ENGINE, "IP filter");
 
         final Group group;
         private final String title;
@@ -95,7 +96,12 @@ final class SettingsWindow {
             new String[] {
                 Settings.DOWNLOAD_DIR, Settings.UPDATE_CHECK, Settings.ADD_START_PAUSED, Settings.ADD_SEQUENTIAL
             },
-            concat(Settings.CONNECTION_KEYS, Settings.PROTOCOL_KEYS));
+            concat(Settings.CONNECTION_KEYS, concat(Settings.PROTOCOL_KEYS, Settings.IPFILTER_KEYS)));
+
+    /** Told after an IP filter setting changed; {@code true} asks for a download now. */
+    private java.util.function.Consumer<Boolean> onIpFilterChanged = force -> {};
+
+    private java.util.function.Supplier<String> ipFilterStatus = () -> "";
 
     private static String[] concat(String[] a, String[] b) {
         String[] out = new String[a.length + b.length];
@@ -148,6 +154,24 @@ final class SettingsWindow {
     void setOnEngineSettingsChanged(Runnable handler) {
         onEngineSettingsChanged = handler;
     }
+
+    void setOnIpFilterChanged(
+            java.util.function.Consumer<Boolean> handler, java.util.function.Supplier<String> status) {
+        onIpFilterChanged = handler;
+        ipFilterStatus = status;
+    }
+
+    /** FX thread: the page's status line, after an apply. */
+    void refreshIpFilterStatus() {
+        if (ipFilterStatusLabel != null) ipFilterStatusLabel.setText(ipFilterStatus.get());
+    }
+
+    private CheckBox ipFilterEnabled;
+    private TextField ipFilterUrl;
+    private Spinner<Integer> ipFilterHours;
+    private TextField ipFilterFile;
+    private TextArea ipFilterBans;
+    private Label ipFilterStatusLabel;
 
     SettingsWindow(Settings settings) {
         this.settings = settings;
@@ -357,6 +381,7 @@ final class SettingsWindow {
             case ADDING -> buildAdding(page);
             case CONNECTION -> buildConnection(page);
             case PROTOCOL -> buildProtocol(page);
+            case IP_FILTER -> buildIpFilter(page);
         }
         page.setPadding(new Insets(0, PAGE_GUTTER, 0, 0));
         ScrollPane scroll = new ScrollPane(page);
@@ -704,6 +729,98 @@ final class SettingsWindow {
                 "announce public list");
     }
 
+    private void buildIpFilter(VBox page) {
+        VBox list = section(page, "Blocklist");
+        ipFilterEnabled = new CheckBox();
+        ipFilterEnabled.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.set(Settings.IPFILTER_ENABLED, String.valueOf(now));
+            settings.saveQuietly();
+            onIpFilterChanged.accept(false);
+        });
+        row(
+                Category.IP_FILTER,
+                list,
+                "Filter peers",
+                "Refuse connections to and from the addresses below. Off, and the lists are kept but not used.",
+                ipFilterEnabled,
+                "enable block ban");
+        ipFilterUrl = new TextField();
+        ipFilterUrl.setPrefColumnCount(16);
+        ipFilterUrl.setPromptText("https://…/list.p2p.gz");
+        ipFilterUrl.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.set(Settings.IPFILTER_URL, now.trim());
+            settings.saveQuietly();
+        });
+        Button refresh = new Button("Download now");
+        refresh.setOnAction(e -> onIpFilterChanged.accept(true));
+        row(
+                Category.IP_FILTER,
+                list,
+                "Blocklist URL",
+                "A .p2p or .dat list, plain or gzipped; downloaded on the schedule below and kept beside the settings.",
+                new HBox(6, ipFilterUrl, refresh),
+                "download p2p dat gz");
+        ipFilterHours = intSpinner(1, 720, Settings.IPFILTER_REFRESH_HOURS);
+        row(
+                Category.IP_FILTER,
+                list,
+                "Refresh every (hours)",
+                "Checked at startup and while running.",
+                ipFilterHours,
+                "schedule interval update");
+        ipFilterFile = new TextField();
+        ipFilterFile.setPrefColumnCount(16);
+        ipFilterFile.setPromptText("none");
+        ipFilterFile.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.set(Settings.IPFILTER_FILE, now.trim());
+            settings.saveQuietly();
+            onIpFilterChanged.accept(false);
+        });
+        Button browseFile = new Button("Browse…");
+        browseFile.setOnAction(e -> {
+            javafx.stage.FileChooser chooser = new javafx.stage.FileChooser();
+            chooser.setTitle("Blocklist file");
+            java.io.File chosen = chooser.showOpenDialog(stage);
+            if (chosen != null) ipFilterFile.setText(chosen.getAbsolutePath());
+        });
+        row(
+                Category.IP_FILTER,
+                list,
+                "Local list",
+                "A list on disk, read alongside the downloaded one.",
+                new HBox(6, ipFilterFile, browseFile),
+                "file import p2p dat");
+
+        VBox bans = section(page, "Manual bans");
+        ipFilterBans = new TextArea();
+        ipFilterBans.setPrefRowCount(4);
+        ipFilterBans.setPrefColumnCount(34);
+        ipFilterBans.setPromptText("1.2.3.4\n10.0.0.0/8\n1.2.3.0-1.2.3.255");
+        ipFilterBans.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setIpFilterBans(java.util.Arrays.stream(now.trim().split("\\s+"))
+                    .filter(t -> !t.isEmpty())
+                    .distinct()
+                    .toList());
+            settings.saveQuietly();
+            onIpFilterChanged.accept(false);
+        });
+        row(
+                Category.IP_FILTER,
+                bans,
+                "Banned addresses",
+                "One per line: an address, a range, or a CIDR. Ban peer in the Peers tab adds here.",
+                ipFilterBans,
+                "ban address range cidr");
+        ipFilterStatusLabel = new Label("");
+        ipFilterStatusLabel.getStyleClass().add("settings-row-description");
+        ipFilterStatusLabel.setWrapText(true);
+        row(Category.IP_FILTER, bans, "Status", "", ipFilterStatusLabel, "loaded ranges blocked");
+    }
+
     /** A spinner that writes its key when the value changes, typed or stepped. */
     private Spinner<Integer> intSpinner(int min, int max, String key) {
         Spinner<Integer> spinner = new Spinner<>(new SpinnerValueFactory.IntegerSpinnerValueFactory(min, max, min));
@@ -777,6 +894,12 @@ final class SettingsWindow {
             encryption.setValue(p.encryption());
             anonymous.setSelected(p.anonymous());
             defaultTrackers.setText(String.join("\n", p.defaultTrackers()));
+            ipFilterEnabled.setSelected(settings.ipFilterEnabled());
+            ipFilterUrl.setText(settings.ipFilterUrl());
+            ipFilterHours.getValueFactory().setValue(settings.ipFilterRefreshHours());
+            ipFilterFile.setText(settings.ipFilterFile());
+            ipFilterBans.setText(String.join("\n", settings.ipFilterBans()));
+            ipFilterStatusLabel.setText(ipFilterStatus.get());
         } finally {
             loading = false;
         }

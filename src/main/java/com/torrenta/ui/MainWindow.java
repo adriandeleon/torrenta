@@ -102,6 +102,7 @@ public final class MainWindow {
     private final DetailPane detail = new DetailPane();
     private final UpdateService updates = new UpdateService();
     private final SettingsWindow settingsWindow;
+    private final IpFilterController ipFilter;
     private final MenuItem downloadUpdateItem = new MenuItem();
     private final MenuItem skipUpdateItem = new MenuItem();
     private final Label updateBadge = new Label();
@@ -119,10 +120,11 @@ public final class MainWindow {
      * @param opener opens a URI with the desktop (a folder, later a web page); the application's
      *     host services, which only the {@code Application} can hand out
      */
-    public MainWindow(Stage stage, Settings settings, Consumer<String> opener) {
+    public MainWindow(Stage stage, Settings settings, Path configDir, Consumer<String> opener) {
         this.stage = stage;
         this.settings = settings;
         this.opener = opener;
+        this.ipFilter = new IpFilterController(settings, configDir);
         stage.setTitle(AppInfo.NAME);
 
         BorderPane root = new BorderPane();
@@ -135,6 +137,8 @@ public final class MainWindow {
         logWindow = new LogWindow(stage, log);
         settingsWindow = new SettingsWindow(settings);
         settingsWindow.setOnEngineSettingsChanged(this::applyEngineSettings);
+        settingsWindow.setOnIpFilterChanged(this::refreshIpFilter, this::ipFilterStatusText);
+        detail.setOnBanPeer(this::banPeer);
         log.installLogBridge(Platform::runLater);
         host.getChildren().add(root);
 
@@ -272,6 +276,50 @@ public final class MainWindow {
         });
         poller.scheduleAtFixedRate(this::poll, 0, POLL_MS, TimeUnit.MILLISECONDS);
         maybeCheckForUpdates();
+        // The filter from disk first, so no peer slips in while a download runs; the schedule next.
+        ipFilter.setEngine(engine);
+        Thread.ofVirtual().name("ip-filter").start(() -> {
+            ipFilter.applyStored(this::reportIpFilter);
+            ipFilter.refresh(false, this::reportIpFilter);
+        });
+        poller.scheduleAtFixedRate(() -> ipFilter.refresh(false, this::reportIpFilter), 1, 1, TimeUnit.HOURS);
+    }
+
+    // ---- IP filter ------------------------------------------------------------------------------
+
+    private void refreshIpFilter(boolean force) {
+        Thread.ofVirtual().name("ip-filter").start(() -> ipFilter.refresh(force, this::reportIpFilter));
+    }
+
+    private void reportIpFilter(String text) {
+        Platform.runLater(() -> {
+            setStatus(text);
+            settingsWindow.refreshIpFilterStatus();
+        });
+    }
+
+    private String ipFilterStatusText() {
+        IpFilterController.Status s = ipFilter.status();
+        long blocked = engine == null ? 0 : engine.blockedPeers();
+        if (s.loadedAt() == 0) return s.note().isEmpty() ? "Nothing loaded" : s.note();
+        return s.ranges() + " ranges loaded at " + Format.dateTime(s.loadedAt() / 1000)
+                + (s.skipped() > 0 ? ", " + s.skipped() + " lines skipped" : "")
+                + (s.note().isEmpty() ? "" : " (" + s.note() + ")")
+                + " · " + blocked + " peers refused this session";
+    }
+
+    /** From the Peers tab: the address (without its port) joins the manual bans, and the filter is on. */
+    private void banPeer(String address) {
+        String ip = address;
+        if (ip.startsWith("[")) ip = ip.substring(1, ip.indexOf(']'));
+        else if (ip.chars().filter(c -> c == ':').count() == 1) ip = ip.substring(0, ip.indexOf(':'));
+        List<String> bans = new ArrayList<>(settings.ipFilterBans());
+        if (!bans.contains(ip)) bans.add(ip);
+        settings.setIpFilterBans(bans);
+        settings.set(Settings.IPFILTER_ENABLED, "true");
+        settings.saveQuietly();
+        setStatus("Banned " + ip);
+        refreshIpFilter(false);
     }
 
     /** A connection setting changed: the engine takes it live, on a worker. */

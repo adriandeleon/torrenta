@@ -68,6 +68,19 @@ public final class Settings {
     public static final String PROTO_ANONYMOUS = "protocol.anonymous";
     public static final String PROTO_DEFAULT_TRACKERS = "protocol.defaultTrackers";
 
+    /** IP filter page. Bans are space-separated ranges or addresses. */
+    public static final String IPFILTER_ENABLED = "ipfilter.enabled";
+
+    public static final String IPFILTER_URL = "ipfilter.url";
+    public static final String IPFILTER_REFRESH_HOURS = "ipfilter.refreshHours";
+    public static final String IPFILTER_FILE = "ipfilter.file";
+    public static final String IPFILTER_LAST_REFRESH = "ipfilter.lastRefreshEpochMs";
+    public static final String IPFILTER_BANS = "ipfilter.bans";
+
+    public static final String[] IPFILTER_KEYS = {
+        IPFILTER_ENABLED, IPFILTER_URL, IPFILTER_REFRESH_HOURS, IPFILTER_FILE, IPFILTER_LAST_REFRESH, IPFILTER_BANS
+    };
+
     public static final String[] PROTOCOL_KEYS = {
         PROTO_DHT, PROTO_PEX, PROTO_LSD, PROTO_UTP, PROTO_ENCRYPTION, PROTO_ANONYMOUS, PROTO_DEFAULT_TRACKERS
     };
@@ -166,6 +179,48 @@ public final class Settings {
 
     public void setAddSequential(boolean on) {
         properties.setProperty(ADD_SEQUENTIAL, String.valueOf(on));
+    }
+
+    public boolean ipFilterEnabled() {
+        return readBoolean(IPFILTER_ENABLED, false);
+    }
+
+    public String ipFilterUrl() {
+        return properties.getProperty(IPFILTER_URL, "").trim();
+    }
+
+    public int ipFilterRefreshHours() {
+        return readInt(IPFILTER_REFRESH_HOURS, 24, 1, 720);
+    }
+
+    public String ipFilterFile() {
+        return properties.getProperty(IPFILTER_FILE, "").trim();
+    }
+
+    public long ipFilterLastRefresh() {
+        try {
+            return Long.parseLong(
+                    properties.getProperty(IPFILTER_LAST_REFRESH, "0").trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    public void setIpFilterLastRefresh(long epochMs) {
+        properties.setProperty(IPFILTER_LAST_REFRESH, String.valueOf(epochMs));
+    }
+
+    /** The manual bans, as typed: addresses, ranges or CIDRs, space-separated. */
+    public java.util.List<String> ipFilterBans() {
+        return java.util.Arrays.stream(
+                        properties.getProperty(IPFILTER_BANS, "").trim().split("\\s+"))
+                .filter(t -> !t.isEmpty())
+                .distinct()
+                .toList();
+    }
+
+    public void setIpFilterBans(java.util.List<String> bans) {
+        properties.setProperty(IPFILTER_BANS, String.join(" ", bans));
     }
 
     /** The connection settings as stored, each clamped to a sane range. */
