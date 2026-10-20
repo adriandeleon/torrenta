@@ -12,6 +12,8 @@ import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.torrenta.automation.AutomationSettings;
+import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
 
@@ -192,6 +194,31 @@ public final class Settings {
 
     /** Inputs are added with the defaults above and the Add dialog does not open. Off by default. */
     public static final String ADD_WITHOUT_ASKING = "add.withoutAsking";
+
+    /**
+     * The command lines run on an event, with placeholders ({@code EventCommand}); blank for none.
+     * They name programs on this machine, so the {@code automation.} prefix never syncs.
+     */
+    public static final String AUTOMATION_ON_ADDED = "automation.onAdded";
+
+    public static final String AUTOMATION_ON_FINISHED = "automation.onFinished";
+    public static final String AUTOMATION_ON_SEEDING_DONE = "automation.onSeedingDone";
+    /** Desktop notifications, one switch per event; only {@code notify.finished} is on by default. */
+    public static final String NOTIFY_ADDED = "notify.added";
+
+    public static final String NOTIFY_FINISHED = "notify.finished";
+    public static final String NOTIFY_SEEDING_DONE = "notify.seedingDone";
+    public static final String NOTIFY_ERROR = "notify.error";
+
+    public static final String[] AUTOMATION_KEYS = {
+        AUTOMATION_ON_ADDED,
+        AUTOMATION_ON_FINISHED,
+        AUTOMATION_ON_SEEDING_DONE,
+        NOTIFY_ADDED,
+        NOTIFY_FINISHED,
+        NOTIFY_SEEDING_DONE,
+        NOTIFY_ERROR
+    };
 
     private final Path file;
     private final Properties properties = new Properties();
@@ -738,5 +765,57 @@ public final class Settings {
     /** The storage choices for a new torrent saved to {@code destination}. */
     public com.torrenta.engine.AddRequest.Storage storage(Path destination) {
         return com.torrenta.engine.AddRequest.Storage.of(plan(destination), partSuffix(), preallocate());
+    }
+
+    /** What runs and what notifies on which event; command lines stripped, blank for none. */
+    public AutomationSettings automation() {
+        AutomationSettings d = AutomationSettings.DEFAULTS;
+        return new AutomationSettings(
+                properties.getProperty(AUTOMATION_ON_ADDED, ""),
+                properties.getProperty(AUTOMATION_ON_FINISHED, ""),
+                properties.getProperty(AUTOMATION_ON_SEEDING_DONE, ""),
+                readBoolean(NOTIFY_ADDED, d.notifyAdded()),
+                readBoolean(NOTIFY_FINISHED, d.notifyFinished()),
+                readBoolean(NOTIFY_SEEDING_DONE, d.notifySeedingDone()),
+                readBoolean(NOTIFY_ERROR, d.notifyError()));
+    }
+
+    /** The command line run on an event, or empty; only the three kinds that run one have a key. */
+    public String eventCommand(EngineEvent.Kind kind) {
+        return automation().command(kind);
+    }
+
+    /** Sets, or with a blank line forgets, the command run on an event. Not saved here. */
+    public void setEventCommand(EngineEvent.Kind kind, String line) {
+        String key = commandKey(kind);
+        if (line == null || line.isBlank()) properties.remove(key);
+        else properties.setProperty(key, line.strip());
+    }
+
+    public boolean notifies(EngineEvent.Kind kind) {
+        return automation().notifies(kind);
+    }
+
+    public void setNotifies(EngineEvent.Kind kind, boolean on) {
+        properties.setProperty(notifyKey(kind), String.valueOf(on));
+    }
+
+    private static String commandKey(EngineEvent.Kind kind) {
+        return switch (kind) {
+            case ADDED -> AUTOMATION_ON_ADDED;
+            case FINISHED -> AUTOMATION_ON_FINISHED;
+            case SEEDING_DONE -> AUTOMATION_ON_SEEDING_DONE;
+            default -> throw new IllegalArgumentException("no command runs on " + kind);
+        };
+    }
+
+    private static String notifyKey(EngineEvent.Kind kind) {
+        return switch (kind) {
+            case ADDED -> NOTIFY_ADDED;
+            case FINISHED -> NOTIFY_FINISHED;
+            case SEEDING_DONE -> NOTIFY_SEEDING_DONE;
+            case ERROR -> NOTIFY_ERROR;
+            default -> throw new IllegalArgumentException("no notification for " + kind);
+        };
     }
 }

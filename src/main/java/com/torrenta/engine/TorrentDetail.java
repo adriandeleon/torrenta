@@ -14,7 +14,10 @@ import java.util.List;
 public record TorrentDetail(
         General general, List<FileStatus> files, List<Peer> peers, List<Tracker> trackers, boolean[] pieces) {
 
-    /** The General tab. Durations and the next announce are seconds; times are epoch seconds. */
+    /**
+     * The General tab. Durations and the next announce are seconds; times are epoch seconds. The
+     * info-hashes are hex, each empty when the torrent has none of that version.
+     */
     public record General(
             String id,
             String savePath,
@@ -30,7 +33,15 @@ public record TorrentDetail(
             long seedingSeconds,
             long nextAnnounceSeconds,
             int connections,
-            String currentTracker) {}
+            String currentTracker,
+            String infoHashV1,
+            String infoHashV2) {
+
+        public General {
+            infoHashV1 = infoHashV1 == null ? "" : infoHashV1;
+            infoHashV2 = infoHashV2 == null ? "" : infoHashV2;
+        }
+    }
 
     /** One file: the torrent's index, its path, its size, how much of it is on disk. */
     public record FileStatus(int index, String path, long size, long done, Priority priority) {

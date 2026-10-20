@@ -7,6 +7,23 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Run on event and desktop notifications** (Settings → Automation). One optional command line
+  per event: torrent added (not the ones restored at start), download finished, seeding done (the
+  share limit paused or removed it). Placeholders are qBittorrent's, spelled the same: `%N` name,
+  `%L` category, `%G` tags (comma separated), `%F` content path (the root folder or the one file),
+  `%R` root path (empty without a root folder), `%D` save path, `%C` file count, `%Z` size in
+  bytes, `%T` current tracker, `%I` info-hash v1, `%J` info-hash v2, `%K` torrent id, `%%` a
+  percent. The line is split as a shell would (quotes keep a value together) and each argument is
+  substituted on its own, so a name with spaces stays one argument; no shell runs it. Output (the
+  first three lines) and the exit code go to the Event Log; a program still running after ten
+  minutes is killed and the log says so. Desktop notifications per event, "`<name>` finished" and
+  the like, with "error" for a torrent, file or tracker error; only finished is on by default.
+  They go through the platform's own facility, `notify-send` on Linux, `osascript` on macOS and a
+  PowerShell toast (`Windows.UI.Notifications`) on Windows, each a short program given the text
+  as arguments; a machine without one is noted once in the log, and the page has a Test
+  notification button. Keys `automation.onAdded`, `automation.onFinished`,
+  `automation.onSeedingDone` (this machine's, never synced: they name its programs) and
+  `notify.added`, `notify.finished`, `notify.seedingDone`, `notify.error`, which sync.
 - **The Add dialog, relaid out, and a magnet that never blocks it.** Two columns: the file tree
   (a select-all box, sizes, priorities with High in the accent and Skip muted; `Space` ticks,
   `+` and `−` step Skip/Low/Normal/High, `←` `→` fold) and, on the right, the folder with a disk
