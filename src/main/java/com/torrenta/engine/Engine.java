@@ -27,6 +27,27 @@ public interface Engine extends AutoCloseable {
     /** Removes the torrent and forgets it; with {@code deleteFiles}, its data on disk too. */
     void remove(String id, boolean deleteFiles) throws EngineException;
 
+    /** Stops transferring and leaves the queue; the torrent stays until resumed. */
+    void pause(String id) throws EngineException;
+
+    /** Hands the torrent back to the queue, which starts it when a slot is free. */
+    void resume(String id) throws EngineException;
+
+    /** Starts it now, regardless of queue limits. */
+    void forceResume(String id) throws EngineException;
+
+    /** Re-hashes what is on disk against the pieces; progress drops and climbs back. */
+    void recheck(String id) throws EngineException;
+
+    /** Announces to the trackers now rather than at the next scheduled time. */
+    void reannounce(String id) throws EngineException;
+
+    /** Pieces in order rather than rarest first, for previewing while downloading. */
+    void setSequential(String id, boolean sequential) throws EngineException;
+
+    /** A magnet link for the torrent, with its trackers, as the engine would build it. */
+    String magnetLink(String id) throws EngineException;
+
     /** A snapshot of every torrent in the session. */
     List<Torrent> torrents();
 

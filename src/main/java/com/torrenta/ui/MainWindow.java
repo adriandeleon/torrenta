@@ -1,19 +1,26 @@
 package com.torrenta.ui;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
+import javafx.beans.binding.BooleanBinding;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
+import javafx.scene.control.Alert;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
@@ -25,8 +32,12 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.cell.ProgressBarTableCell;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -42,12 +53,14 @@ import com.torrenta.engine.Torrent;
 import com.torrenta.store.Settings;
 
 /**
- * The one window: a menu bar, a filter box over the torrent list, a status bar.
+ * The one window: a menu bar, a filter box over the torrent list, a status bar, and the command
+ * palette over all of it.
  *
  * <p>The engine arrives after the window is up ({@link #engineReady}), because loading it takes
  * longer than a first frame should. Until then inputs queue. Once it is there a worker polls it
  * once a second and hands the FX thread a fresh list, which {@link TorrentRows} reconciles into the
- * rows the table already shows; nothing on the FX thread ever calls into the engine.
+ * rows the table already shows; nothing on the FX thread ever calls into the engine. Every action
+ * on a selection runs on a virtual thread and reports to the status bar.
  */
 public final class MainWindow {
 
@@ -55,34 +68,48 @@ public final class MainWindow {
 
     private final Stage stage;
     private final Settings settings;
+    private final Consumer<String> opener;
     private final Label status = new Label();
     private final Label rates = new Label();
     private final TorrentRows rows = new TorrentRows();
     private final FilteredList<TorrentRow> filtered = new FilteredList<>(rows.list());
     private final TextField filter = new TextField();
+    private final StackPane host = new StackPane();
+    private final CommandPalette palette;
     private TableView<TorrentRow> table;
+    private List<Command> commands = List.of();
 
     private Engine engine;
     private String engineDescription = "";
     private final List<String> pendingInputs = new ArrayList<>();
     private ScheduledExecutorService poller;
 
-    public MainWindow(Stage stage, Settings settings) {
+    /**
+     * @param opener opens a URI with the desktop (a folder, later a web page); the application's
+     *     host services, which only the {@code Application} can hand out
+     */
+    public MainWindow(Stage stage, Settings settings, Consumer<String> opener) {
         this.stage = stage;
         this.settings = settings;
+        this.opener = opener;
         stage.setTitle(AppInfo.NAME);
 
         BorderPane root = new BorderPane();
-        root.setTop(buildMenuBar());
         root.setCenter(buildCenter());
         root.setBottom(buildStatusBar());
+        commands = buildCommands();
+        root.setTop(buildMenuBar());
+        table.setContextMenu(buildContextMenu());
+        palette = new CommandPalette(host, () -> table.requestFocus());
+        host.getChildren().add(root);
 
-        Scene scene = new Scene(root, 960, 600);
+        Scene scene = new Scene(host, 960, 600);
         scene.getStylesheets()
                 .add(MainWindow.class
                         .getResource("/com/torrenta/styles/app.css")
                         .toExternalForm());
-        scene.getAccelerators().put(KeyCombination.keyCombination("Shortcut+F"), this::focusFilter);
+        scene.getAccelerators().put(chord(KeyCode.F), this::focusFilter);
+        scene.getAccelerators().put(shiftChord(KeyCode.P), () -> palette.show(commands));
         stage.setScene(scene);
         stage.setOnHidden(e -> stopPolling());
         setStatus("Starting the engine…");
@@ -102,6 +129,29 @@ public final class MainWindow {
     /** The engine's description once it is up, else empty; read by the development capture. */
     public String engineDescription() {
         return engineDescription;
+    }
+
+    /**
+     * Drives the window from the capture hook, by name: {@code select-all}, {@code palette},
+     * {@code palette:<query>}, or a command id. Prints what a screenshot cannot show.
+     */
+    public void runForCapture(String action) {
+        if (action.equals("select-all")) {
+            table.getSelectionModel().selectAll();
+        } else if (action.equals("palette")) {
+            palette.show(commands);
+        } else if (action.startsWith("palette:")) {
+            palette.show(commands);
+            palette.setQueryForCapture(action.substring("palette:".length()));
+        } else {
+            commands.stream()
+                    .filter(c -> c.id().equals(action))
+                    .findFirst()
+                    .ifPresentOrElse(c -> c.run().run(), () -> System.err.println("capture: no command " + action));
+        }
+        System.out.println("capture: selected="
+                + table.getSelectionModel().getSelectedItems().size());
+        if (palette.isShowing()) System.out.println("capture: palette=" + palette.visibleCommands());
     }
 
     /** FX thread. The engine has started; flush what was queued and begin polling. */
@@ -158,37 +208,262 @@ public final class MainWindow {
         if (poller != null) poller.shutdownNow();
     }
 
+    // ---- commands -------------------------------------------------------------------------------
+
+    /** An engine action on one torrent. */
+    private interface TorrentAction {
+        void apply(Engine engine, Torrent torrent) throws EngineException;
+    }
+
+    private List<Torrent> selectedTorrents() {
+        return table.getSelectionModel().getSelectedItems().stream()
+                .map(TorrentRow::torrent)
+                .toList();
+    }
+
+    /** Applies an action to every selected torrent on a worker; the status bar gets the tally. */
+    private void onSelection(String verb, TorrentAction action) {
+        List<Torrent> selected = selectedTorrents();
+        if (selected.isEmpty() || engine == null) return;
+        Engine e = engine;
+        Thread.ofVirtual().name("engine-action").start(() -> {
+            int done = 0;
+            List<String> failures = new ArrayList<>();
+            for (Torrent t : selected) {
+                try {
+                    action.apply(e, t);
+                    done++;
+                } catch (EngineException ex) {
+                    failures.add(ex.getMessage());
+                }
+            }
+            String text = Actions.outcome(verb, done, failures);
+            Platform.runLater(() -> setStatus(text));
+        });
+    }
+
+    private void togglePause() {
+        if (Actions.shouldResume(selectedTorrents())) onSelection("Resumed", (e, t) -> e.resume(t.id()));
+        else onSelection("Paused", (e, t) -> e.pause(t.id()));
+    }
+
+    private void toggleSequential() {
+        boolean on = Actions.shouldEnableSequential(selectedTorrents());
+        onSelection(on ? "Sequential on for" : "Sequential off for", (e, t) -> e.setSequential(t.id(), on));
+    }
+
+    private void remove(boolean deleteFiles) {
+        List<Torrent> selected = selectedTorrents();
+        if (selected.isEmpty()) return;
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, Actions.removeQuestion(selected.size(), deleteFiles));
+        confirm.setHeaderText(deleteFiles ? "Remove and delete files" : "Remove");
+        confirm.initOwner(stage);
+        ButtonType yes = new ButtonType(deleteFiles ? "Delete files" : "Remove", ButtonType.OK.getButtonData());
+        confirm.getButtonTypes().setAll(yes, ButtonType.CANCEL);
+        Optional<ButtonType> answer = confirm.showAndWait();
+        if (answer.isEmpty() || answer.get() != yes) return;
+        onSelection("Removed", (e, t) -> e.remove(t.id(), deleteFiles));
+    }
+
+    private void copyToClipboard(String what, Function<Torrent, String> text) {
+        List<Torrent> selected = selectedTorrents();
+        if (selected.isEmpty()) return;
+        ClipboardContent content = new ClipboardContent();
+        content.putString(String.join("\n", selected.stream().map(text).toList()));
+        Clipboard.getSystemClipboard().setContent(content);
+        setStatus("Copied " + what + (selected.size() == 1 ? "" : " of " + selected.size() + " torrents"));
+    }
+
+    private void copyMagnetLinks() {
+        List<Torrent> selected = selectedTorrents();
+        if (selected.isEmpty() || engine == null) return;
+        Engine e = engine;
+        Thread.ofVirtual().name("engine-magnet").start(() -> {
+            List<String> links = new ArrayList<>();
+            for (Torrent t : selected) {
+                try {
+                    links.add(e.magnetLink(t.id()));
+                } catch (EngineException ex) {
+                    links.add("magnet:?xt=urn:btih:" + t.id());
+                }
+            }
+            Platform.runLater(() -> {
+                ClipboardContent content = new ClipboardContent();
+                content.putString(String.join("\n", links));
+                Clipboard.getSystemClipboard().setContent(content);
+                setStatus("Copied " + (links.size() == 1 ? "magnet link" : links.size() + " magnet links"));
+            });
+        });
+    }
+
+    private void openFolder() {
+        List<Torrent> selected = selectedTorrents();
+        if (selected.isEmpty()) return;
+        String path = selected.get(0).savePath();
+        if (path == null || path.isBlank()) return;
+        opener.accept(Path.of(path).toUri().toString());
+    }
+
+    private static KeyCombination chord(KeyCode key) {
+        return new KeyCodeCombination(key, KeyCombination.SHORTCUT_DOWN);
+    }
+
+    private static KeyCombination shiftChord(KeyCode key) {
+        return new KeyCodeCombination(key, KeyCombination.SHORTCUT_DOWN, KeyCombination.SHIFT_DOWN);
+    }
+
+    private List<Command> buildCommands() {
+        BooleanBinding selection = Bindings.isNotEmpty(table.getSelectionModel().getSelectedItems());
+        BooleanBinding always = Bindings.createBooleanBinding(() -> true);
+        return List.of(
+                new Command("pause-resume", "Pause / Resume", null, "Space", selection, this::togglePause),
+                new Command(
+                        "force-resume",
+                        "Force Resume",
+                        shiftChord(KeyCode.U),
+                        null,
+                        selection,
+                        () -> onSelection("Forced", (e, t) -> e.forceResume(t.id()))),
+                new Command(
+                        "recheck",
+                        "Force Recheck",
+                        shiftChord(KeyCode.R),
+                        null,
+                        selection,
+                        () -> onSelection("Rechecking", (e, t) -> e.recheck(t.id()))),
+                new Command(
+                        "reannounce",
+                        "Force Reannounce",
+                        shiftChord(KeyCode.A),
+                        null,
+                        selection,
+                        () -> onSelection("Reannounced", (e, t) -> e.reannounce(t.id()))),
+                new Command(
+                        "sequential",
+                        "Sequential Download",
+                        shiftChord(KeyCode.S),
+                        null,
+                        selection,
+                        this::toggleSequential),
+                new Command(
+                        "copy-name",
+                        "Copy Name",
+                        chord(KeyCode.C),
+                        null,
+                        selection,
+                        () -> copyToClipboard("name", Torrent::name)),
+                new Command(
+                        "copy-hash",
+                        "Copy Info-Hash",
+                        shiftChord(KeyCode.H),
+                        null,
+                        selection,
+                        () -> copyToClipboard("info-hash", Torrent::id)),
+                new Command(
+                        "copy-magnet",
+                        "Copy Magnet Link",
+                        shiftChord(KeyCode.C),
+                        null,
+                        selection,
+                        this::copyMagnetLinks),
+                new Command(
+                        "open-folder",
+                        "Open Destination Folder",
+                        shiftChord(KeyCode.O),
+                        null,
+                        selection,
+                        this::openFolder),
+                new Command("remove", "Remove…", null, "Delete", selection, () -> remove(false)),
+                new Command("remove-data", "Remove with Data…", null, "Shift+Delete", selection, () -> remove(true)),
+                new Command(
+                        "filter",
+                        "Filter Torrents",
+                        null,
+                        chord(KeyCode.F).getDisplayText(),
+                        always,
+                        this::focusFilter),
+                new Command(
+                        "select-all",
+                        "Select All",
+                        null,
+                        chord(KeyCode.A).getDisplayText(),
+                        always,
+                        () -> table.getSelectionModel().selectAll()));
+    }
+
+    private Command command(String id) {
+        return commands.stream().filter(c -> c.id().equals(id)).findFirst().orElseThrow();
+    }
+
+    /** Space and Delete: on the table only, never as scene accelerators a text field could fire. */
+    private void onTableKey(KeyEvent e) {
+        if (e.getCode() == KeyCode.SPACE) {
+            command("pause-resume").run().run();
+            e.consume();
+        } else if (e.getCode() == KeyCode.DELETE || e.getCode() == KeyCode.BACK_SPACE) {
+            command(e.isShiftDown() ? "remove-data" : "remove").run().run();
+            e.consume();
+        }
+    }
+
     private MenuBar buildMenuBar() {
         MenuItem addTorrent = new MenuItem("Add Torrent File…");
-        addTorrent.setAccelerator(KeyCombination.keyCombination("Shortcut+O"));
+        addTorrent.setAccelerator(chord(KeyCode.O));
         addTorrent.setOnAction(e -> setStatus("Add torrent file: no dialog yet; pass the path on the command line"));
 
         MenuItem addMagnet = new MenuItem("Add Magnet Link…");
-        addMagnet.setAccelerator(KeyCombination.keyCombination("Shortcut+M"));
+        addMagnet.setAccelerator(chord(KeyCode.M));
         addMagnet.setOnAction(e -> setStatus("Add magnet link: no dialog yet; pass the link on the command line"));
 
         MenuItem quit = new MenuItem("Quit");
-        quit.setAccelerator(KeyCombination.keyCombination("Shortcut+Q"));
+        quit.setAccelerator(chord(KeyCode.Q));
         quit.setOnAction(e -> stage.close());
 
         Menu file = new Menu("File");
         file.getItems().addAll(addTorrent, addMagnet, new SeparatorMenuItem(), quit);
 
-        MenuItem findItem = new MenuItem("Filter Torrents");
-        // The accelerator is the scene's, so it works while the menu is closed; this is the label.
-        findItem.setOnAction(e -> focusFilter());
+        Menu torrent = new Menu("Torrent");
+        torrent.getItems().addAll(torrentItems());
+
+        MenuItem paletteItem = new MenuItem("Command Palette…");
+        paletteItem.setAccelerator(shiftChord(KeyCode.P));
+        paletteItem.setOnAction(e -> palette.show(commands));
         Menu view = new Menu("View");
-        view.getItems().add(findItem);
+        view.getItems()
+                .addAll(command("filter").menuItem(), command("select-all").menuItem(), paletteItem);
 
         MenuItem about = new MenuItem("About " + AppInfo.NAME);
         about.setOnAction(e -> setStatus(AppInfo.NAME + " " + AppInfo.VERSION + " — " + AppInfo.COPYRIGHT));
         Menu help = new Menu("Help");
         help.getItems().add(about);
 
-        MenuBar bar = new MenuBar(file, view, help);
+        MenuBar bar = new MenuBar(file, torrent, view, help);
         bar.setUseSystemMenuBar(true);
         return bar;
     }
+
+    /** The Torrent menu and the context menu show the same items in the same order. */
+    private List<MenuItem> torrentItems() {
+        List<MenuItem> items = new ArrayList<>();
+        for (String id : List.of("pause-resume", "force-resume", "recheck", "reannounce", "sequential")) {
+            items.add(command(id).menuItem());
+        }
+        items.add(new SeparatorMenuItem());
+        for (String id : List.of("copy-name", "copy-hash", "copy-magnet", "open-folder")) {
+            items.add(command(id).menuItem());
+        }
+        items.add(new SeparatorMenuItem());
+        for (String id : List.of("remove", "remove-data")) items.add(command(id).menuItem());
+        return items;
+    }
+
+    private ContextMenu buildContextMenu() {
+        ContextMenu menu = new ContextMenu();
+        menu.getItems().addAll(torrentItems());
+        return menu;
+    }
+
+    // ---- layout ---------------------------------------------------------------------------------
 
     private VBox buildCenter() {
         table = buildTable();
@@ -257,6 +532,7 @@ public final class MainWindow {
         table.setTableMenuButtonVisible(true);
         table.setPlaceholder(new Label("No torrents match the filter"));
         table.getStyleClass().add("torrent-table");
+        table.setOnKeyPressed(this::onTableKey);
 
         TableColumn<TorrentRow, String> name = column("name", "Name", 360, true, Torrent::name, s -> s);
         name.setComparator(String.CASE_INSENSITIVE_ORDER);
@@ -269,7 +545,7 @@ public final class MainWindow {
                         column("size", "Size", 90, true, Torrent::size, v -> v == 0 ? "—" : Bytes.human(v)),
                         column("done", "Done", 90, false, Torrent::done, Bytes::human),
                         progress,
-                        column("state", "State", 130, true, t -> t.state().label(), s -> s),
+                        column("state", "State", 130, true, Format::stateLabel, s -> s),
                         column("seeds", "Seeds", 70, true, Torrent::seeds, String::valueOf),
                         column("peers", "Peers", 70, true, Torrent::peers, String::valueOf),
                         column("down", "Down", 90, true, Torrent::downloadRate, Bytes::rate),

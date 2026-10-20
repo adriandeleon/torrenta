@@ -129,6 +129,36 @@ class LibtorrentEngineTest {
     }
 
     @Test
+    void actionsOnAMagnet(@TempDir Path dir) throws Exception {
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            Torrent added = engine.add(MAGNET);
+            assertFalse(added.paused());
+            assertFalse(added.sequential());
+
+            engine.pause(MAGNET_ID);
+            await("paused", () -> engine.torrents().get(0).paused());
+            engine.resume(MAGNET_ID);
+            await("resumed", () -> !engine.torrents().get(0).paused());
+            engine.forceResume(MAGNET_ID);
+            await("still running", () -> !engine.torrents().get(0).paused());
+
+            engine.setSequential(MAGNET_ID, true);
+            await("sequential on", () -> engine.torrents().get(0).sequential());
+            engine.setSequential(MAGNET_ID, false);
+            await("sequential off", () -> !engine.torrents().get(0).sequential());
+
+            engine.recheck(MAGNET_ID); // no metadata: harmless
+            engine.reannounce(MAGNET_ID);
+            String magnet = engine.magnetLink(MAGNET_ID);
+            assertTrue(magnet.startsWith("magnet:?"), magnet);
+            assertTrue(magnet.contains(MAGNET_ID), magnet);
+
+            assertThrows(EngineException.class, () -> engine.pause("0000000000000000000000000000000000000000"));
+        }
+    }
+
+    @Test
     void badInputsAreErrorsNotCrashes(@TempDir Path dir) throws EngineException {
         try (LibtorrentEngine engine = engine(dir)) {
             engine.start();

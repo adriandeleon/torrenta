@@ -12,7 +12,33 @@ class FormatTest {
 
     private static Torrent torrent(TorrentState state, long size, long done, long rate) {
         return new Torrent(
-                "id", "n", size, done, size == 0 ? 0 : (double) done / size, state, rate, 0, 0, 0, 0, 0, 0, 0, "", "");
+                "id",
+                "n",
+                size,
+                done,
+                size == 0 ? 0 : (double) done / size,
+                state,
+                rate,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                "",
+                "",
+                false,
+                false);
+    }
+
+    @Test
+    void stateLabelShowsAUserPauseFirst() {
+        Torrent running = torrent(TorrentState.DOWNLOADING, 100, 10, 1);
+        assertEquals("Downloading", Format.stateLabel(running));
+        Torrent paused = new Torrent(
+                "id", "n", 100, 10, 0.1, TorrentState.DOWNLOADING, 0, 0, 0, 0, 0, 0, 0, 0, "", "", true, false);
+        assertEquals("Paused", Format.stateLabel(paused));
     }
 
     @Test

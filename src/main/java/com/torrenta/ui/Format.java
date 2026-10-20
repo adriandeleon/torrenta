@@ -24,6 +24,11 @@ public final class Format {
 
     private Format() {}
 
+    /** The state column: a user pause outranks whatever the engine's state machine says. */
+    public static String stateLabel(Torrent t) {
+        return t.paused() ? "Paused" : t.state().label();
+    }
+
     public static String percent(double progress) {
         return String.format(Locale.ROOT, "%.1f %%", progress * 100);
     }
