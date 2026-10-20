@@ -406,7 +406,21 @@ class LibtorrentEngineTest {
     void connectionSettingsReachTheSessionAtStartAndLive(@TempDir Path dir) throws Exception {
         com.torrenta.engine.EngineSettings d = com.torrenta.engine.EngineSettings.defaults();
         com.torrenta.engine.EngineSettings quiet = new com.torrenta.engine.EngineSettings(
-                d.listenPort(), true, "", d.ipv6(), false, 123, 7, 3, d.proxy(), "", 1080, "", "", true);
+                d.listenPort(),
+                true,
+                "",
+                d.ipv6(),
+                false,
+                123,
+                7,
+                3,
+                d.proxy(),
+                "",
+                1080,
+                "",
+                "",
+                true,
+                com.torrenta.engine.EngineSettings.Protocol.defaults());
         try (LibtorrentEngine engine =
                 new LibtorrentEngine(() -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), quiet)) {
             engine.start();
@@ -414,11 +428,64 @@ class LibtorrentEngineTest {
             List<EngineEvent> events = new CopyOnWriteArrayList<>();
             engine.addListener(events::add);
             engine.applySettings(new com.torrenta.engine.EngineSettings(
-                    d.listenPort(), true, "", d.ipv6(), false, 321, 7, 3, d.proxy(), "", 1080, "", "", true));
+                    d.listenPort(),
+                    true,
+                    "",
+                    d.ipv6(),
+                    false,
+                    321,
+                    7,
+                    3,
+                    d.proxy(),
+                    "",
+                    1080,
+                    "",
+                    "",
+                    true,
+                    com.torrenta.engine.EngineSettings.Protocol.defaults()));
             assertEquals(321, engine.connectionsLimitForTest(), "applied live");
-            assertTrue(events.stream().anyMatch(ev -> ev.message().startsWith("Connection settings applied")));
+            assertTrue(events.stream().anyMatch(ev -> ev.message().startsWith("Engine settings applied")));
             Torrent t = engine.add(MAGNET);
             assertFalse(t.id().isEmpty(), "adding still works with a per-torrent limit set");
+        }
+    }
+
+    @Test
+    void protocolSettingsReachTheSessionAndNewTorrents(@TempDir Path dir) throws Exception {
+        com.torrenta.engine.EngineSettings.Protocol quiet = new com.torrenta.engine.EngineSettings.Protocol(
+                false,
+                false,
+                false,
+                false,
+                com.torrenta.engine.EngineSettings.Protocol.Encryption.REQUIRE,
+                true,
+                List.of("udp://default.example.org:6969/announce"));
+        com.torrenta.engine.EngineSettings settings =
+                com.torrenta.engine.EngineSettings.defaults().withProtocol(quiet);
+        try (LibtorrentEngine engine = new LibtorrentEngine(
+                () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), settings)) {
+            engine.start();
+            assertFalse(engine.dhtEnabledForTest(), "DHT off at start");
+            Torrent t = engine.add(MAGNET);
+            await(
+                    "the default tracker is on the new torrent",
+                    () -> engine.detail(t.id()).trackers().stream()
+                            .anyMatch(tr -> tr.url().equals("udp://default.example.org:6969/announce")));
+
+            // Turned back on live, with another default tracker that reaches the existing torrent.
+            engine.applySettings(settings.withProtocol(new com.torrenta.engine.EngineSettings.Protocol(
+                    true,
+                    true,
+                    true,
+                    true,
+                    com.torrenta.engine.EngineSettings.Protocol.Encryption.PREFER,
+                    false,
+                    List.of("udp://second.example.org:6969/announce"))));
+            assertTrue(engine.dhtEnabledForTest(), "DHT on after apply");
+            await(
+                    "the second default tracker reached the existing torrent",
+                    () -> engine.detail(t.id()).trackers().stream()
+                            .anyMatch(tr -> tr.url().equals("udp://second.example.org:6969/announce")));
         }
     }
 

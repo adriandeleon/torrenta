@@ -141,6 +141,10 @@ release process with the names changed; Termina's README and memory hold the war
 - **`settings_pack` enum constants are SWIG objects**, like every other libtorrent4j constant:
   `toPack` runs only after the native has loaded. Keys are set by `swigValue()` through the pack's
   generic `setBoolean`/`setInteger`/`setString`; the typed setters cover only a few.
+- **PEX has no session switch in libtorrent**, only the per-torrent `disable_pex` flag, and there
+  is no session-wide default tracker list: `applySettings` walks the handles for both, and `add`
+  sets the flag and appends the trackers on their own tier. `EngineSettings.Protocol` is nested so
+  the connection tests did not have to grow seven arguments.
 - **A proxy with a username is a different libtorrent type** (`socks5_pw`, `http_pw`); the record
   decides with `proxyAuthenticated()`. `proxy_hostnames` is on, so lookups go through the proxy.
 - **Engine events arrive on libtorrent4j's alert thread.** `MainWindow` hops to the FX thread
@@ -176,7 +180,7 @@ Add dialogs (Ctrl+O / Ctrl+M only say so; inputs come from the command line), pa
 in the window (`Engine.remove` exists, nothing calls it yet), limits, a settings window, per-torrent
 detail, `-Pdist` with the native in the image.
 0.2 and 0.3 are feature-complete; 0.4 has begun with the Settings window shell. The Connection
-page is in. Next: protocol (DHT, PEX, LSD, uTP, encryption, anonymous mode, default trackers),
-then IP filter, speed, queue and share limits, each a page and a PR. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
+and Protocol pages are in. Next: IP filter (blocklist URL with refresh, .dat/.p2p import, manual
+bans), then speed, queue and share limits, each a page and a PR. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
 run of release.yml, and the Homebrew/winget packagers need the `PACKAGES_TOKEN` secret copied from
 Termina's repository (the same PAT) before they do anything.

@@ -226,7 +226,9 @@ Everything in Settings that the engine already knows how to do.
    and goes with 0.8's OS integration or stays out): port, random port, UPnP/NAT-PMP, interface
    binding, IPv6, connection limits, proxy. `EngineSettings` maps onto `settings_pack`, applied at
    start and live; the per-torrent limit is set on each add.
-3. **Protocol**: DHT, PEX, LSD, uTP, encryption mode, anonymous mode, default trackers.
+3. **Protocol** — done: DHT, PEX (a per-torrent flag, set on add and carried to existing
+   torrents), LSD, uTP, encryption mode, anonymous mode, default trackers (appended on add and to
+   existing torrents).
 4. **IP filter**: blocklist URL with scheduled refresh, `.dat`/`.p2p` import, manual bans, counts in
    the status bar.
 5. **Speed**: global limits, alternative limits, schedule, overhead options; status-bar toggle.
