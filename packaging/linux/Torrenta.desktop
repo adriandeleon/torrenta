@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=APPLICATION_NAME
+GenericName=BitTorrent Client
+Comment=APPLICATION_DESCRIPTION
+Exec=APPLICATION_LAUNCHER
+Icon=APPLICATION_ICON
+Terminal=false
+Type=Application
+Categories=Network;P2P;FileTransfer;
+Keywords=torrent;bittorrent;magnet;download;p2p;
+StartupWMClass=com.torrenta.App

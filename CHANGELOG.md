@@ -33,6 +33,9 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   editable priority per file; open a file), Peers (address, client, flags, progress, rates,
   totals), Trackers (status and message; add, remove, reannounce), and a Pieces map. The pane's
   visibility, tab and height are remembered.
+- **A native app image and installers** (`-Pdist`): a self-contained Torrenta with its own
+  runtime for macOS (`.app`, `.dmg`), Windows (`.msi`) and Linux (`.deb`, `.rpm`), with the
+  engine's native library beside the image. CI builds and starts the image on all three platforms.
 - **An event log** (`Ctrl+Shift+L`): added, metadata received, checked, finished, removed, torrent
   and disk errors, tracker errors and warnings, listen ports, port mapping, engine start and stop,
   plus the app's own warnings. Filter by level, copy, clear. The status bar shows the latest event

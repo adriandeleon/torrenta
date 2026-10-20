@@ -69,6 +69,9 @@ final class DetailPane extends VBox {
     DetailPane() {
         getStyleClass().add("detail-pane");
         tabs.setTabClosingPolicy(TabPane.TabClosingPolicy.UNAVAILABLE);
+        // Chrome is not focus-traversable: with no torrents the list is hidden and the scene would
+        // otherwise hand the first keystrokes to this tab strip.
+        tabs.setFocusTraversable(false);
         tabs.getTabs()
                 .addAll(
                         tab("General", buildGeneral()),

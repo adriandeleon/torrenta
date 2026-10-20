@@ -201,10 +201,11 @@ What a first public release needs.
    `torrentFile()` do not reflect renames in 2.1.0-39), peers' country (needs an offline GeoIP
    database, 0.8 with OS integration), per-torrent limits in General (0.4), and comment/creator in
    General (libtorrent 2.1 keeps them outside `torrent_info`; the Add dialog shows them).
-3. **Native app image and installers** (`-Pdist`, from Termina): jlink plus jpackage with the
-   libtorrent4j native placed in the image's library dir and `libtorrent4j.jni.path` set by the
-   launcher; macOS `.app`/`.dmg`, Windows `.msi`, Linux `.deb`/`.rpm`; release workflow, JReleaser,
-   Homebrew cask and winget. The packaged app is smoke-tested in CI the way Termina's is.
+3. **Native app image and installers** — done: jlink plus jpackage, the native unpacked and
+   placed beside the image as app content with `libtorrent4j.jni.path` set by the launcher;
+   macOS `.app`/`.dmg`, Windows `.msi`, Linux `.deb`/`.rpm`; CI builds, starts and checks the
+   image on all three platforms. **Release workflow, JReleaser, Homebrew cask and winget** are the
+   next PR, from Termina's. No AOT cache training yet (Termina has it; a measured follow-up).
 4. **Update check** against GitHub releases, from Termina's `update` package.
 
 ### 0.4 — Network, bandwidth, queue

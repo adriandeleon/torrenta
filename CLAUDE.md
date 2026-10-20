@@ -8,6 +8,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
 - Run: `./mvnw javafx:run`
 - Test + format check: `./mvnw verify` (Spotless/Palantir runs at `verify`; `./mvnw spotless:apply`
   fixes formatting)
+- Native app image: **`./mvnw clean -Pdist -DskipTests package`** ⇒ `target/dist/Torrenta{.app}`;
+  add `-Dskip.installers=false` for the installers. `clean` is **required**: jlink's input is built
+  from `target/classes`, and an incremental compile can leave that inconsistent.
 - Run with ad-hoc options: **`scripts/dev-run.sh -Dfoo=bar -- <app args>`**. `mvn javafx:run`
   cannot take them — the plugin's `<options>` are fixed in the pom.
 - Smoke: `scripts/dev-run.sh -Dtorrenta.capture=/tmp/shot.png -- "magnet:?…"` (or
@@ -110,6 +113,18 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
   `nextAnnounce`); the engine divides, the records promise seconds.
 - **A resume-data answer can arrive after the torrent was removed.** The engine marks removed ids
   and ignores late writes for them; without that, the remove test saw the blob come back.
+- **The image does not contain the native library; it sits beside it.** The per-OS jar is
+  resources only, and a resource in a named module is encapsulated unless its package is opened,
+  so `-Pdist` unpacks `lib/<arch>/libtorrent4j.*` and hands it to jpackage as app content;
+  the launcher sets `-Dlibtorrent4j.jni.path=$APPDIR/../torrenta-native/...` and `NativeLibrary`
+  does nothing when the property is set. `$APPDIR` is `lib/app` (Linux), `Contents/app` (macOS),
+  `app` (Windows); the content directory is one level up on all three.
+- **Only the core libtorrent4j jar gets a moditect descriptor** (every package exported); the
+  native jars are excluded from the module path altogether.
+- **Exiting while a modal dialog's nested event loop runs aborts the JVM** (`SIGSEGV` in
+  `libglassgtk3` `destroy_and_delete_ctx` during `Application.terminate`). The capture hook closes
+  any dialog and exits on the next pulse; a Quit while the Add dialog is open goes the same way and
+  is a known gap until Quit is intercepted before `Platform.exit`.
 - **Engine events arrive on libtorrent4j's alert thread.** `MainWindow` hops to the FX thread
   before touching the log or the status bar; `EventLog.add` is FX-only. The j.u.l bridge takes
   the hop as a parameter so tests run it inline.
@@ -138,6 +153,6 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 Add dialogs (Ctrl+O / Ctrl+M only say so; inputs come from the command line), pause/resume/remove
 in the window (`Engine.remove` exists, nothing calls it yet), limits, a settings window, per-torrent
 detail, `-Pdist` with the native in the image.
-0.2 is complete; 0.3 has the Add dialog and the detail pane. Next: the native app image with the
-engine's native inside it, then the update check. Content layout, file rename and first/last piece
-first wait for 0.4.
+0.2 is complete; 0.3 has the Add dialog, the detail pane and the app image. Next: the release
+workflow with JReleaser, Homebrew and winget (from Termina), then the update check. Content
+layout, file rename and first/last piece first wait for 0.4.

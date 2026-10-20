@@ -35,6 +35,20 @@
              x86_64 only. -->
         <libtorrent4j.version>2.1.0-39</libtorrent4j.version>
 
+        <!-- jpackage wants .icns on macOS, .ico on Windows, .png on Linux; the os-* profiles pick. -->
+        <jpackage.icon>${project.basedir}/branding/torrenta.png</jpackage.icon>
+        <jpackage.imageName>Torrenta</jpackage.imageName>
+        <skip.mac.version.fix>true</skip.mac.version.fix>
+        <!-- Installers are minutes of work the dev loop never wants; CI and the release turn them on. -->
+        <skip.installers>true</skip.installers>
+        <!-- The engine's native library inside the per-OS jar: lib/<arch>/libtorrent4j.<ext>. -->
+        <native.arch>x86_64</native.arch>
+        <native.ext>so</native.ext>
+
+        <!-- dist profile only -->
+        <moditect.version>1.2.2.Final</moditect.version>
+        <jpackage.plugin.version>1.6.6</jpackage.plugin.version>
+
         <!-- Prism pipeline order (-Dprism.order). Set per-OS in the os-* profiles:
              mac=mtl,es2,sw (Metal), windows=d3d,es2,sw, linux=es2,sw. This default covers
              profile-less builds (e.g. plain `mvn test`, which doesn't render). -->
@@ -232,6 +246,11 @@
             <activation><os><family>mac</family></os></activation>
             <properties>
                 <prism.pipeline>mtl,es2,sw</prism.pipeline>
+                <jpackage.icon>${project.basedir}/branding/torrenta.icns</jpackage.icon>
+                <jpackage.imageName>Torrenta.app</jpackage.imageName>
+                <skip.mac.version.fix>false</skip.mac.version.fix>
+                <native.arch>arm64</native.arch>
+                <native.ext>dylib</native.ext>
             </properties>
             <dependencies>
                 <dependency>
@@ -247,6 +266,8 @@
             <activation><os><family>windows</family></os></activation>
             <properties>
                 <prism.pipeline>d3d,es2,sw</prism.pipeline>
+                <jpackage.icon>${project.basedir}/branding/torrenta.ico</jpackage.icon>
+                <native.ext>dll</native.ext>
             </properties>
             <dependencies>
                 <dependency>
@@ -262,6 +283,7 @@
             <activation><os><family>unix</family><name>Linux</name></os></activation>
             <properties>
                 <prism.pipeline>es2,sw</prism.pipeline>
+                <jpackage.icon>${project.basedir}/branding/torrenta.png</jpackage.icon>
             </properties>
             <dependencies>
                 <dependency>
@@ -273,8 +295,250 @@
             </dependencies>
         </profile>
 
-        <!-- No `dist` profile yet. When the app has something to ship, take the jlink + jpackage
-             profile from Termina's pom.xml (same author, same layout): moditect for automatic
-             modules, per-OS icons, AOT cache training, installers behind -Dskip.installers. -->
+        <!--
+            Native app image:  mvn clean -Pdist -DskipTests package  =>  target/dist/Torrenta{.app}
+            Installers too:    add -Dskip.installers=false            =>  target/installers/
+
+            `clean` matters. jlink's input is built from target/classes, and an incremental compile
+            can leave that directory inconsistent with the sources in ways javac will not correct.
+
+            libtorrent4j's core jar is an automatic module (no module-info), and jlink refuses to
+            link those: moditect injects a descriptor, and the antrun step overlays the patched jar
+            on the plain one so the module path holds exactly one copy.
+
+            The engine's native library is NOT in the image. Its per-OS jar is resources only, and a
+            resource in a module is encapsulated unless the package is opened; rather than fight that,
+            the library is unpacked here and placed beside the image with jpackage's app-content, and
+            the launcher hands libtorrent4j its path. NativeLibrary sees the property set and does
+            nothing, so the installed app never writes under ~/.torrenta/native.
+        -->
+        <profile>
+            <id>dist</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.moditect</groupId>
+                        <artifactId>moditect-maven-plugin</artifactId>
+                        <version>${moditect.version}</version>
+                        <executions>
+                            <execution>
+                                <id>patch-automatic-modules</id>
+                                <phase>package</phase>
+                                <goals><goal>add-module-info</goal></goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.directory}/modules</outputDirectory>
+                                    <overwriteExistingFiles>true</overwriteExistingFiles>
+                                    <jdepsExtraArgs>
+                                        <arg>--multi-release=25</arg>
+                                        <arg>--ignore-missing-deps</arg>
+                                    </jdepsExtraArgs>
+                                    <modules>
+                                        <module>
+                                            <artifact>
+                                                <groupId>org.libtorrent4j</groupId>
+                                                <artifactId>libtorrent4j</artifactId>
+                                                <version>${libtorrent4j.version}</version>
+                                            </artifact>
+                                            <moduleInfo>
+                                                <name>libtorrent4j</name>
+                                                <!-- Every package, so the swig and alerts packages
+                                                     the engine imports are reachable. -->
+                                                <exports>*;</exports>
+                                            </moduleInfo>
+                                        </module>
+                                    </modules>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-dependency-plugin</artifactId>
+                        <version>3.8.1</version>
+                        <executions>
+                            <execution>
+                                <id>collect-modules</id>
+                                <phase>package</phase>
+                                <goals><goal>copy-dependencies</goal></goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.directory}/mods</outputDirectory>
+                                    <includeScope>runtime</includeScope>
+                                    <!-- The native jar is resources only; it goes beside the image. -->
+                                    <excludeArtifactIds>libtorrent4j-linux,libtorrent4j-macos,libtorrent4j-windows</excludeArtifactIds>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>unpack-native</id>
+                                <phase>package</phase>
+                                <goals><goal>unpack-dependencies</goal></goals>
+                                <configuration>
+                                    <includeArtifactIds>libtorrent4j-linux,libtorrent4j-macos,libtorrent4j-windows</includeArtifactIds>
+                                    <includes>lib/${native.arch}/libtorrent4j.${native.ext}</includes>
+                                    <outputDirectory>${project.build.directory}/native-unpacked</outputDirectory>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-antrun-plugin</artifactId>
+                        <version>3.1.0</version>
+                        <executions>
+                            <execution>
+                                <!-- jpackage will not accept a version it cannot parse, and macOS
+                                     refuses one whose first number is zero; both handled here rather
+                                     than by hardcoding, so Finder, About and the update check agree. -->
+                                <id>derive-versions</id>
+                                <phase>initialize</phase>
+                                <goals><goal>run</goal></goals>
+                                <configuration>
+                                    <exportAntProperties>true</exportAntProperties>
+                                    <target>
+                                        <loadresource property="jpackage.publicVersion">
+                                            <string value="${project.version}"/>
+                                            <filterchain>
+                                                <tokenfilter>
+                                                    <replaceregex pattern="-SNAPSHOT$" replace=""/>
+                                                </tokenfilter>
+                                            </filterchain>
+                                        </loadresource>
+                                        <loadresource property="jpackage.macVersion">
+                                            <string value="${jpackage.publicVersion}"/>
+                                            <filterchain>
+                                                <tokenfilter>
+                                                    <replaceregex pattern="^0\." replace="1."/>
+                                                </tokenfilter>
+                                            </filterchain>
+                                        </loadresource>
+                                        <condition property="jpackage.appVersion"
+                                                   value="${jpackage.macVersion}"
+                                                   else="${jpackage.publicVersion}">
+                                            <os family="mac"/>
+                                        </condition>
+                                        <echo message="version ${project.version}: public ${jpackage.publicVersion}, bundle ${jpackage.appVersion}"/>
+                                    </target>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>assemble-module-path</id>
+                                <phase>package</phase>
+                                <goals><goal>run</goal></goals>
+                                <configuration>
+                                    <target>
+                                        <!-- Patched jars win over the plain automatic ones. -->
+                                        <copy todir="${project.build.directory}/mods" overwrite="true">
+                                            <fileset dir="${project.build.directory}/modules"/>
+                                        </copy>
+                                        <copy todir="${project.build.directory}/mods"
+                                              file="${project.build.directory}/${project.build.finalName}.jar"/>
+                                        <!-- JavaFX publishes a stub jar plus a platform-classifier jar
+                                             with the real classes. Both declare the same module, so
+                                             leaving both on the path is a duplicate-module error. -->
+                                        <delete>
+                                            <fileset dir="${project.build.directory}/mods"
+                                                     includes="javafx-*-${javafx.version}.jar"/>
+                                        </delete>
+                                        <!-- The native, under a stable name next to the image. -->
+                                        <copy todir="${project.build.directory}/native/torrenta-native" overwrite="true">
+                                            <fileset dir="${project.build.directory}/native-unpacked/lib/${native.arch}"
+                                                     includes="libtorrent4j.${native.ext}"/>
+                                        </copy>
+                                    </target>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.panteleyev</groupId>
+                        <artifactId>jpackage-maven-plugin</artifactId>
+                        <version>${jpackage.plugin.version}</version>
+                        <executions>
+                            <execution>
+                                <id>app-image</id>
+                                <phase>package</phase>
+                                <goals><goal>jpackage</goal></goals>
+                                <configuration>
+                                    <type>APP_IMAGE</type>
+                                    <name>Torrenta</name>
+                                    <appVersion>${jpackage.appVersion}</appVersion>
+                                    <vendor>Adrian De Leon</vendor>
+                                    <icon>${jpackage.icon}</icon>
+                                    <destination>${project.build.directory}/dist</destination>
+                                    <module>com.torrenta/com.torrenta.App</module>
+                                    <modulePaths>
+                                        <modulePath>${project.build.directory}/mods</modulePath>
+                                    </modulePaths>
+                                    <!-- Copied into the image's content directory: lib/ on Linux,
+                                         Contents/ on macOS, the root on Windows. $APPDIR is one
+                                         level below each of those, hence the ".." in the option. -->
+                                    <appContentPaths>
+                                        <appContentPath>${project.build.directory}/native/torrenta-native</appContentPath>
+                                    </appContentPaths>
+                                    <javaOptions>
+                                        <javaOption>--enable-native-access=javafx.graphics,libtorrent4j</javaOption>
+                                        <javaOption>-Dprism.order=${prism.pipeline}</javaOption>
+                                        <javaOption>-Dlibtorrent4j.jni.path=$APPDIR/../torrenta-native/libtorrent4j.${native.ext}</javaOption>
+                                        <!-- A ceiling, not a tuning claim: without it the JVM takes a
+                                             quarter of RAM as its maximum heap. -->
+                                        <javaOption>-Xmx1g</javaOption>
+                                        <!-- Returns idle memory to the OS; off by default in G1. -->
+                                        <javaOption>-XX:G1PeriodicGCInterval=30000</javaOption>
+                                    </javaOptions>
+                                    <jLinkOptions>
+                                        <jLinkOption>--strip-debug</jLinkOption>
+                                        <jLinkOption>--no-man-pages</jLinkOption>
+                                        <jLinkOption>--no-header-files</jLinkOption>
+                                        <jLinkOption>--compress=zip-6</jLinkOption>
+                                    </jLinkOptions>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <!-- After jpackage (same phase, POM order), since it edits the bundle. -->
+                                <id>fix-mac-bundle-version</id>
+                                <phase>package</phase>
+                                <goals><goal>exec</goal></goals>
+                                <configuration>
+                                    <executable>bash</executable>
+                                    <arguments>
+                                        <argument>${project.basedir}/scripts/fix-mac-bundle-version.sh</argument>
+                                        <argument>${project.build.directory}/dist/Torrenta.app</argument>
+                                        <argument>${jpackage.publicVersion}</argument>
+                                    </arguments>
+                                    <skip>${skip.mac.version.fix}</skip>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <!-- Last, so it wraps a finished image. -->
+                                <id>build-installers</id>
+                                <phase>package</phase>
+                                <goals><goal>exec</goal></goals>
+                                <configuration>
+                                    <executable>bash</executable>
+                                    <arguments>
+                                        <argument>${project.basedir}/scripts/build-installers.sh</argument>
+                                        <argument>${project.build.directory}/dist/${jpackage.imageName}</argument>
+                                        <argument>${jpackage.appVersion}</argument>
+                                        <argument>${project.build.directory}/installers</argument>
+                                        <argument>${jpackage.icon}</argument>
+                                    </arguments>
+                                    <skip>${skip.installers}</skip>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
     </profiles>
 </project>

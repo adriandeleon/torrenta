@@ -43,6 +43,23 @@ scripts/dev-run.sh -- "magnet:?xt=urn:btih:…"    # with arguments for the app
 
 Builds need a JDK 25: the formatter (Palantir 2.92) does not run on JDK 27.
 
+### Building a native app image
+
+```bash
+./mvnw clean -Pdist -DskipTests package                          # => target/dist/Torrenta{.app}
+./mvnw clean -Pdist -DskipTests -Dskip.installers=false package  # + target/installers/ (.deb .rpm | .dmg | .msi)
+```
+
+Self-contained: bundled runtime, no JDK needed to run it. `clean` is not optional — jlink's input is
+built from `target/classes`, and an incremental compile can leave that inconsistent in ways javac
+will not correct on its own. jlink and jpackage are host-specific, so each platform builds its own.
+
+The engine's native library is not linked into the image. It is unpacked from the per-OS jar at
+build time and placed beside the image (`lib/torrenta-native/` on Linux, `Contents/torrenta-native/`
+on macOS, `torrenta-native\` on Windows), and the launcher hands libtorrent4j its path, so an
+installed Torrenta never writes under `~/.torrenta/native`. CI builds the image on all three
+platforms, starts it, and fails unless the engine came up inside it.
+
 ### Development capture
 
 ```bash
