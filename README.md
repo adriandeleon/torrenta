@@ -64,7 +64,11 @@ window (`download.dir` in the settings file already works).
 |---|---|
 | `Ctrl+O` (`Cmd+O` on macOS) | Add a `.torrent` file |
 | `Ctrl+M` | Add a magnet link |
+| `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
 | `Ctrl+Q` | Quit |
+
+The list's columns (fifteen, from the header's ⋮ menu) keep their order, widths and visibility in
+`settings.properties`.
 
 ## BitTorrent engine
 

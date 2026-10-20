@@ -170,8 +170,8 @@ The point at which Torrenta can be left running.
 1. **Persistence** — done. Per-torrent resume data (libtorrent `save_resume_data` with the info
    dict, written on add, metadata, finish, periodically and on exit, loaded at start); a settings
    file; `TorrentStore` as the one owner of what is on disk; `--config-dir`.
-2. **Stable table.** Rows keyed by info-hash and updated in place; selection, sort and scroll survive
-   a tick. Column chooser, column order and widths remembered. Filter box.
+2. **Stable table** — done. Rows keyed by info-hash and updated in place; selection, sort and
+   scroll survive a tick. Column chooser, column order and widths remembered. Filter box.
 3. **Actions and chords.** Pause, resume, force resume, remove, remove with data, recheck,
    reannounce, sequential and first/last piece toggles, copy name/hash/magnet, open folder. Context
    menu, menu bar, command palette. Multi-select.

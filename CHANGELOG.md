@@ -14,6 +14,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 - **A settings file**, `~/.torrenta/settings.properties`, with `download.dir`.
 - **`--config-dir DIR`** and `TORRENTA_CONFIG_DIR` move the whole folder.
 - `Engine.remove(id, deleteFiles)`, for the window to use next.
+- **A stable transfer list.** Rows are updated in place each second, so the selection, the scroll
+  position and the sort survive. Fifteen columns (name, size, done, progress, state, seeds, peers,
+  down, up, ETA, ratio, added, completed, tracker, save path), typed so sorting compares numbers;
+  order, widths and visibility remembered. A name filter on `Ctrl+F`.
 
 Project scaffold: a themed window with a menu bar, a torrent list and a status bar; the
 `--help`/`--version` command line, which also takes `.torrent` paths and magnet links; the Caret &
