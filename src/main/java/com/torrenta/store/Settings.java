@@ -37,6 +37,10 @@ public final class Settings {
     public static final String LAST_UPDATE_CHECK = "updates.lastCheckEpochMs";
     /** The version the user chose to skip; a manual check still reports it. */
     public static final String DISMISSED_UPDATE = "updates.dismissedVersion";
+    /** The Add dialog's starting positions for its checkboxes. */
+    public static final String ADD_START_PAUSED = "add.startPaused";
+
+    public static final String ADD_SEQUENTIAL = "add.sequential";
 
     private final Path file;
     private final Properties properties = new Properties();
@@ -101,6 +105,38 @@ public final class Settings {
     public boolean updateCheck() {
         return !"false"
                 .equalsIgnoreCase(properties.getProperty(UPDATE_CHECK, "true").trim());
+    }
+
+    public void setUpdateCheck(boolean check) {
+        properties.setProperty(UPDATE_CHECK, String.valueOf(check));
+    }
+
+    public boolean addStartPaused() {
+        return readBoolean(ADD_START_PAUSED, false);
+    }
+
+    public void setAddStartPaused(boolean on) {
+        properties.setProperty(ADD_START_PAUSED, String.valueOf(on));
+    }
+
+    public boolean addSequential() {
+        return readBoolean(ADD_SEQUENTIAL, false);
+    }
+
+    public void setAddSequential(boolean on) {
+        properties.setProperty(ADD_SEQUENTIAL, String.valueOf(on));
+    }
+
+    /** Forgets the given keys, so their getters fall back to the defaults. */
+    public void reset(String... keys) {
+        for (String key : keys) properties.remove(key);
+    }
+
+    /** A boolean as a person might have typed it: anything that is not {@code false} is true. */
+    private boolean readBoolean(String key, boolean fallback) {
+        String value = properties.getProperty(key);
+        if (value == null || value.isBlank()) return fallback;
+        return !"false".equalsIgnoreCase(value.trim());
     }
 
     public long lastUpdateCheck() {

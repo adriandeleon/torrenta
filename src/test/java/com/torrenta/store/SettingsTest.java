@@ -35,6 +35,22 @@ class SettingsTest {
     }
 
     @Test
+    void booleansAreLenientAndResettable(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Files.writeString(
+                file,
+                Settings.UPDATE_CHECK + "=False\n" + Settings.ADD_START_PAUSED + "=yes\n" + Settings.ADD_SEQUENTIAL
+                        + "=\n");
+        Settings settings = new Settings(file);
+        settings.load();
+        assertFalse(settings.updateCheck(), "any spelling of false is false");
+        assertTrue(settings.addStartPaused(), "anything else is true");
+        assertFalse(settings.addSequential(), "blank is the default");
+        settings.reset(Settings.UPDATE_CHECK);
+        assertTrue(settings.updateCheck(), "reset means the default again");
+    }
+
+    @Test
     void aBlankValueFallsBackToTheDefault(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Files.writeString(file, Settings.DOWNLOAD_DIR + "=\n");
