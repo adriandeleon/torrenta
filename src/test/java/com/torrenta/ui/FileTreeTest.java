@@ -22,7 +22,11 @@ class FileTreeTest {
                         new FileEntry(0, "pair/a.bin", 100),
                         new FileEntry(2, "pair/sub/b.bin", 30),
                         new FileEntry(3, "pair/sub/deeper/c.bin", 20)),
-                false);
+                false,
+                List.of(),
+                "",
+                "",
+                0);
         FileTree.Node root = FileTree.build(preview);
         assertEquals("pair", root.name());
         assertFalse(root.isFile());
@@ -43,8 +47,8 @@ class FileTreeTest {
 
     @Test
     void singleFileTorrentIsOneFileAtTheRoot() {
-        TorrentPreview preview =
-                new TorrentPreview("id", "payload.bin", 7, List.of(new FileEntry(0, "payload.bin", 7)), false);
+        TorrentPreview preview = new TorrentPreview(
+                "id", "payload.bin", 7, List.of(new FileEntry(0, "payload.bin", 7)), false, List.of(), "", "", 0);
         FileTree.Node root = FileTree.build(preview);
         assertEquals(1, root.children().size());
         assertTrue(root.children().get(0).isFile());

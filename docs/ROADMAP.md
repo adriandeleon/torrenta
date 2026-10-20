@@ -84,10 +84,10 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 
 | Feature | T | Q | Torrenta |
 |---|---|---|---|
-| General: hashes, save path, created by, comment, pieces, availability bar, times, limits, counters | ✓ | ✓ | 0.3 |
-| Files: tree with progress, priority per file and folder, wanted toggle, rename, open | ✓ | ✓ | 0.3 |
-| Peers: IP, client, flags, progress, rates, country (offline GeoIP, optional download) | ✓ | ✓ | 0.3 |
-| Trackers: status, peers, message; add, edit, remove, reannounce one | ✓ | ✓ | 0.3 |
+| General: hash, save path, pieces, availability, times, counters (limits in 0.4; comment/creator are in the Add dialog, not readable back from a handle) | ✓ | ✓ | 0.3 |
+| Files: tree with progress, priority per file, open (rename: 0.4, with the content layout) | ✓ | ✓ | 0.3 |
+| Peers: IP, client, flags, progress, rates (country via offline GeoIP: 0.8) | ✓ | ✓ | 0.3 |
+| Trackers: status, message; add, remove, reannounce (scrape counts not exposed by the binding) | ✓ | ✓ | 0.3 |
 | Pieces map: downloaded and in-progress pieces | ✓ | ✓ | 0.3 |
 | Speed graph per torrent and session | ✗ | ✓ | 0.7 |
 
@@ -196,7 +196,11 @@ What a first public release needs.
    `torrent_info::rename_file`, and renaming through the handle after adding is confirmed by
    libtorrent's alerts yet a recheck afterwards never found the files under their new names; it
    needs either a binding change or a different sequence, and was not worth holding the dialog.
-2. **Detail pane**: General, Files, Peers, Trackers, Pieces. Collapsible, remembered.
+2. **Detail pane** — done: General, Files, Peers, Trackers, Pieces; collapsible, remembered. Not
+   in it: file rename (same binding limitation as the content layout: names read back through
+   `torrentFile()` do not reflect renames in 2.1.0-39), peers' country (needs an offline GeoIP
+   database, 0.8 with OS integration), per-torrent limits in General (0.4), and comment/creator in
+   General (libtorrent 2.1 keeps them outside `torrent_info`; the Add dialog shows them).
 3. **Native app image and installers** (`-Pdist`, from Termina): jlink plus jpackage with the
    libtorrent4j native placed in the image's library dir and `libtorrent4j.jni.path` set by the
    launcher; macOS `.app`/`.dmg`, Windows `.msi`, Linux `.deb`/`.rpm`; release workflow, JReleaser,

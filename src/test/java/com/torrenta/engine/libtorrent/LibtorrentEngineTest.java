@@ -1,19 +1,18 @@
 package com.torrenta.engine.libtorrent;
 
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.BooleanSupplier;
 
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.Torrent;
+import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.store.TorrentStore;
@@ -94,7 +93,12 @@ class LibtorrentEngineTest {
         Path torrentFile = dir.resolve("payload.torrent");
         Files.write(
                 torrentFile,
-                new TorrentBuilder().path(payload.toFile()).generate().entry().bencode());
+                new TorrentBuilder()
+                        .path(payload.toFile())
+                        .addTracker("udp://tracker.example.org:6969/announce")
+                        .generate()
+                        .entry()
+                        .bencode());
 
         TorrentStore store = new TorrentStore(dir.resolve("store"));
         String id;
@@ -121,6 +125,10 @@ class LibtorrentEngineTest {
                 Torrent t = again.torrents().get(0);
                 return t.progress() >= 1.0 - 1e-6 && t.state() == TorrentState.SEEDING;
             });
+        }
+        try (LibtorrentEngine third = new LibtorrentEngine(downloads, store)) {
+            third.start();
+            assertEquals(1, third.detail(id).trackers().size(), "the tracker survives the resume data");
         }
     }
 
@@ -179,7 +187,12 @@ class LibtorrentEngineTest {
         Path torrentFile = dir.resolve("payload.torrent");
         Files.write(
                 torrentFile,
-                new TorrentBuilder().path(payload.toFile()).generate().entry().bencode());
+                new TorrentBuilder()
+                        .path(payload.toFile())
+                        .addTracker("udp://tracker.example.org:6969/announce")
+                        .generate()
+                        .entry()
+                        .bencode());
 
         List<EngineEvent> events = new CopyOnWriteArrayList<>();
         try (LibtorrentEngine engine = engine(dir)) {
@@ -217,7 +230,12 @@ class LibtorrentEngineTest {
         Files.write(root.resolve("a.bin"), new byte[100 * 1024]);
         Files.write(root.resolve("sub").resolve("b.bin"), new byte[50 * 1024]);
         NativeLibrary.ensureAvailable();
-        return new TorrentBuilder().path(root.toFile()).generate().entry().bencode();
+        return new TorrentBuilder()
+                .path(root.toFile())
+                .addTracker("udp://tracker.example.org:6969/announce")
+                .generate()
+                .entry()
+                .bencode();
     }
 
     @Test
@@ -235,6 +253,10 @@ class LibtorrentEngineTest {
             assertTrue(preview.hasRootFolder());
             assertFalse(preview.isPrivate());
             assertEquals(40, preview.id().length());
+            assertEquals(
+                    List.of("udp://tracker.example.org:6969/announce"),
+                    preview.trackers(),
+                    "trackers come with the file");
             assertThrows(EngineException.class, () -> engine.inspect("not bencode".getBytes()));
         }
     }
@@ -282,6 +304,102 @@ class LibtorrentEngineTest {
             engine.remove(seeded.id(), false);
             await("gone again", () -> engine.torrents().isEmpty());
         }
+    }
+
+    @Test
+    void detailOfASeededTorrent(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "pair");
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            Torrent t = engine.add(downloadsTorrent(dir, torrent));
+            await("seeding", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+
+            TorrentDetail detail = engine.detail(t.id());
+            TorrentDetail.General g = detail.general();
+            assertEquals(t.id(), g.id());
+            assertEquals(downloads.toString(), g.savePath());
+            assertTrue(g.pieceCount() > 0);
+            assertEquals(g.pieceCount(), g.piecesHave(), "complete");
+            assertEquals(g.pieceCount(), detail.pieces().length);
+            for (boolean have : detail.pieces()) assertTrue(have);
+            assertTrue(g.pieceLength() > 0);
+            assertFalse(g.isPrivate());
+            assertTrue(g.activeSeconds() < 600, "seconds, not milliseconds: " + g.activeSeconds());
+            assertTrue(g.seedingSeconds() <= g.activeSeconds());
+
+            assertEquals(2, detail.files().size(), "padding files hidden");
+            TorrentDetail.FileStatus a = detail.files().get(0);
+            assertEquals("pair/a.bin", a.path());
+            assertEquals(a.size(), a.done());
+            assertEquals(1.0, a.progress(), 1e-9);
+            assertEquals(Priority.NORMAL, a.priority());
+
+            int bIndex = detail.files().get(1).index();
+            engine.setFilePriority(t.id(), bIndex, Priority.IGNORE);
+            await("priority applied", () -> engine.detail(t.id()).files().get(1).priority() == Priority.IGNORE);
+            engine.setFilePriority(t.id(), bIndex, Priority.HIGH);
+            await(
+                    "priority applied again",
+                    () -> engine.detail(t.id()).files().get(1).priority() == Priority.HIGH);
+
+            assertTrue(detail.peers().isEmpty(), "nobody is connected in a test");
+
+            assertEquals(1, detail.trackers().size(), "the one the torrent was built with");
+            assertEquals(
+                    "udp://tracker.example.org:6969/announce",
+                    detail.trackers().get(0).url());
+            engine.addTrackers(
+                    t.id(),
+                    List.of(
+                            "udp://tracker.example.org:6969/announce",
+                            " ",
+                            "http://t.example.com/announce",
+                            "http://u.example.com/announce"));
+            await(
+                    "three trackers, no duplicate",
+                    () -> engine.detail(t.id()).trackers().size() == 3);
+            List<TorrentDetail.Tracker> trackers = engine.detail(t.id()).trackers();
+            assertTrue(trackers.stream()
+                    .map(TorrentDetail.Tracker::url)
+                    .toList()
+                    .containsAll(List.of("http://t.example.com/announce", "http://u.example.com/announce")));
+            assertTrue(
+                    trackers.stream().filter(x -> x.url().startsWith("http://")).allMatch(x -> x.tier() == 1),
+                    "added after the existing tier");
+            engine.removeTracker(t.id(), "http://t.example.com/announce");
+            await("two trackers", () -> engine.detail(t.id()).trackers().size() == 2);
+        }
+    }
+
+    @Test
+    void peerFlagsReadAsLetters() throws Exception {
+        NativeLibrary.ensureAvailable();
+        int interesting = org.libtorrent4j.swig.peer_info.interesting.to_int();
+        int choked = org.libtorrent4j.swig.peer_info.choked.to_int();
+        int remoteInterested = org.libtorrent4j.swig.peer_info.remote_interested.to_int();
+        int local = org.libtorrent4j.swig.peer_info.local_connection.to_int();
+        int seed = org.libtorrent4j.swig.peer_info.seed.to_int();
+        int utp = org.libtorrent4j.swig.peer_info.utp_socket.to_int();
+        int rc4 = org.libtorrent4j.swig.peer_info.rc4_encrypted.to_int();
+        int dht = org.libtorrent4j.swig.peer_info.dht.to_int();
+        var standard = org.libtorrent4j.PeerInfo.ConnectionType.STANDARD_BITTORRENT;
+        assertEquals("DUI", PeerFlags.text(interesting | remoteInterested, 0, standard));
+        assertEquals("d", PeerFlags.text(interesting | choked | local, 0, standard));
+        assertEquals("SIEP", PeerFlags.text(seed | utp | rc4, 0, standard));
+        assertEquals("H", PeerFlags.text(local, dht, standard));
+        assertEquals("IW", PeerFlags.text(0, 0, org.libtorrent4j.PeerInfo.ConnectionType.WEB_SEED));
+    }
+
+    private static AddRequest downloadsTorrent(Path dir, byte[] torrent) {
+        return new AddRequest(
+                new AddRequest.TorrentFile(torrent, "pair.torrent"),
+                dir.resolve("downloads"),
+                false,
+                false,
+                false,
+                AddRequest.StopCondition.NONE,
+                Map.of());
     }
 
     @Test
@@ -337,10 +455,15 @@ class LibtorrentEngineTest {
         return new LibtorrentEngine(dir.resolve("downloads"), store);
     }
 
+    /** A condition that may ask the engine, which throws. */
+    private interface Condition {
+        boolean test() throws Exception;
+    }
+
     /** Alerts arrive on their own thread; wait, bounded, rather than sleep and hope. */
-    private static void await(String what, BooleanSupplier condition) throws IOException {
+    private static void await(String what, Condition condition) throws Exception {
         long deadline = System.currentTimeMillis() + 10_000;
-        while (!condition.getAsBoolean()) {
+        while (!condition.test()) {
             if (System.currentTimeMillis() > deadline) throw new AssertionError("timed out waiting for: " + what);
             try {
                 Thread.sleep(25);

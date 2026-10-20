@@ -25,13 +25,20 @@ import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.Torrent;
+import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.store.TorrentStore;
 import org.libtorrent4j.AddTorrentParams;
 import org.libtorrent4j.AlertListener;
+import org.libtorrent4j.AnnounceEndpoint;
+import org.libtorrent4j.AnnounceEntry;
+import org.libtorrent4j.AnnounceInfohash;
+import org.libtorrent4j.BDecodeNode;
 import org.libtorrent4j.FileStorage;
 import org.libtorrent4j.LibTorrent;
+import org.libtorrent4j.PeerInfo;
+import org.libtorrent4j.PieceIndexBitfield;
 import org.libtorrent4j.SessionHandle;
 import org.libtorrent4j.SessionManager;
 import org.libtorrent4j.TorrentFlags;
@@ -58,6 +65,7 @@ import org.libtorrent4j.alerts.TrackerWarningAlert;
 import org.libtorrent4j.swig.add_torrent_params;
 import org.libtorrent4j.swig.error_code;
 import org.libtorrent4j.swig.libtorrent;
+import org.libtorrent4j.swig.load_torrent_limits;
 import org.libtorrent4j.swig.resume_data_flags_t;
 import org.libtorrent4j.swig.status_flags_t;
 import org.libtorrent4j.swig.torrent_flags_t;
@@ -100,6 +108,12 @@ public final class LibtorrentEngine implements Engine {
 
     /** Magnets to pause once their metadata arrives: the dialog's "stop after metadata". */
     private final Set<String> stopAfterMetadata = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Removed in this session. A resume-data answer can arrive after the torrent is gone — the
+     * request was in flight — and writing it would bring the torrent back at the next start.
+     */
+    private final Set<String> removed = ConcurrentHashMap.newKeySet();
 
     public LibtorrentEngine(Path downloadDir, TorrentStore store) {
         this.downloadDir = downloadDir;
@@ -199,9 +213,8 @@ public final class LibtorrentEngine implements Engine {
                 }
             }
             case AddRequest.TorrentFile file -> {
-                info = decode(file.bytes(), file.origin());
-                params = new AddTorrentParams();
-                params.setTorrentInfo(info);
+                params = load(file.bytes(), file.origin());
+                info = params.getTorrentInfo();
             }
         }
         params.setSavePath(request.savePath().toString());
@@ -247,7 +260,8 @@ public final class LibtorrentEngine implements Engine {
     @Override
     public TorrentPreview inspect(byte[] torrent) throws EngineException {
         NativeLibrary.ensureAvailable();
-        TorrentInfo info = decode(torrent, "the torrent");
+        AddTorrentParams params = load(torrent, "the torrent");
+        TorrentInfo info = params.getTorrentInfo();
         FileStorage files = info.files();
         List<TorrentPreview.FileEntry> entries = new ArrayList<>(files.numFiles());
         for (int i = 0; i < files.numFiles(); i++) {
@@ -257,7 +271,37 @@ public final class LibtorrentEngine implements Engine {
         // The real files' bytes, not totalSize(): a hybrid torrent's padding files are not content.
         long size = entries.stream().mapToLong(TorrentPreview.FileEntry::size).sum();
         return new TorrentPreview(
-                info.infoHashes().getBest().toHex(), info.name(), size, List.copyOf(entries), info.isPrivate());
+                params.getInfoHashes().getBest().toHex(),
+                params.getName().isEmpty() ? info.name() : params.getName(),
+                size,
+                List.copyOf(entries),
+                info.isPrivate(),
+                List.copyOf(params.getTrackers()),
+                params.getComment() == null ? "" : params.getComment(),
+                params.getCreatedBy() == null ? "" : params.getCreatedBy(),
+                params.getCreationDate());
+    }
+
+    /**
+     * A {@code .torrent} as add parameters. libtorrent 2.1 keeps the trackers, comment, creator
+     * and web seeds outside {@code torrent_info}, which holds the info dictionary alone; its
+     * {@code load_torrent_*} functions are what read a whole file. Building a {@code TorrentInfo}
+     * from the bytes instead loses the trackers silently, which is how this was found.
+     */
+    private static AddTorrentParams load(byte[] bytes, String origin) throws EngineException {
+        try {
+            BDecodeNode node = BDecodeNode.bdecode(bytes);
+            error_code ec = new error_code();
+            add_torrent_params raw = libtorrent.load_torrent_parsed(node.swig(), ec, new load_torrent_limits());
+            if (ec.value() != 0)
+                throw new EngineException("Not a valid .torrent: " + origin + " (" + ec.message() + ")");
+            AddTorrentParams params = new AddTorrentParams(raw);
+            TorrentInfo info = params.getTorrentInfo();
+            if (info == null || !info.isValid()) throw new EngineException("Not a valid .torrent: " + origin);
+            return params;
+        } catch (RuntimeException e) {
+            throw new EngineException("Not a valid .torrent: " + origin, e);
+        }
     }
 
     private static TorrentInfo decode(byte[] bytes, String origin) throws EngineException {
@@ -291,6 +335,7 @@ public final class LibtorrentEngine implements Engine {
         emit(EngineEvent.info(id, name, deleteFiles ? "Removed " + name + " and its files" : "Removed " + name));
         // Forgotten before libtorrent confirms: a crash in between loses nothing worse than a
         // torrent that comes back once, which beats one that cannot be removed.
+        removed.add(id);
         try {
             store.delete(id);
         } catch (IOException e) {
@@ -341,6 +386,129 @@ public final class LibtorrentEngine implements Engine {
     @Override
     public String magnetLink(String id) throws EngineException {
         return handle(id).makeMagnetUri();
+    }
+
+    @Override
+    public TorrentDetail detail(String id) throws EngineException {
+        TorrentHandle h = handle(id);
+        TorrentStatus status = h.status(StatusQuery.ALL);
+
+        // Files: progress and priority by index; padding files hidden, indices kept.
+        List<TorrentDetail.FileStatus> files = new ArrayList<>();
+        TorrentInfo info = status.hasMetadata() ? h.torrentFile() : null;
+        if (info != null && info.isValid()) {
+            FileStorage storage = info.files();
+            long[] progress = h.fileProgress();
+            org.libtorrent4j.Priority[] priorities = h.filePriorities();
+            for (int i = 0; i < storage.numFiles(); i++) {
+                if (storage.padFileAt(i)) continue;
+                long done = i < progress.length ? progress[i] : 0;
+                Priority priority = i < priorities.length ? fromLibtorrent(priorities[i]) : Priority.NORMAL;
+                files.add(new TorrentDetail.FileStatus(
+                        i, storage.filePath(i).replace('\\', '/'), storage.fileSize(i), done, priority));
+            }
+        }
+
+        List<TorrentDetail.Peer> peers = new ArrayList<>();
+        for (PeerInfo p : h.peerInfo()) {
+            peers.add(new TorrentDetail.Peer(
+                    p.ip(),
+                    p.client() == null ? "" : p.client(),
+                    PeerFlags.text(p.flags(), p.source(), p.connectionType()),
+                    p.progress(),
+                    p.downSpeed(),
+                    p.upSpeed(),
+                    p.totalDownload(),
+                    p.totalUpload()));
+        }
+
+        List<TorrentDetail.Tracker> trackers = new ArrayList<>();
+        for (AnnounceEntry entry : h.trackers()) trackers.add(tracker(entry));
+
+        PieceIndexBitfield bits = status.pieces();
+        boolean[] pieces = new boolean[Math.max(0, bits.size())];
+        for (int i = 0; i < pieces.length; i++) pieces[i] = bits.getBit(i);
+
+        TorrentDetail.General general = new TorrentDetail.General(
+                id,
+                status.swig().getSave_path(),
+                info != null && info.isPrivate(),
+                status.numPieces() > 0 ? status.numPieces() : (info == null ? 0 : info.numPieces()),
+                info == null ? 0 : info.pieceLength(),
+                bits.count(),
+                status.distributedCopies(),
+                status.allTimeDownload(),
+                status.allTimeUpload(),
+                status.totalFailedBytes() + status.totalRedundantBytes(),
+                // libtorrent4j hands durations over in milliseconds; the record promises seconds.
+                status.activeDuration() / 1000,
+                status.seedingDuration() / 1000,
+                status.nextAnnounce() / 1000,
+                status.numConnections(),
+                status.currentTracker() == null ? "" : status.currentTracker());
+        return new TorrentDetail(general, files, peers, trackers, pieces);
+    }
+
+    /** The worst of the tracker's endpoints decides, as a person would read it. */
+    private static TorrentDetail.Tracker tracker(AnnounceEntry entry) {
+        String status = "not contacted";
+        String message = "";
+        int fails = 0;
+        boolean anyWorking = false;
+        boolean anyUpdating = false;
+        boolean anyFailed = false;
+        for (AnnounceEndpoint endpoint : entry.endpoints()) {
+            for (AnnounceInfohash hash : List.of(endpoint.infohashV1(), endpoint.infohashV2())) {
+                if (hash.isWorking()) anyWorking = true;
+                if (hash.updating()) anyUpdating = true;
+                if (hash.fails() > 0) {
+                    anyFailed = true;
+                    fails = Math.max(fails, hash.fails());
+                }
+                String m = hash.message();
+                if (m != null && !m.isEmpty() && message.isEmpty()) message = m;
+            }
+        }
+        if (anyWorking) status = "working";
+        else if (anyUpdating) status = "updating";
+        else if (anyFailed) status = "error";
+        return new TorrentDetail.Tracker(entry.url(), entry.tier(), status, message, fails);
+    }
+
+    @Override
+    public void setFilePriority(String id, int fileIndex, Priority priority) throws EngineException {
+        handle(id).filePriority(fileIndex, toLibtorrent(priority));
+    }
+
+    @Override
+    public void addTrackers(String id, List<String> urls) throws EngineException {
+        TorrentHandle h = handle(id);
+        List<AnnounceEntry> existing = h.trackers();
+        int tier = existing.stream().mapToInt(AnnounceEntry::tier).max().orElse(-1) + 1;
+        for (String url : urls) {
+            String u = url.trim();
+            if (u.isEmpty() || existing.stream().anyMatch(e -> e.url().equals(u))) continue;
+            AnnounceEntry entry = new AnnounceEntry(u);
+            entry.tier((short) tier);
+            h.addTracker(entry);
+        }
+    }
+
+    @Override
+    public void removeTracker(String id, String url) throws EngineException {
+        TorrentHandle h = handle(id);
+        List<AnnounceEntry> kept = new ArrayList<>();
+        for (AnnounceEntry e : h.trackers()) {
+            if (!e.url().equals(url)) kept.add(e);
+        }
+        h.replaceTrackers(kept);
+    }
+
+    private static Priority fromLibtorrent(org.libtorrent4j.Priority priority) {
+        if (priority == org.libtorrent4j.Priority.IGNORE) return Priority.IGNORE;
+        if (priority == org.libtorrent4j.Priority.LOW) return Priority.LOW;
+        if (priority == org.libtorrent4j.Priority.TOP_PRIORITY) return Priority.HIGH;
+        return Priority.NORMAL;
     }
 
     private TorrentHandle handle(String id) throws EngineException {
@@ -474,6 +642,10 @@ public final class LibtorrentEngine implements Engine {
     private static final class StatusQuery {
         /** The default status query leaves the strings out (they cost a copy per call); ask. */
         static final status_flags_t FLAGS = TorrentHandle.QUERY_NAME.or_(TorrentHandle.QUERY_SAVE_PATH);
+
+        /** For the detail pane: the pieces bitfield too, which costs a copy per piece. */
+        static final status_flags_t ALL =
+                FLAGS.or_(TorrentHandle.QUERY_PIECES).or_(TorrentHandle.QUERY_DISTRIBUTED_COPIES);
     }
 
     /** Same rule as {@link StatusQuery}: {@code TorrentFlags}' constants are SWIG objects. */
@@ -665,6 +837,11 @@ public final class LibtorrentEngine implements Engine {
                 return;
             }
             write(alert.params());
+            // The add params carry the trackers only for a magnet; for a .torrent they live inside
+            // the info and the params' own list is empty, so a blob written from the params alone
+            // would bring the torrent back without its trackers. libtorrent's own resume data has
+            // them: ask for it now, and it replaces the blob shortly after.
+            requestSave(alert.handle(), false);
             String id = alert.params().getInfoHashes().getBest().toHex();
             torrentEvent(alert, EngineEvent.Level.INFO, restoring.remove(id) ? "Restored %s" : "Added %s");
         }
@@ -692,6 +869,7 @@ public final class LibtorrentEngine implements Engine {
 
         private void write(AddTorrentParams params) {
             String id = params.getInfoHashes().getBest().toHex();
+            if (removed.contains(id)) return;
             try {
                 store.save(id, AddTorrentParams.writeResumeDataBuf(params));
             } catch (IOException e) {

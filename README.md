@@ -18,8 +18,9 @@ Status: **early**. A themed window with a menu bar, a torrent list, a status bar
 on a real engine: libtorrent, through [libtorrent4j](https://github.com/aldenml/libtorrent4j).
 Torrents arrive from a file, a magnet link, a URL, a drop or the clipboard through an Add dialog
 (save path, start paused, sequential, skip check, stop condition, file selection and priorities),
-are listed with live columns, can be paused, resumed, rechecked, reannounced and removed, and come
-back after a restart. No settings window or limits yet; see [docs/ROADMAP.md](docs/ROADMAP.md).
+are listed with live columns, can be paused, resumed, rechecked, reannounced and removed, show
+their files, peers, trackers and pieces in a detail pane, and come back after a restart. No settings
+window or limits yet; see [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Running
 
@@ -69,6 +70,7 @@ window (`download.dir` in the settings file already works).
 | `Ctrl+V` | Add whatever magnet or torrent link is on the clipboard; the status bar says when there is one |
 | `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
 | `Ctrl+Shift+P` | Command palette: every command, found by typing part of its name |
+| `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
 | `Space` | Pause the selected torrents, or resume them if all are paused |
 | `Ctrl+Shift+U` | Force resume (ignore the queue) |

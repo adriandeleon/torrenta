@@ -55,6 +55,16 @@ public interface Engine extends AutoCloseable {
     /** A magnet link for the torrent, with its trackers, as the engine would build it. */
     String magnetLink(String id) throws EngineException;
 
+    /** Everything the detail pane shows; a few milliseconds, so once a second at most. */
+    TorrentDetail detail(String id) throws EngineException;
+
+    void setFilePriority(String id, int fileIndex, Priority priority) throws EngineException;
+
+    /** Adds trackers the torrent does not have yet, on the tier after its last. */
+    void addTrackers(String id, List<String> urls) throws EngineException;
+
+    void removeTracker(String id, String url) throws EngineException;
+
     /** A snapshot of every torrent in the session. */
     List<Torrent> torrents();
 
