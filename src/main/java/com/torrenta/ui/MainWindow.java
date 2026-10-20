@@ -1868,7 +1868,7 @@ public final class MainWindow {
     }
 
     private HBox buildFilterBar() {
-        filter.setPromptText("Filter by name (Ctrl+F)");
+        filter.setPromptText("Filter (Ctrl+F) — try state:seeding");
         // Not traversable: the scene hands initial focus to the first traversable node, and while
         // the table is hidden (no torrents yet) that would be this box, so every keystroke on a
         // fresh launch would land in the filter. Ctrl+F reaches it; Tab does not need to.
@@ -1891,21 +1891,19 @@ public final class MainWindow {
         return bar;
     }
 
-    /** Case-insensitive substring on the name; blank matches everything. Package-private for tests. */
-    static java.util.function.Predicate<TorrentRow> nameFilter(String text) {
-        String needle = text == null ? "" : text.trim().toLowerCase(java.util.Locale.ROOT);
-        if (needle.isEmpty()) return row -> true;
-        return row -> row.torrent().name().toLowerCase(java.util.Locale.ROOT).contains(needle);
-    }
-
     /**
-     * Every filter at once: the name box and the sidebar's choices (status, category, tag,
+     * Every filter at once: the box's query and the sidebar's choices (status, category, tag,
      * tracker). Package-private for tests.
      */
     static java.util.function.Predicate<TorrentRow> rowFilter(String text, SidebarSelection sidebar) {
-        java.util.function.Predicate<TorrentRow> byName = nameFilter(text);
+        return rowFilter(text, sidebar, java.time.Instant.now().getEpochSecond());
+    }
+
+    /** {@link #rowFilter(String, SidebarSelection)} with the clock that {@code added<7d} counts from. */
+    static java.util.function.Predicate<TorrentRow> rowFilter(String text, SidebarSelection sidebar, long now) {
+        FilterQuery query = FilterQuery.parse(text, now);
         SidebarSelection s = sidebar == null ? SidebarSelection.ALL : sidebar;
-        return row -> byName.test(row) && s.matches(row.torrent());
+        return row -> query.matches(row.torrent()) && s.matches(row.torrent());
     }
 
     private void focusFilter() {
