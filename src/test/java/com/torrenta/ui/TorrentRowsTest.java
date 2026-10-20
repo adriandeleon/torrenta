@@ -108,11 +108,11 @@ class TorrentRowsTest {
                 0,
                 "",
                 List.of()));
-        assertEquals(true, MainWindow.nameFilter("").test(row));
-        assertEquals(true, MainWindow.nameFilter(null).test(row));
-        assertEquals(true, MainWindow.nameFilter("  desktop ").test(row));
-        assertEquals(true, MainWindow.nameFilter("UBUNTU").test(row));
-        assertEquals(false, MainWindow.nameFilter("fedora").test(row));
+        assertEquals(true, MainWindow.rowFilter("", null).test(row));
+        assertEquals(true, MainWindow.rowFilter(null, null).test(row));
+        assertEquals(true, MainWindow.rowFilter("  desktop ", null).test(row));
+        assertEquals(true, MainWindow.rowFilter("UBUNTU", null).test(row));
+        assertEquals(false, MainWindow.rowFilter("fedora", null).test(row));
     }
 
     @Test
