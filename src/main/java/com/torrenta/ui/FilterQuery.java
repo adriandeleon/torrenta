@@ -19,11 +19,11 @@ import com.torrenta.engine.TorrentState;
  * key:value} or {@code key<value} narrows on something else:
  *
  * <ul>
- *   <li>{@code state:} downloading, seeding, paused, checking, metadata, finished — the State
- *       column's notion, so a torrent paused by the user is paused and nothing else
+ *   <li>{@code state:} downloading, seeding, paused, checking, metadata, finished, error — what
+ *       the State column says, so an error outranks a pause and a pause outranks the rest
  *   <li>{@code cat:} / {@code category:} the category, exactly but ignoring case; {@code tag:} one
  *       of the tags, likewise
- *   <li>{@code tracker:} part of the tracker's host
+ *   <li>{@code tracker:} part of the host of any of its trackers
  *   <li>{@code hash:} the start of the info-hash
  *   <li>{@code is:sequential}
  *   <li>{@code ratio}, {@code size} and {@code added} with {@code < <= > >= =} (or after a colon,
@@ -130,19 +130,20 @@ public final class FilterQuery {
 
     private static Term state(String value) {
         return switch (value.toLowerCase(Locale.ROOT)) {
-            case "downloading" -> running(TorrentState.DOWNLOADING);
-            case "seeding" -> running(TorrentState.SEEDING);
-            case "checking" -> running(TorrentState.CHECKING);
-            case "metadata" -> running(TorrentState.FETCHING_METADATA);
-            case "finished" -> running(TorrentState.FINISHED);
-            case "paused" -> new Term(Torrent::paused, "state is Paused");
+            case "downloading" -> column(TorrentState.DOWNLOADING.label());
+            case "seeding" -> column(TorrentState.SEEDING.label());
+            case "checking" -> column(TorrentState.CHECKING.label());
+            case "metadata" -> column(TorrentState.FETCHING_METADATA.label());
+            case "finished" -> column(TorrentState.FINISHED.label());
+            case "paused" -> column("Paused");
+            case "error", "errored" -> column("Error");
             default -> Term.invalid(value.isEmpty() ? "state needs a value" : "no state " + value);
         };
     }
 
-    /** The State column's rule: a user pause outranks the engine's state. */
-    private static Term running(TorrentState state) {
-        return new Term(t -> !t.paused() && t.state() == state, "state is " + state.label());
+    /** The State column's own text, so the two cannot disagree on what outranks what. */
+    private static Term column(String label) {
+        return new Term(t -> Format.stateLabel(t).equals(label), "state is " + label);
     }
 
     private static Term category(String value) {
@@ -155,12 +156,14 @@ public final class FilterQuery {
         return new Term(t -> t.tags().stream().anyMatch(value::equalsIgnoreCase), "tag " + value);
     }
 
+    /** Any of its tracker hosts, or the one it last announced to (which a snapshot may name alone). */
     private static Term tracker(String value) {
         if (value.isEmpty()) return Term.invalid("tracker needs a host");
         String needle = value.toLowerCase(Locale.ROOT);
+        Predicate<String> has = host -> host.toLowerCase(Locale.ROOT).contains(needle);
         return new Term(
-                t -> !t.tracker().isBlank()
-                        && Format.host(t.tracker()).toLowerCase(Locale.ROOT).contains(needle),
+                t -> t.trackers().stream().anyMatch(has)
+                        || (!t.tracker().isBlank() && has.test(Format.host(t.tracker()))),
                 "tracker " + value);
     }
 

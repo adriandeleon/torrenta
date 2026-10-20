@@ -109,6 +109,8 @@ class LibtorrentEngineTest {
             id = added.id();
             assertEquals("payload.bin", added.name());
             assertEquals(bytes.length, added.size());
+            assertEquals(List.of("tracker.example.org"), added.trackers(), "the host, from the add parameters");
+            assertEquals("", added.error());
             // The data is already there, so checking ends in seeding.
             await("checked and seeding", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
         }
@@ -119,6 +121,7 @@ class LibtorrentEngineTest {
             Torrent back = again.torrents().get(0);
             assertEquals(id, back.id());
             assertEquals("payload.bin", back.name());
+            assertEquals(List.of("tracker.example.org"), back.trackers(), "the host survives the resume data");
             // Linux and macOS report 100 % straight from the resume data. Windows was seen at 0 %
             // for a moment after start (libtorrent re-checks when the recorded file times do not
             // match, and NTFS keeps them at a different precision), so: wait for complete, bounded.

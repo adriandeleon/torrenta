@@ -16,76 +16,88 @@ class FilterQueryTest {
     private static final long DAY = 86_400L;
     private static final long GIB = 1L << 30;
 
-    /** A torrent with every field at a dull default; the {@code with*} calls change one. */
-    private record T(
-            String id,
-            String name,
-            long size,
-            TorrentState state,
-            long uploaded,
-            long downloaded,
-            long added,
-            String tracker,
-            boolean paused,
-            boolean sequential,
-            String category,
-            List<String> tags) {
+    /** A torrent with every field at a dull default; each call returns a copy with one changed. */
+    private static final class T implements Cloneable {
+        String id = "abcdef0123";
+        String name;
+        long size;
+        TorrentState state = TorrentState.DOWNLOADING;
+        long uploaded;
+        long downloaded;
+        long added;
+        String tracker = "";
+        boolean paused;
+        boolean sequential;
+        String category = "";
+        List<String> tags = List.of();
+        String error = "";
+        List<String> trackers = List.of();
 
         static T of(String name) {
-            return new T("abcdef0123", name, 0, TorrentState.DOWNLOADING, 0, 0, 0, "", false, false, "", List.of());
+            T t = new T();
+            t.name = name;
+            return t;
+        }
+
+        private T copy(java.util.function.Consumer<T> change) {
+            try {
+                T t = (T) clone();
+                change.accept(t);
+                return t;
+            } catch (CloneNotSupportedException e) {
+                throw new AssertionError(e);
+            }
         }
 
         T id(String v) {
-            return new T(
-                    v, name, size, state, uploaded, downloaded, added, tracker, paused, sequential, category, tags);
+            return copy(t -> t.id = v);
         }
 
         T size(long v) {
-            return new T(id, name, v, state, uploaded, downloaded, added, tracker, paused, sequential, category, tags);
+            return copy(t -> t.size = v);
         }
 
         T state(TorrentState v) {
-            return new T(id, name, size, v, uploaded, downloaded, added, tracker, paused, sequential, category, tags);
+            return copy(t -> t.state = v);
         }
 
         T transfer(long up, long down) {
-            return new T(id, name, size, state, up, down, added, tracker, paused, sequential, category, tags);
+            return copy(t -> {
+                t.uploaded = up;
+                t.downloaded = down;
+            });
         }
 
         T added(long v) {
-            return new T(id, name, size, state, uploaded, downloaded, v, tracker, paused, sequential, category, tags);
+            return copy(t -> t.added = v);
         }
 
         T tracker(String v) {
-            return new T(id, name, size, state, uploaded, downloaded, added, v, paused, sequential, category, tags);
+            return copy(t -> t.tracker = v);
+        }
+
+        T trackers(String... hosts) {
+            return copy(t -> t.trackers = List.of(hosts));
         }
 
         T pausedByUser() {
-            return new T(id, name, size, state, uploaded, downloaded, added, tracker, true, sequential, category, tags);
+            return copy(t -> t.paused = true);
         }
 
         T inOrder() {
-            return new T(id, name, size, state, uploaded, downloaded, added, tracker, paused, true, category, tags);
+            return copy(t -> t.sequential = true);
         }
 
         T category(String v) {
-            return new T(id, name, size, state, uploaded, downloaded, added, tracker, paused, sequential, v, tags);
+            return copy(t -> t.category = v);
         }
 
         T tags(String... v) {
-            return new T(
-                    id,
-                    name,
-                    size,
-                    state,
-                    uploaded,
-                    downloaded,
-                    added,
-                    tracker,
-                    paused,
-                    sequential,
-                    category,
-                    List.of(v));
+            return copy(t -> t.tags = List.of(v));
+        }
+
+        T error(String v) {
+            return copy(t -> t.error = v);
         }
 
         Torrent torrent() {
@@ -110,7 +122,10 @@ class FilterQueryTest {
                     sequential,
                     0,
                     category,
-                    tags);
+                    tags,
+                    error,
+                    trackers,
+                    false);
         }
     }
 
@@ -192,6 +207,12 @@ class FilterQueryTest {
         assertTrue(matches("state:metadata", T.of("a").state(TorrentState.FETCHING_METADATA)));
         assertTrue(matches("state:finished", T.of("a").state(TorrentState.FINISHED)));
         assertTrue(matches("STATE:Seeding", seeding), "key and value ignore case");
+        T broken = seeding.pausedByUser().error("disk full");
+        assertTrue(matches("state:error", broken));
+        assertTrue(matches("state:errored", broken));
+        assertFalse(matches("state:paused", broken), "an error outranks a pause, as in the column");
+        assertFalse(matches("state:seeding", broken));
+        assertFalse(matches("state:error", seeding));
     }
 
     @Test
@@ -199,6 +220,7 @@ class FilterQueryTest {
         assertEquals(new FilterQuery.Chip("state:seeding", "state is Seeding", true), chip("state:seeding"));
         assertEquals("state is Paused", chip("state:paused").label());
         assertEquals("state is Fetching metadata", chip("state:metadata").label());
+        assertEquals("state is Error", chip("state:errored").label());
         assertEquals("not state is Seeding", chip("-state:seeding").label());
     }
 
@@ -234,6 +256,10 @@ class FilterQueryTest {
         assertFalse(matches("tracker:announce", t), "the path is not the host");
         assertFalse(matches("tracker:6969", t), "nor the port");
         assertFalse(matches("tracker:open", T.of("a")), "no tracker matches nothing");
+        T many = T.of("a").trackers("tracker.example.org", "udp.opentrackr.org");
+        assertTrue(matches("tracker:opentrackr", many), "any of its trackers, not just the current one");
+        assertTrue(matches("tracker:EXAMPLE", many));
+        assertFalse(matches("tracker:demonii", many));
         assertEquals("tracker openbittorrent", chip("tracker:openbittorrent").label());
     }
 
