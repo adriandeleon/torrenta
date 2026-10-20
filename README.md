@@ -78,6 +78,15 @@ libtorrent's resume data with the info dictionary inside, so deleting one file f
 `native/<version>/`, the unpacked engine. Downloads go to `~/Downloads` until there is a setting
 window (`download.dir` in the settings file already works).
 
+### Releasing
+
+A release is a tag. Set `<version>` in `pom.xml` to the release number (no `-SNAPSHOT`), commit,
+tag `v<version>`, push the tag. `release.yml` builds the installers on all three platforms, smoke
+tests each packaged app, and JReleaser publishes the GitHub release with install notes and a
+changelog, then updates the Homebrew cask and opens the winget pull request when the
+`PACKAGES_TOKEN` secret is present. A manual run of the workflow is a dry run: it builds and uploads
+everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAPSHOT`.
+
 ## Keyboard
 
 | Chord | Action |

@@ -46,6 +46,15 @@ modified, and on stop, and re-adds them on start. Removing a torrent deletes its
 shown; `MainWindow` polls it once a second on its own thread and hands the FX thread an immutable
 list; `addInput` runs on a virtual thread. Inputs that arrive before the engine is up are queued.
 
+## Releasing
+
+`release.yml` on a `v*` tag: three targets only (linux-x64, macos-arm64, windows-x64 — the engine's
+native exists for no others), each smoke-tests its packaged app before uploading. `jreleaser.yml`
+publishes the release with `.github/release-notes.tpl` ahead of the changelog; the cask and winget
+templates under `src/jreleaser/distributions/` override JReleaser's stock ones (see the NOTES.md
+there: the stock cask names a `binary` that a bundle does not have). Everything here is Termina's
+release process with the names changed; Termina's README and memory hold the war stories.
+
 ## Things that will bite you
 
 - **libtorrent4j does not unpack its native library.** Its JNI class's static initialiser
@@ -153,6 +162,8 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 Add dialogs (Ctrl+O / Ctrl+M only say so; inputs come from the command line), pause/resume/remove
 in the window (`Engine.remove` exists, nothing calls it yet), limits, a settings window, per-torrent
 detail, `-Pdist` with the native in the image.
-0.2 is complete; 0.3 has the Add dialog, the detail pane and the app image. Next: the release
-workflow with JReleaser, Homebrew and winget (from Termina), then the update check. Content
-layout, file rename and first/last piece first wait for 0.4.
+0.2 is complete; 0.3 has the Add dialog, the detail pane, the app image and the release
+pipeline. Next: the update check. Content layout, file rename and first/last piece first wait for
+0.4. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
+run of release.yml, and the Homebrew/winget packagers need the `PACKAGES_TOKEN` secret copied from
+Termina's repository (the same PAT) before they do anything.
