@@ -5,6 +5,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Fixed
+
+- **A JVM crash in the engine** (`SIGSEGV` in `libtorrent4j.so` while reading a torrent's detail,
+  seen once on CI): libtorrent4j's vector proxies hand out pointers that its finalizer frees. The
+  engine now keeps only handles, trackers and peers it owns.
+
 ### Added
 
 - **Torrents survive a restart.** Resume data is kept per torrent under `~/.torrenta/torrents/`,
