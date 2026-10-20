@@ -14,7 +14,7 @@
 
 A keyboard-first, cross-platform BitTorrent client built on JavaFX.
 
-Status: **early**. A themed window with a menu bar, a torrent list, a status bar and an event log,
+Status: **early**. A themed window with a menu bar, an icon toolbar, a torrent list, a status bar and an event log,
 on a real engine: libtorrent, through [libtorrent4j](https://github.com/aldenml/libtorrent4j).
 Torrents arrive from a file, a magnet link, a URL, a drop or the clipboard through an Add dialog
 (save path, start paused, sequential, skip check, stop condition, file selection and priorities),

@@ -5,6 +5,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Added
+
+- **An icon toolbar** under the menu bar, with Editora's glyphs: add a torrent file, add a magnet
+  link, pause/resume, force resume, recheck, remove, filter, event log, settings, and the command
+  palette at the right. Each button is one of the existing commands, so it greys out with them.
+  View → Toolbar hides it (`ui.toolbar`). The add actions, the event log and the toolbar toggle
+  are commands now, so the palette reaches them too.
+
 ### Changed
 
 - **JavaFX 27**, as Editora; was 26.0.2.

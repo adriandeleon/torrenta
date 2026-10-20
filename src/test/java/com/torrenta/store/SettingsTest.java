@@ -36,6 +36,19 @@ class SettingsTest {
     }
 
     @Test
+    void toolbarShowsUnlessTurnedOff(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        assertTrue(settings.toolbar(), "shown by default");
+        settings.setToolbar(false);
+        settings.save();
+        Settings read = new Settings(file);
+        read.load();
+        assertFalse(read.toolbar());
+    }
+
+    @Test
     void booleansAreLenientAndResettable(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Files.writeString(
