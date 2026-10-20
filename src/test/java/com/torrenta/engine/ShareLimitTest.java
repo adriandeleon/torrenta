@@ -1,5 +1,6 @@
 package com.torrenta.engine;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,9 @@ class ShareLimitTest {
                 "",
                 paused,
                 false,
-                seedingSeconds);
+                seedingSeconds,
+                "",
+                List.of());
     }
 
     @Test

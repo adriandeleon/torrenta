@@ -34,7 +34,9 @@ class TorrentRowsTest {
                 "",
                 false,
                 false,
-                0);
+                0,
+                "",
+                List.of());
     }
 
     @Test
@@ -103,11 +105,51 @@ class TorrentRowsTest {
                 "",
                 false,
                 false,
-                0));
+                0,
+                "",
+                List.of()));
         assertEquals(true, MainWindow.nameFilter("").test(row));
         assertEquals(true, MainWindow.nameFilter(null).test(row));
         assertEquals(true, MainWindow.nameFilter("  desktop ").test(row));
         assertEquals(true, MainWindow.nameFilter("UBUNTU").test(row));
         assertEquals(false, MainWindow.nameFilter("fedora").test(row));
+    }
+
+    @Test
+    void rowFilterIsTheNameBoxAndTheSidebarTogether() {
+        TorrentRow row = new TorrentRow(new Torrent(
+                "a",
+                "Ubuntu 26.04 Desktop",
+                1,
+                0,
+                0,
+                TorrentState.SEEDING,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                "",
+                "",
+                false,
+                false,
+                0,
+                "Linux",
+                List.of("iso")));
+        assertEquals(
+                true,
+                MainWindow.rowFilter("ubuntu", SidebarFilter.category("Linux")).test(row));
+        assertEquals(
+                false,
+                MainWindow.rowFilter("ubuntu", SidebarFilter.category("Movies")).test(row));
+        assertEquals(
+                false,
+                MainWindow.rowFilter("fedora", SidebarFilter.category("Linux")).test(row));
+        assertEquals(true, MainWindow.rowFilter("", SidebarFilter.tag("iso")).test(row));
+        assertEquals(false, MainWindow.rowFilter("", SidebarFilter.UNTAGGED).test(row));
+        assertEquals(true, MainWindow.rowFilter(null, null).test(row), "no sidebar choice is All");
     }
 }

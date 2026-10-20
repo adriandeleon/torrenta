@@ -42,6 +42,26 @@ class TorrentStoreTest {
     }
 
     @Test
+    void labelsSitBesideTheBlobAndGoWithIt(@TempDir Path dir) throws IOException {
+        TorrentStore store = new TorrentStore(dir);
+        assertTrue(store.loadLabels(V1).isEmpty());
+        store.saveLabels(V1, new byte[] {7});
+        assertArrayEquals(new byte[] {7}, store.loadLabels(V1).orElseThrow());
+        assertTrue(store.loadAll().isEmpty(), "a sidecar alone is no torrent");
+        assertFalse(store.contains(V1));
+
+        store.save(V1, new byte[] {1});
+        store.delete(V1);
+        assertTrue(store.loadLabels(V1).isEmpty(), "deleted with the torrent");
+
+        store.saveLabels(V2, new byte[] {8});
+        store.deleteLabels(V2);
+        store.deleteLabels(V2); // twice is fine
+        assertTrue(store.loadLabels(V2).isEmpty());
+        assertThrows(IllegalArgumentException.class, () -> store.saveLabels("../x", new byte[0]));
+    }
+
+    @Test
     void leavesNoTempFilesAndIgnoresStrangers(@TempDir Path dir) throws IOException {
         TorrentStore store = new TorrentStore(dir);
         store.save(V1, new byte[] {1});

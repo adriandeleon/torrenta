@@ -13,6 +13,7 @@ import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
+import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.store.TorrentStore;
@@ -281,7 +282,8 @@ class LibtorrentEngineTest {
                     true,
                     false,
                     AddRequest.StopCondition.NONE,
-                    Map.of(b, Priority.IGNORE));
+                    Map.of(b, Priority.IGNORE),
+                    TorrentLabels.NONE);
             Torrent t = engine.add(paused);
             assertTrue(t.paused(), "start paused");
             assertTrue(t.sequential());
@@ -297,7 +299,8 @@ class LibtorrentEngineTest {
                     false,
                     true,
                     AddRequest.StopCondition.NONE,
-                    Map.of());
+                    Map.of(),
+                    TorrentLabels.NONE);
             Torrent seeded = engine.add(trusted);
             await("seeding", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
             assertEquals(1.0, engine.torrents().get(0).progress(), 1e-6);
@@ -399,7 +402,8 @@ class LibtorrentEngineTest {
                 false,
                 false,
                 AddRequest.StopCondition.NONE,
-                Map.of());
+                Map.of(),
+                TorrentLabels.NONE);
     }
 
     @Test
@@ -651,6 +655,66 @@ class LibtorrentEngineTest {
     }
 
     @Test
+    void labelsAreKeptBesideTheResumeDataAndComeBackAfterARestart(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "pair");
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        String id;
+        try (LibtorrentEngine engine = engine(dir, store)) {
+            engine.start();
+            Torrent t = engine.add(new AddRequest(
+                    new AddRequest.TorrentFile(torrent, "pair.torrent"),
+                    downloads,
+                    false,
+                    false,
+                    false,
+                    AddRequest.StopCondition.NONE,
+                    Map.of(),
+                    new TorrentLabels("Linux", List.of("iso"))));
+            id = t.id();
+            assertEquals("Linux", t.category(), "filed on add");
+            assertEquals(List.of("iso"), t.tags());
+            assertEquals("Linux", engine.category(id));
+            assertEquals(List.of("iso"), engine.tags(id));
+            assertTrue(store.loadLabels(id).isPresent(), "the sidecar is written at once, on the caller's thread");
+
+            engine.setTags(id, List.of("iso", "hd"));
+            engine.setCategory(id, "Movies");
+            Torrent now = engine.torrents().get(0);
+            assertEquals("Movies", now.category());
+            assertEquals(List.of("hd", "iso"), now.tags(), "normalised as TorrentLabels does");
+
+            Torrent magnet = engine.add(MAGNET);
+            assertEquals("", magnet.category());
+            assertTrue(magnet.tags().isEmpty());
+            assertTrue(store.loadLabels(MAGNET_ID).isEmpty(), "no labels, no sidecar");
+            assertThrows(
+                    EngineException.class,
+                    () -> engine.setCategory("0000000000000000000000000000000000000000", "x"),
+                    "an id the session lacks");
+            await("resume data written", () -> store.contains(id));
+        }
+        try (LibtorrentEngine again = engine(dir, store)) {
+            again.start();
+            Torrent back = again.torrents().stream()
+                    .filter(t -> t.id().equals(id))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("Movies", back.category(), "restored with the resume data");
+            assertEquals(List.of("hd", "iso"), back.tags());
+
+            again.setCategory(id, "");
+            again.setTags(id, List.of());
+            assertTrue(store.loadLabels(id).isEmpty(), "nothing left to file under takes the sidecar away");
+            again.setCategory(id, "Again");
+            assertTrue(store.loadLabels(id).isPresent());
+            again.remove(id, false);
+            assertTrue(store.loadLabels(id).isEmpty(), "removed with the torrent");
+            await("gone", () -> again.torrents().size() == 1);
+        }
+    }
+
+    @Test
     void stopAfterMetadataIsAcceptedForAMagnet(@TempDir Path dir) throws Exception {
         try (LibtorrentEngine engine = engine(dir)) {
             engine.start();
@@ -661,7 +725,8 @@ class LibtorrentEngineTest {
                     false,
                     false,
                     AddRequest.StopCondition.METADATA_RECEIVED,
-                    Map.of()));
+                    Map.of(),
+                    TorrentLabels.NONE));
             assertFalse(t.paused(), "runs until the metadata arrives");
             assertEquals(TorrentState.FETCHING_METADATA, t.state());
         }

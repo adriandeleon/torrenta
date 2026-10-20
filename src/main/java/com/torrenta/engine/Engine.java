@@ -62,6 +62,18 @@ public interface Engine extends AutoCloseable {
      */
     void setLimits(String id, TorrentLimits limits) throws EngineException;
 
+    /** The category the torrent is filed under, or empty. */
+    String category(String id) throws EngineException;
+
+    /** Files the torrent under a category (empty for none); kept beside its resume data. */
+    void setCategory(String id, String category) throws EngineException;
+
+    /** The torrent's tags, sorted. */
+    List<String> tags(String id) throws EngineException;
+
+    /** Replaces the torrent's tags; normalised as {@link TorrentLabels} does. */
+    void setTags(String id, List<String> tags) throws EngineException;
+
     /** A magnet link for the torrent, with its trackers, as the engine would build it. */
     String magnetLink(String id) throws EngineException;
 

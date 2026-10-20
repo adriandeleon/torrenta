@@ -20,6 +20,16 @@ class ColumnLayoutTest {
     }
 
     @Test
+    void theCategoryAndTagsColumnsAreOrdinaryColumns() {
+        // Hidden by default, so a stored layout carries them with a leading dash; nothing special.
+        String stored = "name:360,-category:120,-tags:160,size:90";
+        List<Column> parsed = ColumnLayout.parse(stored);
+        assertEquals(new Column("category", 120, false), parsed.get(1));
+        assertEquals(new Column("tags", 160, false), parsed.get(2));
+        assertEquals(stored, ColumnLayout.format(parsed));
+    }
+
+    @Test
     void emptyAndBlankMeanNoLayout() {
         assertTrue(ColumnLayout.parse(null).isEmpty());
         assertTrue(ColumnLayout.parse("  ").isEmpty());

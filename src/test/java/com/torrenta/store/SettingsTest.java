@@ -49,6 +49,22 @@ class SettingsTest {
     }
 
     @Test
+    void sidebarShowsUnlessTurnedOffAndItsFilterIsAStringTheUiParses(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        assertTrue(settings.sidebar(), "shown by default");
+        assertEquals("", settings.sidebarFilter(), "nothing chosen is All to the UI");
+        settings.setSidebar(false);
+        settings.setSidebarFilter("category:Linux ISOs");
+        settings.save();
+        Settings read = new Settings(file);
+        read.load();
+        assertFalse(read.sidebar());
+        assertEquals("category:Linux ISOs", read.sidebarFilter());
+    }
+
+    @Test
     void themeIsAStringTheUiInterprets(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Settings settings = new Settings(file);

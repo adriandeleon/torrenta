@@ -76,7 +76,10 @@ Everything lives in one folder, `~/.torrenta` (`--config-dir DIR` or `TORRENTA_C
 it): `settings.properties`, hand-editable; `torrents/<info-hash>.fastresume`, one per torrent,
 libtorrent's resume data with the info dictionary inside, so deleting one file forgets one torrent;
 `native/<version>/`, the unpacked engine. Downloads go to `~/Downloads` until changed in
-Settings (`Ctrl+,`), which writes the same file. A torrent's own share limit (Torrent → Limits…)
+Settings (`Ctrl+,`), which writes the same file. Categories (name and save path) are
+`categories.json` and tags are `tags.json`, both small enough to edit by hand; which torrent is
+filed under which is `torrents/<info-hash>.labels` beside its resume data, written the moment it
+changes and deleted with the torrent. A torrent's own share limit (Torrent → Limits…)
 is kept there as `torrent.<info-hash>.share` and goes with the torrent when it is removed; its rate
 caps and connection counts are libtorrent's and live in its resume data. The global queue and share
 limits are `queue.*` and `share.*`. The theme is there too, under General →
@@ -113,8 +116,9 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+M` | Add a magnet link or a link to a `.torrent` (the clipboard's, if it holds one) |
 | `Ctrl+V` | Add whatever magnet or torrent link is on the clipboard; the status bar says when there is one |
 | `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
+| `Ctrl+B` / `Ctrl+Shift+B` | Focus the sidebar (All, categories, tags, each with a count; arrows choose, `Enter`, `Space` or `Esc` return to the list) / show or hide it |
 | `Ctrl+Shift+P` | Command palette: every command, found by typing part of its name |
-| `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
+| `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Categories and tags (names, save paths, delete), Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
 | `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
 | `Space` | Pause the selected torrents, or resume them if all are paused |
@@ -122,6 +126,8 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+Shift+R` / `Ctrl+Shift+A` | Force recheck / force reannounce |
 | `Ctrl+Shift+S` | Sequential download on or off |
 | `Ctrl+L` | Limits for the selection: download and upload caps, connections, upload slots, first and last pieces first, and a ratio or seeding-time limit of its own in place of the global one |
+| `Ctrl+Shift+G` | Set the selection's category: one that exists, none, or a new one (the Torrent and context menus list them as a submenu) |
+| `Ctrl+T` | Edit the selection's tags: a checkbox per tag that exists, a field for new ones |
 | `Ctrl+C` / `Ctrl+Shift+H` / `Ctrl+Shift+C` | Copy name / info-hash / magnet link |
 | `Ctrl+Shift+O` | Open the destination folder |
 | `Delete` / `Shift+Delete` | Remove, or remove with the downloaded files, after confirming |
@@ -130,12 +136,15 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 
 Every action is in the Torrent menu, the list's right-click menu and the palette, and applies to
 the whole selection. `.torrent` files and links can also be dropped on the window, and anything on
-the command line goes through the same Add dialog. The status bar's "Alt speed" switches the
+the command line goes through the same Add dialog, which offers the categories: one with a save
+path fills the folder when chosen, so a new torrent in it lands there. The sidebar's choice and
+the name filter narrow the list together, and both the choice and whether the sidebar shows are
+remembered. The status bar's "Alt speed" switches the
 alternative speed limits by hand; the schedule in Settings switches them by the clock. The status bar shows the latest event; an error count appears there while
 there are errors, and a click on it opens the log.
 
-The list's columns (fifteen, from the header's ⋮ menu) keep their order, widths and visibility in
-`settings.properties`.
+The list's columns (seventeen, from the header's ⋮ menu, Category and Tags among them) keep their
+order, widths and visibility in `settings.properties`.
 
 ## BitTorrent engine
 

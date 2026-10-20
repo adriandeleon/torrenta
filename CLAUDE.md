@@ -33,6 +33,7 @@ Run Maven from the project root with a JDK 25.
 | Entry | `--help`/`--version`, toolkit start, theme | `com.torrenta.App`, `com.torrenta.cli` |
 | Events | `EngineEvent` (level, torrent, message), raised by the engine from libtorrent alerts and by its own start/stop/remove; `Engine.addListener` | `com.torrenta.engine` |
 | Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL) | `com.torrenta.engine`, `com.torrenta.net` |
+| Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags; JSON for the `<hash>.labels` sidecar), `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `Sidebar` (a tree: All, Categories, Tags; Status and Tracker sections later), `TagsDialog` | `com.torrenta.engine`, `store`, `ui` |
 | Detail | `TorrentDetail` (general, files, peers, trackers, pieces) from `Engine.detail(id)`; `setFilePriority`, `addTrackers`, `removeTracker`; `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
 | Engine settings | `EngineSettings` (engine-neutral record; `listenInterfaces()` is the tested string), `Settings.engineSettings()` clamps the `connection.*` and `proxy.*` keys, `LibtorrentEngine.toPack` maps onto `settings_pack`; applied at start (`SessionParams`) and live (`applySettings`) | `com.torrenta.engine`, `store`, `.libtorrent` |
 | IP filter | `IpRange` (literals only, never resolves), `Blocklist` (pure parser for .p2p/.dat/CIDR/plain), `net.BlocklistFetch` (gzip by magic), `ui.IpFilterController` (cache, schedule, bans → `Engine.setIpFilter`), `peer_blocked` alerts counted | `com.torrenta.engine`, `net`, `ui` |
@@ -186,6 +187,11 @@ release process with the names changed; Termina's README and memory hold the war
 - **Engine events arrive on libtorrent4j's alert thread.** `MainWindow` hops to the FX thread
   before touching the log or the status bar; `EventLog.add` is FX-only. The j.u.l bridge takes
   the hop as a parameter so tests run it inline.
+- **libtorrent's `add_torrent_params` has no category or tags** (libtorrent4j 2.1.0-39 exposes
+  none), so a torrent's filing is a `<hash>.labels` sidecar beside its `.fastresume`, written on
+  the caller's thread the moment it changes (never through the resume-data alert), read back in
+  `restore()`, deleted by `TorrentStore.delete`. The engine holds them in a map by id for the
+  snapshots. The sidebar is not focus-traversable for the same reason as the filter box.
 - **A removed torrent's alert carries only the hash.** `remove()` reads the name first and raises
   the event itself; the `TORRENT_REMOVED` alert is not listened to.
 - **Rows are `TorrentRow` objects, never `Torrent` snapshots.** The list has an extractor on the

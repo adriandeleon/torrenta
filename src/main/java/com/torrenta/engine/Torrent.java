@@ -21,6 +21,8 @@ package com.torrenta.engine;
  * @param sequential pieces are fetched in order
  * @param seedingTime seconds spent finished (every wanted piece there), over the torrent's life;
  *     what a seeding-time limit measures
+ * @param category the category it is filed under, or empty
+ * @param tags its tags, sorted; empty for none
  */
 public record Torrent(
         String id,
@@ -41,4 +43,12 @@ public record Torrent(
         String savePath,
         boolean paused,
         boolean sequential,
-        long seedingTime) {}
+        long seedingTime,
+        String category,
+        java.util.List<String> tags) {
+
+    public Torrent {
+        category = category == null ? "" : category;
+        tags = tags == null ? java.util.List.of() : java.util.List.copyOf(tags);
+    }
+}
