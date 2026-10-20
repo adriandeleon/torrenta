@@ -7,6 +7,7 @@ import javafx.beans.property.SimpleBooleanProperty;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The ranking, on plain commands; the matcher's own scoring has its own test. */
 class CommandPaletteTest {
@@ -50,5 +51,20 @@ class CommandPaletteTest {
         assertEquals("Space", withHint.hint());
         Command none = c("Y");
         assertEquals("", none.hint());
+    }
+
+    @Test
+    void titleRunsEmboldenExactlyTheMatchedCharacters() {
+        var runs = MatchText.runs("Force Recheck", "frec");
+        assertEquals(
+                List.of("F|palette-match", "orce ", "Rec|palette-match", "heck"),
+                runs.stream()
+                        .map(t -> t.getText() + (t.getStyleClass().contains(MatchText.MATCHED) ? "|palette-match" : ""))
+                        .toList());
+        var plain = MatchText.runs("Remove…", "");
+        assertEquals(1, plain.size());
+        assertEquals("Remove…", plain.get(0).getText());
+        assertTrue(plain.get(0).getStyleClass().contains(MatchText.PLAIN));
+        assertEquals(1, MatchText.runs("", "x").size(), "never an empty flow");
     }
 }

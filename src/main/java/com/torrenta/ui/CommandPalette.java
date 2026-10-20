@@ -4,20 +4,25 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
 import javafx.scene.control.TextField;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.MouseButton;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.scene.text.TextFlow;
 
 /**
- * Every command in the window, findable by typing part of its name. Carried over from Termina.
+ * Every command in the window, findable by typing part of its name. Editora's palette: the input
+ * is the first row, led by a chip naming the chord that opened it; rows embolden the characters
+ * the query matched and show the chord in the keyboard's own hue; a legend closes the card.
  *
  * <p>An in-scene overlay rather than a window of its own: a second Stage would take OS focus and
  * getting it back is the thing that has to work. Whatever the user does here, the next keystroke
@@ -25,46 +30,71 @@ import javafx.scene.layout.VBox;
  */
 final class CommandPalette {
 
-    /** Enough rows to be useful without covering the list it is being used on. */
-    private static final int VISIBLE_ROWS = 10;
+    /** Height of one command row, and how many the list shows before it scrolls; the kit's. */
+    static final double ROW_HEIGHT = 36;
+
+    static final int VISIBLE_ROWS = 8;
 
     private final StackPane host;
     private final Runnable onHidden;
-
+    private final Label prefixChip = new Label();
     private final TextField query = new TextField();
     private final ListView<Command> results = new ListView<>();
-    private final VBox card = new VBox();
+    private final Label hint = new Label("↵  run      ↑↓  move      Esc  close");
+    private final VBox card = new VBox(6);
     private final Region backdrop = new Region();
-
     private List<Command> commands = List.of();
+    /** The query of the current filter pass, read by the cells to embolden the matched characters. */
+    private String currentQuery = "";
 
-    CommandPalette(StackPane host, Runnable onHidden) {
+    /**
+     * @param openerChord the chord that opens the palette, shown as a chip leading the input so the
+     *     palette introduces itself by its keyboard identity; blank for none
+     */
+    CommandPalette(StackPane host, Runnable onHidden, String openerChord) {
         this.host = host;
         this.onHidden = onHidden;
-
         backdrop.getStyleClass().add("palette-backdrop");
         backdrop.setOnMousePressed(e -> hide());
 
+        // Kit shape: no title header; the first row IS the input, led by the chord chip.
+        prefixChip.getStyleClass().add("palette-prefix");
+        prefixChip.setText(openerChord == null ? "" : openerChord);
+        prefixChip.setVisible(!prefixChip.getText().isEmpty());
+        prefixChip.setManaged(prefixChip.isVisible());
         query.getStyleClass().add("palette-input");
-        query.setPromptText("Type a command…");
+        query.setPromptText("Run command…");
         query.textProperty().addListener((o, was, now) -> refilter(now));
+        HBox inputRow = new HBox(9, prefixChip, query);
+        inputRow.setAlignment(Pos.CENTER_LEFT);
+        inputRow.getStyleClass().add("palette-input-row");
+        HBox.setHgrow(query, Priority.ALWAYS);
 
         results.getStyleClass().add("palette-list");
         results.setPlaceholder(new Label("No matching command"));
         results.setCellFactory(view -> new CommandCell());
-        results.setOnMousePressed(e -> {
-            if (e.getClickCount() >= 2) runSelected();
-        });
+        // A whole number of rows: a fixed height cut the last row in half.
+        results.setFixedCellSize(ROW_HEIGHT);
+        results.setPrefHeight(listHeight(0));
+        results.insetsProperty()
+                .addListener((o, was, in) -> results.setPrefHeight(listHeight(in.getTop() + in.getBottom())));
 
-        card.getStyleClass().add("palette-card");
-        card.getChildren().addAll(query, results);
-        card.setMaxWidth(560);
-        card.setMaxHeight(Region.USE_PREF_SIZE);
+        hint.getStyleClass().add("palette-hint");
+
+        card.getStyleClass().add("command-palette");
+        card.getChildren().addAll(inputRow, results, hint);
+        card.setPrefWidth(620);
+        card.setMaxSize(620, Region.USE_PREF_SIZE); // hug the content; never stretch to fill the overlay
         StackPane.setAlignment(card, Pos.TOP_CENTER);
-
         // On the card, so it runs before the ListView's own handling of Up/Down and before the
         // TextField swallows anything. Enter and Escape would otherwise never reach us.
         card.addEventFilter(KeyEvent.KEY_PRESSED, this::onKey);
+    }
+
+    /** The list height for {@link #VISIBLE_ROWS} rows, or fewer when there are fewer, inside {@code insets}. */
+    double listHeight(double insets) {
+        int rows = Math.min(VISIBLE_ROWS, Math.max(1, results.getItems().size()));
+        return rows * ROW_HEIGHT + insets;
     }
 
     /** The visible result labels, so a capture run can assert on the ranking rather than a picture. */
@@ -91,10 +121,6 @@ final class CommandPalette {
         query.setText("");
         refilter("");
         host.getChildren().addAll(backdrop, card);
-        // The height is only knowable once the rows exist; a fixed one either wastes space on a
-        // short list or scrolls a list that would have fitted.
-        results.setPrefHeight(
-                Math.min(VISIBLE_ROWS, Math.max(1, results.getItems().size())) * 28 + 8);
         query.requestFocus();
     }
 
@@ -105,8 +131,11 @@ final class CommandPalette {
     }
 
     private void refilter(String text) {
+        currentQuery = text == null ? "" : text;
         results.getItems().setAll(rank(text, commands));
         if (!results.getItems().isEmpty()) results.getSelectionModel().selectFirst();
+        Insets in = results.getInsets();
+        results.setPrefHeight(listHeight(in == null ? 0 : in.getTop() + in.getBottom()));
     }
 
     /** The commands that match, best first; ties keep the given order, which is the menus' order. */
@@ -170,16 +199,16 @@ final class CommandPalette {
     private void runSelected() {
         Command command = results.getSelectionModel().getSelectedItem();
         // Hidden first: the command may open a dialog, and the palette must not still be sitting
-        // over it — or, worse, take the focus back afterwards.
+        // over it, or, worse, take the focus back afterwards.
         hide();
         if (command != null) command.run().run();
     }
 
-    /** A row: the command on the left, its shortcut right-aligned, as the menus show it. */
-    private static final class CommandCell extends ListCell<Command> {
-        private final Label name = new Label();
-        private final Label chord = new Label();
-        private final HBox layout = new HBox(name, spacer(), chord);
+    /** A row: the title as styled runs on the left, the chord right-aligned, as the menus show it. */
+    private final class CommandCell extends ListCell<Command> {
+        private final TextFlow title = new TextFlow();
+        private final Label key = new Label();
+        private final HBox box = new HBox(10, title, spacer(), key);
 
         private static Region spacer() {
             Region region = new Region();
@@ -188,9 +217,15 @@ final class CommandPalette {
         }
 
         CommandCell() {
-            name.getStyleClass().add("palette-name");
-            chord.getStyleClass().add("palette-chord");
-            layout.setAlignment(Pos.CENTER_LEFT);
+            key.getStyleClass().add("keybinding");
+            box.setAlignment(Pos.CENTER_LEFT);
+            // A click runs the row; the keyboard runs the selected one on Enter.
+            setOnMouseClicked(e -> {
+                if (e.getButton() == MouseButton.PRIMARY && !isEmpty() && getItem() != null) {
+                    getListView().getSelectionModel().select(getItem());
+                    runSelected();
+                }
+            });
         }
 
         @Override
@@ -200,9 +235,9 @@ final class CommandPalette {
                 setGraphic(null);
                 return;
             }
-            name.setText(item.label());
-            chord.setText(item.hint());
-            setGraphic(layout);
+            title.getChildren().setAll(MatchText.runs(item.label(), currentQuery));
+            key.setText(item.hint());
+            setGraphic(box);
         }
     }
 }
