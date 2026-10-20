@@ -26,7 +26,8 @@ class EngineSettingsTest {
                 d.proxyPassword(),
                 d.proxyPeers(),
                 EngineSettings.Protocol.defaults(),
-                EngineSettings.Speed.defaults());
+                EngineSettings.Speed.defaults(),
+                EngineSettings.Queue.defaults());
     }
 
     @Test
@@ -65,7 +66,8 @@ class EngineSettingsTest {
                 "pw",
                 true,
                 EngineSettings.Protocol.defaults(),
-                EngineSettings.Speed.defaults());
+                EngineSettings.Speed.defaults(),
+                EngineSettings.Queue.defaults());
         assertTrue(socks.proxyAuthenticated());
         EngineSettings anon = new EngineSettings(
                 d.listenPort(),
@@ -83,7 +85,8 @@ class EngineSettingsTest {
                 "",
                 true,
                 EngineSettings.Protocol.defaults(),
-                EngineSettings.Speed.defaults());
+                EngineSettings.Speed.defaults(),
+                EngineSettings.Queue.defaults());
         assertFalse(anon.proxyAuthenticated(), "a blank user is no login");
     }
 }

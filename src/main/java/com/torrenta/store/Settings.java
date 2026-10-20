@@ -13,6 +13,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.torrenta.engine.EngineSettings;
+import com.torrenta.engine.ShareLimit;
 
 /**
  * User preferences, stored as a plain properties file.
@@ -106,6 +107,34 @@ public final class Settings {
         SPEED_SCHEDULE_DAYS,
         SPEED_COUNT_OVERHEAD
     };
+
+    /** Queue and share limits page. Active counts are 0 for none; the ratio is a decimal, 0 for none. */
+    public static final String QUEUE_ACTIVE_DOWNLOADS = "queue.activeDownloads";
+
+    public static final String QUEUE_ACTIVE_SEEDS = "queue.activeSeeds";
+    public static final String QUEUE_ACTIVE_LIMIT = "queue.activeLimit";
+    public static final String QUEUE_IGNORE_SLOW = "queue.ignoreSlowTorrents";
+    public static final String SHARE_RATIO = "share.ratio";
+    public static final String SHARE_SEED_MINUTES = "share.seedMinutes";
+    public static final String SHARE_ACTION = "share.action";
+
+    public static final String[] QUEUE_KEYS = {
+        QUEUE_ACTIVE_DOWNLOADS,
+        QUEUE_ACTIVE_SEEDS,
+        QUEUE_ACTIVE_LIMIT,
+        QUEUE_IGNORE_SLOW,
+        SHARE_RATIO,
+        SHARE_SEED_MINUTES,
+        SHARE_ACTION
+    };
+
+    /**
+     * A torrent's own share limit, {@code torrent.<info-hash>.share}, as {@link ShareLimit#format()}
+     * writes it. Machine-local (the torrents are), so {@code torrent.} never syncs.
+     */
+    public static final String TORRENT_PREFIX = "torrent.";
+
+    private static final String SHARE_SUFFIX = ".share";
 
     /** IP filter page. Bans are space-separated ranges or addresses. */
     public static final String IPFILTER_ENABLED = "ipfilter.enabled";
@@ -395,6 +424,13 @@ public final class Settings {
                 readMinutes(SPEED_SCHEDULE_TO, sd.scheduleTo()),
                 readDays(SPEED_SCHEDULE_DAYS, sd.scheduleDays()),
                 readBoolean(SPEED_COUNT_OVERHEAD, sd.countOverhead()));
+        EngineSettings.Queue qd = EngineSettings.Queue.defaults();
+        EngineSettings.Queue queue = new EngineSettings.Queue(
+                readInt(QUEUE_ACTIVE_DOWNLOADS, qd.activeDownloads(), 0, 10_000),
+                readInt(QUEUE_ACTIVE_SEEDS, qd.activeSeeds(), 0, 10_000),
+                readInt(QUEUE_ACTIVE_LIMIT, qd.activeLimit(), 0, 10_000),
+                readBoolean(QUEUE_IGNORE_SLOW, qd.ignoreSlowTorrents()),
+                shareLimit());
         return new EngineSettings(
                 readInt(CONN_PORT, d.listenPort(), 1024, 65535),
                 readBoolean(CONN_RANDOM_PORT, d.randomPort()),
@@ -411,7 +447,54 @@ public final class Settings {
                 properties.getProperty(PROXY_PASSWORD, ""),
                 readBoolean(PROXY_PEERS, d.proxyPeers()),
                 protocol,
-                speed);
+                speed,
+                queue);
+    }
+
+    /** The global share limit: ratio 0 to 1000, minutes 0 to a year, an unreadable action pauses. */
+    public ShareLimit shareLimit() {
+        ShareLimit.Action action;
+        try {
+            action = ShareLimit.Action.valueOf(
+                    properties.getProperty(SHARE_ACTION, "PAUSE").trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            action = ShareLimit.Action.PAUSE;
+        }
+        return new ShareLimit(
+                readDouble(SHARE_RATIO, 0, 0, 1000), readInt(SHARE_SEED_MINUTES, 0, 0, 366 * 24 * 60), action);
+    }
+
+    /** A torrent's own share limit, if it has one. */
+    public java.util.Optional<ShareLimit> shareOverride(String torrentId) {
+        return ShareLimit.parse(properties.getProperty(TORRENT_PREFIX + torrentId + SHARE_SUFFIX));
+    }
+
+    /** Sets, or with {@code null} forgets, a torrent's own share limit. Not saved here. */
+    public void setShareOverride(String torrentId, ShareLimit limit) {
+        String key = TORRENT_PREFIX + torrentId + SHARE_SUFFIX;
+        if (limit == null) properties.remove(key);
+        else properties.setProperty(key, limit.format());
+    }
+
+    /** Every torrent's own share limit, by id. */
+    public Map<String, ShareLimit> shareOverrides() {
+        Map<String, ShareLimit> out = new java.util.HashMap<>();
+        for (String key : properties.stringPropertyNames()) {
+            if (!key.startsWith(TORRENT_PREFIX) || !key.endsWith(SHARE_SUFFIX)) continue;
+            String id = key.substring(TORRENT_PREFIX.length(), key.length() - SHARE_SUFFIX.length());
+            ShareLimit.parse(properties.getProperty(key)).ifPresent(limit -> out.put(id, limit));
+        }
+        return out;
+    }
+
+    /** A decimal between the bounds; anything unreadable or outside them is the default. */
+    private double readDouble(String key, double fallback, double min, double max) {
+        try {
+            double value = Double.parseDouble(properties.getProperty(key, "").trim());
+            return Double.isNaN(value) || value < min || value > max ? fallback : value;
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     /** {@code HH:mm} as minutes after midnight; anything unreadable is the default. */

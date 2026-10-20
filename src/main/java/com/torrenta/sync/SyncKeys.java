@@ -13,12 +13,15 @@ import java.util.TreeMap;
  * Which settings travel between machines, and the one shape they travel in.
  *
  * <p>Everything in the settings file syncs except what describes one installation: the sync
- * connection itself, folders and interfaces of this machine, the clocks of the last checks, and the
- * proxy password, which does not belong in a repository even a private one. Pure.
+ * connection itself, folders and interfaces of this machine, the clocks of the last checks, the
+ * per-torrent entries (the torrents are this machine's), and the proxy password, which does not
+ * belong in a repository even a private one. Pure.
  */
 public final class SyncKeys {
 
-    static final List<String> LOCAL_PREFIXES = List.of("sync.");
+    /** {@code torrent.<hash>.*} describes a torrent of this machine, which another has not got. */
+    static final List<String> LOCAL_PREFIXES = List.of("sync.", "torrent.");
+
     static final List<String> LOCAL_KEYS = List.of(
             "download.dir",
             "connection.interface",

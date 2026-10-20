@@ -61,10 +61,13 @@ import javafx.stage.Stage;
 import com.torrenta.AppInfo;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Engine;
+import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Inputs;
+import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
+import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.net.TorrentFetch;
 import com.torrenta.store.Settings;
@@ -103,6 +106,7 @@ public final class MainWindow {
     private TableView<TorrentRow> table;
     private List<Command> commands = List.of();
     private AddDialog currentDialog;
+    private LimitsDialog limitsDialog;
     private String lastClipboardOffer = "";
     private final DetailPane detail = new DetailPane();
     private final UpdateService updates = new UpdateService();
@@ -119,6 +123,8 @@ public final class MainWindow {
     private SplitPane split;
     private volatile String detailId;
     private volatile boolean detailWanted;
+    /** The global share limit as the poll thread applies it; refreshed with the engine settings. */
+    private volatile ShareLimit globalShareLimit = ShareLimit.NONE;
 
     private Engine engine;
     private String engineDescription = "";
@@ -210,6 +216,7 @@ public final class MainWindow {
     /** What to photograph: the open Add dialog if there is one, else the window. */
     public javafx.scene.Scene captureScene() {
         if (currentDialog != null && currentDialog.isShowing()) return currentDialog.scene();
+        if (limitsDialog != null && limitsDialog.isShowing()) return limitsDialog.scene();
         if (aboutDialog != null && aboutDialog.isShowing())
             return aboutDialog.getDialogPane().getScene();
         if (settingsWindow.isShowing()) return settingsWindow.scene();
@@ -219,6 +226,7 @@ public final class MainWindow {
     /** Dismisses an open Add dialog, so the capture hook can exit outside its nested event loop. */
     public void closeDialogsForCapture() {
         if (currentDialog != null && currentDialog.isShowing()) currentDialog.cancel();
+        if (limitsDialog != null && limitsDialog.isShowing()) limitsDialog.cancel();
         if (aboutDialog != null && aboutDialog.isShowing()) aboutDialog.close();
     }
 
@@ -270,6 +278,8 @@ public final class MainWindow {
         if (logWindow.isShowing()) System.out.println("capture: log-window=showing");
         if (currentDialog != null && currentDialog.isShowing())
             System.out.println("capture: dialog=" + currentDialog.title());
+        if (limitsDialog != null && limitsDialog.isShowing())
+            System.out.println("capture: dialog=" + limitsDialog.title());
         if (detailWanted) System.out.println("capture: detail=" + detail.summary());
         if (settingsWindow.isShowing())
             System.out.println("capture: settings=" + settingsWindow.visibleRowsForCapture());
@@ -291,6 +301,7 @@ public final class MainWindow {
     public void engineReady(Engine engine) {
         this.engine = engine;
         this.engineDescription = engine.description();
+        globalShareLimit = settings.shareLimit();
         setStatus(engineDescription);
         List<String> queued = List.copyOf(pendingInputs);
         pendingInputs.clear();
@@ -405,6 +416,7 @@ public final class MainWindow {
         if (engine == null) return;
         Engine e = engine;
         var current = settings.engineSettings();
+        globalShareLimit = current.queue().share();
         Thread.ofVirtual().name("engine-settings").start(() -> {
             try {
                 e.applySettings(current);
@@ -632,6 +644,7 @@ public final class MainWindow {
     private void poll() {
         List<Torrent> snapshot = engine.torrents();
         Engine.Rates current = engine.rates();
+        enforceShareLimits(snapshot);
         // The detail pane costs a status with the pieces bitfield; only for one shown torrent.
         String id = detailWanted ? detailId : null;
         TorrentDetail detailSnapshot = null;
@@ -651,6 +664,52 @@ public final class MainWindow {
                 else if (detailId == null) detail.clear();
             }
         });
+    }
+
+    /**
+     * Poll thread. libtorrent ranks seeds by the share limits but pauses nothing by them, so the
+     * rule is applied here, once a second: a finished torrent past its own or the global limit is
+     * paused or removed, and the log says so. A paused one no longer qualifies, so it is done once;
+     * resuming it by hand seeds it until the next tick, raising the limit seeds it for good.
+     */
+    private void enforceShareLimits(List<Torrent> snapshot) {
+        ShareLimit global = globalShareLimit;
+        java.util.Map<String, ShareLimit> overrides = settings.shareOverrides();
+        if (!global.limited() && overrides.isEmpty()) return;
+        for (Torrent t : snapshot) {
+            Optional<ShareLimit.Action> due = ShareLimit.decide(t, global, overrides.get(t.id()));
+            if (due.isEmpty()) continue;
+            String text;
+            try {
+                switch (due.get()) {
+                    case PAUSE -> {
+                        engine.pause(t.id());
+                        text = "Share limit reached: paused " + t.name();
+                    }
+                    case REMOVE -> {
+                        engine.remove(t.id(), false);
+                        text = "Share limit reached: removed " + t.name();
+                    }
+                    default -> throw new IllegalStateException(due.get().name());
+                }
+            } catch (EngineException e) {
+                text = "Share limit on " + t.name() + ": " + e.getMessage();
+            }
+            String message = text;
+            boolean removed = due.get() == ShareLimit.Action.REMOVE;
+            Platform.runLater(() -> {
+                log.add(EngineEvent.info(t.id(), t.name(), message));
+                setStatus(message);
+                if (removed) forgetOverride(t.id());
+            });
+        }
+    }
+
+    /** FX thread: a removed torrent takes its own share limit with it. */
+    private void forgetOverride(String id) {
+        if (settings.shareOverride(id).isEmpty()) return;
+        settings.setShareOverride(id, null);
+        settings.saveQuietly();
     }
 
     private void setDetailVisible(boolean visible) {
@@ -743,7 +802,51 @@ public final class MainWindow {
         confirm.getButtonTypes().setAll(yes, ButtonType.CANCEL);
         Optional<ButtonType> answer = confirm.showAndWait();
         if (answer.isEmpty() || answer.get() != yes) return;
-        onSelection("Removed", (e, t) -> e.remove(t.id(), deleteFiles));
+        onSelection("Removed", (e, t) -> {
+            e.remove(t.id(), deleteFiles);
+            Platform.runLater(() -> forgetOverride(t.id()));
+        });
+    }
+
+    /**
+     * Torrent → Limits…: the first selected torrent's limits are read on a worker, the dialog edits
+     * them, and Apply writes them to every selected torrent. The share override is the window's,
+     * kept in the settings file beside the torrent's id.
+     */
+    private void editLimits() {
+        List<Torrent> selected = selectedTorrents();
+        if (selected.isEmpty() || engine == null || (limitsDialog != null && limitsDialog.isShowing())) return;
+        Engine e = engine;
+        Torrent first = selected.get(0);
+        Thread.ofVirtual().name("engine-limits").start(() -> {
+            TorrentLimits current;
+            try {
+                current = e.limits(first.id());
+            } catch (EngineException ex) {
+                Platform.runLater(() -> setStatus(ex.getMessage()));
+                return;
+            }
+            Platform.runLater(() -> {
+                String subject = selected.size() == 1 ? first.name() : selected.size() + " torrents";
+                LimitsDialog dialog = new LimitsDialog(
+                        stage,
+                        subject,
+                        current,
+                        settings.shareOverride(first.id()).orElse(null),
+                        settings.shareLimit(),
+                        first.size() > 0);
+                limitsDialog = dialog;
+                Optional<LimitsDialog.Result> result = dialog.showAndWait();
+                limitsDialog = null;
+                if (result.isEmpty()) return;
+                for (Torrent t : selected)
+                    settings.setShareOverride(t.id(), result.get().shareOverride());
+                settings.saveQuietly();
+                onSelection(
+                        "Limits set on",
+                        (eng, t) -> eng.setLimits(t.id(), result.get().limits()));
+            });
+        });
     }
 
     private void copyToClipboard(String what, Function<Torrent, String> text) {
@@ -836,6 +939,7 @@ public final class MainWindow {
                         null,
                         selection,
                         this::toggleSequential),
+                new Command("limits", "Limits…", chord(KeyCode.L), null, selection, this::editLimits),
                 new Command(
                         "copy-name",
                         "Copy Name",
@@ -1022,7 +1126,7 @@ public final class MainWindow {
     /** The Torrent menu and the context menu show the same items in the same order. */
     private List<MenuItem> torrentItems() {
         List<MenuItem> items = new ArrayList<>();
-        for (String id : List.of("pause-resume", "force-resume", "recheck", "reannounce", "sequential")) {
+        for (String id : List.of("pause-resume", "force-resume", "recheck", "reannounce", "sequential", "limits")) {
             items.add(command(id).menuItem());
         }
         items.add(new SeparatorMenuItem());

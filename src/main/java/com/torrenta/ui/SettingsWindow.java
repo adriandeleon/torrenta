@@ -44,6 +44,7 @@ import javafx.util.StringConverter;
 
 import com.torrenta.AppInfo;
 import com.torrenta.engine.EngineSettings;
+import com.torrenta.engine.ShareLimit;
 import com.torrenta.store.Settings;
 import com.torrenta.sync.SyncEngine;
 
@@ -80,7 +81,8 @@ final class SettingsWindow {
         CONNECTION(Group.ENGINE, "Connection"),
         PROTOCOL(Group.ENGINE, "Protocol"),
         IP_FILTER(Group.ENGINE, "IP filter"),
-        SPEED(Group.ENGINE, "Speed");
+        SPEED(Group.ENGINE, "Speed"),
+        QUEUE(Group.ENGINE, "Queue and share limits");
 
         final Group group;
         private final String title;
@@ -104,7 +106,9 @@ final class SettingsWindow {
             },
             concat(
                     Settings.CONNECTION_KEYS,
-                    concat(Settings.PROTOCOL_KEYS, concat(Settings.IPFILTER_KEYS, Settings.SPEED_KEYS))));
+                    concat(
+                            Settings.PROTOCOL_KEYS,
+                            concat(Settings.IPFILTER_KEYS, concat(Settings.SPEED_KEYS, Settings.QUEUE_KEYS)))));
 
     /** Told after an IP filter setting changed; {@code true} asks for a download now. */
     private java.util.function.Consumer<Boolean> onIpFilterChanged = force -> {};
@@ -408,6 +412,13 @@ final class SettingsWindow {
     private final java.util.Map<java.time.DayOfWeek, CheckBox> scheduleDays =
             new java.util.EnumMap<>(java.time.DayOfWeek.class);
     private CheckBox countOverhead;
+    private Spinner<Integer> activeDownloads;
+    private Spinner<Integer> activeSeeds;
+    private Spinner<Integer> activeLimit;
+    private CheckBox ignoreSlow;
+    private Spinner<Double> shareRatio;
+    private Spinner<Integer> shareMinutes;
+    private ChoiceBox<ShareLimit.Action> shareAction;
 
     SettingsWindow(Settings settings) {
         this.settings = settings;
@@ -621,6 +632,7 @@ final class SettingsWindow {
             case IP_FILTER -> buildIpFilter(page);
             case SYNC -> buildSync(page);
             case SPEED -> buildSpeed(page);
+            case QUEUE -> buildQueue(page);
         }
         page.setPadding(new Insets(0, PAGE_GUTTER, 0, 0));
         ScrollPane scroll = new ScrollPane(page);
@@ -1154,6 +1166,106 @@ final class SettingsWindow {
                 "ip overhead headers");
     }
 
+    private void buildQueue(VBox page) {
+        VBox queue = section(page, "Queue (0 for no limit)");
+        activeDownloads = intSpinner(0, 10_000, Settings.QUEUE_ACTIVE_DOWNLOADS);
+        row(
+                Category.QUEUE,
+                queue,
+                "Active downloads",
+                "Torrents downloading at once; the rest wait their turn, in the order they were added. Force"
+                        + " Resume starts one regardless.",
+                activeDownloads,
+                "queue slots maximum simultaneous");
+        activeSeeds = intSpinner(0, 10_000, Settings.QUEUE_ACTIVE_SEEDS);
+        row(
+                Category.QUEUE,
+                queue,
+                "Active seeds",
+                "Torrents seeding at once. A seed past its share limit gives up its slot first.",
+                activeSeeds,
+                "queue slots maximum simultaneous uploads");
+        activeLimit = intSpinner(0, 10_000, Settings.QUEUE_ACTIVE_LIMIT);
+        row(
+                Category.QUEUE,
+                queue,
+                "Active torrents",
+                "Downloading and seeding together.",
+                activeLimit,
+                "queue slots maximum total simultaneous");
+        ignoreSlow = bool(Settings.QUEUE_IGNORE_SLOW);
+        row(
+                Category.QUEUE,
+                queue,
+                "Don't count slow torrents",
+                "A torrent moving under a few KiB/s for a minute does not hold a slot, so a stalled one"
+                        + " cannot block the queue.",
+                ignoreSlow,
+                "slow stalled threshold inactive");
+
+        VBox share = section(page, "Share limits");
+        shareRatio = ratioSpinner(Settings.SHARE_RATIO);
+        row(
+                Category.QUEUE,
+                share,
+                "Ratio limit",
+                "Uploaded over downloaded at which a finished torrent is done seeding; 0 for none. A torrent"
+                        + " whose files were there already is measured against its size.",
+                shareRatio,
+                "share seed upload");
+        shareMinutes = intSpinner(0, 366 * 24 * 60, Settings.SHARE_SEED_MINUTES);
+        row(
+                Category.QUEUE,
+                share,
+                "Seeding time limit, in minutes",
+                "Minutes spent finished, over the torrent's life; 0 for none. Either limit being reached is"
+                        + " enough.",
+                shareMinutes,
+                "share seed time duration");
+        shareAction = new ChoiceBox<>();
+        shareAction.getItems().addAll(ShareLimit.Action.values());
+        shareAction.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(ShareLimit.Action action) {
+                return action == null ? "" : action.label();
+            }
+
+            @Override
+            public ShareLimit.Action fromString(String s) {
+                return null;
+            }
+        });
+        shareAction.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.set(Settings.SHARE_ACTION, now.name());
+            changed();
+        });
+        row(
+                Category.QUEUE,
+                share,
+                "When a limit is reached",
+                "Checked once a second. Pause keeps the torrent in the list, stopped; Remove takes it out and"
+                        + " leaves the files. A torrent's own limits (Torrent → Limits…) replace these for it.",
+                shareAction,
+                "action pause remove stop");
+    }
+
+    /** A decimal spinner in tenths, which writes its key as a person would type the number. */
+    private Spinner<Double> ratioSpinner(String key) {
+        Spinner<Double> spinner = new Spinner<>(new SpinnerValueFactory.DoubleSpinnerValueFactory(0, 1000, 0, 0.1));
+        spinner.setEditable(true);
+        spinner.setPrefWidth(110);
+        spinner.focusedProperty().addListener((o, was, now) -> {
+            if (!now) spinner.increment(0);
+        });
+        spinner.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.set(key, ShareLimit.formatRatio(now));
+            changed();
+        });
+        return spinner;
+    }
+
     private java.util.Set<java.time.DayOfWeek> selectedDays() {
         java.util.Set<java.time.DayOfWeek> out = java.util.EnumSet.noneOf(java.time.DayOfWeek.class);
         scheduleDays.forEach((day, box) -> {
@@ -1271,6 +1383,14 @@ final class SettingsWindow {
             scheduleTo.setText(Settings.formatMinutes(sp.scheduleTo()));
             scheduleDays.forEach((day, box) -> box.setSelected(sp.scheduleDays().contains(day)));
             countOverhead.setSelected(sp.countOverhead());
+            EngineSettings.Queue q = e.queue();
+            activeDownloads.getValueFactory().setValue(q.activeDownloads());
+            activeSeeds.getValueFactory().setValue(q.activeSeeds());
+            activeLimit.getValueFactory().setValue(q.activeLimit());
+            ignoreSlow.setSelected(q.ignoreSlowTorrents());
+            shareRatio.getValueFactory().setValue(q.share().ratio());
+            shareMinutes.getValueFactory().setValue(q.share().seedingMinutes());
+            shareAction.setValue(q.share().action());
         } finally {
             loading = false;
         }

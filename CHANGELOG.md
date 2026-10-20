@@ -7,6 +7,18 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Queue and share limits** (Settings → Queue and share limits): how many torrents download, seed
+  and run at once (0 for no limit), whether a slow torrent holds a slot, and a global share limit:
+  a ratio and a seeding time, either of which, once reached by a finished torrent, pauses it or
+  removes it. libtorrent ranks its seeds by these limits but pauses nothing by them, so the window
+  applies the rule from its poll, once a second, and says so in the log. `queue.*` and `share.*`
+  in the settings file.
+- **Torrent → Limits…** (`Ctrl+L`, also in the context menu and the palette), for the selection:
+  download and upload caps, connections, upload slots, "download the first and last pieces first"
+  (the edge pieces of every wanted file go to top priority, so a video plays and seeks early), and
+  a share limit of the torrent's own in place of the global one, or none. The caps and counts are
+  libtorrent's and survive in the resume data; the share override is `torrent.<hash>.share` in the
+  settings file, never synced, forgotten when the torrent is removed.
 - **Settings sync** through a Git repository of yours (Settings → Sync), as Editora's: every
   computer that connects to the same repository keeps the same settings, merged one key at a time,
   this machine winning a same-key conflict. Automatic after startup, half a minute after a change

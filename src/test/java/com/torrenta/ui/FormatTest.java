@@ -29,7 +29,8 @@ class FormatTest {
                 "",
                 "",
                 false,
-                false);
+                false,
+                0);
     }
 
     @Test
@@ -37,7 +38,7 @@ class FormatTest {
         Torrent running = torrent(TorrentState.DOWNLOADING, 100, 10, 1);
         assertEquals("Downloading", Format.stateLabel(running));
         Torrent paused = new Torrent(
-                "id", "n", 100, 10, 0.1, TorrentState.DOWNLOADING, 0, 0, 0, 0, 0, 0, 0, 0, "", "", true, false);
+                "id", "n", 100, 10, 0.1, TorrentState.DOWNLOADING, 0, 0, 0, 0, 0, 0, 0, 0, "", "", true, false, 0);
         assertEquals("Paused", Format.stateLabel(paused));
     }
 

@@ -168,6 +168,12 @@ release process with the names changed; Termina's README and memory hold the war
   poller) and after any settings change; the pair in force is `Speed.alternativeActive(now)`,
   a pure rule with the overnight case tested. Limits are KiB/s in settings and bytes/s in the
   pack; 0 is "none" on both sides.
+- **libtorrent's share limits pause nothing.** `share_ratio_limit` and `seed_time_limit` only rank
+  seeds for the queue (`seed_rank`); the pausing or removing is `ShareLimit.decide` in the window's
+  poll, once a second, against `Torrent.seedingTime` (`finished_duration`, so a torrent with files
+  left out counts). Active counts are `-1` for "no limit" in the pack; `0` would park every torrent.
+  A torrent's own share limit is `torrent.<hash>.share` in the settings file (the `torrent.` prefix
+  never syncs); its rate caps and counts are the handle's and travel in the resume data.
 - **The IP filter is replaced whole, never merged**: `set_ip_filter` takes a complete
   `ip_filter`, so the controller rebuilds it from cache + local file + bans every time. A filter
   set before `start()` is applied at start, so no peer slips in while the first download runs.
@@ -206,11 +212,8 @@ release process with the names changed; Termina's README and memory hold the war
 
 ## Not done
 
-Add dialogs (Ctrl+O / Ctrl+M only say so; inputs come from the command line), pause/resume/remove
-in the window (`Engine.remove` exists, nothing calls it yet), limits, a settings window, per-torrent
-detail, `-Pdist` with the native in the image.
-0.2 and 0.3 are feature-complete; 0.4 has begun with the Settings window shell. The Connection
-and Protocol pages are in. Next: IP filter (blocklist URL with refresh, .dat/.p2p import, manual
-bans), then speed, queue and share limits, each a page and a PR. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
+0.2 and 0.3 are feature-complete; 0.4's Settings pages (Connection, Protocol, IP filter, Speed,
+Queue and share limits) and the per-torrent Limits dialog are in. Left from 0.4: queue positions,
+super seeding, set location, rename, export `.torrent`. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
 run of release.yml, and the Homebrew/winget packagers need the `PACKAGES_TOKEN` secret copied from
 Termina's repository (the same PAT) before they do anything.

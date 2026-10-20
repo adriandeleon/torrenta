@@ -23,6 +23,8 @@ class SyncKeysTest {
         assertFalse(SyncKeys.isSynced("connection.interface"));
         assertFalse(SyncKeys.isSynced("proxy.password"), "a secret");
         assertFalse(SyncKeys.isSynced("updates.lastCheckEpochMs"), "a clock");
+        assertFalse(SyncKeys.isSynced("torrent.0123abcd.share"), "a torrent of this machine");
+        assertTrue(SyncKeys.isSynced("share.ratio"), "the global share limit travels");
         assertFalse(SyncKeys.isSynced(""));
         assertFalse(SyncKeys.isSynced(null));
     }

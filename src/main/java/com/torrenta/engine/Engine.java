@@ -52,6 +52,16 @@ public interface Engine extends AutoCloseable {
     /** Pieces in order rather than rarest first, for previewing while downloading. */
     void setSequential(String id, boolean sequential) throws EngineException;
 
+    /** The torrent's own limits, as it has them now. */
+    TorrentLimits limits(String id) throws EngineException;
+
+    /**
+     * Sets the torrent's own limits; they are kept with its resume data. First-and-last-first is
+     * expressed as piece priorities and needs the metadata, so it is skipped silently for a magnet
+     * that has none yet.
+     */
+    void setLimits(String id, TorrentLimits limits) throws EngineException;
+
     /** A magnet link for the torrent, with its trackers, as the engine would build it. */
     String magnetLink(String id) throws EngineException;
 

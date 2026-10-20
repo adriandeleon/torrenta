@@ -27,8 +27,10 @@ import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.IpRange;
 import com.torrenta.engine.Priority;
+import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
+import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.store.TorrentStore;
@@ -448,6 +450,85 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
+    public TorrentLimits limits(String id) throws EngineException {
+        TorrentHandle h = handle(id);
+        torrent_handle raw = h.swig();
+        return new TorrentLimits(
+                noneAsZero(raw.download_limit()),
+                noneAsZero(raw.upload_limit()),
+                noneAsZero(raw.max_connections()),
+                noneAsZero(raw.max_uploads()),
+                firstAndLastFirst(h));
+    }
+
+    @Override
+    public void setLimits(String id, TorrentLimits limits) throws EngineException {
+        TorrentHandle h = handle(id);
+        torrent_handle raw = h.swig();
+        // 0 is "none" on both sides for the rates; the counts take -1 for "no limit of its own".
+        raw.set_download_limit(limits.downloadLimit());
+        raw.set_upload_limit(limits.uploadLimit());
+        raw.set_max_connections(limits.maxConnections() <= 0 ? -1 : limits.maxConnections());
+        raw.set_max_uploads(limits.maxUploads() <= 0 ? -1 : limits.maxUploads());
+        // On: the edge pieces go to the top. Off: back to their file's own priority, not the
+        // default, so a file the user raised keeps its ends raised.
+        edgePieces(h)
+                .forEach((piece, own) -> h.piecePriority(
+                        piece, limits.firstAndLastFirst() ? org.libtorrent4j.Priority.TOP_PRIORITY : own));
+        // A limit is part of the resume data; write it now rather than at the next periodic flush.
+        requestSave(h, false);
+    }
+
+    /**
+     * libtorrent answers "no limit" as 0 or -1 for the rates and as {@code (1 << 24) - 1} for the
+     * counts (what {@code set_max_connections(-1)} stores); all of them are 0 to the interface.
+     */
+    private static int noneAsZero(int value) {
+        return value <= 0 || value >= (1 << 24) - 1 ? 0 : value;
+    }
+
+    /** Whether every wanted file's first and last piece is at top priority; false without metadata. */
+    private static boolean firstAndLastFirst(TorrentHandle h) {
+        Map<Integer, org.libtorrent4j.Priority> edges = edgePieces(h);
+        if (edges.isEmpty()) return false;
+        org.libtorrent4j.Priority[] priorities = h.piecePriorities();
+        for (int piece : edges.keySet()) {
+            if (piece >= priorities.length || priorities[piece] != org.libtorrent4j.Priority.TOP_PRIORITY) return false;
+        }
+        return true;
+    }
+
+    /**
+     * The first and last piece of every file that is wanted (not a padding file, not ignored),
+     * each with its file's priority (the higher one where two files share a piece), in order.
+     * Empty until the metadata is there.
+     */
+    private static Map<Integer, org.libtorrent4j.Priority> edgePieces(TorrentHandle h) {
+        TorrentInfo info = h.status(StatusQuery.FLAGS).hasMetadata() ? h.torrentFile() : null;
+        if (info == null || !info.isValid() || info.pieceLength() <= 0) return Map.of();
+        try {
+            FileStorage storage = info.files();
+            org.libtorrent4j.Priority[] priorities = h.filePriorities();
+            Map<Integer, org.libtorrent4j.Priority> edges = new java.util.TreeMap<>();
+            long pieceLength = info.pieceLength();
+            for (int i = 0; i < storage.numFiles(); i++) {
+                if (storage.padFileAt(i) || storage.fileSize(i) <= 0) continue;
+                org.libtorrent4j.Priority own =
+                        i < priorities.length ? priorities[i] : org.libtorrent4j.Priority.DEFAULT;
+                if (own == org.libtorrent4j.Priority.IGNORE) continue;
+                long offset = storage.fileOffset(i);
+                for (long piece : new long[] {offset / pieceLength, (offset + storage.fileSize(i) - 1) / pieceLength}) {
+                    edges.merge((int) piece, own, (a, b) -> a.swig() >= b.swig() ? a : b);
+                }
+            }
+            return edges;
+        } finally {
+            // The file storage points into the info; keep it until the reads are done.
+            Reference.reachabilityFence(info);
+        }
+    }
+
+    @Override
     public String magnetLink(String id) throws EngineException {
         return handle(id).makeMagnetUri();
     }
@@ -727,7 +808,33 @@ public final class LibtorrentEngine implements Engine {
         pack.downloadRateLimit(speed.effectiveDownloadBytes(now));
         pack.uploadRateLimit(speed.effectiveUploadBytes(now));
         pack.setBoolean(settings_pack.bool_types.rate_limit_ip_overhead.swigValue(), speed.countOverhead());
+
+        // The queue: 0 is "no limit" to a person and -1 to libtorrent, where 0 would park everything.
+        EngineSettings.Queue queue = s.queue();
+        pack.activeDownloads(unlimitedAsMinusOne(queue.activeDownloads()));
+        pack.activeSeeds(unlimitedAsMinusOne(queue.activeSeeds()));
+        pack.activeLimit(unlimitedAsMinusOne(queue.activeLimit()));
+        pack.setBoolean(settings_pack.bool_types.dont_count_slow_torrents.swigValue(), queue.ignoreSlowTorrents());
+        // libtorrent reads these only to rank seeds for the queue (one past its limits yields its
+        // slot first); pausing or removing by them is the window's job, from its poll.
+        ShareLimit share = queue.share();
+        pack.setInteger(
+                settings_pack.int_types.share_ratio_limit.swigValue(),
+                share.ratio() > 0 ? (int) Math.round(share.ratio() * 100) : Integer.MAX_VALUE);
+        pack.setInteger(
+                settings_pack.int_types.seed_time_limit.swigValue(),
+                share.seedingMinutes() > 0 ? share.seedingMinutes() * 60 : Integer.MAX_VALUE);
         return pack;
+    }
+
+    private static int unlimitedAsMinusOne(int count) {
+        return count <= 0 ? -1 : count;
+    }
+
+    /** The session's active counts as libtorrent has them (downloads, seeds, all); for the test. */
+    int[] activeLimitsForTest() throws EngineException {
+        SettingsPack current = running().settings();
+        return new int[] {current.activeDownloads(), current.activeSeeds(), current.activeLimit()};
     }
 
     @Override
@@ -974,7 +1081,10 @@ public final class LibtorrentEngine implements Engine {
                 status.swig().getSave_path(),
                 // Paused by a person, not parked by the queue: the queue pauses auto-managed ones.
                 has(flags, Flags.PAUSED) && !has(flags, Flags.AUTO_MANAGED),
-                has(flags, Flags.SEQUENTIAL_DOWNLOAD));
+                has(flags, Flags.SEQUENTIAL_DOWNLOAD),
+                // Milliseconds from libtorrent4j; the record promises seconds. Finished rather than
+                // seeding: a torrent with files left out never becomes a seed, but it is done.
+                status.finishedDuration() / 1000);
     }
 
     /** libtorrent's seven states folded into the list's six. Package-private for the test. */
