@@ -42,6 +42,7 @@ import org.libtorrent4j.AnnounceEndpoint;
 import org.libtorrent4j.AnnounceEntry;
 import org.libtorrent4j.AnnounceInfohash;
 import org.libtorrent4j.BDecodeNode;
+import org.libtorrent4j.ErrorCode;
 import org.libtorrent4j.FileStorage;
 import org.libtorrent4j.LibTorrent;
 import org.libtorrent4j.PeerInfo;
@@ -1158,7 +1159,19 @@ public final class LibtorrentEngine implements Engine {
                 // seeding: a torrent with files left out never becomes a seed, but it is done.
                 status.finishedDuration() / 1000,
                 l.category(),
-                l.tags());
+                l.tags(),
+                // Parked by the queue: paused, but auto-managed, so libtorrent resumes it itself.
+                has(flags, Flags.PAUSED) && has(flags, Flags.AUTO_MANAGED),
+                status.queuePosition(),
+                errorText(status),
+                status.isMovingStorage());
+    }
+
+    private static String errorText(TorrentStatus status) {
+        ErrorCode ec = status.errorCode();
+        if (ec == null || !ec.isError()) return "";
+        String message = ec.getMessage();
+        return message == null || message.isBlank() ? "error " + ec.getValue() : message;
     }
 
     /** libtorrent's seven states folded into the list's six. Package-private for the test. */

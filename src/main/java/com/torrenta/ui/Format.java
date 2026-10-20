@@ -38,6 +38,14 @@ public final class Format {
         return String.format(Locale.ROOT, "%.1f %%", progress * 100);
     }
 
+    /**
+     * A whole percentage for a sentence: {@code 62%}. Floored, so 99.97% is {@code 99%} and only a
+     * finished torrent says {@code 100%}.
+     */
+    public static String wholePercent(double progress) {
+        return (int) Math.floor(Math.max(0, Math.min(1, progress)) * 100 + 1e-9) + "%";
+    }
+
     /** Seconds left, {@link #NO_ETA} or {@link #INFINITE_ETA}. Sortable; {@link #eta} prints it. */
     public static long etaSeconds(Torrent t) {
         if (t.state() != TorrentState.DOWNLOADING) return NO_ETA;
@@ -60,6 +68,20 @@ public final class Format {
         if (seconds < 3600) return (seconds / 60) + "m " + (seconds % 60) + "s";
         if (seconds < 86400) return (seconds / 3600) + "h " + (seconds % 3600 / 60) + "m";
         return (seconds / 86400) + "d " + (seconds % 86400 / 3600) + "h";
+    }
+
+    /**
+     * How long, for a sentence that is redrawn every second and should not tick: {@code 3 min},
+     * {@code 2 h 10 min}, {@code 3 d}. Under a minute is {@code under a minute}.
+     */
+    public static String coarse(long seconds) {
+        if (seconds < 60) return "under a minute";
+        if (seconds < 3600) return (seconds / 60) + " min";
+        if (seconds < 86400) {
+            long minutes = seconds % 3600 / 60;
+            return (seconds / 3600) + " h" + (minutes == 0 ? "" : " " + minutes + " min");
+        }
+        return (seconds / 86400) + " d";
     }
 
     /** Uploaded over downloaded; -1 when nothing has moved either way, infinity when only up. */

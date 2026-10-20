@@ -23,6 +23,10 @@ package com.torrenta.engine;
  *     what a seeding-time limit measures
  * @param category the category it is filed under, or empty
  * @param tags its tags, sorted; empty for none
+ * @param queued parked by the queue (paused and auto-managed), waiting for a slot
+ * @param queuePosition its place in the download or seed queue, 0 first; -1 when not queued
+ * @param error why libtorrent stopped it (a storage or file error), or empty
+ * @param moving its files are being moved to a new location
  */
 public record Torrent(
         String id,
@@ -45,10 +49,66 @@ public record Torrent(
         boolean sequential,
         long seedingTime,
         String category,
-        java.util.List<String> tags) {
+        java.util.List<String> tags,
+        boolean queued,
+        int queuePosition,
+        String error,
+        boolean moving) {
 
     public Torrent {
         category = category == null ? "" : category;
         tags = tags == null ? java.util.List.of() : java.util.List.copyOf(tags);
+        error = error == null ? "" : error;
+    }
+
+    /** A torrent that is not queued, not in error and not moving: what most tests want. */
+    public Torrent(
+            String id,
+            String name,
+            long size,
+            long done,
+            double progress,
+            TorrentState state,
+            long downloadRate,
+            long uploadRate,
+            int peers,
+            int seeds,
+            long uploaded,
+            long downloaded,
+            long added,
+            long completed,
+            String tracker,
+            String savePath,
+            boolean paused,
+            boolean sequential,
+            long seedingTime,
+            String category,
+            java.util.List<String> tags) {
+        this(
+                id,
+                name,
+                size,
+                done,
+                progress,
+                state,
+                downloadRate,
+                uploadRate,
+                peers,
+                seeds,
+                uploaded,
+                downloaded,
+                added,
+                completed,
+                tracker,
+                savePath,
+                paused,
+                sequential,
+                seedingTime,
+                category,
+                tags,
+                false,
+                -1,
+                "",
+                false);
     }
 }

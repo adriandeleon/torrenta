@@ -37,16 +37,21 @@ public final class TorrentRows {
     }
 
     public void apply(List<Torrent> snapshot) {
+        apply(snapshot, System.currentTimeMillis() / 1000);
+    }
+
+    /** @param now epoch seconds, for the rows' stall clocks */
+    public void apply(List<Torrent> snapshot, long now) {
         Set<String> seen = new HashSet<>();
         for (Torrent t : snapshot) {
             seen.add(t.id());
             TorrentRow row = byId.get(t.id());
             if (row == null) {
-                row = new TorrentRow(t);
+                row = new TorrentRow(t, now);
                 byId.put(t.id(), row);
                 rows.add(row);
             } else {
-                row.update(t);
+                row.update(t, now);
             }
         }
         if (seen.size() != byId.size()) {

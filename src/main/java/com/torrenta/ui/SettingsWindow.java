@@ -107,7 +107,11 @@ final class SettingsWindow {
     /** The keys this window owns, for Reset. */
     private static final String[] OWNED_KEYS = concat(
             new String[] {
-                Settings.DOWNLOAD_DIR, Settings.UPDATE_CHECK, Settings.ADD_START_PAUSED, Settings.ADD_SEQUENTIAL
+                Settings.DOWNLOAD_DIR,
+                Settings.UPDATE_CHECK,
+                Settings.ADD_START_PAUSED,
+                Settings.ADD_SEQUENTIAL,
+                Settings.UI_STATE_COLORS
             },
             concat(
                     Settings.CONNECTION_KEYS,
@@ -117,6 +121,8 @@ final class SettingsWindow {
 
     /** Told after an IP filter setting changed; {@code true} asks for a download now. */
     private java.util.function.Consumer<Boolean> onIpFilterChanged = force -> {};
+    /** Told after an appearance setting the main window draws from changed. */
+    private Runnable onAppearanceChanged = () -> {};
 
     private java.util.function.Supplier<String> ipFilterStatus = () -> "";
 
@@ -183,6 +189,7 @@ final class SettingsWindow {
     private ChoiceBox<Theme> theme;
     private TextField downloadDir;
     private CheckBox updateCheck;
+    private CheckBox stateColors;
     private CheckBox addStartPaused;
     private CheckBox addSequential;
     private Spinner<Integer> port;
@@ -427,6 +434,10 @@ final class SettingsWindow {
         return when == null ? "" : when.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
     }
 
+    void setOnAppearanceChanged(Runnable handler) {
+        onAppearanceChanged = handler;
+    }
+
     void setOnIpFilterChanged(
             java.util.function.Consumer<Boolean> handler, java.util.function.Supplier<String> status) {
         onIpFilterChanged = handler;
@@ -530,6 +541,7 @@ final class SettingsWindow {
             settings.reset(OWNED_KEYS);
             settings.saveQuietly();
             reload();
+            onAppearanceChanged.run();
         });
         Button close = new Button("Close");
         close.setOnAction(e -> stage.hide());
@@ -736,6 +748,21 @@ final class SettingsWindow {
                 "Editora's Caret & Ink pair, and AtlantaFX's Nord and Cupertino, light and dark. Applied at once.",
                 theme,
                 "appearance colors colours dark light nord cupertino editora style");
+        stateColors = new CheckBox();
+        stateColors.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setStateColors(now);
+            settings.saveQuietly();
+            onAppearanceChanged.run();
+        });
+        row(
+                Category.GENERAL,
+                appearance,
+                "Colour rows by state",
+                "Downloading teal, seeding periwinkle, stalled amber, errors red: the glyph, the start of the"
+                        + " status and the progress bar. Off, the glyphs and sentences still say it.",
+                stateColors,
+                "state status colours colors glyph progress bar stalled seeding downloading error accessibility");
 
         VBox downloads = section(page, "Downloads");
         downloadDir = new TextField();
@@ -1559,6 +1586,7 @@ final class SettingsWindow {
             theme.setValue(Theme.byId(settings.theme(), Theme.DEFAULT));
             downloadDir.setText(settings.downloadDir().toString());
             updateCheck.setSelected(settings.updateCheck());
+            stateColors.setSelected(settings.stateColors());
             syncEnabled.setSelected(settings.syncEnabled());
             syncUrl.setText(settings.syncUrl());
             syncBranch.setText(settings.syncBranch().equals("main") ? "" : settings.syncBranch());

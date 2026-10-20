@@ -194,6 +194,13 @@ release process with the names changed; Termina's README and memory hold the war
   snapshots. The sidebar is not focus-traversable for the same reason as the filter box.
 - **A removed torrent's alert carries only the hash.** `remove()` reads the name first and raises
   the event itself; the `TORRENT_REMOVED` alert is not listened to.
+- **A row's state is computed, not stored**: `RowState.of(torrent, quietSeconds)` and
+  `StatusLine.of(…)` are pure; `TorrentRow` keeps only the stall clock, set *before* its torrent
+  property fires so every cell of a tick reads the same number. The row's `st-*` pseudo-class
+  (`MainWindow.StateRow`) listens by **invalidation**: two equal snapshots fire no change event,
+  and a stalled torrent's snapshots are often equal while its clock moves. State colours are
+  scoped under `.state-colors` on the scene root so the setting can turn them off. The redesign
+  these come from is `docs/UI-REDESIGN.md`.
 - **Rows are `TorrentRow` objects, never `Torrent` snapshots.** The list has an extractor on the
   row's torrent property, which is what makes the `SortedList` re-sort on an in-place update.
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
