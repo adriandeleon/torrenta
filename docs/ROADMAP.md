@@ -1,0 +1,311 @@
+# Torrenta roadmap
+
+A keyboard-first, cross-platform BitTorrent client on JavaFX, as complete as Transmission and
+qBittorrent, with built-in search. This is the plan from the 0.1 scaffold to a 1.0 that can replace
+either of them for daily use. One PR per feature, each line below is one PR unless it says
+otherwise, and each milestone is a tagged release so that macOS and Windows get exercised early.
+
+## Principles
+
+- **Keyboard first.** Every action has a chord and a command-palette entry; the mouse is optional.
+  Chords are `Shortcut+key`, declared once on the menu item.
+- **One window.** Transfer list, sidebar filters, detail pane, status bar. Dialogs for add, settings
+  and torrent creation; nothing else pops up.
+- **The engine is libtorrent, behind `Engine`.** qBittorrent is also libtorrent, so parity with it is
+  a matter of exposing what the engine already does, not of writing protocol code. Nothing above
+  `com.torrenta.engine` may import a libtorrent type, so a second engine (Transmission over RPC, for
+  a seedbox) stays possible.
+- **Nothing on the FX thread talks to the engine.** Polling and actions run on workers; the FX thread
+  receives immutable snapshots.
+- **Settings apply live** and are clamped on read as well as write, as in Termina.
+- **Extract the decision, then test it.** Rules (which torrents a filter shows, what a share-limit
+  action does, how a search result is ranked) are pure classes with tests; UI classes stay thin.
+- **Verify by driving it.** The capture hook renders the real window; the CI smoke test asserts the
+  engine started inside it.
+
+## Where it stands: 0.1
+
+Window, theme, menu bar, torrent table polled off the FX thread, `--help`/`--version`, inputs from
+the command line, libtorrent4j 2.1.0-39 with native unpacking, CI on three platforms with a
+rendered smoke test. No persistence, dialogs, settings, limits, detail or packaging.
+
+## Parity matrix
+
+Transmission 4.1 (T) and qBittorrent 5 (Q), feature by feature, with the Torrenta milestone that
+delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are deliberately after 1.0.
+
+### Adding torrents
+
+| Feature | T | Q | Torrenta |
+|---|---|---|---|
+| Add `.torrent` file, magnet, HTTP(S) URL to a `.torrent` | ✓ | ✓ | 0.3 |
+| Add dialog: save path, category/labels, file selection and priorities, start paused, sequential, skip hash check | ◐ | ✓ | 0.3 |
+| Stop condition on add (after metadata, after files checked) | ✗ | ✓ | 0.3 |
+| Content layout on add (original, subfolder, flat) and rename on add | ✗ | ✓ | 0.3 |
+| Drag and drop files, magnets and URLs onto the window | ✓ | ✓ | 0.3 |
+| Clipboard watch: offer a magnet or URL found on the clipboard | ✗ | ✗ | 0.3 |
+| Watch folders, one save path per folder | ✓ | ✓ | 0.5 |
+| Register as the OS handler for `.torrent` and `magnet:` (single instance, hand off to the running app) | ✓ | ✓ | 0.8 |
+| Default trackers added to every torrent | ✓ | ✓ | 0.4 |
+| Web seeds (HTTP sources) shown and editable | ✓ | ✓ | 0.4 |
+
+### Transfer list
+
+| Feature | T | Q | Torrenta |
+|---|---|---|---|
+| Columns: name, size, done, progress, status, seeds, peers, down, up, ETA, ratio, added, completed, tracker, category, tags, save path; choose and reorder, remembered | ◐ | ✓ | 0.2 |
+| Stable rows: update in place, selection and scroll survive a tick | ✓ | ✓ | 0.2 |
+| Sort by any column; filter box on name | ✓ | ✓ | 0.2 |
+| Sidebar filters: status (all, downloading, seeding, completed, paused, active, inactive, stalled, checking, errored), categories, tags, trackers | ◐ | ✓ | 0.5 |
+| Multi-select with bulk actions | ✓ | ✓ | 0.2 |
+| Context menu and chords for every per-torrent action | ✓ | ✓ | 0.2 |
+| Command palette (Ctrl+Shift+P) over every command | ✗ | ✗ | 0.2 |
+| Status bar: session rates, DHT nodes, free space on the download disk, alt-speed toggle, port state | ✓ | ✓ | 0.4 |
+
+### Per-torrent actions
+
+| Feature | T | Q | Torrenta |
+|---|---|---|---|
+| Pause, resume, force resume (ignore queue) | ✓ | ✓ | 0.2 |
+| Remove, remove with data, with confirmation | ✓ | ✓ | 0.2 |
+| Force recheck, force reannounce | ✓ | ✓ | 0.2 |
+| Set location (move storage), rename torrent, rename files and folders | ✓ | ✓ | 0.4 |
+| Queue: move to top, up, down, bottom | ✓ | ✓ | 0.4 |
+| Per-torrent download and upload limits | ✓ | ✓ | 0.4 |
+| Per-torrent share limits: ratio, seeding time, inactive time; action on reaching them | ✓ | ✓ | 0.4 |
+| Sequential download, first and last piece first | ✓ | ✓ | 0.2 |
+| Super seeding | ✗ | ✓ | 0.4 |
+| Copy name, info-hash (v1 and v2), magnet link | ◐ | ✓ | 0.2 |
+| Open destination folder, open file | ◐ | ✓ | 0.2 |
+| Export `.torrent` | ✗ | ✓ | 0.4 |
+
+### Detail pane
+
+| Feature | T | Q | Torrenta |
+|---|---|---|---|
+| General: hashes, save path, created by, comment, pieces, availability bar, times, limits, counters | ✓ | ✓ | 0.3 |
+| Files: tree with progress, priority per file and folder, wanted toggle, rename, open | ✓ | ✓ | 0.3 |
+| Peers: IP, client, flags, progress, rates, country (offline GeoIP, optional download) | ✓ | ✓ | 0.3 |
+| Trackers: status, peers, message; add, edit, remove, reannounce one | ✓ | ✓ | 0.3 |
+| Pieces map: downloaded and in-progress pieces | ✓ | ✓ | 0.3 |
+| Speed graph per torrent and session | ✗ | ✓ | 0.7 |
+
+### Network
+
+| Feature | T | Q | Torrenta |
+|---|---|---|---|
+| Listen port, random port, port test | ✓ | ✓ | 0.4 |
+| UPnP and NAT-PMP forwarding | ✓ | ✓ | 0.4 |
+| DHT, PEX, LSD, uTP toggles | ✓ | ✓ | 0.4 |
+| Encryption mode: require, prefer, allow | ✓ | ✓ | 0.4 |
+| IPv6 | ✓ | ✓ | 0.4 |
+| Proxy: SOCKS5/HTTP, with auth, for peers and trackers | ✗ | ✓ | 0.4 |
+| IP filter: blocklist URL, eMule `.dat` and PeerGuardian `.p2p`, manual bans | ✓ | ✓ | 0.4 |
+| Bind to a network interface or address | ✓ | ✓ | 0.4 |
+| Anonymous mode (no client identification) | ✗ | ✓ | 0.4 |
+| Connection limits: global, per torrent, upload slots | ✓ | ✓ | 0.4 |
+
+### Bandwidth, queue, seeding
+
+| Feature | T | Q | Torrenta |
+|---|---|---|---|
+| Global download and upload limits | ✓ | ✓ | 0.4 |
+| Alternative limits, toggle, weekly schedule | ✓ | ✓ | 0.4 |
+| Queue: max active downloads, uploads, total; slow-torrent threshold does not count | ✓ | ✓ | 0.4 |
+| Global share limits with action: pause, remove, remove with data, super seed | ✓ | ✓ | 0.4 |
+| Rate limit applies to uTP and overhead options | ✓ | ✓ | 0.4 |
+
+### Organisation
+
+| Feature | T | Q | Torrenta |
+|---|---|---|---|
+| Labels / tags | ✓ | ✓ | 0.5 |
+| Categories with save path; automatic torrent management (move when category changes) | ✗ | ✓ | 0.5 |
+| Incomplete-files folder, `.!tt` suffix while downloading | ✓ | ✓ | 0.5 |
+| Pre-allocate disk space | ✓ | ✓ | 0.5 |
+| Resume data across restarts; fast resume, no re-check | ✓ | ✓ | 0.2 |
+| Session statistics: all-time up/down, ratio, time active, per-session | ✓ | ✓ | 0.7 |
+
+### Automation and tools
+
+| Feature | T | Q | Torrenta |
+|---|---|---|---|
+| Run a program on added, on finished, on seeding done; with placeholders | ✓ | ✓ | 0.5 |
+| Desktop notifications on finished and on error | ✓ | ✓ | 0.5 |
+| Email on finished | ✗ | ✓ | later |
+| Torrent creation: pieces size, private, trackers, web seeds, v1/v2/hybrid, start seeding | ✓ | ✓ | 0.7 |
+| RSS: feeds, refresh, articles; auto-download rules with regex, category, save path, episode filter | ✗ | ✓ | 0.7 |
+| Execution log with per-category filters; debug log window | ◐ | ✓ | 0.2 |
+| Built-in tracker | ✗ | ✓ | no |
+
+### Search
+
+| Feature | T | Q | Torrenta |
+|---|---|---|---|
+| Search tab across providers, merged results, sort by seeds/size/date, category filter, add from result | ✗ | ✓ | 0.6 |
+| Provider plugins | ✗ | ✓ (Python) | 0.6 (see below) |
+| Torznab indexers (Jackett, Prowlarr) | ✗ | ✗ | 0.6 |
+
+### Remote and app
+
+| Feature | T | Q | Torrenta |
+|---|---|---|---|
+| Native packages: macOS `.dmg`/`.app`, Windows `.msi`, Linux `.deb`/`.rpm`/tarball; Homebrew and winget | ✓ | ✓ | 0.3 |
+| Update check against GitHub releases | ✓ | ✓ | 0.3 |
+| Settings window, live-applying, searchable | ✓ | ✓ | 0.4 |
+| Light and dark themes, UI font | ◐ | ✓ | 0.8 |
+| Interface languages | ✓ | ✓ | 0.8 |
+| Control a remote daemon (Transmission RPC as a second `Engine`) | ✓ (remote GUI) | ✗ | 0.9 |
+| Serve a web UI / RPC of its own | ✓ | ✓ | later |
+| Headless daemon mode | ✓ | ✓ (`-nox`) | later |
+
+## Milestones
+
+Each is a release. Lines are PRs, in order within the milestone; a PR lands green on all three
+platforms before the next starts.
+
+### 0.2 — Usable
+The point at which Torrenta can be left running.
+
+1. **Persistence.** Session state and per-torrent resume data (libtorrent `save_resume_data`,
+   written on change and on exit, loaded at start); a settings file under the platform config dir;
+   `TorrentStore` as the one owner of what is on disk.
+2. **Stable table.** Rows keyed by info-hash and updated in place; selection, sort and scroll survive
+   a tick. Column chooser, column order and widths remembered. Filter box.
+3. **Actions and chords.** Pause, resume, force resume, remove, remove with data, recheck,
+   reannounce, sequential and first/last piece toggles, copy name/hash/magnet, open folder. Context
+   menu, menu bar, command palette. Multi-select.
+4. **Engine alerts.** A listener thread turns libtorrent alerts into events: added, finished, error,
+   metadata received, tracker error. Drives the status bar, the execution log window and later the
+   notifications.
+
+### 0.3 — Add, inspect, install
+What a first public release needs.
+
+1. **Add dialog** for files, magnets and URLs: save path with free-space readout, start paused,
+   sequential, skip check, stop condition, content layout, file tree with priorities. Drag and drop
+   and clipboard detection. The add from the command line reuses it.
+2. **Detail pane**: General, Files, Peers, Trackers, Pieces. Collapsible, remembered.
+3. **Native app image and installers** (`-Pdist`, from Termina): jlink plus jpackage with the
+   libtorrent4j native placed in the image's library dir and `libtorrent4j.jni.path` set by the
+   launcher; macOS `.app`/`.dmg`, Windows `.msi`, Linux `.deb`/`.rpm`; release workflow, JReleaser,
+   Homebrew cask and winget. The packaged app is smoke-tested in CI the way Termina's is.
+4. **Update check** against GitHub releases, from Termina's `update` package.
+
+### 0.4 — Network, bandwidth, queue
+Everything in Settings that the engine already knows how to do.
+
+1. **Settings window**, searchable, live-applying, with the Connection, Speed, BitTorrent and
+   Advanced pages; `Settings` is clamped on read and write and maps one-to-one onto a libtorrent
+   `settings_pack`.
+2. **Connection**: port, random port, port test, UPnP/NAT-PMP, interface binding, IPv6, connection
+   limits, proxy.
+3. **Protocol**: DHT, PEX, LSD, uTP, encryption mode, anonymous mode, default trackers.
+4. **IP filter**: blocklist URL with scheduled refresh, `.dat`/`.p2p` import, manual bans, counts in
+   the status bar.
+5. **Speed**: global limits, alternative limits, schedule, overhead options; status-bar toggle.
+6. **Queue and share limits**: active limits, slow threshold, queue positions, global and
+   per-torrent ratio/time limits with their action; super seeding.
+7. **Per-torrent limits dialog**, set location, rename torrent and files, export `.torrent`.
+
+### 0.5 — Organisation and automation
+
+1. **Categories and tags** with sidebar filters and automatic torrent management.
+2. **Sidebar** status and tracker filters, counts, remembered selection.
+3. **Incomplete folder, suffix, pre-allocation.**
+4. **Watch folders.**
+5. **Run on event** (added, finished, seeding done) with placeholders; desktop notifications.
+
+### 0.6 — Search
+See "Search design" below.
+
+1. **Provider API and Torznab client**, with a provider settings page: add an indexer by URL and API
+   key, test it.
+2. **Search tab**: query, category, provider selection; results merged and deduplicated by
+   info-hash; sort; add to the Add dialog.
+3. **Declarative providers**: a definition file format for sites without an API, loaded from the
+   config dir; a handful of definitions for public, non-infringing indexes shipped as examples.
+
+### 0.7 — RSS, creation, statistics
+
+1. **RSS reader**: feeds, refresh interval, article list with read state.
+2. **RSS auto-download rules** with regex, episode filter, category and save path.
+3. **Torrent creator**: v1/v2/hybrid, piece size, private, trackers, web seeds, seed after creating.
+4. **Statistics** window and per-torrent and session speed graphs.
+
+### 0.8 — App polish
+
+1. **OS integration**: `.torrent` and `magnet:` handler, single instance with hand-off, tray or dock
+   badge with rates.
+2. **Light theme, UI font, Termina's theme switching.**
+3. **Interface languages**, from Termina's `i18n` package, with the same six to start.
+
+### 0.9 — Remote
+
+1. **Transmission RPC `Engine`**: the same window driving a transmission-daemon on a seedbox or NAS;
+   session profiles in Settings; capabilities the daemon lacks are hidden, not faked.
+
+### 1.0 — Criteria
+
+Every ✓ row for 0.2 through 0.9 shipped on all three platforms; a week of daily use on each
+without data loss; resume data proven across upgrades; installers signed where the platform
+requires it; the README's "Not done" list empty.
+
+## Search design
+
+qBittorrent's search is a set of Python scraper plugins, one per site, which break when a site
+changes and which make the client the party doing the scraping. Torrenta does it in three layers,
+so that the app itself ships no site-specific code:
+
+1. **`SearchProvider`** — `search(query, category) → List<SearchResult>`, where a result is name,
+   size, seeds, leechers, date, magnet or `.torrent` URL, provider, and a detail URL. Providers run
+   in parallel on a worker with a timeout each; results are merged, deduplicated by info-hash where
+   one is known, and ranked by a pure `ResultRanker` that is tested.
+2. **Torznab client.** Jackett and Prowlarr expose hundreds of indexers behind one API (`/api?t=search`,
+   `apikey`, Newznab categories). Point Torrenta at one, pick which indexers to query, done. This is
+   how Sonarr and Radarr search, and it keeps site-specific scraping in a tool built for it.
+3. **Declarative providers.** For sites with a JSON API or a stable HTML listing: a definition file
+   (URL template, pagination, a selector or JSON path per field) interpreted by one generic
+   provider. Users drop definitions into the config dir; the app ships examples for public,
+   non-infringing indexes (Internet Archive, academic and Linux-distribution trackers). Definitions
+   are data, so a site change is a file edit rather than a release.
+
+Search is a tab beside the transfer list: a query field (Ctrl+K), category and provider chips, a
+results table (name, size, seeds, leechers, date, provider), Enter opens the Add dialog with the
+result pre-filled. Searches are rate-limited per provider and cached for the session.
+
+## Architecture notes
+
+- Packages: `engine` (API), `engine.libtorrent`, `engine.transmission` (0.9), `store` (resume data,
+  settings), `search`, `rss`, `ui` (one window), `ui.detail`, `ui.settings`, `cli`, `i18n`,
+  `update`.
+- Threads: FX thread for the scene only; one engine poll thread; one alert thread; virtual threads
+  for actions, search and RSS; every engine call off the FX thread, enforced by an assertion in
+  `LibtorrentEngine`.
+- Persistence: resume data as libtorrent's bencoded files under `<config>/torrents/<hash>.fastresume`
+  plus the `.torrent`; settings as one properties file; categories, tags, RSS rules, providers as
+  JSON. Written atomically (temp file and move), as `NativeLibrary` already does.
+- Config dir: platform conventions (`~/.config/torrenta`, `~/Library/Application Support/Torrenta`,
+  `%APPDATA%\Torrenta`), overridable with `--config-dir` for tests and captures.
+- Tests: pure rules in JUnit; the engine in a real session on all three platforms; the window by
+  capture, with CI asserting what the capture prints.
+
+## Risks
+
+- **Natives in the packaged app.** jlink has no jars; the `.so`/`.dylib`/`.dll` has to be placed in
+  the image and found. First PR of 0.3 settles it; until then every release claim is unproven.
+- **libtorrent4j tracks libtorrent master.** Pin the version, bump deliberately, and run the engine
+  test on all three platforms before merging a bump.
+- **Platforms the engine does not ship for**: Intel macOS and ARM Linux. The app says so and stays
+  up. FrostWire's jlibtorrent fork covers both, if demand appears.
+- **Resume data compatibility across libtorrent versions** is the one place data loss can happen:
+  keep the `.torrent` beside the resume file so a torrent can always be re-added.
+- **Wayland.** JavaFX runs through XWayland; fractional scaling misreports geometry, as Termina
+  found. Capture and check on a Wayland desktop before each release.
+- **Search providers** change and go away. Definitions as data, Torznab for the long tail, no
+  site-specific code in the app.
+
+## Out of scope for 1.0
+
+A web UI or RPC server of Torrenta's own, headless mode, a built-in tracker, email notifications,
+plugin loading of arbitrary code.
