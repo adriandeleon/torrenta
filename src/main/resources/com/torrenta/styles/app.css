@@ -138,3 +138,8 @@
 .pieces-map {
     -fx-background-color: -color-bg-subtle;
 }
+
+.update-badge {
+    -fx-text-fill: -color-accent-fg;
+    -fx-cursor: hand;
+}

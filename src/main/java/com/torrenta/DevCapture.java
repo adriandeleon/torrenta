@@ -106,6 +106,8 @@ final class DevCapture {
         System.out.println("capture: engine=" + window.engineDescription());
         System.out.println("capture: status=" + window.statusText());
         for (String line : window.eventLines()) System.out.println("capture: event=" + line);
+        if (!window.availableUpdateVersion().isEmpty())
+            System.out.println("capture: update=" + window.availableUpdateVersion());
         if (scene != stage.getScene()) System.out.println("capture: scene=dialog");
     }
 }

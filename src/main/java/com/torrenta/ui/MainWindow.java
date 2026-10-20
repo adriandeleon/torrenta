@@ -64,6 +64,9 @@ import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.net.TorrentFetch;
 import com.torrenta.store.Settings;
+import com.torrenta.update.ReleaseInfo;
+import com.torrenta.update.UpdateCheck;
+import com.torrenta.update.UpdateService;
 
 /**
  * The one window: a menu bar, a filter box over the torrent list, a status bar, and the command
@@ -97,6 +100,11 @@ public final class MainWindow {
     private AddDialog currentDialog;
     private String lastClipboardOffer = "";
     private final DetailPane detail = new DetailPane();
+    private final UpdateService updates = new UpdateService();
+    private final MenuItem downloadUpdateItem = new MenuItem();
+    private final MenuItem skipUpdateItem = new MenuItem();
+    private final Label updateBadge = new Label();
+    private ReleaseInfo availableUpdate;
     private SplitPane split;
     private volatile String detailId;
     private volatile boolean detailWanted;
@@ -147,6 +155,7 @@ public final class MainWindow {
         stage.setOnHidden(e -> {
             rememberDivider();
             stopPolling();
+            updates.shutdown();
         });
         setStatus("Starting the engine…");
         rates.setText(ratesText(Engine.Rates.ZERO));
@@ -247,6 +256,71 @@ public final class MainWindow {
             return t;
         });
         poller.scheduleAtFixedRate(this::poll, 0, POLL_MS, TimeUnit.MILLISECONDS);
+        maybeCheckForUpdates();
+    }
+
+    // ---- updates --------------------------------------------------------------------------------
+
+    /** After startup, at most once a day, and only if the setting allows; says nothing on failure. */
+    private void maybeCheckForUpdates() {
+        if (!settings.updateCheck()) return;
+        long now = System.currentTimeMillis();
+        if (!UpdateCheck.isDue(settings.lastUpdateCheck(), now, UpdateCheck.DEFAULT_INTERVAL_MS)) return;
+        settings.setLastUpdateCheck(now);
+        settings.saveQuietly();
+        updates.check(AppInfo.VERSION, outcome -> onUpdateOutcome(outcome, false));
+    }
+
+    /** The user asked: ignores the interval, the setting and the skipped version, and always reports. */
+    private void checkForUpdatesNow() {
+        setStatus("Checking for updates…");
+        settings.setLastUpdateCheck(System.currentTimeMillis());
+        settings.saveQuietly();
+        updates.check(AppInfo.VERSION, outcome -> {
+            onUpdateOutcome(outcome, true);
+            if (outcome.error() != null) setStatus("Update check failed: " + outcome.error());
+            else if (outcome.available())
+                setStatus(AppInfo.NAME + " " + outcome.latest().version() + " is available — see the Help menu");
+            else setStatus(AppInfo.NAME + " " + AppInfo.VERSION + " is up to date");
+        });
+    }
+
+    /** FX thread. */
+    private void onUpdateOutcome(UpdateService.Outcome outcome, boolean manual) {
+        if (!outcome.available()) return;
+        if (!manual && outcome.latest().version().equals(settings.dismissedUpdate())) return;
+        availableUpdate = outcome.latest();
+        downloadUpdateItem.setText("Download " + AppInfo.NAME + " " + availableUpdate.version() + "…");
+        skipUpdateItem.setText("Skip Version " + availableUpdate.version());
+        downloadUpdateItem.setVisible(true);
+        skipUpdateItem.setVisible(true);
+        updateBadge.setText(availableUpdate.version() + " available");
+        updateBadge.setVisible(true);
+        updateBadge.setManaged(true);
+        if (!manual) setStatus(AppInfo.NAME + " " + availableUpdate.version() + " is available — see the Help menu");
+    }
+
+    private void downloadUpdate() {
+        if (availableUpdate == null) return;
+        String url = availableUpdate.url().isEmpty() ? AppInfo.RELEASES_PAGE : availableUpdate.url();
+        opener.accept(url);
+    }
+
+    private void skipUpdate() {
+        if (availableUpdate == null) return;
+        settings.setDismissedUpdate(availableUpdate.version());
+        settings.saveQuietly();
+        setStatus("Skipping " + AppInfo.NAME + " " + availableUpdate.version() + "; a manual check will still show it");
+        availableUpdate = null;
+        downloadUpdateItem.setVisible(false);
+        skipUpdateItem.setVisible(false);
+        updateBadge.setVisible(false);
+        updateBadge.setManaged(false);
+    }
+
+    /** The newer version found, or empty; read by the capture hook. */
+    public String availableUpdateVersion() {
+        return availableUpdate == null ? "" : availableUpdate.version();
     }
 
     /** FX thread. The engine could not start; the window stays up so the message can be read. */
@@ -607,6 +681,7 @@ public final class MainWindow {
                         this::openFolder),
                 new Command("remove", "Remove…", null, "Delete", selection, () -> remove(false)),
                 new Command("remove-data", "Remove with Data…", null, "Shift+Delete", selection, () -> remove(true)),
+                new Command("check-updates", "Check for Updates", null, null, always, this::checkForUpdatesNow),
                 new Command(
                         "filter",
                         "Filter Torrents",
@@ -670,8 +745,20 @@ public final class MainWindow {
 
         MenuItem about = new MenuItem("About " + AppInfo.NAME);
         about.setOnAction(e -> setStatus(AppInfo.NAME + " " + AppInfo.VERSION + " — " + AppInfo.COPYRIGHT));
+        // The two update items exist from the start and show only once a release is known, so the
+        // menu's shape does not change under a hand that has learned it.
+        downloadUpdateItem.setVisible(false);
+        downloadUpdateItem.setOnAction(e -> downloadUpdate());
+        skipUpdateItem.setVisible(false);
+        skipUpdateItem.setOnAction(e -> skipUpdate());
         Menu help = new Menu("Help");
-        help.getItems().add(about);
+        help.getItems()
+                .addAll(
+                        command("check-updates").menuItem(),
+                        downloadUpdateItem,
+                        skipUpdateItem,
+                        new SeparatorMenuItem(),
+                        about);
 
         MenuBar bar = new MenuBar(file, torrent, view, help);
         bar.setUseSystemMenuBar(true);
@@ -922,7 +1009,12 @@ public final class MainWindow {
         errorBadge.visibleProperty().bind(log.errorsProperty().greaterThan(0));
         errorBadge.managedProperty().bind(errorBadge.visibleProperty());
         errorBadge.setOnMouseClicked(e -> logWindow.show());
-        HBox bar = new HBox(12, status, spacer, errorBadge, rates);
+        // "0.9.0 available", persistent where the status text is not; a click opens the download.
+        updateBadge.getStyleClass().add("update-badge");
+        updateBadge.setVisible(false);
+        updateBadge.setManaged(false);
+        updateBadge.setOnMouseClicked(e -> downloadUpdate());
+        HBox bar = new HBox(12, status, spacer, updateBadge, errorBadge, rates);
         bar.setPadding(new Insets(4, 10, 4, 10));
         bar.getStyleClass().add("status-bar");
         return bar;

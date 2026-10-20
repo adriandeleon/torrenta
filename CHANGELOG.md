@@ -39,6 +39,8 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 - **A release pipeline**: a `v*` tag builds and smoke-tests the installers on all three
   platforms and publishes a GitHub release with install notes, a changelog and checksums; a
   Homebrew cask and a winget manifest follow when the token is present.
+- **An update check** against GitHub releases, after startup and at most once a day, with a
+  manual Check for Updates, a Download item and a Skip Version item in the Help menu.
 - **An event log** (`Ctrl+Shift+L`): added, metadata received, checked, finished, removed, torrent
   and disk errors, tracker errors and warnings, listen ports, port mapping, engine start and stop,
   plus the app's own warnings. Filter by level, copy, clear. The status bar shows the latest event

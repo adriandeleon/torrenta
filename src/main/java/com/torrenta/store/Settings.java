@@ -31,6 +31,12 @@ public final class Settings {
 
     public static final String DETAIL_TAB = "detail.tab";
     public static final String DETAIL_DIVIDER = "detail.divider";
+    /** Ask GitHub for a newer release after startup, at most once a day. */
+    public static final String UPDATE_CHECK = "updates.check";
+
+    public static final String LAST_UPDATE_CHECK = "updates.lastCheckEpochMs";
+    /** The version the user chose to skip; a manual check still reports it. */
+    public static final String DISMISSED_UPDATE = "updates.dismissedVersion";
 
     private final Path file;
     private final Properties properties = new Properties();
@@ -90,6 +96,31 @@ public final class Settings {
         } catch (IOException e) {
             LOG.log(Level.WARNING, "Could not write " + file, e);
         }
+    }
+
+    public boolean updateCheck() {
+        return !"false"
+                .equalsIgnoreCase(properties.getProperty(UPDATE_CHECK, "true").trim());
+    }
+
+    public long lastUpdateCheck() {
+        try {
+            return Long.parseLong(properties.getProperty(LAST_UPDATE_CHECK, "0").trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    public void setLastUpdateCheck(long epochMs) {
+        properties.setProperty(LAST_UPDATE_CHECK, String.valueOf(epochMs));
+    }
+
+    public String dismissedUpdate() {
+        return properties.getProperty(DISMISSED_UPDATE, "");
+    }
+
+    public void setDismissedUpdate(String version) {
+        properties.setProperty(DISMISSED_UPDATE, version == null ? "" : version);
     }
 
     public Path downloadDir() {
