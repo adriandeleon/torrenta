@@ -31,6 +31,14 @@ public interface Engine extends AutoCloseable {
     /** Reads a {@code .torrent} without adding it, for the dialog. */
     TorrentPreview inspect(byte[] torrent) throws EngineException;
 
+    /**
+     * Starts fetching a magnet's metadata without adding it, so the Add dialog can show the files
+     * while it is open. The magnet joins the swarm writing nothing, is in no snapshot and no
+     * store, and leaves once the metadata is in or the fetch is cancelled. Fails if the magnet is
+     * already in the session.
+     */
+    MetadataFetch fetchMetadata(String magnet) throws EngineException;
+
     /** Removes the torrent and forgets it; with {@code deleteFiles}, its data on disk too. */
     void remove(String id, boolean deleteFiles) throws EngineException;
 
@@ -125,6 +133,23 @@ public interface Engine extends AutoCloseable {
     @Override
     default void close() {
         stop();
+    }
+
+    /** A magnet's metadata on its way, from {@link #fetchMetadata}. */
+    interface MetadataFetch {
+
+        /** Peers connected to fetch it now; 0 once the fetch is over. Not on the FX thread. */
+        int peers();
+
+        /**
+         * The whole {@code .torrent}, the magnet's trackers included, once the metadata is in:
+         * what {@link #inspect} reads and {@link AddRequest.TorrentFile} adds. Completes on an
+         * engine thread; fails if the fetch is cancelled or the engine stops.
+         */
+        java.util.concurrent.CompletableFuture<byte[]> torrent();
+
+        /** Leaves the swarm. Idempotent; must come before the same magnet is added for real. */
+        void cancel();
     }
 
     /** Bytes per second, session-wide. */

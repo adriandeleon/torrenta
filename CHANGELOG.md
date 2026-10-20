@@ -7,6 +7,19 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **The Add dialog, relaid out, and a magnet that never blocks it.** Two columns: the file tree
+  (a select-all box, sizes, priorities with High in the accent and Skip muted; `Space` ticks,
+  `+` and `−` step Skip/Low/Normal/High, `←` `→` fold) and, on the right, the folder with a disk
+  bar and "412 GiB free on /data · 5.9 GiB leaves 406 GiB", Category and Stop when, Tags, and the
+  options (sequential, first and last pieces first, skip hash check). A header says where it came
+  from, the name, and size · files · v1/v2/hybrid · trackers · the comment. `Enter` adds,
+  `Shift+Enter` adds paused (the other way round when Start paused is the default), `Esc`
+  cancels, each key shown beside its button. A magnet's file list is fetched while the dialog is
+  open and fills the tree in live ("Fetching file list · 3 peers · 12s"); until then everything
+  else can be set, and **Add now, pick files when ready** (`Enter`) adds it to stop when its
+  metadata arrives, or **Wait here for the file list** (`Ctrl+Enter`). "Next time, add with these
+  settings without asking" (Settings → Adding torrents → Add without asking, `add.withoutAsking`)
+  adds every input with the defaults and opens no dialog.
 - **Watch folders** (Settings → Watch folders). A `.torrent` dropped into a watched folder is
   added without a dialog, once it has stopped growing; a `.magnet` file holds one magnet link per
   line, as qBittorrent reads them. Each entry says what becomes of the file (deleted, or renamed

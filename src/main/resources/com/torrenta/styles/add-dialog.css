@@ -1,0 +1,97 @@
+/*
+ * The Add dialog, in the theme's semantic colour variables like app.css: a small-caps kicker over
+ * the name, files on the left, the disk bar and the options on the right, keys beside the buttons.
+ */
+
+.add-kicker {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.78em;
+    -fx-font-weight: bold;
+}
+
+.add-title {
+    -fx-text-fill: -color-fg-default;
+    -fx-font-size: 1.35em;
+    -fx-font-weight: bold;
+}
+
+.add-summary {
+    -fx-text-fill: -color-fg-muted;
+}
+
+.add-dialog .dialog-label {
+    -fx-font-size: 0.9em;
+}
+
+.add-files {
+    -fx-background-color: -color-bg-inset;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 4;
+    -fx-background-radius: 4;
+}
+
+.add-files .file-tree {
+    -fx-background-color: transparent;
+    -fx-border-width: 0;
+}
+
+.add-files .file-tree .column-header .label {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.78em;
+    -fx-font-weight: bold;
+}
+
+.add-size-column {
+    -fx-alignment: center-right;
+}
+
+.add-files .priority-high {
+    -fx-text-fill: -color-accent-fg;
+}
+
+.add-files .priority-skip {
+    -fx-text-fill: -color-fg-subtle;
+}
+
+.add-placeholder-bar {
+    -fx-background-color: -color-neutral-muted;
+    -fx-background-radius: 3;
+}
+
+.add-fetching {
+    -fx-text-fill: -color-fg-muted;
+    -fx-padding: 6 0 0 0;
+}
+
+.add-fetch-failed {
+    -fx-text-fill: -color-warning-fg;
+}
+
+.disk-bar {
+    -fx-background-color: -color-neutral-muted;
+    -fx-background-radius: 3;
+}
+
+.disk-used {
+    -fx-background-color: -color-fg-subtle;
+    -fx-background-radius: 3 0 0 3;
+}
+
+.disk-torrent {
+    -fx-background-color: -color-accent-emphasis;
+}
+
+.disk-torrent:over {
+    -fx-background-color: -color-danger-emphasis;
+}
+
+.key-hint {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.85em;
+}
+
+/* On the accent-filled default button the muted grey would vanish; the button's own ink, faded. */
+.button:default .key-hint {
+    -fx-text-fill: -color-fg-emphasis;
+    -fx-opacity: 0.7;
+}
