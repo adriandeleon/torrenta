@@ -295,4 +295,48 @@ class SettingsTest {
         settings.load();
         assertEquals(Settings.defaultDownloadDir(), settings.downloadDir());
     }
+
+    @Test
+    void automationCommandsAndNotificationsRoundTrip(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        com.torrenta.automation.AutomationSettings d = settings.automation();
+        assertEquals("", d.onAdded());
+        assertEquals("", d.onFinished());
+        assertEquals("", d.onSeedingDone());
+        assertFalse(d.notifyAdded());
+        assertTrue(d.notifyFinished(), "only finished notifies by default");
+        assertFalse(d.notifySeedingDone());
+        assertFalse(d.notifyError());
+
+        settings.setEventCommand(com.torrenta.engine.EngineEvent.Kind.FINISHED, "  notify-send \"%N done\"  ");
+        settings.setEventCommand(com.torrenta.engine.EngineEvent.Kind.ADDED, "echo %K");
+        settings.setNotifies(com.torrenta.engine.EngineEvent.Kind.FINISHED, false);
+        settings.setNotifies(com.torrenta.engine.EngineEvent.Kind.ERROR, true);
+        settings.save();
+
+        Settings read = new Settings(file);
+        read.load();
+        com.torrenta.automation.AutomationSettings a = read.automation();
+        assertEquals("notify-send \"%N done\"", a.onFinished(), "stripped");
+        assertEquals("echo %K", a.onAdded());
+        assertEquals("", a.onSeedingDone());
+        assertFalse(a.notifyFinished());
+        assertTrue(a.notifyError());
+        assertTrue(a.active());
+        assertEquals("echo %K", read.eventCommand(com.torrenta.engine.EngineEvent.Kind.ADDED));
+        assertTrue(read.notifies(com.torrenta.engine.EngineEvent.Kind.ERROR));
+
+        read.setEventCommand(com.torrenta.engine.EngineEvent.Kind.ADDED, "   ");
+        assertEquals(
+                "", read.eventCommand(com.torrenta.engine.EngineEvent.Kind.ADDED), "a blank line forgets the command");
+        assertEquals("", read.get(Settings.AUTOMATION_ON_ADDED, ""), "and the key with it");
+        read.reset(Settings.AUTOMATION_KEYS);
+        assertTrue(read.notifies(com.torrenta.engine.EngineEvent.Kind.FINISHED), "reset means the defaults again");
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> read.setEventCommand(com.torrenta.engine.EngineEvent.Kind.ERROR, "x"),
+                "nothing runs on an error");
+    }
 }

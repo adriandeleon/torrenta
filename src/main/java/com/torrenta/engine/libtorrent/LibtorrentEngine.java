@@ -879,7 +879,13 @@ public final class LibtorrentEngine implements Engine {
                 status.seedingDuration() / 1000,
                 status.nextAnnounce() / 1000,
                 status.numConnections(),
-                status.currentTracker() == null ? "" : status.currentTracker());
+                status.currentTracker() == null ? "" : status.currentTracker(),
+                status.getInfoHashes().swig().has_v1()
+                        ? status.getInfoHashes().swig().getV1().to_hex()
+                        : "",
+                status.getInfoHashes().swig().has_v2()
+                        ? status.getInfoHashes().swig().getV2().to_hex()
+                        : "");
         // The bitfield and the file storage point into these two; keep them until the end.
         Reference.reachabilityFence(status);
         Reference.reachabilityFence(info);
@@ -1474,7 +1480,7 @@ public final class LibtorrentEngine implements Engine {
                     case TORRENT_FINISHED -> {
                         TorrentAlert<?> t = (TorrentAlert<?>) alert;
                         requestSave(t.handle(), false);
-                        torrentEvent(t, EngineEvent.Level.INFO, "%s finished");
+                        torrentEvent(t, EngineEvent.Level.INFO, EngineEvent.Kind.FINISHED, "%s finished");
                         if (t.handle().isValid()) {
                             // Names first, then the move: both are disk jobs, done in this order.
                             applySuffixes(id(t.handle()), t.handle());
@@ -1521,6 +1527,7 @@ public final class LibtorrentEngine implements Engine {
                         torrentEvent(
                                 t,
                                 EngineEvent.Level.ERROR,
+                                EngineEvent.Kind.ERROR,
                                 "%s: " + t.error().getMessage()
                                         + (t.filename().isEmpty() ? "" : " (" + t.filename() + ")"));
                     }
@@ -1545,13 +1552,20 @@ public final class LibtorrentEngine implements Engine {
                     case FILE_ERROR -> {
                         FileErrorAlert t = (FileErrorAlert) alert;
                         torrentEvent(
-                                t, EngineEvent.Level.ERROR, "%s: " + t.error().getMessage() + " — " + t.filename());
+                                t,
+                                EngineEvent.Level.ERROR,
+                                EngineEvent.Kind.ERROR,
+                                "%s: " + t.error().getMessage() + " — " + t.filename());
                     }
                     case TRACKER_ERROR -> {
                         TrackerErrorAlert t = (TrackerErrorAlert) alert;
                         String reason = t.errorMessage().isEmpty() ? t.error().getMessage() : t.errorMessage();
                         onTracker(t, true);
-                        torrentEvent(t, EngineEvent.Level.WARNING, "%s: tracker " + t.trackerUrl() + " — " + reason);
+                        torrentEvent(
+                                t,
+                                EngineEvent.Level.WARNING,
+                                EngineEvent.Kind.ERROR,
+                                "%s: tracker " + t.trackerUrl() + " — " + reason);
                     }
                     case TRACKER_WARNING -> {
                         TrackerWarningAlert t = (TrackerWarningAlert) alert;
@@ -1624,7 +1638,9 @@ public final class LibtorrentEngine implements Engine {
             // them: ask for it now, and it replaces the blob shortly after.
             requestSave(alert.handle(), false);
             String id = alert.params().getInfoHashes().getBest().toHex();
-            torrentEvent(alert, EngineEvent.Level.INFO, restoring.remove(id) ? "Restored %s" : "Added %s");
+            // A torrent restored at start is not new to the person; nothing runs on it.
+            if (restoring.remove(id)) torrentEvent(alert, EngineEvent.Level.INFO, "Restored %s");
+            else torrentEvent(alert, EngineEvent.Level.INFO, EngineEvent.Kind.ADDED, "Added %s");
         }
 
         /**
@@ -1648,10 +1664,15 @@ public final class LibtorrentEngine implements Engine {
 
         /** {@code template} has one {@code %s}, the torrent's name. */
         private void torrentEvent(TorrentAlert<?> alert, EngineEvent.Level level, String template) {
+            torrentEvent(alert, level, EngineEvent.Kind.OTHER, template);
+        }
+
+        private void torrentEvent(
+                TorrentAlert<?> alert, EngineEvent.Level level, EngineEvent.Kind kind, String template) {
             TorrentHandle handle = alert.handle();
             if (!handle.isValid()) return;
             String name = nameOf(handle);
-            emit(new EngineEvent(java.time.Instant.now(), level, id(handle), name, template.formatted(name)));
+            emit(EngineEvent.of(kind, level, id(handle), name, template.formatted(name)));
         }
 
         private void onSaved(SaveResumeDataAlert alert) {

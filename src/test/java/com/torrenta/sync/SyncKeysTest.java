@@ -33,6 +33,10 @@ class SyncKeysTest {
         assertFalse(SyncKeys.isSynced("ui.sidebar.collapsed"));
         assertTrue(SyncKeys.isSynced("ui.sidebar"), "but whether the sidebar shows travels");
         assertTrue(SyncKeys.isSynced("share.ratio"), "the global share limit travels");
+        assertFalse(SyncKeys.isSynced("automation.onFinished"), "names a program on this machine");
+        assertFalse(SyncKeys.isSynced("automation.onAdded"));
+        assertTrue(SyncKeys.isSynced("notify.finished"), "but whether to notify travels");
+        assertTrue(SyncKeys.isSynced("notify.error"));
         assertFalse(SyncKeys.isSynced(""));
         assertFalse(SyncKeys.isSynced(null));
     }

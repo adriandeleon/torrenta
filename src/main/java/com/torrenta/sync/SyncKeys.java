@@ -13,18 +13,19 @@ import java.util.TreeMap;
  * Which settings travel between machines, and the one shape they travel in.
  *
  * <p>Everything in the settings file syncs except what describes one installation: the sync
- * connection itself, folders and interfaces of this machine, the clocks of the last checks, the
- * per-torrent entries and the sidebar's choices and folds (the torrents are this machine's), and
- * the proxy password, which does not belong in a repository even a private one. Pure.
+ * connection itself, folders, interfaces and programs of this machine, the clocks of the last
+ * checks, the per-torrent entries and the sidebar's choices and folds (the torrents are this
+ * machine's), and the proxy password, which does not belong in a repository even a private one. Pure.
  */
 public final class SyncKeys {
 
     /**
      * {@code torrent.<hash>.*} describes a torrent of this machine, which another has not got;
      * {@code ui.sidebar.*} is what the sidebar has chosen and folded (whether it shows,
-     * {@code ui.sidebar} without the dot, travels).
+     * {@code ui.sidebar} without the dot, travels); {@code automation.*} names programs on this
+     * machine (the {@code notify.*} switches travel).
      */
-    static final List<String> LOCAL_PREFIXES = List.of("sync.", "torrent.", "ui.sidebar.");
+    static final List<String> LOCAL_PREFIXES = List.of("sync.", "torrent.", "ui.sidebar.", "automation.");
 
     static final List<String> LOCAL_KEYS = List.of(
             "download.dir",

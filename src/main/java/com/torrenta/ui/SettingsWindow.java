@@ -47,6 +47,8 @@ import javafx.stage.Window;
 import javafx.util.StringConverter;
 
 import com.torrenta.AppInfo;
+import com.torrenta.automation.AutomationSettings;
+import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.WatchFolder;
@@ -85,6 +87,7 @@ final class SettingsWindow {
         GENERAL(Group.APPLICATION, "General"),
         ADDING(Group.APPLICATION, "Adding torrents"),
         WATCH(Group.APPLICATION, "Watch folders"),
+        AUTOMATION(Group.APPLICATION, "Automation"),
         SYNC(Group.APPLICATION, "Sync"),
         LABELS(Group.APPLICATION, "Categories and tags"),
         CONNECTION(Group.ENGINE, "Connection"),
@@ -112,7 +115,7 @@ final class SettingsWindow {
     private static final String[] OWNED_KEYS = concat(
             new String[] {Settings.UPDATE_CHECK, Settings.ADD_START_PAUSED, Settings.ADD_SEQUENTIAL},
             concat(
-                    Settings.DOWNLOAD_KEYS,
+                    concat(Settings.DOWNLOAD_KEYS, Settings.AUTOMATION_KEYS),
                     concat(
                             Settings.CONNECTION_KEYS,
                             concat(
@@ -196,6 +199,20 @@ final class SettingsWindow {
     private TableView<WatchFolder> watchTable;
     private Label watchStatusLabel;
     private WatchFolderDialog watchDialog;
+
+    private TextField onAdded;
+    private TextField onFinished;
+    private TextField onSeedingDone;
+    private CheckBox notifyAdded;
+    private CheckBox notifyFinished;
+    private CheckBox notifySeedingDone;
+    private CheckBox notifyError;
+    /** The Automation page's Test button; the outcome lands in the event log. */
+    private Runnable testNotification = () -> {};
+
+    void setOnTestNotification(Runnable test) {
+        this.testNotification = test;
+    }
 
     /** The store the Watch folders page edits, and who to tell. */
     void setWatchFolders(WatchFolderStore store, WatchHost host) {
@@ -740,6 +757,7 @@ final class SettingsWindow {
             case GENERAL -> buildGeneral(page);
             case ADDING -> buildAdding(page);
             case WATCH -> buildWatch(page);
+            case AUTOMATION -> buildAutomation(page);
             case CONNECTION -> buildConnection(page);
             case PROTOCOL -> buildProtocol(page);
             case IP_FILTER -> buildIpFilter(page);
@@ -1218,6 +1236,106 @@ final class SettingsWindow {
         if (selected != null && watchTable.getItems().contains(selected))
             watchTable.getSelectionModel().select(selected);
         refreshWatchStatus();
+    }
+
+    private void buildAutomation(VBox page) {
+        VBox run = section(page, "Run on event");
+        onAdded = commandField(EngineEvent.Kind.ADDED);
+        row(
+                Category.AUTOMATION,
+                run,
+                "On added",
+                "Runs when a torrent is added to the session, not for the ones restored at start.",
+                onAdded,
+                "run program command script execute added");
+        onFinished = commandField(EngineEvent.Kind.FINISHED);
+        row(
+                Category.AUTOMATION,
+                run,
+                "On finished",
+                "Runs when a download completes.",
+                onFinished,
+                "run program command script execute finished complete download");
+        onSeedingDone = commandField(EngineEvent.Kind.SEEDING_DONE);
+        row(
+                Category.AUTOMATION,
+                run,
+                "On seeding done",
+                "Runs when a torrent reaches its share limit (Queue and share limits, or its own) and is paused or"
+                        + " removed.",
+                onSeedingDone,
+                "run program command script execute seeding done share ratio limit");
+        Label legend = new Label("The line is split like a shell would (quotes keep a value together) but no shell"
+                + " runs it; placeholders are filled in per argument, so a name with spaces stays one argument."
+                + " %N name  %L category  %G tags  %F content path  %R root path  %D save path  %C file count"
+                + "  %Z size in bytes  %T tracker  %I info-hash v1  %J info-hash v2  %K torrent id  %% percent."
+                + " Output and exit code go to the Event Log; a program still running after 10 minutes is killed."
+                + " These lines name programs on this machine and never sync.");
+        legend.setWrapText(true);
+        legend.getStyleClass().add("settings-row-description");
+        run.getChildren().add(legend);
+        rows.add(new Row(
+                Category.AUTOMATION, legend, "Placeholders | %N %L %G %F %R %D %C %Z %T %I %J %K shell quotes", run));
+
+        VBox notify = section(page, "Desktop notifications");
+        notifyAdded = notifyBox(EngineEvent.Kind.ADDED);
+        row(Category.AUTOMATION, notify, "Torrent added", "", notifyAdded, "notification notify desktop toast added");
+        notifyFinished = notifyBox(EngineEvent.Kind.FINISHED);
+        row(
+                Category.AUTOMATION,
+                notify,
+                "Download finished",
+                "",
+                notifyFinished,
+                "notification notify desktop toast finished complete");
+        notifySeedingDone = notifyBox(EngineEvent.Kind.SEEDING_DONE);
+        row(
+                Category.AUTOMATION,
+                notify,
+                "Seeding done",
+                "",
+                notifySeedingDone,
+                "notification notify desktop toast seeding share limit");
+        notifyError = notifyBox(EngineEvent.Kind.ERROR);
+        row(
+                Category.AUTOMATION,
+                notify,
+                "Torrent or tracker error",
+                "",
+                notifyError,
+                "notification notify desktop toast error tracker");
+        Button test = new Button("Test notification");
+        test.setOnAction(e -> testNotification.run());
+        row(
+                Category.AUTOMATION,
+                notify,
+                "Test",
+                "Shows one now, through notify-send on Linux, osascript on macOS and a PowerShell toast on Windows;"
+                        + " the Event Log says how it went.",
+                test,
+                "notification notify desktop toast test try");
+    }
+
+    private TextField commandField(EngineEvent.Kind kind) {
+        TextField field = new TextField();
+        field.setPrefColumnCount(30);
+        field.setPromptText("none");
+        field.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setEventCommand(kind, now);
+            settings.saveQuietly();
+        });
+        return field;
+    }
+
+    private CheckBox notifyBox(EngineEvent.Kind kind) {
+        CheckBox box = new CheckBox();
+        box.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setNotifies(kind, now);
+            settings.saveQuietly();
+        });
+        return box;
     }
 
     private void buildAdding(VBox page) {
@@ -1834,6 +1952,14 @@ final class SettingsWindow {
             syncInterval.getValueFactory().setValue(settings.syncIntervalMinutes());
             addStartPaused.setSelected(settings.addStartPaused());
             addSequential.setSelected(settings.addSequential());
+            AutomationSettings a = settings.automation();
+            onAdded.setText(a.onAdded());
+            onFinished.setText(a.onFinished());
+            onSeedingDone.setText(a.onSeedingDone());
+            notifyAdded.setSelected(a.notifyAdded());
+            notifyFinished.setSelected(a.notifyFinished());
+            notifySeedingDone.setSelected(a.notifySeedingDone());
+            notifyError.setSelected(a.notifyError());
             EngineSettings e = settings.engineSettings();
             port.getValueFactory().setValue(e.listenPort());
             randomPort.setSelected(e.randomPort());

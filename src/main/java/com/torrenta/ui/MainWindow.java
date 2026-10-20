@@ -59,6 +59,8 @@ import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
 import com.torrenta.AppInfo;
+import com.torrenta.automation.Automation;
+import com.torrenta.automation.Notifiers;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
 import com.torrenta.engine.Engine;
@@ -119,6 +121,9 @@ public final class MainWindow {
     private final LabelStore labels;
     private final WatchFolderStore watchStore;
     private WatchFolders watcher;
+    /** Runs the person's commands and shows notifications; made with the engine in {@link #listenTo}. */
+    private volatile Automation automation;
+
     private Sidebar sidebar;
     private SidebarSelection sidebarSelection = SidebarSelection.ALL;
     private String lastClipboardOffer = "";
@@ -176,6 +181,10 @@ public final class MainWindow {
         settingsWindow.setLabels(labels, new LabelsHost());
         settingsWindow.setOnIpFilterChanged(this::refreshIpFilter, this::ipFilterStatusText);
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
+        settingsWindow.setOnTestNotification(() -> {
+            Automation a = automation;
+            if (a != null) a.testNotification();
+        });
         sync = new SettingsSync(settings, configDir, new SyncHost());
         settingsWindow.setSync(sync);
         sync.addListener(() -> {
@@ -234,7 +243,7 @@ public final class MainWindow {
         return engineDescription;
     }
 
-    /** What to photograph: the open Add dialog if there is one, else the window. */
+    /** What to photograph: the open Add dialog if there is one, else a window of ours, else the window. */
     public javafx.scene.Scene captureScene() {
         if (currentDialog != null && currentDialog.isShowing()) return currentDialog.scene();
         if (limitsDialog != null && limitsDialog.isShowing()) return limitsDialog.scene();
@@ -245,6 +254,7 @@ public final class MainWindow {
             return aboutDialog.getDialogPane().getScene();
         if (settingsWindow.dialogScene() != null) return settingsWindow.dialogScene();
         if (settingsWindow.isShowing()) return settingsWindow.scene();
+        if (logWindow.isShowing()) return logWindow.scene();
         return stage.getScene();
     }
 
@@ -348,10 +358,26 @@ public final class MainWindow {
      * the engine's alert thread; the log and the status bar are FX-owned, hence the hop.
      */
     public void listenTo(Engine engine) {
-        engine.addListener(event -> Platform.runLater(() -> {
+        automation = new Automation(engine, settings::automation, Notifiers.forPlatform(), this::reportFromWorker);
+        engine.addListener(event -> {
+            // The automation decides on the alert thread and does its work on threads of its own.
+            automation.handle(event);
+            Platform.runLater(() -> {
+                log.add(event);
+                setStatus(event.message());
+            });
+        });
+    }
+
+    /**
+     * Any thread: an event from a worker of the window's own (the automation) into the log. A
+     * command's output lines go to the log only; the status bar keeps the line that says it ran.
+     */
+    private void reportFromWorker(EngineEvent event) {
+        Platform.runLater(() -> {
             log.add(event);
-            setStatus(event.message());
-        }));
+            if (!event.message().startsWith(Automation.OUTPUT_PREFIX)) setStatus(event.message());
+        });
     }
 
     /** FX thread. The engine has started; flush what was queued and begin polling. */
@@ -821,8 +847,13 @@ public final class MainWindow {
             }
             String message = text;
             boolean removed = due.get() == ShareLimit.Action.REMOVE;
+            EngineEvent event =
+                    EngineEvent.of(EngineEvent.Kind.SEEDING_DONE, EngineEvent.Level.INFO, t.id(), t.name(), message);
+            // The snapshot goes along: a removed torrent cannot be looked up for the placeholders.
+            Automation a = automation;
+            if (a != null) a.handle(event, t);
             Platform.runLater(() -> {
-                log.add(EngineEvent.info(t.id(), t.name(), message));
+                log.add(event);
                 setStatus(message);
                 if (removed) forgetOverride(t.id());
             });

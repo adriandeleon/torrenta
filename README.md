@@ -44,7 +44,10 @@ scripts/dev-run.sh -- "magnet:?xt=urn:btih:…"    # with arguments for the app
 Builds need a JDK 25: the formatter (Palantir 2.92) does not run on JDK 27.
 
 A folder can be watched for `.torrent` and `.magnet` files (Settings → Watch folders): what lands
-there is added without a dialog, then deleted or renamed `.added`.
+there is added without a dialog, then deleted or renamed `.added`. A program can run when a
+torrent is added, finishes or is done seeding (Settings → Automation, qBittorrent's `%N` `%F`
+`%D` … placeholders, no shell), and a desktop notification can be shown for each of those and for
+errors, through `notify-send`, `osascript` or a PowerShell toast.
 
 ### Building a native app image
 
@@ -92,7 +95,10 @@ Add dialog's line under the save path says where the files start and how much ro
 filed under which is `torrents/<info-hash>.labels` beside its resume data, written the moment it
 changes and deleted with the torrent. Watch folders are `watch-folders.json` (folder, what to do
 with the file, save path, category, start paused), this machine's and never synced; a file that is
-not a torrent is renamed `.invalid` and left alone. A torrent's own share limit (Torrent → Limits…)
+not a torrent is renamed `.invalid` and left alone. The commands run on an event are
+`automation.onAdded`, `automation.onFinished` and `automation.onSeedingDone` in the settings file,
+this machine's too (they name its programs); the notification switches are `notify.added`,
+`notify.finished`, `notify.seedingDone` and `notify.error` and do sync. A torrent's own share limit (Torrent → Limits…)
 is kept there as `torrent.<info-hash>.share` and goes with the torrent when it is removed; its rate
 caps and connection counts are libtorrent's and live in its resume data. The global queue and share
 limits are `queue.*` and `share.*`. The theme is there too, under General →
@@ -131,7 +137,7 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
 | `Ctrl+B` / `Ctrl+Shift+B` | Focus the sidebar (All, then Status, Categories, Tags and Trackers, every entry with a count; arrows walk every section, `Space` makes the entry the section's choice, `Enter` chooses and returns to the list, `Esc` returns without choosing; `Left`/`Right` fold a section) / show or hide it |
 | `Ctrl+Shift+P` | Command palette: every command, found by typing part of its name |
-| `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Categories and tags (names, save paths, delete), Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
+| `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Categories and tags (names, save paths, delete), Watch folders, Automation (a command per event with placeholders, desktop notifications), Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
 | `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
 | `Space` | Pause the selected torrents, or resume them if all are paused |

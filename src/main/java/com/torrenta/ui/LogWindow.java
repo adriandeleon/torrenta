@@ -112,6 +112,11 @@ final class LogWindow {
         }
     }
 
+    /** For a capture of the log itself. */
+    Scene scene() {
+        return stage.getScene();
+    }
+
     boolean isShowing() {
         return stage.isShowing();
     }

@@ -334,6 +334,9 @@ class LibtorrentEngineTest {
             assertFalse(g.isPrivate());
             assertTrue(g.activeSeconds() < 600, "seconds, not milliseconds: " + g.activeSeconds());
             assertTrue(g.seedingSeconds() <= g.activeSeconds());
+            assertEquals(40, g.infoHashV1().length(), "the v1 hash, hex: " + g.infoHashV1());
+            assertTrue(
+                    g.infoHashV2().isEmpty() || g.infoHashV2().length() == 64, "the full v2 hash: " + g.infoHashV2());
 
             assertEquals(2, detail.files().size(), "padding files hidden");
             TorrentDetail.FileStatus a = detail.files().get(0);
