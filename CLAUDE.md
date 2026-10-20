@@ -146,6 +146,16 @@ release process with the names changed; Termina's README and memory hold the war
 - **`settings_pack` enum constants are SWIG objects**, like every other libtorrent4j constant:
   `toPack` runs only after the native has loaded. Keys are set by `swigValue()` through the pack's
   generic `setBoolean`/`setInteger`/`setString`; the typed setters cover only a few.
+- **A SWIG vector element is a pointer into the vector, and the vector's finalizer frees it.**
+  `torrent_handle_vector.get(i)`, `announce_entry_vector.get(i)`, `peer_info_vector.get(i)` (and
+  libtorrent4j's own `SessionHandle.torrents()`, `TorrentHandle.trackers()`/`peerInfo()`, which are
+  built on them) hand out proxies with `swigCMemOwn=false`; once the vector is unreachable the
+  collector frees the elements under them, and the next native call on one is a use-after-free that
+  killed the CI JVM inside `file_progress`. The engine therefore keeps handles only as the session's
+  own copies (`find_torrent`), copies trackers and peers through their SWIG copy constructors, and
+  holds every vector with `Reference.reachabilityFence` until the copies are made. Anything that
+  points into a parent (`status.pieces()`, `info.files()`) is used while the parent is fenced. CI
+  runs the Linux tests with `MALLOC_PERTURB_` so a slip crashes every time, not once in a hundred.
 - **The IP filter is replaced whole, never merged**: `set_ip_filter` takes a complete
   `ip_filter`, so the controller rebuilds it from cache + local file + bans every time. A filter
   set before `start()` is applied at start, so no peer slips in while the first download runs.
