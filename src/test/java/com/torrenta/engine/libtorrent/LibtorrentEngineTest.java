@@ -16,6 +16,7 @@ import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
+import com.torrenta.engine.TorrentStorage;
 import com.torrenta.store.TorrentStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -537,6 +538,26 @@ class LibtorrentEngineTest {
         }
     }
 
+    /** Every regular file under the folder with its size, for a failure message. */
+    private static String onDisk(Path root) {
+        if (root == null || !Files.isDirectory(root)) return "(nothing)";
+        try (java.util.stream.Stream<Path> walk = Files.walk(root)) {
+            return walk.filter(Files::isRegularFile)
+                    .map(f -> {
+                        try {
+                            return root.relativize(f) + "=" + Files.size(f);
+                        } catch (java.io.IOException e) {
+                            return root.relativize(f) + "=?";
+                        }
+                    })
+                    .sorted()
+                    .toList()
+                    .toString();
+        } catch (java.io.IOException e) {
+            return "(unreadable: " + e.getMessage() + ")";
+        }
+    }
+
     /** Runs the collector and the finalizer, then churns the native heap so freed memory is reused. */
     @SuppressWarnings("removal")
     private static void collect() {
@@ -761,6 +782,238 @@ class LibtorrentEngineTest {
         }
         assertEquals(TorrentState.FETCHING_METADATA, LibtorrentEngine.state(TorrentStatus.State.DOWNLOADING_METADATA));
         assertEquals(TorrentState.CHECKING, LibtorrentEngine.state(TorrentStatus.State.CHECKING_RESUME_DATA));
+    }
+
+    /**
+     * A torrent downloaded over loopback from a second engine: the one way to see the engine
+     * write files, rather than find them. The seeder has the data under {@code dir/seed/pair}.
+     */
+    private static LibtorrentEngine seeder(Path dir, byte[] torrent) throws Exception {
+        LibtorrentEngine seed = new LibtorrentEngine(dir.resolve("seed"), new TorrentStore(dir.resolve("seedstore")));
+        seed.start();
+        seed.add(new AddRequest(
+                new AddRequest.TorrentFile(torrent, "pair.torrent"),
+                dir.resolve("seed"),
+                false,
+                false,
+                false,
+                AddRequest.StopCondition.NONE,
+                Map.of(),
+                TorrentLabels.NONE));
+        await("seeder seeding", () -> seed.torrents().get(0).state() == TorrentState.SEEDING);
+        return seed;
+    }
+
+    /**
+     * Waits for the condition while telling the torrent about the seeder whenever it has no peer,
+     * at most once a second: a second connection from the same address makes the seeder drop
+     * one as a duplicate, which stalls the transfer.
+     */
+    private static void awaitDownload(
+            String what, LibtorrentEngine engine, String id, LibtorrentEngine seed, Condition condition)
+            throws Exception {
+        int port = seed.listenPortForTest();
+        long deadline = System.currentTimeMillis() + 20_000;
+        long nextConnect = 0;
+        while (!condition.test()) {
+            if (System.currentTimeMillis() > deadline) {
+                throw new AssertionError("timed out waiting for: " + what + "; torrent " + engine.torrents()
+                        + "; files "
+                        + engine.detail(id).files() + "; on disk "
+                        + onDisk(Path.of(engine.torrents().get(0).savePath()).getParent()));
+            }
+            if (System.currentTimeMillis() >= nextConnect
+                    && engine.torrents().get(0).peers() == 0) {
+                engine.connectPeerForTest(id, port);
+                nextConnect = System.currentTimeMillis() + 1000;
+            }
+            Thread.sleep(25);
+        }
+    }
+
+    /** A file partly downloaded whose file on disk is already its full size: pre-allocated. */
+    private static boolean aPartialFileIsFullSize(LibtorrentEngine engine, String id, Path saveDir) throws Exception {
+        for (TorrentDetail.FileStatus f : engine.detail(id).files()) {
+            if (f.done() <= 0 || f.done() >= f.size()) continue;
+            Path onDisk = saveDir.resolve(f.path());
+            Path part = saveDir.resolve(f.path() + TorrentStorage.SUFFIX);
+            Path file = Files.isRegularFile(part) ? part : onDisk;
+            if (Files.isRegularFile(file) && Files.size(file) == f.size()) return true;
+        }
+        return false;
+    }
+
+    @Test
+    void anIncompleteFolderIsLeftForTheDestinationOnFinish(@TempDir Path dir) throws Exception {
+        byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
+        Path downloads = dir.resolve("downloads");
+        Path incomplete = dir.resolve("incomplete");
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine seed = seeder(dir, torrent);
+                LibtorrentEngine engine = engine(dir, store)) {
+            engine.addListener(events::add);
+            engine.start();
+            Torrent t = engine.add(
+                    downloadsTorrent(dir, torrent).withStorage(new AddRequest.Storage(incomplete, false, false)));
+            assertEquals(incomplete.toString(), t.savePath(), "starts in the incomplete folder");
+            assertEquals(downloads.toString(), engine.storageForTest(t.id()).destination());
+            assertTrue(store.loadStorage(t.id()).isPresent(), "the destination is on disk at once");
+
+            awaitDownload("downloaded and moved", engine, t.id(), seed, () -> {
+                Torrent now = engine.torrents().get(0);
+                return now.progress() >= 1.0 - 1e-6 && now.savePath().equals(downloads.toString());
+            });
+            assertTrue(Files.isRegularFile(downloads.resolve("pair").resolve("a.bin")));
+            assertTrue(
+                    Files.isRegularFile(downloads.resolve("pair").resolve("sub").resolve("b.bin")));
+            assertFalse(Files.exists(incomplete.resolve("pair").resolve("a.bin")), "moved, not copied");
+            await(
+                    "nothing owed any more",
+                    () -> engine.storageForTest(t.id()).isEmpty()
+                            && store.loadStorage(t.id()).isEmpty());
+            await(
+                    "the move is in the log",
+                    () -> events.stream().anyMatch(e -> e.message().equals("Moved pair to " + downloads)));
+            assertEquals(downloads.toString(), engine.detail(t.id()).general().savePath());
+        }
+    }
+
+    @Test
+    void theMoveAndTheSuffixSurviveARestart(@TempDir Path dir) throws Exception {
+        byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
+        Path downloads = dir.resolve("downloads");
+        Path incomplete = dir.resolve("incomplete");
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        String id;
+        try (LibtorrentEngine engine = engine(dir, store)) {
+            engine.start();
+            AddRequest paused = new AddRequest(
+                    new AddRequest.TorrentFile(torrent, "pair.torrent"),
+                    downloads,
+                    true,
+                    true,
+                    false,
+                    AddRequest.StopCondition.NONE,
+                    Map.of(),
+                    TorrentLabels.NONE,
+                    new AddRequest.Storage(incomplete, true, true));
+            id = engine.add(paused).id();
+            // The suffix goes on once the check is over, paused or not. No file exists yet (a
+            // file is allocated when it is first written to), and the handle's torrent_file()
+            // keeps the original names in libtorrent 2.1, so the sidecar is what says so.
+            await(
+                    "both files suffixed",
+                    () -> engine.storageForTest(id).suffixed().size() == 2);
+            assertFalse(Files.exists(incomplete.resolve("pair")), "nothing written while paused");
+            assertTrue(
+                    engine.detail(id).files().stream().noneMatch(f -> f.path().endsWith(".part")),
+                    "the detail pane shows the files by their own names");
+            await("resume data written", () -> store.contains(id));
+        }
+        TorrentStorage owed = TorrentStorage.decode(store.loadStorage(id).orElseThrow());
+        assertEquals(downloads.toString(), owed.destination());
+        assertTrue(owed.partSuffix());
+        assertEquals(2, owed.suffixed().size());
+
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine seed = seeder(dir, torrent);
+                LibtorrentEngine again = engine(dir, store)) {
+            again.addListener(events::add);
+            again.start();
+            assertEquals(owed, again.storageForTest(id), "read back with the resume data");
+            Torrent back = again.torrents().get(0);
+            assertTrue(back.paused());
+            assertEquals(incomplete.toString(), back.savePath());
+            // Throttled so there is a moment to look at the files while they are incomplete: on
+            // disk under the suffix, in the torrent's own folder (the resume data had dropped the
+            // folder; see restoreSuffixes), and at full size from the first piece.
+            again.setLimits(id, new com.torrenta.engine.TorrentLimits(48 * 1024, 0, 0, 0, false));
+            again.resume(id);
+            Path aPart = incomplete.resolve("pair").resolve("a.bin.part");
+            Path bPart = incomplete.resolve("pair").resolve("sub").resolve("b.bin.part");
+            awaitDownload(
+                    "a suffixed file in the torrent's folder, allocated in full",
+                    again,
+                    id,
+                    seed,
+                    () -> (Files.isRegularFile(aPart) || Files.isRegularFile(bPart))
+                            && aPartialFileIsFullSize(again, id, incomplete));
+            assertFalse(Files.exists(incomplete.resolve("a.bin.part")), "not beside the folder");
+            again.setLimits(id, com.torrenta.engine.TorrentLimits.NONE);
+            awaitDownload("downloaded, renamed and moved", again, id, seed, () -> {
+                Torrent now = again.torrents().get(0);
+                return now.progress() >= 1.0 - 1e-6 && now.savePath().equals(downloads.toString());
+            });
+            await(
+                    "nothing to take back",
+                    () -> again.storageForTest(id).suffixed().isEmpty());
+            assertTrue(Files.isRegularFile(downloads.resolve("pair").resolve("a.bin")), "its own name again");
+            assertTrue(
+                    Files.isRegularFile(downloads.resolve("pair").resolve("sub").resolve("b.bin")));
+            assertFalse(Files.exists(downloads.resolve("pair").resolve("a.bin.part")));
+            assertFalse(Files.exists(aPart));
+            assertTrue(again.detail(id).files().stream().noneMatch(f -> f.path().endsWith(".part")));
+            await(
+                    "the move is in the log",
+                    () -> events.stream().anyMatch(e -> e.message().startsWith("Moved pair to ")));
+            // The suffix is still wanted (a file set to ignore and wanted later would get it), so
+            // the sidecar stays; the destination is done with.
+            assertEquals("", again.storageForTest(id).destination());
+        }
+    }
+
+    @Test
+    void preallocationWritesEachFileAtFullSizeFromItsFirstPiece(@TempDir Path dir) throws Exception {
+        byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
+        Path downloads = dir.resolve("downloads");
+        try (LibtorrentEngine seed = seeder(dir, torrent);
+                LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            AddRequest sequential = new AddRequest(
+                    new AddRequest.TorrentFile(torrent, "pair.torrent"),
+                    downloads,
+                    false,
+                    true,
+                    false,
+                    AddRequest.StopCondition.NONE,
+                    Map.of(),
+                    TorrentLabels.NONE,
+                    new AddRequest.Storage(null, false, true));
+            Torrent t = engine.add(sequential);
+            assertTrue(engine.storageForTest(t.id()).isEmpty(), "nothing owed: no sidecar for allocation alone");
+            engine.setLimits(t.id(), new com.torrenta.engine.TorrentLimits(48 * 1024, 0, 0, 0, false));
+            awaitDownload(
+                    "a file at full size while partly downloaded",
+                    engine,
+                    t.id(),
+                    seed,
+                    () -> aPartialFileIsFullSize(engine, t.id(), downloads));
+            // libtorrent 2.x allocates a file when it is first written to, not at add: nothing
+            // of a file no piece has reached yet is on disk.
+            assertFalse(Files.isRegularFile(downloads.resolve("pair").resolve("a.bin"))
+                    && Files.isRegularFile(
+                            downloads.resolve("pair").resolve("sub").resolve("b.bin"))
+                    && engine.torrents().get(0).progress() < 0.3);
+        }
+    }
+
+    @Test
+    void aFileThatIsAlreadyCompleteKeepsItsNameWhenTheSuffixIsOn(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "pair");
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            Torrent t =
+                    engine.add(downloadsTorrent(dir, torrent).withStorage(new AddRequest.Storage(null, true, false)));
+            await("seeding", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+            await("checked", () -> engine.detail(t.id()).files().size() == 2);
+            assertTrue(Files.isRegularFile(downloads.resolve("pair").resolve("a.bin")));
+            assertFalse(Files.exists(downloads.resolve("pair").resolve("a.bin.part")));
+            assertTrue(engine.detail(t.id()).files().stream()
+                    .noneMatch(f -> f.path().endsWith(".part")));
+            assertTrue(engine.storageForTest(t.id()).suffixed().isEmpty());
+        }
     }
 
     private static LibtorrentEngine engine(Path dir) {

@@ -250,7 +250,11 @@ Everything in Settings that the engine already knows how to do.
 
 1. ✓ **Categories and tags** with sidebar filters and automatic torrent management.
 2. ✓ **Sidebar** status and tracker filters, counts, remembered selection.
-3. **Incomplete folder, suffix, pre-allocation.**
+3. ✓ **Incomplete folder, suffix, pre-allocation.** The suffix goes on after the check and off
+   per file, through `rename_file`; libtorrent 2.1 writes a renamed file into the resume data
+   relative to the torrent's folder but reads it back relative to the save path, so the engine
+   puts the full names back from its `.storage` sidecar before re-adding. Allocation is on each
+   file's first write in libtorrent 2.x, not at add.
 4. **Watch folders.**
 5. **Run on event** (added, finished, seeding done) with placeholders; desktop notifications.
 
