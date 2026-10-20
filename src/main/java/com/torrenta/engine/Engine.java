@@ -77,6 +77,13 @@ public interface Engine extends AutoCloseable {
     /** Applies connection settings now, to the running session; also the ones used at start. */
     void applySettings(EngineSettings settings) throws EngineException;
 
+    /**
+     * Re-evaluates the speed limits for this moment: the alternative pair if its schedule says so
+     * or it is on by hand, the normal pair otherwise. Called every minute by the window and after
+     * any change. Returns whether the alternative pair is in force.
+     */
+    boolean refreshLimits(java.time.LocalDateTime now) throws EngineException;
+
     /** Replaces the IP filter: peers in these ranges are refused. Empty clears it. */
     void setIpFilter(List<IpRange> ranges) throws EngineException;
 

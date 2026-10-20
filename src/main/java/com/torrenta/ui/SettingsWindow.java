@@ -74,7 +74,8 @@ final class SettingsWindow {
         ADDING(Group.APPLICATION, "Adding torrents"),
         CONNECTION(Group.ENGINE, "Connection"),
         PROTOCOL(Group.ENGINE, "Protocol"),
-        IP_FILTER(Group.ENGINE, "IP filter");
+        IP_FILTER(Group.ENGINE, "IP filter"),
+        SPEED(Group.ENGINE, "Speed");
 
         final Group group;
         private final String title;
@@ -96,7 +97,9 @@ final class SettingsWindow {
             new String[] {
                 Settings.DOWNLOAD_DIR, Settings.UPDATE_CHECK, Settings.ADD_START_PAUSED, Settings.ADD_SEQUENTIAL
             },
-            concat(Settings.CONNECTION_KEYS, concat(Settings.PROTOCOL_KEYS, Settings.IPFILTER_KEYS)));
+            concat(
+                    Settings.CONNECTION_KEYS,
+                    concat(Settings.PROTOCOL_KEYS, concat(Settings.IPFILTER_KEYS, Settings.SPEED_KEYS))));
 
     /** Told after an IP filter setting changed; {@code true} asks for a download now. */
     private java.util.function.Consumer<Boolean> onIpFilterChanged = force -> {};
@@ -173,6 +176,17 @@ final class SettingsWindow {
     private TextField ipFilterFile;
     private TextArea ipFilterBans;
     private Label ipFilterStatusLabel;
+    private Spinner<Integer> speedDown;
+    private Spinner<Integer> speedUp;
+    private Spinner<Integer> altDown;
+    private Spinner<Integer> altUp;
+    private CheckBox altOn;
+    private CheckBox scheduleOn;
+    private TextField scheduleFrom;
+    private TextField scheduleTo;
+    private final java.util.Map<java.time.DayOfWeek, CheckBox> scheduleDays =
+            new java.util.EnumMap<>(java.time.DayOfWeek.class);
+    private CheckBox countOverhead;
 
     SettingsWindow(Settings settings) {
         this.settings = settings;
@@ -384,6 +398,7 @@ final class SettingsWindow {
             case CONNECTION -> buildConnection(page);
             case PROTOCOL -> buildProtocol(page);
             case IP_FILTER -> buildIpFilter(page);
+            case SPEED -> buildSpeed(page);
         }
         page.setPadding(new Insets(0, PAGE_GUTTER, 0, 0));
         ScrollPane scroll = new ScrollPane(page);
@@ -841,6 +856,104 @@ final class SettingsWindow {
         row(Category.IP_FILTER, bans, "Status", "", ipFilterStatusLabel, "loaded ranges blocked");
     }
 
+    private void buildSpeed(VBox page) {
+        VBox limits = section(page, "Limits (KiB/s, 0 for none)");
+        speedDown = intSpinner(0, 10_000_000, Settings.SPEED_DOWNLOAD);
+        row(
+                Category.SPEED,
+                limits,
+                "Download",
+                "The whole session, all torrents together.",
+                speedDown,
+                "rate limit cap kb");
+        speedUp = intSpinner(0, 10_000_000, Settings.SPEED_UPLOAD);
+        row(
+                Category.SPEED,
+                limits,
+                "Upload",
+                "A sensible upload cap keeps a home connection responsive.",
+                speedUp,
+                "rate limit cap kb");
+
+        VBox alternative = section(page, "Alternative limits");
+        altDown = intSpinner(0, 10_000_000, Settings.SPEED_ALT_DOWNLOAD);
+        row(
+                Category.SPEED,
+                alternative,
+                "Alternative download",
+                "Used while the toggle below is on, or during the scheduled hours.",
+                altDown,
+                "alt rate night");
+        altUp = intSpinner(0, 10_000_000, Settings.SPEED_ALT_UPLOAD);
+        row(Category.SPEED, alternative, "Alternative upload", "", altUp, "alt rate night");
+        altOn = bool(Settings.SPEED_ALT_ON);
+        row(
+                Category.SPEED,
+                alternative,
+                "Use alternative limits now",
+                "Also toggled from the status bar.",
+                altOn,
+                "toggle turtle");
+
+        VBox schedule = section(page, "Schedule");
+        scheduleOn = bool(Settings.SPEED_SCHEDULE_ON);
+        row(
+                Category.SPEED,
+                schedule,
+                "Switch to the alternative limits on a schedule",
+                "Checked every minute. A window that ends before it starts spans midnight.",
+                scheduleOn,
+                "time night hours");
+        scheduleFrom = timeField(Settings.SPEED_SCHEDULE_FROM);
+        row(Category.SPEED, schedule, "From", "24-hour clock, HH:mm.", scheduleFrom, "start time");
+        scheduleTo = timeField(Settings.SPEED_SCHEDULE_TO);
+        row(Category.SPEED, schedule, "To", "", scheduleTo, "end time");
+        HBox days = new HBox(8);
+        for (java.time.DayOfWeek day : java.time.DayOfWeek.values()) {
+            CheckBox box = new CheckBox(day.getDisplayName(java.time.format.TextStyle.SHORT, Locale.getDefault()));
+            box.selectedProperty().addListener((o, was, now) -> {
+                if (loading) return;
+                settings.set(Settings.SPEED_SCHEDULE_DAYS, Settings.formatDays(selectedDays()));
+                changed();
+            });
+            scheduleDays.put(day, box);
+            days.getChildren().add(box);
+        }
+        row(Category.SPEED, schedule, "Days", "", days, "weekdays weekend");
+
+        VBox options = section(page, "Options");
+        countOverhead = bool(Settings.SPEED_COUNT_OVERHEAD);
+        row(
+                Category.SPEED,
+                options,
+                "Count protocol overhead",
+                "Rate-limit TCP/IP headers too, so the limit matches what the line carries rather than the payload alone.",
+                countOverhead,
+                "ip overhead headers");
+    }
+
+    private java.util.Set<java.time.DayOfWeek> selectedDays() {
+        java.util.Set<java.time.DayOfWeek> out = java.util.EnumSet.noneOf(java.time.DayOfWeek.class);
+        scheduleDays.forEach((day, box) -> {
+            if (box.isSelected()) out.add(day);
+        });
+        return out;
+    }
+
+    /** An HH:mm field that writes its key only when the text is a valid time. */
+    private TextField timeField(String key) {
+        TextField field = new TextField();
+        field.setPrefColumnCount(5);
+        field.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            if (Settings.parseMinutes(now).isPresent()) {
+                settings.set(key, now.trim());
+                changed();
+            }
+        });
+        return field;
+    }
+
     /** A spinner that writes its key when the value changes, typed or stepped. */
     private Spinner<Integer> intSpinner(int min, int max, String key) {
         Spinner<Integer> spinner = new Spinner<>(new SpinnerValueFactory.IntegerSpinnerValueFactory(min, max, min));
@@ -921,6 +1034,17 @@ final class SettingsWindow {
             ipFilterFile.setText(settings.ipFilterFile());
             ipFilterBans.setText(String.join("\n", settings.ipFilterBans()));
             ipFilterStatusLabel.setText(ipFilterStatus.get());
+            EngineSettings.Speed sp = e.speed();
+            speedDown.getValueFactory().setValue(sp.download());
+            speedUp.getValueFactory().setValue(sp.upload());
+            altDown.getValueFactory().setValue(sp.alternativeDownload());
+            altUp.getValueFactory().setValue(sp.alternativeUpload());
+            altOn.setSelected(sp.alternativeOn());
+            scheduleOn.setSelected(sp.scheduleOn());
+            scheduleFrom.setText(Settings.formatMinutes(sp.scheduleFrom()));
+            scheduleTo.setText(Settings.formatMinutes(sp.scheduleTo()));
+            scheduleDays.forEach((day, box) -> box.setSelected(sp.scheduleDays().contains(day)));
+            countOverhead.setSelected(sp.countOverhead());
         } finally {
             loading = false;
         }

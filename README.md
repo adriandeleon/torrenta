@@ -103,7 +103,7 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+V` | Add whatever magnet or torrent link is on the clipboard; the status bar says when there is one |
 | `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
 | `Ctrl+Shift+P` | Command palette: every command, found by typing part of its name |
-| `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) and IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans); searchable, applies live |
+| `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans) and Speed (limits, alternative limits with a weekly schedule, overhead); searchable, applies live |
 | `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
 | `Space` | Pause the selected torrents, or resume them if all are paused |
@@ -118,7 +118,8 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 
 Every action is in the Torrent menu, the list's right-click menu and the palette, and applies to
 the whole selection. `.torrent` files and links can also be dropped on the window, and anything on
-the command line goes through the same Add dialog. The status bar shows the latest event; an error count appears there while
+the command line goes through the same Add dialog. The status bar's "Alt speed" switches the
+alternative speed limits by hand; the schedule in Settings switches them by the clock. The status bar shows the latest event; an error count appears there while
 there are errors, and a click on it opens the log.
 
 The list's columns (fifteen, from the header's ⋮ menu) keep their order, widths and visibility in

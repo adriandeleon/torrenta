@@ -156,6 +156,10 @@ release process with the names changed; Termina's README and memory hold the war
   holds every vector with `Reference.reachabilityFence` until the copies are made. Anything that
   points into a parent (`status.pieces()`, `info.files()`) is used while the parent is fenced. CI
   runs the Linux tests with `MALLOC_PERTURB_` so a slip crashes every time, not once in a hundred.
+- **Speed limits are re-evaluated every minute** (`Engine.refreshLimits(now)`, from the window's
+  poller) and after any settings change; the pair in force is `Speed.alternativeActive(now)`,
+  a pure rule with the overnight case tested. Limits are KiB/s in settings and bytes/s in the
+  pack; 0 is "none" on both sides.
 - **The IP filter is replaced whole, never merged**: `set_ip_filter` takes a complete
   `ip_filter`, so the controller rebuilds it from cache + local file + bans every time. A filter
   set before `start()` is applied at start, so no peer slips in while the first download runs.

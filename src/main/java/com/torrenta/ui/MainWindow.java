@@ -111,6 +111,7 @@ public final class MainWindow {
     private final MenuItem downloadUpdateItem = new MenuItem();
     private final MenuItem skipUpdateItem = new MenuItem();
     private final Label updateBadge = new Label();
+    private final Label altSpeedToggle = new Label();
     private ReleaseInfo availableUpdate;
     private Alert aboutDialog;
     private SplitPane split;
@@ -295,6 +296,32 @@ public final class MainWindow {
             ipFilter.refresh(false, this::reportIpFilter);
         });
         poller.scheduleAtFixedRate(() -> ipFilter.refresh(false, this::reportIpFilter), 1, 1, TimeUnit.HOURS);
+        // The schedule is checked every minute; a change of state applies the other pair.
+        poller.scheduleAtFixedRate(this::refreshLimits, 0, 60, TimeUnit.SECONDS);
+    }
+
+    // ---- speed ----------------------------------------------------------------------------------
+
+    private void refreshLimits() {
+        Engine e = engine;
+        if (e == null) return;
+        try {
+            boolean alternative = e.refreshLimits(java.time.LocalDateTime.now());
+            Platform.runLater(() -> {
+                altSpeedToggle.setText("Alt speed: " + (alternative ? "on" : "off"));
+                altSpeedToggle.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("active"), alternative);
+            });
+        } catch (EngineException ex) {
+            Platform.runLater(() -> setStatus(ex.getMessage()));
+        }
+    }
+
+    private void toggleAlternativeSpeed() {
+        boolean on = !settings.engineSettings().speed().alternativeOn();
+        settings.set(Settings.SPEED_ALT_ON, String.valueOf(on));
+        settings.saveQuietly();
+        setStatus(on ? "Alternative speed limits on" : "Alternative speed limits off");
+        applyEngineSettings();
     }
 
     // ---- IP filter ------------------------------------------------------------------------------
@@ -342,6 +369,7 @@ public final class MainWindow {
         Thread.ofVirtual().name("engine-settings").start(() -> {
             try {
                 e.applySettings(current);
+                refreshLimits();
             } catch (EngineException ex) {
                 Platform.runLater(() -> setStatus(ex.getMessage()));
             }
@@ -1201,7 +1229,11 @@ public final class MainWindow {
         updateBadge.setVisible(false);
         updateBadge.setManaged(false);
         updateBadge.setOnMouseClicked(e -> downloadUpdate());
-        HBox bar = new HBox(12, status, spacer, updateBadge, errorBadge, rates);
+        // The alternative-speed toggle: a click flips the manual switch; the schedule shows too.
+        altSpeedToggle.getStyleClass().add("alt-speed");
+        altSpeedToggle.setText("Alt speed: off");
+        altSpeedToggle.setOnMouseClicked(e -> toggleAlternativeSpeed());
+        HBox bar = new HBox(12, status, spacer, altSpeedToggle, updateBadge, errorBadge, rates);
         bar.setPadding(new Insets(4, 10, 4, 10));
         bar.getStyleClass().add("status-bar");
         return bar;

@@ -16,6 +16,7 @@ import java.util.Locale;
  * @param proxy the proxy, or {@link ProxyType#NONE}
  * @param proxyPeers send peer connections through the proxy too, not only trackers
  * @param protocol the protocol page: discovery, transport, encryption, default trackers
+ * @param speed the speed page: limits, alternative limits, their schedule
  */
 public record EngineSettings(
         int listenPort,
@@ -32,7 +33,88 @@ public record EngineSettings(
         String proxyUsername,
         String proxyPassword,
         boolean proxyPeers,
-        Protocol protocol) {
+        Protocol protocol,
+        Speed speed) {
+
+    /**
+     * The Speed page. Limits are KiB/s, 0 meaning none. The alternative pair is used while
+     * {@code alternativeOn} is set by hand or the schedule says so.
+     *
+     * @param scheduleFrom minutes after midnight; a window that ends before it starts spans midnight
+     * @param scheduleDays the days the window applies, by {@link java.time.DayOfWeek}
+     * @param countOverhead rate-limit IP overhead too, not only payload
+     */
+    public record Speed(
+            int download,
+            int upload,
+            int alternativeDownload,
+            int alternativeUpload,
+            boolean alternativeOn,
+            boolean scheduleOn,
+            int scheduleFrom,
+            int scheduleTo,
+            java.util.Set<java.time.DayOfWeek> scheduleDays,
+            boolean countOverhead) {
+
+        public static Speed defaults() {
+            return new Speed(
+                    0,
+                    0,
+                    0,
+                    0,
+                    false,
+                    false,
+                    22 * 60,
+                    8 * 60,
+                    java.util.EnumSet.allOf(java.time.DayOfWeek.class),
+                    false);
+        }
+
+        /**
+         * Whether the schedule puts the alternative limits in force at this moment. Pure.
+         *
+         * <p>A window that ends before it starts spans midnight and belongs to the day it started
+         * on: Monday 22:00–08:00 covers Tuesday 03:00 but not Monday 03:00, which was Sunday's.
+         */
+        public boolean scheduleActive(java.time.LocalDateTime now) {
+            if (!scheduleOn) return false;
+            int minute = now.getHour() * 60 + now.getMinute();
+            java.time.DayOfWeek today = now.getDayOfWeek();
+            if (scheduleFrom <= scheduleTo) {
+                return scheduleDays.contains(today) && minute >= scheduleFrom && minute < scheduleTo;
+            }
+            return (scheduleDays.contains(today) && minute >= scheduleFrom)
+                    || (scheduleDays.contains(today.minus(1)) && minute < scheduleTo);
+        }
+
+        /** The alternative pair is in force now, by hand or by schedule. */
+        public boolean alternativeActive(java.time.LocalDateTime now) {
+            return alternativeOn || scheduleActive(now);
+        }
+
+        /** The download limit in force now, bytes per second, 0 for none. */
+        public int effectiveDownloadBytes(java.time.LocalDateTime now) {
+            return (alternativeActive(now) ? alternativeDownload : download) * 1024;
+        }
+
+        public int effectiveUploadBytes(java.time.LocalDateTime now) {
+            return (alternativeActive(now) ? alternativeUpload : upload) * 1024;
+        }
+
+        public Speed withAlternativeOn(boolean on) {
+            return new Speed(
+                    download,
+                    upload,
+                    alternativeDownload,
+                    alternativeUpload,
+                    on,
+                    scheduleOn,
+                    scheduleFrom,
+                    scheduleTo,
+                    scheduleDays,
+                    countOverhead);
+        }
+    }
 
     /**
      * The Protocol page.
@@ -94,7 +176,22 @@ public record EngineSettings(
 
     public static EngineSettings defaults() {
         return new EngineSettings(
-                6881, false, "", true, true, 500, 100, 20, ProxyType.NONE, "", 1080, "", "", true, Protocol.defaults());
+                6881,
+                false,
+                "",
+                true,
+                true,
+                500,
+                100,
+                20,
+                ProxyType.NONE,
+                "",
+                1080,
+                "",
+                "",
+                true,
+                Protocol.defaults(),
+                Speed.defaults());
     }
 
     public EngineSettings withProtocol(Protocol protocol) {
@@ -113,7 +210,28 @@ public record EngineSettings(
                 proxyUsername,
                 proxyPassword,
                 proxyPeers,
-                protocol);
+                protocol,
+                speed);
+    }
+
+    public EngineSettings withSpeed(Speed speed) {
+        return new EngineSettings(
+                listenPort,
+                randomPort,
+                listenInterface,
+                ipv6,
+                upnp,
+                maxConnections,
+                maxConnectionsPerTorrent,
+                uploadSlots,
+                proxy,
+                proxyHost,
+                proxyPort,
+                proxyUsername,
+                proxyPassword,
+                proxyPeers,
+                protocol,
+                speed);
     }
 
     /**

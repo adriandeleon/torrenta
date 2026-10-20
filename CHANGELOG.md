@@ -74,6 +74,9 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 - **Protocol settings**: DHT, peer exchange, local peer discovery, uTP, the encryption policy
   (require, prefer, off), anonymous mode, and default trackers added to every torrent, new and
   existing. Applied at start and live.
+- **Speed limits**: global download and upload caps, an alternative pair switched by hand from
+  the status bar or by a weekly schedule (overnight windows belong to the day they start on), and
+  counting protocol overhead in the limit.
 - **Inter as the interface font**, bundled, the same face Editora and Termina use.
 - **An IP filter**: a PeerGuardian or eMule blocklist by URL (plain or gzipped), downloaded on a
   schedule and kept beside the settings, a local list file, and manual bans — including Ban Peer
