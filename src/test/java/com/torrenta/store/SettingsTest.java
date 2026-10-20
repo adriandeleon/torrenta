@@ -165,6 +165,55 @@ class SettingsTest {
     }
 
     @Test
+    void queueAndShareSettingsAreReadAndClamped(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Files.writeString(
+                file,
+                String.join(
+                        "\n",
+                        Settings.QUEUE_ACTIVE_DOWNLOADS + "=0",
+                        Settings.QUEUE_ACTIVE_SEEDS + "=-3", // outside the range: default
+                        Settings.QUEUE_IGNORE_SLOW + "=false",
+                        Settings.SHARE_RATIO + "=1.5",
+                        Settings.SHARE_SEED_MINUTES + "=90",
+                        Settings.SHARE_ACTION + "=remove",
+                        ""));
+        Settings settings = new Settings(file);
+        settings.load();
+        var q = settings.engineSettings().queue();
+        assertEquals(0, q.activeDownloads(), "0 is no limit");
+        assertEquals(5, q.activeSeeds());
+        assertEquals(15, q.activeLimit());
+        assertFalse(q.ignoreSlowTorrents());
+        assertEquals(
+                new com.torrenta.engine.ShareLimit(1.5, 90, com.torrenta.engine.ShareLimit.Action.REMOVE), q.share());
+
+        Files.writeString(file, Settings.SHARE_RATIO + "=lots\n" + Settings.SHARE_ACTION + "=explode\n");
+        settings.load();
+        assertEquals(com.torrenta.engine.ShareLimit.NONE, settings.shareLimit(), "unreadable: none, pause");
+    }
+
+    @Test
+    void aTorrentsOwnShareLimitRoundTrips(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        assertTrue(settings.shareOverride("abc").isEmpty());
+        var own = new com.torrenta.engine.ShareLimit(3, 0, com.torrenta.engine.ShareLimit.Action.PAUSE);
+        settings.setShareOverride("abc", own);
+        settings.setShareOverride("def", com.torrenta.engine.ShareLimit.NONE);
+        settings.save();
+        Settings read = new Settings(file);
+        read.load();
+        assertEquals(java.util.Optional.of(own), read.shareOverride("abc"));
+        assertEquals(java.util.Map.of("abc", own, "def", com.torrenta.engine.ShareLimit.NONE), read.shareOverrides());
+        assertTrue(read.syncedEntries().keySet().stream().noneMatch(k -> k.startsWith("torrent.")), "never synced");
+        read.setShareOverride("abc", null);
+        assertTrue(read.shareOverride("abc").isEmpty(), "forgotten");
+        assertEquals(1, read.shareOverrides().size());
+    }
+
+    @Test
     void aBlankValueFallsBackToTheDefault(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Files.writeString(file, Settings.DOWNLOAD_DIR + "=\n");

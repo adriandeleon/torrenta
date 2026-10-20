@@ -14,7 +14,7 @@ class ActionsTest {
 
     private static Torrent t(boolean paused, boolean sequential) {
         return new Torrent(
-                "id", "n", 1, 0, 0, TorrentState.DOWNLOADING, 0, 0, 0, 0, 0, 0, 0, 0, "", "", paused, sequential);
+                "id", "n", 1, 0, 0, TorrentState.DOWNLOADING, 0, 0, 0, 0, 0, 0, 0, 0, "", "", paused, sequential, 0);
     }
 
     @Test

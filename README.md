@@ -76,7 +76,10 @@ Everything lives in one folder, `~/.torrenta` (`--config-dir DIR` or `TORRENTA_C
 it): `settings.properties`, hand-editable; `torrents/<info-hash>.fastresume`, one per torrent,
 libtorrent's resume data with the info dictionary inside, so deleting one file forgets one torrent;
 `native/<version>/`, the unpacked engine. Downloads go to `~/Downloads` until changed in
-Settings (`Ctrl+,`), which writes the same file. The theme is there too, under General →
+Settings (`Ctrl+,`), which writes the same file. A torrent's own share limit (Torrent → Limits…)
+is kept there as `torrent.<info-hash>.share` and goes with the torrent when it is removed; its rate
+caps and connection counts are libtorrent's and live in its resume data. The global queue and share
+limits are `queue.*` and `share.*`. The theme is there too, under General →
 Appearance: Editora Light and Dark (Caret & Ink, as Editora and Termina), Nord and Cupertino,
 light and dark, applied the moment one is picked (`ui.theme` in the file).
 
@@ -111,13 +114,14 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+V` | Add whatever magnet or torrent link is on the clipboard; the status bar says when there is one |
 | `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
 | `Ctrl+Shift+P` | Command palette: every command, found by typing part of its name |
-| `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans) and Speed (limits, alternative limits with a weekly schedule, overhead); searchable, applies live |
+| `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
 | `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
 | `Space` | Pause the selected torrents, or resume them if all are paused |
 | `Ctrl+Shift+U` | Force resume (ignore the queue) |
 | `Ctrl+Shift+R` / `Ctrl+Shift+A` | Force recheck / force reannounce |
 | `Ctrl+Shift+S` | Sequential download on or off |
+| `Ctrl+L` | Limits for the selection: download and upload caps, connections, upload slots, first and last pieces first, and a ratio or seeding-time limit of its own in place of the global one |
 | `Ctrl+C` / `Ctrl+Shift+H` / `Ctrl+Shift+C` | Copy name / info-hash / magnet link |
 | `Ctrl+Shift+O` | Open the destination folder |
 | `Delete` / `Shift+Delete` | Remove, or remove with the downloaded files, after confirming |

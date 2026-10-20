@@ -16,7 +16,25 @@ class TorrentRowsTest {
 
     private static Torrent t(String id, long rate) {
         return new Torrent(
-                id, "name " + id, 100, 0, 0, TorrentState.DOWNLOADING, rate, 0, 0, 0, 0, 0, 0, 0, "", "", false, false);
+                id,
+                "name " + id,
+                100,
+                0,
+                0,
+                TorrentState.DOWNLOADING,
+                rate,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                "",
+                "",
+                false,
+                false,
+                0);
     }
 
     @Test
@@ -84,7 +102,8 @@ class TorrentRowsTest {
                 "",
                 "",
                 false,
-                false));
+                false,
+                0));
         assertEquals(true, MainWindow.nameFilter("").test(row));
         assertEquals(true, MainWindow.nameFilter(null).test(row));
         assertEquals(true, MainWindow.nameFilter("  desktop ").test(row));

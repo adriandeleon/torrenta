@@ -17,6 +17,7 @@ import java.util.Locale;
  * @param proxyPeers send peer connections through the proxy too, not only trackers
  * @param protocol the protocol page: discovery, transport, encryption, default trackers
  * @param speed the speed page: limits, alternative limits, their schedule
+ * @param queue the queue and share limits page: active slots, the slow-torrent rule, share limits
  */
 public record EngineSettings(
         int listenPort,
@@ -34,7 +35,34 @@ public record EngineSettings(
         String proxyPassword,
         boolean proxyPeers,
         Protocol protocol,
-        Speed speed) {
+        Speed speed,
+        Queue queue) {
+
+    /**
+     * The Queue and share limits page. Active counts are 0 for no limit (libtorrent says -1).
+     *
+     * @param activeDownloads torrents downloading at once; the rest wait in the queue
+     * @param activeSeeds torrents seeding at once
+     * @param activeLimit torrents active at once, downloading and seeding together
+     * @param ignoreSlowTorrents a torrent moving under a few KiB/s does not take a slot
+     * @param share the global share limit, which a torrent's own override replaces
+     */
+    public record Queue(
+            int activeDownloads, int activeSeeds, int activeLimit, boolean ignoreSlowTorrents, ShareLimit share) {
+
+        public Queue {
+            if (share == null) share = ShareLimit.NONE;
+        }
+
+        /** libtorrent's defaults: 3 downloading, 5 seeding, 15 in all, slow ones not counted. */
+        public static Queue defaults() {
+            return new Queue(3, 5, 15, true, ShareLimit.NONE);
+        }
+
+        public Queue withShare(ShareLimit share) {
+            return new Queue(activeDownloads, activeSeeds, activeLimit, ignoreSlowTorrents, share);
+        }
+    }
 
     /**
      * The Speed page. Limits are KiB/s, 0 meaning none. The alternative pair is used while
@@ -191,7 +219,8 @@ public record EngineSettings(
                 "",
                 true,
                 Protocol.defaults(),
-                Speed.defaults());
+                Speed.defaults(),
+                Queue.defaults());
     }
 
     public EngineSettings withProtocol(Protocol protocol) {
@@ -211,7 +240,8 @@ public record EngineSettings(
                 proxyPassword,
                 proxyPeers,
                 protocol,
-                speed);
+                speed,
+                queue);
     }
 
     public EngineSettings withSpeed(Speed speed) {
@@ -231,7 +261,29 @@ public record EngineSettings(
                 proxyPassword,
                 proxyPeers,
                 protocol,
-                speed);
+                speed,
+                queue);
+    }
+
+    public EngineSettings withQueue(Queue queue) {
+        return new EngineSettings(
+                listenPort,
+                randomPort,
+                listenInterface,
+                ipv6,
+                upnp,
+                maxConnections,
+                maxConnectionsPerTorrent,
+                uploadSlots,
+                proxy,
+                proxyHost,
+                proxyPort,
+                proxyUsername,
+                proxyPassword,
+                proxyPeers,
+                protocol,
+                speed,
+                queue);
     }
 
     /**
@@ -259,12 +311,16 @@ public record EngineSettings(
     public String toString() {
         return String.format(
                 Locale.ROOT,
-                "listen=%s upnp=%s conns=%d/%d slots=%d proxy=%s",
+                "listen=%s upnp=%s conns=%d/%d slots=%d proxy=%s active=%d/%d/%d share=%s",
                 listenInterfaces(),
                 upnp,
                 maxConnections,
                 maxConnectionsPerTorrent,
                 uploadSlots,
-                proxy);
+                proxy,
+                queue.activeDownloads(),
+                queue.activeSeeds(),
+                queue.activeLimit(),
+                queue.share());
     }
 }

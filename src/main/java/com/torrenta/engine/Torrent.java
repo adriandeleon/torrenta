@@ -19,6 +19,8 @@ package com.torrenta.engine;
  * @param savePath where the files are
  * @param paused stopped by the user (not by the queue)
  * @param sequential pieces are fetched in order
+ * @param seedingTime seconds spent finished (every wanted piece there), over the torrent's life;
+ *     what a seeding-time limit measures
  */
 public record Torrent(
         String id,
@@ -38,4 +40,5 @@ public record Torrent(
         String tracker,
         String savePath,
         boolean paused,
-        boolean sequential) {}
+        boolean sequential,
+        long seedingTime) {}

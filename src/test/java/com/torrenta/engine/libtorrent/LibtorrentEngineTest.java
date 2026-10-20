@@ -421,7 +421,8 @@ class LibtorrentEngineTest {
                 "",
                 true,
                 com.torrenta.engine.EngineSettings.Protocol.defaults(),
-                com.torrenta.engine.EngineSettings.Speed.defaults());
+                com.torrenta.engine.EngineSettings.Speed.defaults(),
+                com.torrenta.engine.EngineSettings.Queue.defaults());
         try (LibtorrentEngine engine =
                 new LibtorrentEngine(() -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), quiet)) {
             engine.start();
@@ -444,7 +445,8 @@ class LibtorrentEngineTest {
                     "",
                     true,
                     com.torrenta.engine.EngineSettings.Protocol.defaults(),
-                    com.torrenta.engine.EngineSettings.Speed.defaults()));
+                    com.torrenta.engine.EngineSettings.Speed.defaults(),
+                    com.torrenta.engine.EngineSettings.Queue.defaults()));
             assertEquals(321, engine.connectionsLimitForTest(), "applied live");
             assertTrue(events.stream().anyMatch(ev -> ev.message().startsWith("Engine settings applied")));
             Torrent t = engine.add(MAGNET);
@@ -576,6 +578,75 @@ class LibtorrentEngineTest {
             engine.applySettings(settings.withSpeed(speed.withAlternativeOn(false)));
             assertFalse(engine.refreshLimits(java.time.LocalDateTime.now()));
             assertEquals(1000 * 1024, engine.rateLimitsForTest()[0], "back to normal");
+        }
+    }
+
+    @Test
+    void queueSettingsReachTheSessionAtStartAndLive(@TempDir Path dir) throws Exception {
+        com.torrenta.engine.EngineSettings.Queue queue = new com.torrenta.engine.EngineSettings.Queue(
+                2,
+                0,
+                7,
+                false,
+                new com.torrenta.engine.ShareLimit(1.5, 30, com.torrenta.engine.ShareLimit.Action.PAUSE));
+        com.torrenta.engine.EngineSettings settings =
+                com.torrenta.engine.EngineSettings.defaults().withQueue(queue);
+        try (LibtorrentEngine engine = new LibtorrentEngine(
+                () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), settings)) {
+            engine.start();
+            assertEquals(2, engine.activeLimitsForTest()[0], "applied at start");
+            assertEquals(-1, engine.activeLimitsForTest()[1], "0 to a person is -1 to libtorrent");
+            assertEquals(7, engine.activeLimitsForTest()[2]);
+            engine.applySettings(settings.withQueue(
+                    new com.torrenta.engine.EngineSettings.Queue(4, 5, 6, true, com.torrenta.engine.ShareLimit.NONE)));
+            assertEquals(4, engine.activeLimitsForTest()[0], "applied live");
+            assertEquals(5, engine.activeLimitsForTest()[1]);
+            assertEquals(6, engine.activeLimitsForTest()[2]);
+        }
+    }
+
+    @Test
+    void perTorrentLimitsAreKeptByTheHandleAndReadBack(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "pair");
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            Torrent t = engine.add(downloadsTorrent(dir, torrent));
+            com.torrenta.engine.TorrentLimits before = engine.limits(t.id());
+            assertEquals(0, before.downloadLimit(), "none to begin with");
+            assertEquals(0, before.uploadLimit());
+            assertEquals(100, before.maxConnections(), "the per-torrent connection setting, set on add");
+            assertFalse(before.firstAndLastFirst());
+
+            com.torrenta.engine.TorrentLimits wanted =
+                    new com.torrenta.engine.TorrentLimits(100 * 1024, 50 * 1024, 7, 3, true);
+            engine.setLimits(t.id(), wanted);
+            assertEquals(wanted, engine.limits(t.id()), "read back as set");
+
+            engine.setLimits(t.id(), new com.torrenta.engine.TorrentLimits(0, 0, 0, 0, false));
+            assertEquals(com.torrenta.engine.TorrentLimits.NONE, engine.limits(t.id()), "0 is none on both sides");
+
+            // A magnet has no pieces to order yet: the flag is false and setting it is not an error.
+            Torrent magnet = engine.add(MAGNET);
+            engine.setLimits(magnet.id(), wanted);
+            assertFalse(engine.limits(magnet.id()).firstAndLastFirst());
+            assertEquals(7, engine.limits(magnet.id()).maxConnections());
+        }
+    }
+
+    @Test
+    void seedingTimeIsSecondsFinished(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "pair");
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            Torrent t = engine.add(downloadsTorrent(dir, torrent));
+            assertEquals(0, t.seedingTime(), "not yet checked");
+            await("seeding", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+            await("the clock runs, in seconds not milliseconds", () -> {
+                long seconds = engine.torrents().get(0).seedingTime();
+                return seconds >= 1 && seconds < 100;
+            });
         }
     }
 
