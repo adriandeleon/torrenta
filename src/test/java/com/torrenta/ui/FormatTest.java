@@ -33,7 +33,10 @@ class FormatTest {
                 false,
                 0,
                 "",
-                List.of());
+                List.of(),
+                "",
+                java.util.List.of(),
+                false);
     }
 
     @Test
@@ -61,8 +64,37 @@ class FormatTest {
                 false,
                 0,
                 "",
-                List.of());
+                List.of(),
+                "",
+                java.util.List.of(),
+                false);
         assertEquals("Paused", Format.stateLabel(paused));
+        Torrent errored = new Torrent(
+                "id",
+                "n",
+                100,
+                10,
+                0.1,
+                TorrentState.DOWNLOADING,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                "",
+                "",
+                true,
+                false,
+                0,
+                "",
+                List.of(),
+                "No such file",
+                List.of(),
+                false);
+        assertEquals("Error", Format.stateLabel(errored), "an error outranks even the pause");
     }
 
     @Test

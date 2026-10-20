@@ -34,7 +34,10 @@ class ActionsTest {
                 sequential,
                 0,
                 "",
-                List.of());
+                List.of(),
+                "",
+                java.util.List.of(),
+                false);
     }
 
     @Test

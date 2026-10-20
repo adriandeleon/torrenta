@@ -1,6 +1,5 @@
 package com.torrenta.ui;
 
-import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -24,8 +23,12 @@ public final class Format {
 
     private Format() {}
 
-    /** The state column: a user pause outranks whatever the engine's state machine says. */
+    /**
+     * The state column: an error outranks everything (the torrent is going nowhere until it is
+     * seen to), then a user pause outranks whatever the engine's state machine says.
+     */
     public static String stateLabel(Torrent t) {
+        if (!t.error().isEmpty()) return "Error";
         return t.paused() ? "Paused" : t.state().label();
     }
 
@@ -98,13 +101,8 @@ public final class Format {
 
     /** The tracker's host, which is what identifies it; the full URL goes in a tooltip one day. */
     public static String host(String trackerUrl) {
-        if (trackerUrl == null || trackerUrl.isBlank()) return "—";
-        try {
-            String host = URI.create(trackerUrl).getHost();
-            return host == null || host.isEmpty() ? trackerUrl : host;
-        } catch (IllegalArgumentException e) {
-            return trackerUrl;
-        }
+        String host = com.torrenta.engine.TrackerHost.of(trackerUrl);
+        return host.isEmpty() ? "—" : host;
     }
 
     public static String dateTime(long epochSeconds) {

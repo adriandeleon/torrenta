@@ -23,9 +23,11 @@ package com.torrenta.engine;
  *     what a seeding-time limit measures
  * @param category the category it is filed under, or empty
  * @param tags its tags, sorted; empty for none
+ * @param error what stopped the torrent (a missing file, a full disk), or empty while nothing has
+ * @param trackers the hosts of its trackers, each once, sorted; empty for a trackerless torrent
+ * @param trackerError some tracker of its last answered with an error and has not answered since
  * @param queued parked by the queue (paused and auto-managed), waiting for a slot
  * @param queuePosition its place in the download or seed queue, 0 first; -1 when not queued
- * @param error why libtorrent stopped it (a storage or file error), or empty
  * @param moving its files are being moved to a new location
  */
 public record Torrent(
@@ -50,18 +52,21 @@ public record Torrent(
         long seedingTime,
         String category,
         java.util.List<String> tags,
+        String error,
+        java.util.List<String> trackers,
+        boolean trackerError,
         boolean queued,
         int queuePosition,
-        String error,
         boolean moving) {
 
     public Torrent {
         category = category == null ? "" : category;
         tags = tags == null ? java.util.List.of() : java.util.List.copyOf(tags);
         error = error == null ? "" : error;
+        trackers = trackers == null ? java.util.List.of() : java.util.List.copyOf(trackers);
     }
 
-    /** A torrent that is not queued, not in error and not moving: what most tests want. */
+    /** A torrent that is not queued and not moving: what most tests want. */
     public Torrent(
             String id,
             String name,
@@ -83,7 +88,10 @@ public record Torrent(
             boolean sequential,
             long seedingTime,
             String category,
-            java.util.List<String> tags) {
+            java.util.List<String> tags,
+            String error,
+            java.util.List<String> trackers,
+            boolean trackerError) {
         this(
                 id,
                 name,
@@ -106,9 +114,11 @@ public record Torrent(
                 seedingTime,
                 category,
                 tags,
+                error,
+                trackers,
+                trackerError,
                 false,
                 -1,
-                "",
                 false);
     }
 }

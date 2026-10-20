@@ -120,9 +120,11 @@ final class T {
                 seedingTime,
                 "",
                 List.of(),
+                error,
+                List.of(),
+                false,
                 queued,
                 queuePosition,
-                error,
                 moving);
     }
 }

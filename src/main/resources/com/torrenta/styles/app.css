@@ -377,7 +377,9 @@
 
 /*
  * The sidebar of filters beside the list: the subtle ground, a rule on its right, sections as
- * bold headings with no selection affordance, counts in the muted ink at the right edge.
+ * bold headings with no selection affordance, counts in the muted ink at the right edge. An
+ * entry in force (one per section at most) is drawn as chosen; the tree's own selection is only
+ * the cursor, shown as a ring while the sidebar has the focus and not at all otherwise.
  */
 .sidebar {
     -fx-background-color: -color-bg-subtle;
@@ -405,12 +407,34 @@
 
 .sidebar .tree-cell:filled:selected,
 .sidebar .tree-view:focused .tree-cell:filled:selected {
+    -fx-background-color: transparent;
+}
+
+.sidebar .tree-view:focused .tree-cell:filled:selected {
+    -fx-background-color: -color-border-default, -color-bg-subtle;
+    -fx-background-radius: 6, 5;
+    -fx-background-insets: 0 4 0 4, 1 5 1 5;
+}
+
+.sidebar .tree-cell:filled:chosen,
+.sidebar .tree-view:focused .tree-cell:filled:chosen,
+.sidebar .tree-view:focused .tree-cell:filled:chosen:selected {
     -fx-background-color: -color-accent-subtle;
     -fx-background-radius: 6;
     -fx-background-insets: 0 4 0 4;
 }
 
+.sidebar .tree-view:focused .tree-cell:filled:chosen:selected {
+    -fx-background-color: -color-accent-emphasis, -color-accent-subtle;
+    -fx-background-radius: 6, 5;
+    -fx-background-insets: 0 4 0 4, 1 5 1 5;
+}
+
 .sidebar .tree-cell:filled:selected .label {
+    -fx-text-fill: -color-fg-default;
+}
+
+.sidebar .tree-cell:filled:chosen .label {
     -fx-text-fill: -color-accent-fg;
 }
 
@@ -420,6 +444,10 @@
 }
 
 .sidebar .tree-cell:filled:selected .sidebar-count {
+    -fx-text-fill: -color-fg-muted;
+}
+
+.sidebar .tree-cell:filled:chosen .sidebar-count {
     -fx-text-fill: -color-accent-fg;
 }
 

@@ -116,7 +116,7 @@ public final class MainWindow {
 
     private final LabelStore labels;
     private Sidebar sidebar;
-    private SidebarFilter sidebarFilter = SidebarFilter.ALL;
+    private SidebarSelection sidebarSelection = SidebarSelection.ALL;
     private String lastClipboardOffer = "";
     private final DetailPane detail = new DetailPane();
     private final UpdateService updates = new UpdateService();
@@ -262,6 +262,7 @@ public final class MainWindow {
     /**
      * Drives the window from the capture hook, by name: {@code select-all}, {@code palette},
      * {@code palette:<query>}, {@code sidebar:<filter>} (as {@link SidebarFilter#parse} reads it),
+     * {@code sidebar-keys:<KEY+KEY+…>} (focus the sidebar and press them),
      * {@code dialog-category:<name>} on an open Add dialog, or a command id. Prints what a
      * screenshot cannot show.
      */
@@ -285,6 +286,13 @@ public final class MainWindow {
                 currentDialog.selectCategoryForCapture(action.substring("dialog-category:".length()));
         } else if (action.startsWith("sidebar:")) {
             chooseFilter(SidebarFilter.parse(action.substring("sidebar:".length())));
+        } else if (action.startsWith("sidebar-keys:")) {
+            // Focus the sidebar and press these keys in turn (DOWN+DOWN+SPACE; the comma is the hook's own separator):
+            // the keyboard path.
+            focusSidebar();
+            for (String key : action.substring("sidebar-keys:".length()).split("\\+"))
+                sidebar.pressForCapture(
+                        javafx.scene.input.KeyCode.valueOf(key.trim().toUpperCase(java.util.Locale.ROOT)));
         } else if (action.equals("select-first")) {
             table.getSelectionModel().clearAndSelect(0);
         } else if (action.startsWith("detail:")) {
@@ -313,7 +321,8 @@ public final class MainWindow {
         if (promptDialog != null && promptDialog.isShowing())
             System.out.println("capture: dialog=" + promptDialog.getTitle());
         if (sidebar.isVisible()) System.out.println("capture: sidebar=" + sidebar.summary());
-        System.out.println("capture: filter=" + sidebarFilter.format() + " shown=" + filtered.size());
+        System.out.println("capture: filter=" + sidebarSelection.describe() + " shown=" + filtered.size());
+        System.out.println("capture: focus-sidebar=" + sidebar.hasFocus() + " cursor=" + sidebar.cursorForCapture());
         for (TorrentRow row : table.getItems()) {
             Torrent t = row.torrent();
             StatusLine line = StatusLine.of(t, row.quietSeconds(), shareLimitFor(t));
@@ -787,7 +796,11 @@ public final class MainWindow {
         settings.saveQuietly();
     }
 
-    private void stopPolling() {
+    /**
+     * Any thread, idempotent. Before the engine stops: a poll of a stopped engine sees no
+     * torrents, and the sidebar would take that for the choices' entries having gone.
+     */
+    public void stopPolling() {
         if (poller != null) poller.shutdownNow();
     }
 
@@ -1041,22 +1054,33 @@ public final class MainWindow {
         sidebar.update(labels.categories().stream().map(Category::name).toList(), labels.tags(), snapshot);
     }
 
-    /** The sidebar's choice changed by hand (or fell back to All): filter, and remember. */
-    private void onSidebarFilter(SidebarFilter filter) {
-        sidebarFilter = filter;
+    /** An entry chosen in the sidebar by hand (or a section's All, when its choice vanished). */
+    private void onSidebarChoice(SidebarEntries.Entry entry) {
+        setSidebarSelection(sidebarSelection.choose(entry.filter, entry.axis));
+    }
+
+    /** Chooses a filter from code: a palette command, the capture hook. */
+    private void chooseFilter(SidebarFilter filter) {
+        setSidebarSelection(sidebarSelection.with(filter));
+    }
+
+    /** The selection in force: the sidebar draws it, the list obeys it, the settings keep it. */
+    private void setSidebarSelection(SidebarSelection selection) {
+        sidebarSelection = selection;
+        sidebar.select(selection);
         applyFilters();
-        settings.setSidebarFilter(filter.format());
+        selection.format().forEach((axis, text) -> settings.setSidebarChoice(axis.key(), text));
         settings.saveQuietly();
     }
 
-    /** Chooses a filter from code: the stored one at start, the capture hook. */
-    private void chooseFilter(SidebarFilter filter) {
-        sidebar.select(filter);
-        onSidebarFilter(filter);
+    private void onSidebarCollapse(java.util.Set<SidebarFilter.Axis> collapsed) {
+        settings.setSidebarCollapsed(
+                collapsed.stream().map(SidebarFilter.Axis::key).toList());
+        settings.saveQuietly();
     }
 
     private void applyFilters() {
-        filtered.setPredicate(rowFilter(filter.getText(), sidebarFilter));
+        filtered.setPredicate(rowFilter(filter.getText(), sidebarSelection));
     }
 
     private void setSidebarVisible(boolean visible) {
@@ -1118,7 +1142,7 @@ public final class MainWindow {
     private List<Command> buildCommands() {
         BooleanBinding selection = Bindings.isNotEmpty(table.getSelectionModel().getSelectedItems());
         BooleanBinding always = Bindings.createBooleanBinding(() -> true);
-        return List.of(
+        List<Command> all = new ArrayList<>(List.of(
                 new Command("add-file", "Add Torrent File…", chord(KeyCode.O), null, always, this::addTorrentFile),
                 new Command("add-magnet", "Add Magnet Link…", chord(KeyCode.M), null, always, this::addMagnetLink),
                 // The chord is a scene accelerator, not a menu one: Ctrl+V in a text field must paste.
@@ -1235,7 +1259,19 @@ public final class MainWindow {
                         null,
                         always,
                         () -> setSidebarVisible(!sidebar.isVisible())),
-                new Command("focus-sidebar", "Focus Sidebar", chord(KeyCode.B), null, always, this::focusSidebar));
+                new Command("focus-sidebar", "Focus Sidebar", chord(KeyCode.B), null, always, this::focusSidebar)));
+        // One "Show: …" per status, and Show: All, so a filter is picked without the mouse.
+        all.add(new Command("show-all", "Show: All", null, null, always, () -> chooseFilter(SidebarFilter.ALL)));
+        for (SidebarStatus status : SidebarStatus.values()) {
+            all.add(new Command(
+                    "show-" + status.key(),
+                    "Show: " + status.title(),
+                    null,
+                    null,
+                    always,
+                    () -> chooseFilter(SidebarFilter.status(status))));
+        }
+        return List.copyOf(all);
     }
 
     /**
@@ -1477,16 +1513,24 @@ public final class MainWindow {
         VBox listAndDetail = new VBox(buildFilterBar(), split);
         // The sidebar runs the full height on the left of the filter bar, the list and the detail
         // pane; hidden and unmanaged together, so View → Sidebar gives the width back to the list.
-        sidebar = new Sidebar(this::onSidebarFilter, () -> table.requestFocus());
+        sidebar = new Sidebar(this::onSidebarChoice, this::onSidebarCollapse, () -> table.requestFocus());
         sidebar.managedProperty().bind(sidebar.visibleProperty());
         sidebar.setVisible(settings.sidebar());
+        sidebar.setCollapsed(settings.sidebarCollapsed().stream()
+                .map(key -> SidebarFilter.Axis.valueOf(key.toUpperCase(java.util.Locale.ROOT)))
+                .collect(java.util.stream.Collectors.toCollection(
+                        () -> java.util.EnumSet.noneOf(SidebarFilter.Axis.class))));
         sidebar.visibleProperty().addListener((o, was, now) -> {
             settings.setSidebar(now);
             settings.saveQuietly();
         });
         refreshSidebar(List.of());
-        sidebarFilter = SidebarFilter.parse(settings.sidebarFilter());
-        sidebar.select(sidebarFilter);
+        sidebarSelection = SidebarSelection.parse(
+                settings.sidebarChoice("status"),
+                settings.sidebarChoice("category"),
+                settings.sidebarChoice("tag"),
+                settings.sidebarChoice("tracker"));
+        sidebar.select(sidebarSelection);
         applyFilters();
         BorderPane centreWithSidebar = new BorderPane(listAndDetail);
         centreWithSidebar.setLeft(sidebar);
@@ -1548,11 +1592,14 @@ public final class MainWindow {
         return row -> row.torrent().name().toLowerCase(java.util.Locale.ROOT).contains(needle);
     }
 
-    /** Both filters at once: the name box and the sidebar's choice. Package-private for tests. */
-    static java.util.function.Predicate<TorrentRow> rowFilter(String text, SidebarFilter sidebar) {
+    /**
+     * Every filter at once: the name box and the sidebar's choices (status, category, tag,
+     * tracker). Package-private for tests.
+     */
+    static java.util.function.Predicate<TorrentRow> rowFilter(String text, SidebarSelection sidebar) {
         java.util.function.Predicate<TorrentRow> byName = nameFilter(text);
-        SidebarFilter f = sidebar == null ? SidebarFilter.ALL : sidebar;
-        return row -> byName.test(row) && f.matches(row.torrent());
+        SidebarSelection s = sidebar == null ? SidebarSelection.ALL : sidebar;
+        return row -> byName.test(row) && s.matches(row.torrent());
     }
 
     private void focusFilter() {
