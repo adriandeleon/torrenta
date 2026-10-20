@@ -38,6 +38,7 @@ import javafx.util.StringConverter;
 
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
+import com.torrenta.engine.DownloadPlan;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 
@@ -49,13 +50,16 @@ import com.torrenta.engine.TorrentPreview;
  * says. Enter adds, Escape cancels, every control is reachable by keyboard.
  *
  * <p>A category with a save path fills the folder when chosen (automatic torrent management, as
- * qBittorrent calls it); the folder stays editable afterwards.
+ * qBittorrent calls it); the folder stays editable afterwards. The folder is where the files end
+ * up; when the incomplete folder is on, the line under it says that they start there.
  */
 final class AddDialog {
 
     private final Stage stage = new Stage();
     private final TextField savePath = new TextField();
-    private final Label freeSpace = new Label();
+    /** One label per line of {@link FreeSpace#hint}; a grid row gives a label one line's height. */
+    private final VBox freeSpace = new VBox(2);
+
     private final CheckBox startPaused = new CheckBox("Start paused");
     private final CheckBox sequential = new CheckBox("Sequential download");
     private final CheckBox skipCheck = new CheckBox("Skip hash check (the files are already complete)");
@@ -63,11 +67,53 @@ final class AddDialog {
     private final ChoiceBox<String> category = new ChoiceBox<>();
     private final TextField tags = new TextField();
     private final List<Category> categories;
+    private final Defaults defaults;
     private final Button add = new Button("Add");
     private final TreeTableView<FileTree.Node> tree = new TreeTableView<>();
     private final AddRequest.Source source;
     private final TorrentPreview preview;
     private AddRequest result;
+
+    /**
+     * What the settings say a new torrent starts as.
+     *
+     * @param savePath the download folder
+     * @param startPaused the Start paused box's starting position
+     * @param sequential the Sequential box's
+     * @param incompleteEnabled whether downloads start in the incomplete folder
+     * @param incompleteDir that folder
+     * @param partSuffix whether incomplete files carry {@code .part}
+     * @param preallocate whether files are allocated in full at the start
+     */
+    record Defaults(
+            Path savePath,
+            boolean startPaused,
+            boolean sequential,
+            boolean incompleteEnabled,
+            Path incompleteDir,
+            boolean partSuffix,
+            boolean preallocate) {
+
+        static Defaults from(com.torrenta.store.Settings settings) {
+            return new Defaults(
+                    settings.downloadDir(),
+                    settings.addStartPaused(),
+                    settings.addSequential(),
+                    settings.incompleteEnabled(),
+                    settings.incompleteDir(),
+                    settings.partSuffix(),
+                    settings.preallocate());
+        }
+
+        /** Where a torrent saved to {@code destination} starts and ends. */
+        DownloadPlan plan(Path destination) {
+            return DownloadPlan.of(destination, incompleteEnabled, incompleteDir);
+        }
+
+        AddRequest.Storage storage(Path destination) {
+            return AddRequest.Storage.of(plan(destination), partSuffix, preallocate);
+        }
+    }
 
     /**
      * @param preview the torrent's contents, or null for a magnet
@@ -79,12 +125,11 @@ final class AddDialog {
             AddRequest.Source source,
             TorrentPreview preview,
             String origin,
-            Path defaultSavePath,
-            boolean startPausedDefault,
-            boolean sequentialDefault,
+            Defaults defaults,
             List<Category> categories) {
         this.source = source;
         this.preview = preview;
+        this.defaults = defaults;
         this.categories = List.copyOf(categories);
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
@@ -107,19 +152,21 @@ final class AddDialog {
                 muted("Size"),
                 new Label(preview == null ? "Unknown until the metadata arrives" : Bytes.human(preview.size())));
 
-        savePath.setText(defaultSavePath.toString());
+        savePath.setText(defaults.savePath().toString());
         savePath.textProperty().addListener((o, was, now) -> updateFreeSpace());
         Button browse = new Button("Browse…");
         browse.setOnAction(e -> browse());
         HBox.setHgrow(savePath, Priority.ALWAYS);
         HBox pathRow = new HBox(6, savePath, browse);
         form.addRow(row++, muted("Save to"), pathRow);
-        freeSpace.getStyleClass().add("dialog-hint");
+        // A path too long for the column is cut with an ellipsis rather than squeezing the labels.
+        freeSpace.setMinWidth(0);
+        freeSpace.setMaxWidth(Double.MAX_VALUE);
         form.add(freeSpace, 1, row++);
         updateFreeSpace();
 
-        startPaused.setSelected(startPausedDefault);
-        sequential.setSelected(sequentialDefault);
+        startPaused.setSelected(defaults.startPaused());
+        sequential.setSelected(defaults.sequential());
         stop.getItems().addAll(AddRequest.StopCondition.values());
         stop.setValue(AddRequest.StopCondition.NONE);
         stop.setConverter(new StringConverter<>() {
@@ -178,7 +225,7 @@ final class AddDialog {
         content.getChildren().add(buttons);
 
         Scene scene =
-                new Scene(content, 640, preview != null && !preview.files().isEmpty() ? 590 : 360);
+                new Scene(content, 640, preview != null && !preview.files().isEmpty() ? 620 : 400);
         scene.getStylesheets()
                 .add(AddDialog.class.getResource("/com/torrenta/styles/app.css").toExternalForm());
         Fonts.installUiFont(scene);
@@ -218,15 +265,17 @@ final class AddDialog {
     /** Presses Add, for the capture hook. */
     void confirm() {
         if (add.isDisabled()) return;
+        Path destination = Path.of(savePath.getText().trim());
         result = new AddRequest(
                 source,
-                Path.of(savePath.getText().trim()),
+                destination,
                 startPaused.isSelected(),
                 sequential.isSelected(),
                 skipCheck.isSelected(),
                 stop.getValue(),
                 filePriorities(),
-                new TorrentLabels(category.getValue(), List.of(tags.getText())));
+                new TorrentLabels(category.getValue(), List.of(tags.getText())),
+                defaults.storage(destination));
         stage.hide();
     }
 
@@ -340,8 +389,34 @@ final class AddDialog {
 
     private void updateFreeSpace() {
         String text = savePath.getText().trim();
-        OptionalLong free = text.isEmpty() ? OptionalLong.empty() : FreeSpace.of(Path.of(text));
-        freeSpace.setText(free.isPresent() ? Bytes.human(free.getAsLong()) + " free" : "");
+        Path destination;
+        try {
+            destination = text.isEmpty() ? null : Path.of(text);
+        } catch (RuntimeException e) {
+            destination = null;
+        }
+        freeSpace.getChildren().clear();
+        if (destination == null) return;
+        DownloadPlan plan = defaults.plan(destination);
+        String hint = FreeSpace.hint(
+                plan,
+                plan.viaIncomplete() ? FreeSpace.of(plan.start()) : OptionalLong.empty(),
+                FreeSpace.of(plan.destination()));
+        for (String line : hint.split("\n")) {
+            if (line.isEmpty()) continue;
+            Label label = new Label(line);
+            label.getStyleClass().add("dialog-hint");
+            label.setMinWidth(0);
+            label.setMaxWidth(Double.MAX_VALUE);
+            freeSpace.getChildren().add(label);
+        }
+    }
+
+    /** The lines under the save path, for the capture hook; joined with " / ". */
+    String hint() {
+        return String.join(
+                " / ",
+                freeSpace.getChildren().stream().map(n -> ((Label) n).getText()).toList());
     }
 
     static String nameOf(AddRequest.Source source, TorrentPreview preview) {

@@ -28,6 +28,7 @@ public final class SyncKeys {
 
     static final List<String> LOCAL_KEYS = List.of(
             "download.dir",
+            "download.incompleteDir",
             "connection.interface",
             "ipfilter.file",
             "ipfilter.lastRefreshEpochMs",

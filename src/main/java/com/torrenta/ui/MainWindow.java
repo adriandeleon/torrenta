@@ -309,8 +309,10 @@ public final class MainWindow {
                 + table.getSelectionModel().getSelectedItems().size());
         if (palette.isShowing()) System.out.println("capture: palette=" + palette.visibleCommands());
         if (logWindow.isShowing()) System.out.println("capture: log-window=showing");
-        if (currentDialog != null && currentDialog.isShowing())
+        if (currentDialog != null && currentDialog.isShowing()) {
             System.out.println("capture: dialog=" + currentDialog.title());
+            System.out.println("capture: dialog-hint=" + currentDialog.hint());
+        }
         if (limitsDialog != null && limitsDialog.isShowing())
             System.out.println("capture: dialog=" + limitsDialog.title());
         if (tagsDialog != null && tagsDialog.isShowing()) System.out.println("capture: dialog=" + tagsDialog.title());
@@ -583,15 +585,8 @@ public final class MainWindow {
 
     /** FX thread. Shows the dialog and, if confirmed, adds on a worker. */
     private void openDialog(AddRequest.Source source, TorrentPreview preview, String origin) {
-        AddDialog dialog = new AddDialog(
-                stage,
-                source,
-                preview,
-                origin,
-                settings.downloadDir(),
-                settings.addStartPaused(),
-                settings.addSequential(),
-                labels.categories());
+        AddDialog dialog =
+                new AddDialog(stage, source, preview, origin, AddDialog.Defaults.from(settings), labels.categories());
         currentDialog = dialog;
         Optional<AddRequest> request = dialog.showAndWait();
         currentDialog = null;

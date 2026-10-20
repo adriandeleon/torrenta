@@ -62,6 +62,22 @@ class TorrentStoreTest {
     }
 
     @Test
+    void theStorageRecordSitsBesideTheBlobAndGoesWithIt(@TempDir Path dir) throws IOException {
+        TorrentStore store = new TorrentStore(dir.resolve("t"));
+        assertTrue(store.loadStorage(V1).isEmpty(), "none yet");
+        store.save(V1, new byte[] {1});
+        store.saveStorage(V1, new byte[] {9, 9});
+        assertArrayEquals(new byte[] {9, 9}, store.loadStorage(V1).orElseThrow());
+        assertEquals(1, store.loadAll().size(), "a sidecar is not a torrent");
+        store.deleteStorage(V1);
+        assertTrue(store.loadStorage(V1).isEmpty());
+        store.saveStorage(V1, new byte[] {1});
+        store.delete(V1);
+        assertTrue(store.loadStorage(V1).isEmpty(), "delete takes the sidecar too");
+        assertFalse(Files.exists(dir.resolve("t").resolve(V1 + TorrentStore.STORAGE_SUFFIX)));
+    }
+
+    @Test
     void leavesNoTempFilesAndIgnoresStrangers(@TempDir Path dir) throws IOException {
         TorrentStore store = new TorrentStore(dir);
         store.save(V1, new byte[] {1});

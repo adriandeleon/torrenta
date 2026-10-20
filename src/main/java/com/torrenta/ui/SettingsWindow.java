@@ -106,14 +106,16 @@ final class SettingsWindow {
 
     /** The keys this window owns, for Reset. */
     private static final String[] OWNED_KEYS = concat(
-            new String[] {
-                Settings.DOWNLOAD_DIR, Settings.UPDATE_CHECK, Settings.ADD_START_PAUSED, Settings.ADD_SEQUENTIAL
-            },
+            new String[] {Settings.UPDATE_CHECK, Settings.ADD_START_PAUSED, Settings.ADD_SEQUENTIAL},
             concat(
-                    Settings.CONNECTION_KEYS,
+                    Settings.DOWNLOAD_KEYS,
                     concat(
-                            Settings.PROTOCOL_KEYS,
-                            concat(Settings.IPFILTER_KEYS, concat(Settings.SPEED_KEYS, Settings.QUEUE_KEYS)))));
+                            Settings.CONNECTION_KEYS,
+                            concat(
+                                    Settings.PROTOCOL_KEYS,
+                                    concat(
+                                            Settings.IPFILTER_KEYS,
+                                            concat(Settings.SPEED_KEYS, Settings.QUEUE_KEYS))))));
 
     /** Told after an IP filter setting changed; {@code true} asks for a download now. */
     private java.util.function.Consumer<Boolean> onIpFilterChanged = force -> {};
@@ -182,6 +184,10 @@ final class SettingsWindow {
 
     private ChoiceBox<Theme> theme;
     private TextField downloadDir;
+    private CheckBox incompleteEnabled;
+    private TextField incompleteDir;
+    private CheckBox partSuffix;
+    private CheckBox preallocate;
     private CheckBox updateCheck;
     private CheckBox addStartPaused;
     private CheckBox addSequential;
@@ -762,6 +768,74 @@ final class SettingsWindow {
                 "Where new torrents save their files; the Add dialog starts here and can pick another.",
                 new HBox(6, downloadDir, browse),
                 "save path directory location");
+
+        incompleteEnabled = new CheckBox();
+        incompleteEnabled.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setIncompleteEnabled(now);
+            settings.saveQuietly();
+        });
+        incompleteDir = new TextField();
+        incompleteDir.setPrefColumnCount(22);
+        incompleteDir.textProperty().addListener((o, was, now) -> {
+            if (loading || now.isBlank()) return;
+            settings.setIncompleteDir(Path.of(now.trim()));
+            settings.saveQuietly();
+        });
+        incompleteDir
+                .disableProperty()
+                .bind(incompleteEnabled.selectedProperty().not());
+        Button browseIncomplete = new Button("Browse…");
+        browseIncomplete
+                .disableProperty()
+                .bind(incompleteEnabled.selectedProperty().not());
+        browseIncomplete.setOnAction(e -> {
+            DirectoryChooser chooser = new DirectoryChooser();
+            chooser.setTitle("Incomplete folder");
+            File current = new File(incompleteDir.getText().trim());
+            while (current != null && !current.isDirectory()) current = current.getParentFile();
+            if (current != null) chooser.setInitialDirectory(current);
+            File chosen = chooser.showDialog(stage);
+            if (chosen != null) incompleteDir.setText(chosen.getAbsolutePath());
+        });
+        HBox incompleteRow = new HBox(6, incompleteEnabled, incompleteDir, browseIncomplete);
+        incompleteRow.setAlignment(Pos.CENTER_LEFT);
+        row(
+                Category.GENERAL,
+                downloads,
+                "Incomplete folder",
+                "Downloads start here and are moved to their save path when complete; a file already there is never"
+                        + " written over. This folder is this machine's and does not sync.",
+                incompleteRow,
+                "temporary partial in progress move finished");
+        partSuffix = new CheckBox();
+        partSuffix.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setPartSuffix(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.GENERAL,
+                downloads,
+                "Append .part to incomplete files",
+                "Each file carries the suffix until it is complete, so a half-downloaded file is never mistaken for a"
+                        + " whole one. Applies to torrents added from now on.",
+                partSuffix,
+                "suffix extension !qB !tr partial rename");
+        preallocate = new CheckBox();
+        preallocate.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setPreallocate(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.GENERAL,
+                downloads,
+                "Pre-allocate disk space for all files",
+                "A file is written at its full size from its first piece, which keeps it in one piece on disk and"
+                        + " fails early when the disk is full. Applies to torrents added from now on.",
+                preallocate,
+                "allocate sparse fragmentation full size");
 
         VBox updates = section(page, "Updates");
         updateCheck = new CheckBox();
@@ -1558,6 +1632,10 @@ final class SettingsWindow {
             reloadLabels();
             theme.setValue(Theme.byId(settings.theme(), Theme.DEFAULT));
             downloadDir.setText(settings.downloadDir().toString());
+            incompleteEnabled.setSelected(settings.incompleteEnabled());
+            incompleteDir.setText(settings.incompleteDir().toString());
+            partSuffix.setSelected(settings.partSuffix());
+            preallocate.setSelected(settings.preallocate());
             updateCheck.setSelected(settings.updateCheck());
             syncEnabled.setSelected(settings.syncEnabled());
             syncUrl.setText(settings.syncUrl());
