@@ -76,6 +76,9 @@ public final class MainWindow {
     private final TextField filter = new TextField();
     private final StackPane host = new StackPane();
     private final CommandPalette palette;
+    private final EventLog log = new EventLog();
+    private final LogWindow logWindow;
+    private final Label errorBadge = new Label();
     private TableView<TorrentRow> table;
     private List<Command> commands = List.of();
 
@@ -101,6 +104,8 @@ public final class MainWindow {
         root.setTop(buildMenuBar());
         table.setContextMenu(buildContextMenu());
         palette = new CommandPalette(host, () -> table.requestFocus());
+        logWindow = new LogWindow(stage, log);
+        log.installLogBridge(Platform::runLater);
         host.getChildren().add(root);
 
         Scene scene = new Scene(host, 960, 600);
@@ -110,6 +115,7 @@ public final class MainWindow {
                         .toExternalForm());
         scene.getAccelerators().put(chord(KeyCode.F), this::focusFilter);
         scene.getAccelerators().put(shiftChord(KeyCode.P), () -> palette.show(commands));
+        scene.getAccelerators().put(shiftChord(KeyCode.L), logWindow::show);
         stage.setScene(scene);
         stage.setOnHidden(e -> stopPolling());
         setStatus("Starting the engine…");
@@ -131,6 +137,13 @@ public final class MainWindow {
         return engineDescription;
     }
 
+    /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
+    public List<String> eventLines() {
+        return log.events().stream()
+                .map(e -> LogWindow.levelLabel(e.level()) + " " + e.message())
+                .toList();
+    }
+
     /**
      * Drives the window from the capture hook, by name: {@code select-all}, {@code palette},
      * {@code palette:<query>}, or a command id. Prints what a screenshot cannot show.
@@ -138,6 +151,8 @@ public final class MainWindow {
     public void runForCapture(String action) {
         if (action.equals("select-all")) {
             table.getSelectionModel().selectAll();
+        } else if (action.equals("event-log")) {
+            logWindow.show();
         } else if (action.equals("palette")) {
             palette.show(commands);
         } else if (action.startsWith("palette:")) {
@@ -152,6 +167,19 @@ public final class MainWindow {
         System.out.println("capture: selected="
                 + table.getSelectionModel().getSelectedItems().size());
         if (palette.isShowing()) System.out.println("capture: palette=" + palette.visibleCommands());
+        if (logWindow.isShowing()) System.out.println("capture: log-window=showing");
+    }
+
+    /**
+     * Any thread, before {@code engine.start()}: the start itself raises events (engine started,
+     * listening on a port) that a listener attached afterwards would never hear. Events arrive on
+     * the engine's alert thread; the log and the status bar are FX-owned, hence the hop.
+     */
+    public void listenTo(Engine engine) {
+        engine.addListener(event -> Platform.runLater(() -> {
+            log.add(event);
+            setStatus(event.message());
+        }));
     }
 
     /** FX thread. The engine has started; flush what was queued and begin polling. */
@@ -612,7 +640,19 @@ public final class MainWindow {
     private HBox buildStatusBar() {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox bar = new HBox(12, status, spacer, rates);
+        // "3 errors", shown only while there are some; a click opens the log. Cleared with it.
+        errorBadge.getStyleClass().add("error-badge");
+        errorBadge
+                .textProperty()
+                .bind(Bindings.createStringBinding(
+                        () -> log.errorsProperty().get() == 1
+                                ? "1 error"
+                                : log.errorsProperty().get() + " errors",
+                        log.errorsProperty()));
+        errorBadge.visibleProperty().bind(log.errorsProperty().greaterThan(0));
+        errorBadge.managedProperty().bind(errorBadge.visibleProperty());
+        errorBadge.setOnMouseClicked(e -> logWindow.show());
+        HBox bar = new HBox(12, status, spacer, errorBadge, rates);
         bar.setPadding(new Insets(4, 10, 4, 10));
         bar.getStyleClass().add("status-bar");
         return bar;

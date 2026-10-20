@@ -22,6 +22,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   reannounce, sequential download, copy name/info-hash/magnet link, open the destination folder,
   remove and remove with data (confirmed). In the Torrent menu, the right-click menu, and a
   **command palette** on `Ctrl+Shift+P`.
+- **An event log** (`Ctrl+Shift+L`): added, metadata received, checked, finished, removed, torrent
+  and disk errors, tracker errors and warnings, listen ports, port mapping, engine start and stop,
+  plus the app's own warnings. Filter by level, copy, clear. The status bar shows the latest event
+  and an error count that opens the log.
 
 Project scaffold: a themed window with a menu bar, a torrent list and a status bar; the
 `--help`/`--version` command line, which also takes `.torrent` paths and magnet links; the Caret &
