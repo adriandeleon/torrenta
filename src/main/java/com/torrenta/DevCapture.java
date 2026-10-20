@@ -76,7 +76,11 @@ final class DevCapture {
             } catch (IOException | RuntimeException ex) {
                 System.err.println("capture failed: " + ex);
             }
-            Platform.exit();
+            // A modal dialog runs a nested event loop; exiting from inside it is "Key not
+            // associated with a running event loop" and then a hard JVM abort on the way out.
+            // Close it first, and leave on the next pulse once the loop has unwound.
+            window.closeDialogsForCapture();
+            Platform.runLater(Platform::exit);
         });
         settle.play();
     }

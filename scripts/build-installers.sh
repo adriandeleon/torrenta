@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Wraps an already-finished application image into this platform's native installers.
+#
+# Wraps, rather than builds: jpackage's --app-image mode packages exactly what it is handed, so the
+# image that was smoke-tested is the one that ships. jpackage is host-specific and there is no
+# cross-building, so each platform makes its own:
+#   macOS   .dmg
+#   Windows .msi
+#   Linux   .deb and .rpm
+#
+# Usage: build-installers.sh <app-image> <app-version> <dest-dir> <icon>
+set -euo pipefail
+
+image="${1:?app image required}"
+version="${2:?app version required}"
+dest="${3:?destination required}"
+icon="${4:-}"
+
+[ -d "$image" ] || { echo "no app image at $image" >&2; exit 1; }
+mkdir -p "$dest"
+
+common=(--app-image "$image" --name Torrenta --app-version "$version" --dest "$dest"
+        --vendor "Adrian De Leon"
+        --description "A keyboard-first BitTorrent client"
+        --copyright "Copyright 2026 Adrian De Leon")
+[ -n "$icon" ] && [ -f "$icon" ] && common+=(--icon "$icon")
+
+build() {
+    local type="$1"; shift
+    echo "[installers] building $type"
+    if jpackage --type "$type" "${common[@]}" "$@"; then
+        echo "[installers] $type OK"
+    else
+        echo "::error::[installers] $type failed" >&2
+        return 1
+    fi
+}
+
+case "$(uname -s)" in
+    Darwin)
+        build dmg --mac-package-name Torrenta
+        ;;
+    Linux)
+        # The resource directory overrides the desktop entry (for StartupWMClass and the categories;
+        # see packaging/linux/NOTES.md) and the icon, which the deb and rpm bundlers otherwise
+        # regenerate from their own 32x32 stock image.
+        resources="$(mktemp -d)"
+        cp "$(dirname "$0")/../packaging/linux/"*.desktop "$resources/"
+        [ -n "$icon" ] && [ -f "$icon" ] && cp "$icon" "$resources/Torrenta.png"
+        build deb \
+            --linux-package-name torrenta \
+            --linux-deb-maintainer "adrian.deleon@gmail.com" \
+            --linux-menu-group "Network;P2P;FileTransfer" \
+            --linux-shortcut \
+            --resource-dir "$resources"
+        build rpm \
+            --linux-package-name torrenta \
+            --linux-rpm-license-type MIT \
+            --linux-menu-group "Network;P2P;FileTransfer" \
+            --linux-shortcut \
+            --resource-dir "$resources"
+        ;;
+    *)
+        # A fixed upgrade UUID is what makes the next MSI replace this one rather than installing
+        # beside it. Generated once for Torrenta and never changed.
+        build msi \
+            --win-menu \
+            --win-menu-group Torrenta \
+            --win-shortcut \
+            --win-dir-chooser \
+            --win-per-user-install \
+            --win-upgrade-uuid "b7c2e9d4-5a61-4f0e-9c3b-2d8f7a1e6c05"
+        ;;
+esac
+
+echo "[installers] produced:"
+ls -la "$dest"

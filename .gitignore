@@ -12,3 +12,7 @@ target/
 # OS
 .DS_Store
 Thumbs.db
+
+# JVM crash reports, which land in the working directory
+hs_err_pid*.log
+replay_pid*.log

@@ -172,6 +172,11 @@ public final class MainWindow {
         return currentDialog != null && currentDialog.isShowing() ? currentDialog.scene() : stage.getScene();
     }
 
+    /** Dismisses an open Add dialog, so the capture hook can exit outside its nested event loop. */
+    public void closeDialogsForCapture() {
+        if (currentDialog != null && currentDialog.isShowing()) currentDialog.cancel();
+    }
+
     /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
     public List<String> eventLines() {
         return log.events().stream()

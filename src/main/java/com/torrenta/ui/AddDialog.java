@@ -167,6 +167,12 @@ final class AddDialog {
         return stage.getTitle();
     }
 
+    /** Closes without adding, as Escape would. */
+    void cancel() {
+        result = null;
+        stage.hide();
+    }
+
     /** Presses Add, for the capture hook. */
     void confirm() {
         if (add.isDisabled()) return;
