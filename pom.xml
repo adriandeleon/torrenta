@@ -26,6 +26,10 @@
         <jacoco.version>0.8.13</jacoco.version>
         <javafx.plugin.version>0.0.8</javafx.plugin.version>
         <junit.version>5.14.4</junit.version>
+        <!-- The update check reads a GitHub release payload: a large JSON document with
+             user-authored text in it, so it gets a real parser. jackson-core only — no databind —
+             and it is a proper JPMS module, so jlink links it without moditect. -->
+        <jackson.version>2.22.1</jackson.version>
 
         <!-- The engine: libtorrent (the one behind qBittorrent and Deluge) through SWIG. One core
              jar, plus one jar of native libraries per OS, chosen by the os-* profiles below. The
@@ -68,6 +72,12 @@
             <version>${libtorrent4j.version}</version>
         </dependency>
         <!-- libtorrent4j-{macos,linux,windows}: see the os-* profiles. -->
+
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>${jackson.version}</version>
+        </dependency>
 
         <dependency>
             <groupId>org.junit.jupiter</groupId>

@@ -13,8 +13,10 @@ module com.torrenta {
     // Settings, the store and the engine log through j.u.l; nothing is lost without a handler.
     requires java.logging;
 
-    // Fetching a .torrent from a URL for the Add dialog.
+    // Fetching a .torrent from a URL for the Add dialog, and the update check.
     requires java.net.http;
+    // The update check's release payload gets a real parser.
+    requires com.fasterxml.jackson.core;
 
     // ImageIO, for the development screen capture only. Nothing else here touches AWT, and
     // App.main forces it headless before any AWT class can load.

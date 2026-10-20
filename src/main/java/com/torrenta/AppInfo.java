@@ -25,6 +25,7 @@ public final class AppInfo {
     public static final String GITHUB_REPO = "adriandeleon/torrenta";
     public static final String HOMEPAGE = "https://github.com/" + GITHUB_REPO;
     public static final String RELEASES_PAGE = HOMEPAGE + "/releases";
+    public static final String LATEST_RELEASE_API = "https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest";
 
     private AppInfo() {}
 

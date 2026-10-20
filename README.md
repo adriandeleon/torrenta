@@ -78,6 +78,11 @@ libtorrent's resume data with the info dictionary inside, so deleting one file f
 `native/<version>/`, the unpacked engine. Downloads go to `~/Downloads` until there is a setting
 window (`download.dir` in the settings file already works).
 
+After startup, at most once a day, Torrenta asks GitHub whether there is a newer release and says
+so in the status bar and the Help menu; nothing about you or the machine is sent beyond the request
+itself. Help → Check for Updates asks now; Skip Version keeps that one quiet; `updates.check=false`
+in the settings file turns the automatic check off.
+
 ### Releasing
 
 A release is a tag. Set `<version>` in `pom.xml` to the release number (no `-SNAPSHOT`), commit,

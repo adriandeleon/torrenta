@@ -207,7 +207,12 @@ What a first public release needs.
    image on all three platforms. Release workflow, JReleaser, Homebrew cask and winget — done, from
    Termina's; untested until the first dry run and tag. No AOT cache training yet (Termina has it;
    a measured follow-up).
-4. **Update check** against GitHub releases, from Termina's `update` package.
+4. **Update check** — done, from Termina's `update` package: daily after startup, manual from
+   Help, Download and Skip Version items, no draft or pre-release offered, snapshots count as
+   their release.
+
+**0.3 is feature-complete.** What is left before the `v0.3.0` tag is the release pipeline's dry
+run and the `PACKAGES_TOKEN` secret; see the README's Releasing section.
 
 ### 0.4 — Network, bandwidth, queue
 Everything in Settings that the engine already knows how to do.
