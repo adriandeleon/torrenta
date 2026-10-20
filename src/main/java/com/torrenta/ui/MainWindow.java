@@ -112,6 +112,7 @@ public final class MainWindow {
     private final MenuItem skipUpdateItem = new MenuItem();
     private final Label updateBadge = new Label();
     private ReleaseInfo availableUpdate;
+    private Alert aboutDialog;
     private SplitPane split;
     private volatile String detailId;
     private volatile boolean detailWanted;
@@ -194,6 +195,8 @@ public final class MainWindow {
     /** What to photograph: the open Add dialog if there is one, else the window. */
     public javafx.scene.Scene captureScene() {
         if (currentDialog != null && currentDialog.isShowing()) return currentDialog.scene();
+        if (aboutDialog != null && aboutDialog.isShowing())
+            return aboutDialog.getDialogPane().getScene();
         if (settingsWindow.isShowing()) return settingsWindow.scene();
         return stage.getScene();
     }
@@ -201,6 +204,7 @@ public final class MainWindow {
     /** Dismisses an open Add dialog, so the capture hook can exit outside its nested event loop. */
     public void closeDialogsForCapture() {
         if (currentDialog != null && currentDialog.isShowing()) currentDialog.cancel();
+        if (aboutDialog != null && aboutDialog.isShowing()) aboutDialog.close();
     }
 
     /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
@@ -383,6 +387,16 @@ public final class MainWindow {
         updateBadge.setVisible(true);
         updateBadge.setManaged(true);
         if (!manual) setStatus(AppInfo.NAME + " " + availableUpdate.version() + " is available — see the Help menu");
+    }
+
+    /** Help → About: one panel at a time, brought back if it is already open. */
+    private void showAbout() {
+        if (aboutDialog != null && aboutDialog.isShowing()) {
+            aboutDialog.getDialogPane().getScene().getWindow().requestFocus();
+            return;
+        }
+        aboutDialog = AboutDialog.create(stage, settings.file(), opener, availableUpdate);
+        aboutDialog.show();
     }
 
     private void downloadUpdate() {
@@ -786,6 +800,7 @@ public final class MainWindow {
                 new Command("remove", "Remove…", null, "Delete", selection, () -> remove(false)),
                 new Command("remove-data", "Remove with Data…", null, "Shift+Delete", selection, () -> remove(true)),
                 new Command("check-updates", "Check for Updates", null, null, always, this::checkForUpdatesNow),
+                new Command("about", "About " + AppInfo.NAME, null, null, always, this::showAbout),
                 new Command(
                         "settings", "Settings…", chord(KeyCode.COMMA), null, always, () -> settingsWindow.show(stage)),
                 new Command(
@@ -917,8 +932,6 @@ public final class MainWindow {
                         command("event-log").menuItem(),
                         paletteItem);
 
-        MenuItem about = new MenuItem("About " + AppInfo.NAME);
-        about.setOnAction(e -> setStatus(AppInfo.NAME + " " + AppInfo.VERSION + " — " + AppInfo.COPYRIGHT));
         // The two update items exist from the start and show only once a release is known, so the
         // menu's shape does not change under a hand that has learned it.
         downloadUpdateItem.setVisible(false);
@@ -932,7 +945,7 @@ public final class MainWindow {
                         downloadUpdateItem,
                         skipUpdateItem,
                         new SeparatorMenuItem(),
-                        about);
+                        command("about").menuItem());
 
         MenuBar bar = new MenuBar(file, torrent, view, help);
         bar.setUseSystemMenuBar(true);

@@ -12,6 +12,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   palette at the right. Each button is one of the existing commands, so it greys out with them.
   View → Toolbar hides it (`ui.toolbar`). The add actions, the event log and the toolbar toggle
   are commands now, so the palette reaches them too.
+- **Help → About**, the panel Editora has: icon, name, version and tagline, the copyright, links to
+  the licence, the homepage, the releases and the settings file (opens its folder), the available
+  update when one is known, and a monospace block with the build, the engine, Java, JavaFX, the OS
+  and the config folder, with "Copy details". Also in the palette.
 
 ### Fixed
 
