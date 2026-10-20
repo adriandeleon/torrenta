@@ -34,6 +34,7 @@ import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
+import com.torrenta.engine.TrackerHost;
 import com.torrenta.store.TorrentStore;
 import org.libtorrent4j.AddTorrentParams;
 import org.libtorrent4j.Address;
@@ -42,6 +43,7 @@ import org.libtorrent4j.AnnounceEndpoint;
 import org.libtorrent4j.AnnounceEntry;
 import org.libtorrent4j.AnnounceInfohash;
 import org.libtorrent4j.BDecodeNode;
+import org.libtorrent4j.ErrorCode;
 import org.libtorrent4j.FileStorage;
 import org.libtorrent4j.LibTorrent;
 import org.libtorrent4j.PeerInfo;
@@ -69,6 +71,7 @@ import org.libtorrent4j.alerts.SaveResumeDataAlert;
 import org.libtorrent4j.alerts.SaveResumeDataFailedAlert;
 import org.libtorrent4j.alerts.TorrentAlert;
 import org.libtorrent4j.alerts.TorrentErrorAlert;
+import org.libtorrent4j.alerts.TrackerAlert;
 import org.libtorrent4j.alerts.TrackerErrorAlert;
 import org.libtorrent4j.alerts.TrackerWarningAlert;
 import org.libtorrent4j.swig.add_torrent_params;
@@ -171,6 +174,17 @@ public final class LibtorrentEngine implements Engine {
     /** Category and tags by id; absent means none. The sidecar in the store is the durable copy. */
     private final Map<String, TorrentLabels> labels = new ConcurrentHashMap<>();
 
+    /**
+     * The hosts of each torrent's trackers, by id, for the sidebar's Trackers section: from the
+     * add parameters (a magnet's, a .torrent's, the resume data's), from any tracker alert, and
+     * recomputed when trackers are added or removed through the API. Kept here so the snapshot
+     * costs no call for them: the handle's tracker list is a vector copy per torrent per poll.
+     */
+    private final Map<String, Set<String>> trackerHosts = new ConcurrentHashMap<>();
+
+    /** The tracker URLs that last answered a torrent with an error, by id; a reply clears one. */
+    private final Map<String, Set<String>> trackerErrors = new ConcurrentHashMap<>();
+
     public LibtorrentEngine(Path downloadDir, TorrentStore store) {
         this(() -> downloadDir, store);
     }
@@ -242,7 +256,9 @@ public final class LibtorrentEngine implements Engine {
             s.swig().add_torrent(params, added);
             if (added.value() != 0) {
                 LOG.warning("Could not bring back " + entry.getKey() + ": " + added.message());
+                continue;
             }
+            rememberTrackers(entry.getKey(), new AddTorrentParams(params).getTrackers());
         }
     }
 
@@ -335,6 +351,7 @@ public final class LibtorrentEngine implements Engine {
             endedFetches.remove(params.getInfoHashes().getV1().toHex());
         if (info == null && request.stopCondition() == AddRequest.StopCondition.METADATA_RECEIVED)
             stopAfterMetadata.add(id);
+        rememberTrackers(id, params.getTrackers());
 
         // The synchronous add, so the caller gets a handle (and an error) straight away; the
         // add_torrent_alert that follows is what writes the first resume data.
@@ -618,6 +635,8 @@ public final class LibtorrentEngine implements Engine {
         synchronized (store) {
             removed.add(id);
             labels.remove(id);
+            trackerHosts.remove(id);
+            trackerErrors.remove(id);
             try {
                 store.delete(id);
             } catch (IOException e) {
@@ -884,6 +903,28 @@ public final class LibtorrentEngine implements Engine {
             AnnounceEntry entry = new AnnounceEntry(u);
             entry.tier((short) tier);
             h.addTracker(entry);
+            existing.add(entry);
+        }
+        trackerHosts.put(id, hostsOf(existing));
+    }
+
+    /** The hosts of the entries, as a set of this engine's own, for {@link #trackerHosts}. */
+    private static Set<String> hostsOf(List<AnnounceEntry> entries) {
+        Set<String> out = ConcurrentHashMap.newKeySet();
+        for (AnnounceEntry e : entries) {
+            String host = TrackerHost.of(e.url());
+            if (!host.isEmpty()) out.add(host);
+        }
+        return out;
+    }
+
+    /** Any thread, no session call: the hosts of the URLs join the torrent's. */
+    private void rememberTrackers(String id, List<String> urls) {
+        if (urls.isEmpty()) return;
+        Set<String> hosts = trackerHosts.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet());
+        for (String url : urls) {
+            String host = TrackerHost.of(url);
+            if (!host.isEmpty()) hosts.add(host);
         }
     }
 
@@ -895,6 +936,9 @@ public final class LibtorrentEngine implements Engine {
             if (!e.url().equals(url)) kept.add(e);
         }
         h.replaceTrackers(kept);
+        trackerHosts.put(id, hostsOf(kept));
+        Set<String> errors = trackerErrors.get(id);
+        if (errors != null) errors.remove(url);
     }
 
     private static Priority fromLibtorrent(org.libtorrent4j.Priority priority) {
@@ -1303,6 +1347,9 @@ public final class LibtorrentEngine implements Engine {
         if (name == null || name.isEmpty()) name = id;
         String tracker = status.currentTracker();
         TorrentLabels l = labels.getOrDefault(id, TorrentLabels.NONE);
+        ErrorCode error = status.errorCode();
+        Set<String> hosts = trackerHosts.get(id);
+        Set<String> errors = trackerErrors.get(id);
         return new Torrent(
                 id,
                 name,
@@ -1327,7 +1374,10 @@ public final class LibtorrentEngine implements Engine {
                 // seeding: a torrent with files left out never becomes a seed, but it is done.
                 status.finishedDuration() / 1000,
                 l.category(),
-                l.tags());
+                l.tags(),
+                error != null && error.isError() ? error.getMessage() : "",
+                hosts == null ? List.of() : hosts.stream().sorted().toList(),
+                errors != null && !errors.isEmpty());
     }
 
     /** libtorrent's seven states folded into the list's six. Package-private for the test. */
@@ -1356,6 +1406,8 @@ public final class LibtorrentEngine implements Engine {
             AlertType.FILE_RENAME_FAILED.swig(),
             AlertType.TRACKER_ERROR.swig(),
             AlertType.TRACKER_WARNING.swig(),
+            AlertType.TRACKER_REPLY.swig(),
+            AlertType.TRACKER_ANNOUNCE.swig(),
             AlertType.LISTEN_SUCCEEDED.swig(),
             AlertType.LISTEN_FAILED.swig(),
             AlertType.PORTMAP.swig(),
@@ -1425,12 +1477,20 @@ public final class LibtorrentEngine implements Engine {
                     case TRACKER_ERROR -> {
                         TrackerErrorAlert t = (TrackerErrorAlert) alert;
                         String reason = t.errorMessage().isEmpty() ? t.error().getMessage() : t.errorMessage();
+                        onTracker(t, true);
                         torrentEvent(t, EngineEvent.Level.WARNING, "%s: tracker " + t.trackerUrl() + " — " + reason);
                     }
                     case TRACKER_WARNING -> {
                         TrackerWarningAlert t = (TrackerWarningAlert) alert;
+                        onTracker(t, false);
                         torrentEvent(
                                 t, EngineEvent.Level.WARNING, "%s: tracker " + t.trackerUrl() + " — " + t.message());
+                    }
+                    case TRACKER_REPLY -> onTracker((TrackerAlert<?>) alert, false);
+                    case TRACKER_ANNOUNCE -> {
+                        // An announce says nothing about the outcome; only the host is noted.
+                        TrackerAlert<?> t = (TrackerAlert<?>) alert;
+                        if (t.handle().isValid()) rememberTrackers(id(t.handle()), List.of(t.trackerUrl()));
                     }
                     case LISTEN_SUCCEEDED -> {
                         ListenSucceededAlert a = (ListenSucceededAlert) alert;
@@ -1493,6 +1553,25 @@ public final class LibtorrentEngine implements Engine {
             requestSave(alert.handle(), false);
             String id = alert.params().getInfoHashes().getBest().toHex();
             torrentEvent(alert, EngineEvent.Level.INFO, restoring.remove(id) ? "Restored %s" : "Added %s");
+        }
+
+        /**
+         * A tracker answered: its host is one of the torrent's (a tracker learnt from a peer
+         * exchange is first seen here), and the URL is in error or out of it.
+         */
+        private void onTracker(TrackerAlert<?> alert, boolean failed) {
+            TorrentHandle handle = alert.handle();
+            if (!handle.isValid()) return;
+            String id = id(handle);
+            rememberTrackers(id, List.of(alert.trackerUrl()));
+            if (failed) {
+                trackerErrors
+                        .computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet())
+                        .add(alert.trackerUrl());
+            } else {
+                Set<String> errors = trackerErrors.get(id);
+                if (errors != null) errors.remove(alert.trackerUrl());
+            }
         }
 
         /** {@code template} has one {@code %s}, the torrent's name. */

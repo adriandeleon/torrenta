@@ -35,7 +35,10 @@ class ShareLimitTest {
                 false,
                 seedingSeconds,
                 "",
-                List.of());
+                List.of(),
+                "",
+                java.util.List.of(),
+                false);
     }
 
     @Test

@@ -24,7 +24,9 @@ class SyncKeysTest {
         assertFalse(SyncKeys.isSynced("proxy.password"), "a secret");
         assertFalse(SyncKeys.isSynced("updates.lastCheckEpochMs"), "a clock");
         assertFalse(SyncKeys.isSynced("torrent.0123abcd.share"), "a torrent of this machine");
-        assertFalse(SyncKeys.isSynced("ui.sidebar.filter"), "names this machine's categories");
+        assertFalse(SyncKeys.isSynced("ui.sidebar.category"), "names this machine's categories");
+        assertFalse(SyncKeys.isSynced("ui.sidebar.status"), "what this machine is looking at");
+        assertFalse(SyncKeys.isSynced("ui.sidebar.collapsed"));
         assertTrue(SyncKeys.isSynced("ui.sidebar"), "but whether the sidebar shows travels");
         assertTrue(SyncKeys.isSynced("share.ratio"), "the global share limit travels");
         assertFalse(SyncKeys.isSynced(""));

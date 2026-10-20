@@ -10,6 +10,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SettingsTest {
@@ -54,14 +55,31 @@ class SettingsTest {
         Settings settings = new Settings(file);
         settings.load();
         assertTrue(settings.sidebar(), "shown by default");
-        assertEquals("", settings.sidebarFilter(), "nothing chosen is All to the UI");
+        for (String axis : Settings.SIDEBAR_AXES)
+            assertEquals("", settings.sidebarChoice(axis), "nothing chosen is All to the UI");
+        assertTrue(settings.sidebarCollapsed().isEmpty(), "every section open by default");
         settings.setSidebar(false);
-        settings.setSidebarFilter("category:Linux ISOs");
+        settings.setSidebarChoice("category", "category:Linux ISOs");
+        settings.setSidebarChoice("status", " status:seeding ");
+        settings.setSidebarCollapsed(List.of("tracker", "bogus", "tag"));
         settings.save();
         Settings read = new Settings(file);
         read.load();
         assertFalse(read.sidebar());
-        assertEquals("category:Linux ISOs", read.sidebarFilter());
+        assertEquals("category:Linux ISOs", read.sidebarChoice("category"));
+        assertEquals("status:seeding", read.sidebarChoice("status"), "trimmed");
+        assertEquals("", read.sidebarChoice("tag"));
+        assertEquals(List.of("tag", "tracker"), List.copyOf(read.sidebarCollapsed()), "known axes, in their order");
+        assertThrows(IllegalArgumentException.class, () -> read.sidebarChoice("colour"), "not an axis");
+    }
+
+    @Test
+    void sidebarCollapsedDropsWhatIsNotASection(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Files.writeString(file, "ui.sidebar.collapsed=Status, nonsense,,TAG\n");
+        Settings settings = new Settings(file);
+        settings.load();
+        assertEquals(List.of("status", "tag"), List.copyOf(settings.sidebarCollapsed()));
     }
 
     @Test
