@@ -15,6 +15,7 @@ import java.util.Locale;
  * @param uploadSlots how many peers are unchoked at once
  * @param proxy the proxy, or {@link ProxyType#NONE}
  * @param proxyPeers send peer connections through the proxy too, not only trackers
+ * @param protocol the protocol page: discovery, transport, encryption, default trackers
  */
 public record EngineSettings(
         int listenPort,
@@ -30,7 +31,50 @@ public record EngineSettings(
         int proxyPort,
         String proxyUsername,
         String proxyPassword,
-        boolean proxyPeers) {
+        boolean proxyPeers,
+        Protocol protocol) {
+
+    /**
+     * The Protocol page.
+     *
+     * @param dht find peers through the distributed hash table (magnets need it)
+     * @param pex swap peer lists with connected peers; a per-torrent flag in libtorrent
+     * @param lsd find peers on the local network
+     * @param utp use uTP as well as TCP, which keeps a home connection responsive
+     * @param encryption require, prefer, or never encrypt peer connections
+     * @param anonymous send no client name or version, and nothing a tracker could use to tell
+     *     clients apart
+     * @param defaultTrackers appended to every torrent as it is added
+     */
+    public record Protocol(
+            boolean dht,
+            boolean pex,
+            boolean lsd,
+            boolean utp,
+            Encryption encryption,
+            boolean anonymous,
+            java.util.List<String> defaultTrackers) {
+
+        public enum Encryption {
+            REQUIRE("Require"),
+            PREFER("Prefer"),
+            OFF("Off");
+
+            private final String label;
+
+            Encryption(String label) {
+                this.label = label;
+            }
+
+            public String label() {
+                return label;
+            }
+        }
+
+        public static Protocol defaults() {
+            return new Protocol(true, true, true, true, Encryption.PREFER, false, java.util.List.of());
+        }
+    }
 
     public enum ProxyType {
         NONE("None"),
@@ -49,7 +93,27 @@ public record EngineSettings(
     }
 
     public static EngineSettings defaults() {
-        return new EngineSettings(6881, false, "", true, true, 500, 100, 20, ProxyType.NONE, "", 1080, "", "", true);
+        return new EngineSettings(
+                6881, false, "", true, true, 500, 100, 20, ProxyType.NONE, "", 1080, "", "", true, Protocol.defaults());
+    }
+
+    public EngineSettings withProtocol(Protocol protocol) {
+        return new EngineSettings(
+                listenPort,
+                randomPort,
+                listenInterface,
+                ipv6,
+                upnp,
+                maxConnections,
+                maxConnectionsPerTorrent,
+                uploadSlots,
+                proxy,
+                proxyHost,
+                proxyPort,
+                proxyUsername,
+                proxyPassword,
+                proxyPeers,
+                protocol);
     }
 
     /**

@@ -3,6 +3,7 @@ package com.torrenta.store;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -74,6 +75,34 @@ class SettingsTest {
         assertEquals(1080, e.proxyPort());
         assertEquals("tun0", e.listenInterface());
         assertTrue(e.upnp(), "untouched keys are the defaults");
+        assertTrue(e.protocol().dht(), "protocol defaults too");
+        assertEquals(
+                com.torrenta.engine.EngineSettings.Protocol.Encryption.PREFER,
+                e.protocol().encryption());
+    }
+
+    @Test
+    void protocolSettingsAreRead(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Files.writeString(
+                file,
+                String.join(
+                        "\n",
+                        Settings.PROTO_DHT + "=false",
+                        Settings.PROTO_ENCRYPTION + "=require",
+                        Settings.PROTO_DEFAULT_TRACKERS
+                                + "=  udp://a.example.org:1/announce   udp://b.example.org:2/announce udp://a.example.org:1/announce ",
+                        ""));
+        Settings settings = new Settings(file);
+        settings.load();
+        var p = settings.engineSettings().protocol();
+        assertFalse(p.dht());
+        assertTrue(p.pex(), "untouched: default");
+        assertEquals(com.torrenta.engine.EngineSettings.Protocol.Encryption.REQUIRE, p.encryption());
+        assertEquals(
+                List.of("udp://a.example.org:1/announce", "udp://b.example.org:2/announce"),
+                p.defaultTrackers(),
+                "split, trimmed, deduplicated");
     }
 
     @Test

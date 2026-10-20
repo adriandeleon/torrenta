@@ -45,6 +45,9 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 - **Connection settings**: listening port or a random one, UPnP / NAT-PMP, IPv6, binding to an
   address or interface, connection limits (global, per torrent, upload slots), and a SOCKS5 or
   HTTP proxy with optional login, for trackers and optionally peers. Applied at start and live.
+- **Protocol settings**: DHT, peer exchange, local peer discovery, uTP, the encryption policy
+  (require, prefer, off), anonymous mode, and default trackers added to every torrent, new and
+  existing. Applied at start and live.
 - **An update check** against GitHub releases, after startup and at most once a day, with a
   manual Check for Updates, a Download item and a Skip Version item in the Help menu.
 - **An event log** (`Ctrl+Shift+L`): added, metadata received, checked, finished, removed, torrent

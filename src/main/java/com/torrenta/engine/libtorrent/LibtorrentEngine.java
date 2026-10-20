@@ -251,7 +251,24 @@ public final class LibtorrentEngine implements Engine {
         if (request.sequential()) flags = flags.or_(Flags.SEQUENTIAL_DOWNLOAD);
         if (request.skipCheck()) flags = flags.or_(Flags.SEED_MODE);
         if (request.stopCondition() == AddRequest.StopCondition.FILES_CHECKED) flags = flags.or_(Flags.STOP_WHEN_READY);
+        if (!engineSettings.protocol().pex()) flags = flags.or_(Flags.DISABLE_PEX);
         params.setFlags(flags);
+
+        List<String> defaults = engineSettings.protocol().defaultTrackers();
+        if (!defaults.isEmpty()) {
+            // Appended on a tier of their own, after the torrent's; duplicates stay out.
+            List<String> trackers = new ArrayList<>(params.getTrackers());
+            List<Integer> tiers = new ArrayList<>(params.getTrackerTiers());
+            int tier = tiers.stream().mapToInt(Integer::intValue).max().orElse(-1) + 1;
+            for (String url : defaults) {
+                if (!trackers.contains(url)) {
+                    trackers.add(url);
+                    tiers.add(tier);
+                }
+            }
+            params.setTrackers(trackers);
+            params.setTrackerTiers(tiers);
+        }
 
         if (info != null && !request.filePriorities().isEmpty()) {
             org.libtorrent4j.Priority[] priorities = new org.libtorrent4j.Priority[info.numFiles()];
@@ -572,7 +589,22 @@ public final class LibtorrentEngine implements Engine {
         SessionManager s = session;
         if (s == null || !s.isRunning()) return;
         s.applySettings(toPack(settings));
-        emit(EngineEvent.session(EngineEvent.Level.INFO, "Connection settings applied: " + settings));
+        // PEX is a per-torrent flag and default trackers are per-torrent lists: carried to what is
+        // already in the session, so a change does not wait for the next add.
+        for (TorrentHandle handle : handles(s)) {
+            if (settings.protocol().pex()) handle.unsetFlags(Flags.DISABLE_PEX);
+            else handle.setFlags(Flags.DISABLE_PEX);
+        }
+        if (!settings.protocol().defaultTrackers().isEmpty()) {
+            for (TorrentHandle handle : handles(s)) {
+                try {
+                    addTrackers(id(handle), settings.protocol().defaultTrackers());
+                } catch (EngineException e) {
+                    LOG.fine("default trackers not added to " + id(handle) + ": " + e.getMessage());
+                }
+            }
+        }
+        emit(EngineEvent.session(EngineEvent.Level.INFO, "Engine settings applied: " + settings));
     }
 
     /** The session's connection limit as libtorrent has it; for the test. */
@@ -614,7 +646,34 @@ public final class LibtorrentEngine implements Engine {
         pack.setBoolean(settings_pack.bool_types.proxy_tracker_connections.swigValue(), true);
         // Resolve host names through the proxy, so a DNS lookup does not leak what the proxy hides.
         pack.setBoolean(settings_pack.bool_types.proxy_hostnames.swigValue(), true);
+
+        EngineSettings.Protocol p = s.protocol();
+        pack.setBoolean(settings_pack.bool_types.enable_dht.swigValue(), p.dht());
+        pack.setBoolean(settings_pack.bool_types.enable_lsd.swigValue(), p.lsd());
+        pack.setBoolean(settings_pack.bool_types.enable_outgoing_utp.swigValue(), p.utp());
+        pack.setBoolean(settings_pack.bool_types.enable_incoming_utp.swigValue(), p.utp());
+        pack.setBoolean(settings_pack.bool_types.anonymous_mode.swigValue(), p.anonymous());
+        settings_pack.enc_policy policy =
+                switch (p.encryption()) {
+                    case REQUIRE -> settings_pack.enc_policy.pe_forced;
+                    case PREFER -> settings_pack.enc_policy.pe_enabled;
+                    case OFF -> settings_pack.enc_policy.pe_disabled;
+                };
+        settings_pack.enc_level level =
+                switch (p.encryption()) {
+                    case REQUIRE -> settings_pack.enc_level.pe_rc4;
+                    case PREFER -> settings_pack.enc_level.pe_both;
+                    case OFF -> settings_pack.enc_level.pe_plaintext;
+                };
+        pack.setInteger(settings_pack.int_types.out_enc_policy.swigValue(), policy.swigValue());
+        pack.setInteger(settings_pack.int_types.in_enc_policy.swigValue(), policy.swigValue());
+        pack.setInteger(settings_pack.int_types.allowed_enc_level.swigValue(), level.swigValue());
         return pack;
+    }
+
+    /** Whether DHT is on in the session; for the test. */
+    boolean dhtEnabledForTest() throws EngineException {
+        return running().settings().isEnableDht();
     }
 
     @Override
@@ -731,6 +790,7 @@ public final class LibtorrentEngine implements Engine {
         static final torrent_flags_t SEQUENTIAL_DOWNLOAD = TorrentFlags.SEQUENTIAL_DOWNLOAD;
         static final torrent_flags_t SEED_MODE = TorrentFlags.SEED_MODE;
         static final torrent_flags_t STOP_WHEN_READY = TorrentFlags.STOP_WHEN_READY;
+        static final torrent_flags_t DISABLE_PEX = TorrentFlags.DISABLE_PEX;
     }
 
     private static boolean has(torrent_flags_t flags, torrent_flags_t flag) {

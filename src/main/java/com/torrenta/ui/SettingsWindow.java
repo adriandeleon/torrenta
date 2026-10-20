@@ -24,6 +24,7 @@ import javafx.scene.control.PasswordField;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
+import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.BorderPane;
@@ -71,7 +72,8 @@ final class SettingsWindow {
     enum Category {
         GENERAL(Group.APPLICATION, "General"),
         ADDING(Group.APPLICATION, "Adding torrents"),
-        CONNECTION(Group.ENGINE, "Connection");
+        CONNECTION(Group.ENGINE, "Connection"),
+        PROTOCOL(Group.ENGINE, "Protocol");
 
         final Group group;
         private final String title;
@@ -93,7 +95,7 @@ final class SettingsWindow {
             new String[] {
                 Settings.DOWNLOAD_DIR, Settings.UPDATE_CHECK, Settings.ADD_START_PAUSED, Settings.ADD_SEQUENTIAL
             },
-            Settings.CONNECTION_KEYS);
+            concat(Settings.CONNECTION_KEYS, Settings.PROTOCOL_KEYS));
 
     private static String[] concat(String[] a, String[] b) {
         String[] out = new String[a.length + b.length];
@@ -135,6 +137,13 @@ final class SettingsWindow {
     private TextField proxyUsername;
     private PasswordField proxyPassword;
     private CheckBox proxyPeers;
+    private CheckBox dht;
+    private CheckBox pex;
+    private CheckBox lsd;
+    private CheckBox utp;
+    private ChoiceBox<EngineSettings.Protocol.Encryption> encryption;
+    private CheckBox anonymous;
+    private TextArea defaultTrackers;
 
     void setOnEngineSettingsChanged(Runnable handler) {
         onEngineSettingsChanged = handler;
@@ -347,6 +356,7 @@ final class SettingsWindow {
             case GENERAL -> buildGeneral(page);
             case ADDING -> buildAdding(page);
             case CONNECTION -> buildConnection(page);
+            case PROTOCOL -> buildProtocol(page);
         }
         page.setPadding(new Insets(0, PAGE_GUTTER, 0, 0));
         ScrollPane scroll = new ScrollPane(page);
@@ -604,6 +614,96 @@ final class SettingsWindow {
         }
     }
 
+    private void buildProtocol(VBox page) {
+        VBox discovery = section(page, "Finding peers");
+        dht = bool(Settings.PROTO_DHT);
+        row(
+                Category.PROTOCOL,
+                discovery,
+                "DHT",
+                "The distributed hash table. Magnet links need it; private torrents never use it.",
+                dht,
+                "distributed hash table trackerless");
+        pex = bool(Settings.PROTO_PEX);
+        row(
+                Category.PROTOCOL,
+                discovery,
+                "Peer exchange (PEX)",
+                "Swap peer lists with the peers you are connected to.",
+                pex,
+                "ut_pex");
+        lsd = bool(Settings.PROTO_LSD);
+        row(
+                Category.PROTOCOL,
+                discovery,
+                "Local peer discovery",
+                "Find peers on your own network, so a second machine at home fetches from the first.",
+                lsd,
+                "lsd lan multicast");
+
+        VBox transport = section(page, "Transport");
+        utp = bool(Settings.PROTO_UTP);
+        row(
+                Category.PROTOCOL,
+                transport,
+                "uTP",
+                "The UDP transport that yields to other traffic, keeping the connection usable while downloading. TCP stays on.",
+                utp,
+                "udp congestion");
+        encryption = new ChoiceBox<>();
+        encryption.getItems().addAll(EngineSettings.Protocol.Encryption.values());
+        encryption.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(EngineSettings.Protocol.Encryption e) {
+                return e == null ? "" : e.label();
+            }
+
+            @Override
+            public EngineSettings.Protocol.Encryption fromString(String s) {
+                return null;
+            }
+        });
+        encryption.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.set(Settings.PROTO_ENCRYPTION, now.name());
+            changed();
+        });
+        row(
+                Category.PROTOCOL,
+                transport,
+                "Encryption",
+                "Require it and refuse plain peers; prefer it and take either; or never encrypt. It hides the traffic's shape from a watching network, not its endpoints.",
+                encryption,
+                "rc4 mse obfuscation require prefer");
+        anonymous = bool(Settings.PROTO_ANONYMOUS);
+        row(
+                Category.PROTOCOL,
+                transport,
+                "Anonymous mode",
+                "Send no client name or version and nothing a tracker could use to tell clients apart. Some trackers refuse such clients.",
+                anonymous,
+                "privacy identify fingerprint");
+
+        VBox trackers = section(page, "Trackers");
+        defaultTrackers = new TextArea();
+        defaultTrackers.setPrefRowCount(4);
+        defaultTrackers.setPrefColumnCount(34);
+        defaultTrackers.setPromptText("udp://tracker.example.org:6969/announce");
+        defaultTrackers.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.set(
+                    Settings.PROTO_DEFAULT_TRACKERS, String.join(" ", now.trim().split("\\s+")));
+            changed();
+        });
+        row(
+                Category.PROTOCOL,
+                trackers,
+                "Default trackers",
+                "One per line. Added to every torrent as it is added, and to the ones already here.",
+                defaultTrackers,
+                "announce public list");
+    }
+
     /** A spinner that writes its key when the value changes, typed or stepped. */
     private Spinner<Integer> intSpinner(int min, int max, String key) {
         Spinner<Integer> spinner = new Spinner<>(new SpinnerValueFactory.IntegerSpinnerValueFactory(min, max, min));
@@ -669,6 +769,14 @@ final class SettingsWindow {
             proxyUsername.setText(e.proxyUsername());
             proxyPassword.setText(e.proxyPassword());
             proxyPeers.setSelected(e.proxyPeers());
+            EngineSettings.Protocol p = e.protocol();
+            dht.setSelected(p.dht());
+            pex.setSelected(p.pex());
+            lsd.setSelected(p.lsd());
+            utp.setSelected(p.utp());
+            encryption.setValue(p.encryption());
+            anonymous.setSelected(p.anonymous());
+            defaultTrackers.setText(String.join("\n", p.defaultTrackers()));
         } finally {
             loading = false;
         }

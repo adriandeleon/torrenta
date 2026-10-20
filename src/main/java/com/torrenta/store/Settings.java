@@ -58,6 +58,20 @@ public final class Settings {
 
     public static final String PROXY_PEERS = "proxy.peers";
 
+    /** Protocol page. Default trackers are space-separated, since a URL has no spaces. */
+    public static final String PROTO_DHT = "protocol.dht";
+
+    public static final String PROTO_PEX = "protocol.pex";
+    public static final String PROTO_LSD = "protocol.lsd";
+    public static final String PROTO_UTP = "protocol.utp";
+    public static final String PROTO_ENCRYPTION = "protocol.encryption";
+    public static final String PROTO_ANONYMOUS = "protocol.anonymous";
+    public static final String PROTO_DEFAULT_TRACKERS = "protocol.defaultTrackers";
+
+    public static final String[] PROTOCOL_KEYS = {
+        PROTO_DHT, PROTO_PEX, PROTO_LSD, PROTO_UTP, PROTO_ENCRYPTION, PROTO_ANONYMOUS, PROTO_DEFAULT_TRACKERS
+    };
+
     public static final String[] CONNECTION_KEYS = {
         CONN_PORT, CONN_RANDOM_PORT, CONN_INTERFACE, CONN_IPV6, CONN_UPNP, CONN_MAX_CONNECTIONS,
         CONN_MAX_PER_TORRENT, CONN_UPLOAD_SLOTS, PROXY_TYPE, PROXY_HOST, PROXY_PORT, PROXY_USERNAME,
@@ -164,6 +178,31 @@ public final class Settings {
         } catch (IllegalArgumentException e) {
             proxy = EngineSettings.ProxyType.NONE;
         }
+        EngineSettings.Protocol pd = EngineSettings.Protocol.defaults();
+        EngineSettings.Protocol.Encryption encryption;
+        try {
+            encryption = EngineSettings.Protocol.Encryption.valueOf(properties
+                    .getProperty(PROTO_ENCRYPTION, pd.encryption().name())
+                    .trim()
+                    .toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            encryption = pd.encryption();
+        }
+        java.util.List<String> trackers = java.util.Arrays.stream(properties
+                        .getProperty(PROTO_DEFAULT_TRACKERS, "")
+                        .trim()
+                        .split("\\s+"))
+                .filter(t -> !t.isEmpty())
+                .distinct()
+                .toList();
+        EngineSettings.Protocol protocol = new EngineSettings.Protocol(
+                readBoolean(PROTO_DHT, pd.dht()),
+                readBoolean(PROTO_PEX, pd.pex()),
+                readBoolean(PROTO_LSD, pd.lsd()),
+                readBoolean(PROTO_UTP, pd.utp()),
+                encryption,
+                readBoolean(PROTO_ANONYMOUS, pd.anonymous()),
+                trackers);
         return new EngineSettings(
                 readInt(CONN_PORT, d.listenPort(), 1024, 65535),
                 readBoolean(CONN_RANDOM_PORT, d.randomPort()),
@@ -178,7 +217,8 @@ public final class Settings {
                 readInt(PROXY_PORT, d.proxyPort(), 1, 65535),
                 properties.getProperty(PROXY_USERNAME, ""),
                 properties.getProperty(PROXY_PASSWORD, ""),
-                readBoolean(PROXY_PEERS, d.proxyPeers()));
+                readBoolean(PROXY_PEERS, d.proxyPeers()),
+                protocol);
     }
 
     /** An int between the bounds; anything unreadable or outside them is the default. */
