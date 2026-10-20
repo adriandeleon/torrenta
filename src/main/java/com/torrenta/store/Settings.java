@@ -6,6 +6,8 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -35,6 +37,13 @@ public final class Settings {
     public static final String DETAIL_DIVIDER = "detail.divider";
     /** Ask GitHub for a newer release after startup, at most once a day. */
     public static final String UPDATE_CHECK = "updates.check";
+    /** Settings sync: machine-local, never synced themselves (see {@code SyncKeys}). */
+    public static final String SYNC_ENABLED = "sync.enabled";
+
+    public static final String SYNC_URL = "sync.url";
+    public static final String SYNC_BRANCH = "sync.branch";
+    public static final String SYNC_INTERVAL = "sync.intervalMinutes";
+    public static final String SYNC_LAST = "sync.lastEpochMs";
     /** The theme id ({@code editora-dark}, {@code nord-light}, …); the UI maps it and falls back. */
     public static final String THEME = "ui.theme";
 
@@ -100,6 +109,7 @@ public final class Settings {
 
     private final Path file;
     private final Properties properties = new Properties();
+    private Runnable onSaved;
 
     public Settings(Path file) {
         this.file = file;
@@ -138,6 +148,74 @@ public final class Settings {
         } finally {
             Files.deleteIfExists(tmp);
         }
+        Runnable listener = onSaved;
+        if (listener != null) listener.run();
+    }
+
+    /** Runs after every successful save, on the saving thread: settings sync listens here. */
+    public void setOnSaved(Runnable listener) {
+        onSaved = listener;
+    }
+
+    /** The entries that travel between machines, sorted. */
+    public Map<String, String> syncedEntries() {
+        return com.torrenta.sync.SyncKeys.synced(properties);
+    }
+
+    /** Replaces the synced entries with {@code merged}; the local ones stay. Not saved here. */
+    public void replaceSynced(Map<String, String> merged) {
+        for (String key : List.copyOf(properties.stringPropertyNames())) {
+            if (com.torrenta.sync.SyncKeys.isSynced(key)) properties.remove(key);
+        }
+        merged.forEach((key, value) -> {
+            if (com.torrenta.sync.SyncKeys.isSynced(key) && value != null) properties.setProperty(key, value);
+        });
+    }
+
+    public boolean syncEnabled() {
+        return readBoolean(SYNC_ENABLED, false);
+    }
+
+    public void setSyncEnabled(boolean enabled) {
+        properties.setProperty(SYNC_ENABLED, String.valueOf(enabled));
+    }
+
+    public String syncUrl() {
+        return properties.getProperty(SYNC_URL, "").trim();
+    }
+
+    public void setSyncUrl(String url) {
+        properties.setProperty(SYNC_URL, url == null ? "" : url.trim());
+    }
+
+    public String syncBranch() {
+        String branch = properties.getProperty(SYNC_BRANCH, "").trim();
+        return branch.isEmpty() ? "main" : branch;
+    }
+
+    public void setSyncBranch(String branch) {
+        properties.setProperty(SYNC_BRANCH, branch == null ? "" : branch.trim());
+    }
+
+    /** Minutes between automatic syncs while the window is focused; 1 to 1440, 15 by default. */
+    public int syncIntervalMinutes() {
+        return readInt(SYNC_INTERVAL, 15, 1, 1440);
+    }
+
+    public void setSyncIntervalMinutes(int minutes) {
+        properties.setProperty(SYNC_INTERVAL, String.valueOf(Math.clamp(minutes, 1, 1440)));
+    }
+
+    public long syncLastEpochMs() {
+        try {
+            return Long.parseLong(properties.getProperty(SYNC_LAST, "0").trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    public void setSyncLastEpochMs(long epochMs) {
+        properties.setProperty(SYNC_LAST, String.valueOf(epochMs));
     }
 
     /** A raw value, for keys whose shape another class owns. */

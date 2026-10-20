@@ -156,6 +156,14 @@ release process with the names changed; Termina's README and memory hold the war
   holds every vector with `Reference.reachabilityFence` until the copies are made. Anything that
   points into a parent (`status.pieces()`, `info.files()`) is used while the parent is fenced. CI
   runs the Linux tests with `MALLOC_PERTURB_` so a slip crashes every time, not once in a hundred.
+- **Settings sync never asks git to merge** (`sync/SyncEngine`, Editora's design): the clone under
+  `<configDir>/sync/repo` is reset to the remote, the live settings are three-way merged per key
+  against `refs/torrenta/base` (`SyncMerge`, this machine wins), written over the tree, committed
+  and pushed; the base moves only after the push, so an interrupted round is simply repeated. What
+  travels is decided by `SyncKeys` (everything but `sync.*`, folders, the interface, clocks and the
+  proxy password). Automatic rounds run git with no prompt of any kind (`QuietGit`); a `gh` account
+  that can read an https repository is pinned in the clone's config (`SyncAccount`, adl has two).
+  `Settings.setOnSaved` is how a change reaches the service; its own saves set `applying` first.
 - **The IP filter is replaced whole, never merged**: `set_ip_filter` takes a complete
   `ip_filter`, so the controller rebuilds it from cache + local file + bans every time. A filter
   set before `start()` is applied at start, so no peer slips in while the first download runs.

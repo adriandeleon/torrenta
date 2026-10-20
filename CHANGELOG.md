@@ -5,6 +5,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Added
+
+- **Settings sync** through a Git repository of yours (Settings → Sync), as Editora's: every
+  computer that connects to the same repository keeps the same settings, merged one key at a time,
+  this machine winning a same-key conflict. Automatic after startup, half a minute after a change
+  and on a timer while the window is in front; "Sync now" too. "Create on GitHub" makes a private
+  repository through the GitHub CLI; with two gh accounts, the one that can read the repository is
+  remembered and used. This machine's folders, interface, clocks and proxy password never travel.
+
 ### Fixed
 
 - **A JVM crash in the engine** (`SIGSEGV` in `libtorrent4j.so` while reading a torrent's detail,
