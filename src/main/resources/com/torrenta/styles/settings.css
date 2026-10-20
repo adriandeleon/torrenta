@@ -1,0 +1,81 @@
+/*
+ * Settings window chrome. Everything here is expressed in the theme's own semantic colour
+ * variables (-color-fg-muted, -color-accent-*, …) rather than literal hex, so the light and dark
+ * themes both style it without a second stylesheet.
+ */
+
+.settings-sidebar {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent -color-border-muted transparent transparent;
+}
+
+.settings-sidebar .list-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 5 10 5 10;
+}
+
+/* Group headings are labels, not choices — no hover, no selection affordance. */
+.settings-group-header {
+    -fx-text-fill: -color-fg-subtle;
+    -fx-font-size: 0.75em;
+    -fx-font-weight: bold;
+    -fx-padding: 12 10 4 10;
+}
+
+.settings-sidebar .list-cell:filled:selected {
+    -fx-background-color: -color-accent-subtle;
+    -fx-text-fill: -color-accent-fg;
+    -fx-background-radius: 6;
+}
+
+.settings-sidebar .list-cell:filled:hover {
+    -fx-background-radius: 6;
+}
+
+/* A category with no search hits: still listed, so its absence is not mistaken for it not existing. */
+.settings-dimmed {
+    -fx-opacity: 0.4;
+}
+
+.settings-section-header {
+    -fx-font-weight: bold;
+    -fx-text-fill: -color-fg-default;
+    -fx-padding: 0 0 2 0;
+}
+
+/*
+ * No rule between rows, as Editora's settings have none: a line under every row turns a page of
+ * eight settings into eight boxes, and the eye ends up reading the lines rather than the text.
+ * Separation comes from the space instead, which is why the padding grows as the border goes —
+ * without that the rows simply run together.
+ */
+.settings-row {
+    -fx-padding: 13 2 13 2;
+}
+
+/*
+ * Sizes in px rather than em, and stated for both lines. Editora's settings pin them the same way:
+ * a title left at the inherited size sets the scale for the page, and the description then has to
+ * be expressed relative to whatever that turns out to be.
+ */
+.settings-row-title {
+    -fx-text-fill: -color-fg-default;
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+}
+
+.settings-row-description {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 11.5px;
+}
+
+.settings-path {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-family: monospace;
+    -fx-font-size: 0.85em;
+}
+
+.settings-preview {
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 6;
+}

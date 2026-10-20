@@ -65,7 +65,14 @@ final class AddDialog {
      * @param preview the torrent's contents, or null for a magnet
      * @param origin where it came from: a path, a URL, or the magnet link
      */
-    AddDialog(Window owner, AddRequest.Source source, TorrentPreview preview, String origin, Path defaultSavePath) {
+    AddDialog(
+            Window owner,
+            AddRequest.Source source,
+            TorrentPreview preview,
+            String origin,
+            Path defaultSavePath,
+            boolean startPausedDefault,
+            boolean sequentialDefault) {
         this.source = source;
         this.preview = preview;
         stage.initOwner(owner);
@@ -100,6 +107,8 @@ final class AddDialog {
         form.add(freeSpace, 1, row++);
         updateFreeSpace();
 
+        startPaused.setSelected(startPausedDefault);
+        sequential.setSelected(sequentialDefault);
         stop.getItems().addAll(AddRequest.StopCondition.values());
         stop.setValue(AddRequest.StopCondition.NONE);
         stop.setConverter(new StringConverter<>() {

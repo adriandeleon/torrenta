@@ -17,8 +17,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `TORRENTA_CAPTURE=/tmp/shot.png ./mvnw javafx:run`) renders the real window, writes a PNG, prints
   `capture:` lines (title, focus, engine, status bar) and exits. `-Dtorrenta.captureAction=` runs
   window actions first: `select-all`, `palette`, `palette:<query>`, or a command id such as
-  `pause-resume`, `dialog-add` to press Add on an open Add dialog, `select-first`, or
-  `detail:<tab>` to show the detail pane on a tab; the palette's ranking, the
+  `pause-resume`, `dialog-add` to press Add on an open Add dialog, `select-first`,
+  `detail:<tab>` to show the detail pane on a tab, or `settings` / `settings:<query>` to open the
+  Settings window (the PNG is then of it) and print the visible rows; the palette's ranking, the
   open dialog's title and the log window's state are printed, and when a dialog is open the PNG is
   of the dialog.
 
@@ -33,7 +34,7 @@ Run Maven from the project root with a JDK 25.
 | Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL) | `com.torrenta.engine`, `com.torrenta.net` |
 | Detail | `TorrentDetail` (general, files, peers, trackers, pieces) from `Engine.detail(id)`; `setFilePriority`, `addTrackers`, `removeTracker`; `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
 | Update | `update.UpdateCheck` (pure: payload, version rules, due), `UpdateService` (GitHub, off the FX thread, `-Dtorrenta.updateEndpoint` for a capture) — Termina's, verbatim | `com.torrenta.update` |
-| UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a vertical `SplitPane`, the Help menu's update items; `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
+| UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a vertical `SplitPane`, the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
 | Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
@@ -155,7 +156,11 @@ release process with the names changed; Termina's README and memory hold the war
   reasoning about dispatch order.
 - **Chords are `Shortcut+key`** (Ctrl off macOS, Cmd on it), declared once on the menu item so the
   menu and the accelerator cannot disagree.
-- **A settings change applies live**, with no OK button, when settings exist.
+- **A settings change applies live**, with no OK button: every control in `SettingsWindow` writes
+  through and `saveQuietly()`s; `reload()` sets `loading` so listeners stay quiet while the controls
+  are populated. The engine reads the download folder through a `Supplier` for the same reason.
+- **A new setting is a key, two accessors, a row with keywords, a line in `reload()` and in
+  `OWNED_KEYS`** (for Reset). Keywords are what the search box finds; the title leads them.
 - **Version comes from the pom** through `build-info.properties`; nothing else states it.
 
 ## Not done
@@ -163,8 +168,8 @@ release process with the names changed; Termina's README and memory hold the war
 Add dialogs (Ctrl+O / Ctrl+M only say so; inputs come from the command line), pause/resume/remove
 in the window (`Engine.remove` exists, nothing calls it yet), limits, a settings window, per-torrent
 detail, `-Pdist` with the native in the image.
-0.2 and 0.3 are feature-complete. Next: the `v0.3.0` tag after the release dry run, then 0.4
-(Settings window, network, bandwidth, queue; content layout, file rename and first/last piece
-first). **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
+0.2 and 0.3 are feature-complete; 0.4 has begun with the Settings window shell. Next: the
+Connection page (port, UPnP, interfaces, connection limits, proxy), then protocol, IP filter,
+speed, queue and share limits, each a page and a PR. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
 run of release.yml, and the Homebrew/winget packagers need the `PACKAGES_TOKEN` secret copied from
 Termina's repository (the same PAT) before they do anything.

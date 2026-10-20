@@ -74,7 +74,7 @@ public final class App extends Application {
         // The engine loads a native library, opens sockets and re-adds every stored torrent:
         // hundreds of milliseconds that the first frame should not wait for. The window is up with
         // "Starting the engine…" meanwhile.
-        engine = new LibtorrentEngine(settings.downloadDir(), new TorrentStore(configDir.resolve(TorrentStore.FOLDER)));
+        engine = new LibtorrentEngine(settings::downloadDir, new TorrentStore(configDir.resolve(TorrentStore.FOLDER)));
         window.listenTo(engine);
         Thread starter = new Thread(
                 () -> {

@@ -217,9 +217,10 @@ run and the `PACKAGES_TOKEN` secret; see the README's Releasing section.
 ### 0.4 — Network, bandwidth, queue
 Everything in Settings that the engine already knows how to do.
 
-1. **Settings window**, searchable, live-applying, with the Connection, Speed, BitTorrent and
-   Advanced pages; `Settings` is clamped on read and write and maps one-to-one onto a libtorrent
-   `settings_pack`.
+1. **Settings window** — done as the shell plus the General and Adding pages (download folder,
+   update check, Add dialog defaults): sidebar, search across rows with dimmed pages, live apply,
+   Reset. The Connection, Speed, BitTorrent and Advanced pages arrive with their settings in the
+   PRs below, each mapping onto libtorrent's `settings_pack`.
 2. **Connection**: port, random port, port test, UPnP/NAT-PMP, interface binding, IPv6, connection
    limits, proxy.
 3. **Protocol**: DHT, PEX, LSD, uTP, encryption mode, anonymous mode, default trackers.

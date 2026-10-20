@@ -93,7 +93,9 @@ public final class LibtorrentEngine implements Engine {
     private static final long PERIODIC_FLUSH_SECONDS = 120;
     private static final long STOP_FLUSH_TIMEOUT_MS = 5000;
 
-    private final Path downloadDir;
+    /** Read at every use: the Settings window changes it while the session runs. */
+    private final java.util.function.Supplier<Path> downloadDir;
+
     private final TorrentStore store;
     private SessionManager session;
     private ScheduledExecutorService flusher;
@@ -116,6 +118,10 @@ public final class LibtorrentEngine implements Engine {
     private final Set<String> removed = ConcurrentHashMap.newKeySet();
 
     public LibtorrentEngine(Path downloadDir, TorrentStore store) {
+        this(() -> downloadDir, store);
+    }
+
+    public LibtorrentEngine(java.util.function.Supplier<Path> downloadDir, TorrentStore store) {
         this.downloadDir = downloadDir;
         this.store = store;
     }
@@ -124,10 +130,11 @@ public final class LibtorrentEngine implements Engine {
     public synchronized void start() throws EngineException {
         if (session != null) return;
         NativeLibrary.ensureAvailable();
+        Path dir = downloadDir.get();
         try {
-            Files.createDirectories(downloadDir);
+            Files.createDirectories(dir);
         } catch (IOException e) {
-            throw new EngineException("Could not create the download folder " + downloadDir, e);
+            throw new EngineException("Could not create the download folder " + dir, e);
         }
         SessionManager s;
         try {
@@ -196,7 +203,7 @@ public final class LibtorrentEngine implements Engine {
                 throw new EngineException("Could not read " + input + ": " + e.getMessage(), e);
             }
         }
-        return add(AddRequest.defaults(source, downloadDir));
+        return add(AddRequest.defaults(source, downloadDir.get()));
     }
 
     @Override

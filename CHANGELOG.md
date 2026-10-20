@@ -39,6 +39,9 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 - **A release pipeline**: a `v*` tag builds and smoke-tests the installers on all three
   platforms and publishes a GitHub release with install notes, a changelog and checksums; a
   Homebrew cask and a winget manifest follow when the token is present.
+- **A Settings window** (`Ctrl+,`): a sidebar of pages, a search box that filters every row, and
+  controls that apply the moment they change — the download folder, the update check, and the Add
+  dialog's starting positions for Start paused and Sequential.
 - **An update check** against GitHub releases, after startup and at most once a day, with a
   manual Check for Updates, a Download item and a Skip Version item in the Help menu.
 - **An event log** (`Ctrl+Shift+L`): added, metadata received, checked, finished, removed, torrent

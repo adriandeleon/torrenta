@@ -101,6 +101,7 @@ public final class MainWindow {
     private String lastClipboardOffer = "";
     private final DetailPane detail = new DetailPane();
     private final UpdateService updates = new UpdateService();
+    private final SettingsWindow settingsWindow;
     private final MenuItem downloadUpdateItem = new MenuItem();
     private final MenuItem skipUpdateItem = new MenuItem();
     private final Label updateBadge = new Label();
@@ -132,6 +133,7 @@ public final class MainWindow {
         table.setContextMenu(buildContextMenu());
         palette = new CommandPalette(host, () -> table.requestFocus());
         logWindow = new LogWindow(stage, log);
+        settingsWindow = new SettingsWindow(settings);
         log.installLogBridge(Platform::runLater);
         host.getChildren().add(root);
 
@@ -178,7 +180,9 @@ public final class MainWindow {
 
     /** What to photograph: the open Add dialog if there is one, else the window. */
     public javafx.scene.Scene captureScene() {
-        return currentDialog != null && currentDialog.isShowing() ? currentDialog.scene() : stage.getScene();
+        if (currentDialog != null && currentDialog.isShowing()) return currentDialog.scene();
+        if (settingsWindow.isShowing()) return settingsWindow.scene();
+        return stage.getScene();
     }
 
     /** Dismisses an open Add dialog, so the capture hook can exit outside its nested event loop. */
@@ -202,6 +206,11 @@ public final class MainWindow {
             table.getSelectionModel().selectAll();
         } else if (action.equals("event-log")) {
             logWindow.show();
+        } else if (action.equals("settings")) {
+            settingsWindow.show(stage);
+        } else if (action.startsWith("settings:")) {
+            settingsWindow.show(stage);
+            settingsWindow.searchForCapture(action.substring("settings:".length()));
         } else if (action.equals("dialog-add")) {
             if (currentDialog != null && currentDialog.isShowing()) currentDialog.confirm();
         } else if (action.equals("select-first")) {
@@ -227,6 +236,8 @@ public final class MainWindow {
         if (currentDialog != null && currentDialog.isShowing())
             System.out.println("capture: dialog=" + currentDialog.title());
         if (detailWanted) System.out.println("capture: detail=" + detail.summary());
+        if (settingsWindow.isShowing())
+            System.out.println("capture: settings=" + settingsWindow.visibleRowsForCapture());
     }
 
     /**
@@ -366,7 +377,14 @@ public final class MainWindow {
 
     /** FX thread. Shows the dialog and, if confirmed, adds on a worker. */
     private void openDialog(AddRequest.Source source, TorrentPreview preview, String origin) {
-        AddDialog dialog = new AddDialog(stage, source, preview, origin, settings.downloadDir());
+        AddDialog dialog = new AddDialog(
+                stage,
+                source,
+                preview,
+                origin,
+                settings.downloadDir(),
+                settings.addStartPaused(),
+                settings.addSequential());
         currentDialog = dialog;
         Optional<AddRequest> request = dialog.showAndWait();
         currentDialog = null;
@@ -683,6 +701,8 @@ public final class MainWindow {
                 new Command("remove-data", "Remove with Data…", null, "Shift+Delete", selection, () -> remove(true)),
                 new Command("check-updates", "Check for Updates", null, null, always, this::checkForUpdatesNow),
                 new Command(
+                        "settings", "Settings…", chord(KeyCode.COMMA), null, always, () -> settingsWindow.show(stage)),
+                new Command(
                         "filter",
                         "Filter Torrents",
                         null,
@@ -731,7 +751,15 @@ public final class MainWindow {
         quit.setOnAction(e -> stage.close());
 
         Menu file = new Menu("File");
-        file.getItems().addAll(addTorrent, addMagnet, addClipboard, new SeparatorMenuItem(), quit);
+        file.getItems()
+                .addAll(
+                        addTorrent,
+                        addMagnet,
+                        addClipboard,
+                        new SeparatorMenuItem(),
+                        command("settings").menuItem(),
+                        new SeparatorMenuItem(),
+                        quit);
 
         Menu torrent = new Menu("Torrent");
         torrent.getItems().addAll(torrentItems());

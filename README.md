@@ -75,8 +75,8 @@ engine, status bar) and exits. CI runs the first form under Xvfb on Linux as a s
 Everything lives in one folder, `~/.torrenta` (`--config-dir DIR` or `TORRENTA_CONFIG_DIR` to move
 it): `settings.properties`, hand-editable; `torrents/<info-hash>.fastresume`, one per torrent,
 libtorrent's resume data with the info dictionary inside, so deleting one file forgets one torrent;
-`native/<version>/`, the unpacked engine. Downloads go to `~/Downloads` until there is a setting
-window (`download.dir` in the settings file already works).
+`native/<version>/`, the unpacked engine. Downloads go to `~/Downloads` until changed in
+Settings (`Ctrl+,`), which writes the same file.
 
 After startup, at most once a day, Torrenta asks GitHub whether there is a newer release and says
 so in the status bar and the Help menu; nothing about you or the machine is sent beyond the request
@@ -101,6 +101,7 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+V` | Add whatever magnet or torrent link is on the clipboard; the status bar says when there is one |
 | `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
 | `Ctrl+Shift+P` | Command palette: every command, found by typing part of its name |
+| `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults; searchable, applies live |
 | `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
 | `Space` | Pause the selected torrents, or resume them if all are paused |
