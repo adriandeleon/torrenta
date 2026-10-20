@@ -51,6 +51,32 @@ class SettingsTest {
     }
 
     @Test
+    void connectionSettingsAreClamped(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Files.writeString(
+                file,
+                String.join(
+                        "\n",
+                        Settings.CONN_PORT + "=80", // below 1024: default
+                        Settings.CONN_MAX_CONNECTIONS + "=abc", // unreadable: default
+                        Settings.CONN_UPLOAD_SLOTS + "=50",
+                        Settings.PROXY_TYPE + "=socks5", // case does not matter
+                        Settings.PROXY_PORT + "=70000", // above 65535: default
+                        Settings.CONN_INTERFACE + "=  tun0 ",
+                        ""));
+        Settings settings = new Settings(file);
+        settings.load();
+        var e = settings.engineSettings();
+        assertEquals(6881, e.listenPort());
+        assertEquals(500, e.maxConnections());
+        assertEquals(50, e.uploadSlots());
+        assertEquals(com.torrenta.engine.EngineSettings.ProxyType.SOCKS5, e.proxy());
+        assertEquals(1080, e.proxyPort());
+        assertEquals("tun0", e.listenInterface());
+        assertTrue(e.upnp(), "untouched keys are the defaults");
+    }
+
+    @Test
     void aBlankValueFallsBackToTheDefault(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Files.writeString(file, Settings.DOWNLOAD_DIR + "=\n");
