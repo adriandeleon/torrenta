@@ -54,6 +54,9 @@ public final class App extends Application {
     public void start(Stage stage) {
         CommandLine cli = CommandLine.parse(getParameters().getRaw().toArray(String[]::new));
 
+        // Before any stylesheet: CSS naming a font that is not yet registered does not wait for it,
+        // it silently resolves to the system face.
+        com.torrenta.ui.Fonts.load();
         // Applied before any window is built, so the first frame is already themed.
         Application.setUserAgentStylesheet(Theme.EDITORA_DARK.stylesheet());
 
