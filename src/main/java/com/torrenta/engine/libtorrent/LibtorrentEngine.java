@@ -2,6 +2,7 @@ package com.torrenta.engine.libtorrent;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.ref.Reference;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -68,12 +69,19 @@ import org.libtorrent4j.alerts.TorrentErrorAlert;
 import org.libtorrent4j.alerts.TrackerErrorAlert;
 import org.libtorrent4j.alerts.TrackerWarningAlert;
 import org.libtorrent4j.swig.add_torrent_params;
+import org.libtorrent4j.swig.announce_entry;
+import org.libtorrent4j.swig.announce_entry_vector;
 import org.libtorrent4j.swig.error_code;
+import org.libtorrent4j.swig.info_hash_t;
 import org.libtorrent4j.swig.ip_filter;
 import org.libtorrent4j.swig.libtorrent;
 import org.libtorrent4j.swig.load_torrent_limits;
+import org.libtorrent4j.swig.peer_info;
+import org.libtorrent4j.swig.peer_info_vector;
 import org.libtorrent4j.swig.resume_data_flags_t;
+import org.libtorrent4j.swig.session_handle;
 import org.libtorrent4j.swig.settings_pack;
+import org.libtorrent4j.swig.sha1_hash;
 import org.libtorrent4j.swig.status_flags_t;
 import org.libtorrent4j.swig.torrent_flags_t;
 import org.libtorrent4j.swig.torrent_handle;
@@ -308,25 +316,30 @@ public final class LibtorrentEngine implements Engine {
     public TorrentPreview inspect(byte[] torrent) throws EngineException {
         NativeLibrary.ensureAvailable();
         AddTorrentParams params = load(torrent, "the torrent");
-        TorrentInfo info = params.getTorrentInfo();
-        FileStorage files = info.files();
-        List<TorrentPreview.FileEntry> entries = new ArrayList<>(files.numFiles());
-        for (int i = 0; i < files.numFiles(); i++) {
-            if (files.padFileAt(i)) continue;
-            entries.add(new TorrentPreview.FileEntry(i, files.filePath(i).replace('\\', '/'), files.fileSize(i)));
+        try {
+            TorrentInfo info = params.getTorrentInfo();
+            FileStorage files = info.files();
+            List<TorrentPreview.FileEntry> entries = new ArrayList<>(files.numFiles());
+            for (int i = 0; i < files.numFiles(); i++) {
+                if (files.padFileAt(i)) continue;
+                entries.add(new TorrentPreview.FileEntry(i, files.filePath(i).replace('\\', '/'), files.fileSize(i)));
+            }
+            // The real files' bytes, not totalSize(): a hybrid torrent's padding files are not content.
+            long size =
+                    entries.stream().mapToLong(TorrentPreview.FileEntry::size).sum();
+            return new TorrentPreview(
+                    params.getInfoHashes().getBest().toHex(),
+                    params.getName().isEmpty() ? info.name() : params.getName(),
+                    size,
+                    List.copyOf(entries),
+                    info.isPrivate(),
+                    List.copyOf(params.getTrackers()),
+                    params.getComment() == null ? "" : params.getComment(),
+                    params.getCreatedBy() == null ? "" : params.getCreatedBy(),
+                    params.getCreationDate());
+        } finally {
+            Reference.reachabilityFence(params);
         }
-        // The real files' bytes, not totalSize(): a hybrid torrent's padding files are not content.
-        long size = entries.stream().mapToLong(TorrentPreview.FileEntry::size).sum();
-        return new TorrentPreview(
-                params.getInfoHashes().getBest().toHex(),
-                params.getName().isEmpty() ? info.name() : params.getName(),
-                size,
-                List.copyOf(entries),
-                info.isPrivate(),
-                List.copyOf(params.getTrackers()),
-                params.getComment() == null ? "" : params.getComment(),
-                params.getCreatedBy() == null ? "" : params.getCreatedBy(),
-                params.getCreationDate());
     }
 
     /**
@@ -461,7 +474,7 @@ public final class LibtorrentEngine implements Engine {
         }
 
         List<TorrentDetail.Peer> peers = new ArrayList<>();
-        for (PeerInfo p : h.peerInfo()) {
+        for (PeerInfo p : peers(h)) {
             peers.add(new TorrentDetail.Peer(
                     p.ip(),
                     p.client() == null ? "" : p.client(),
@@ -474,7 +487,7 @@ public final class LibtorrentEngine implements Engine {
         }
 
         List<TorrentDetail.Tracker> trackers = new ArrayList<>();
-        for (AnnounceEntry entry : h.trackers()) trackers.add(tracker(entry));
+        for (AnnounceEntry entry : trackers(h)) trackers.add(tracker(entry));
 
         PieceIndexBitfield bits = status.pieces();
         boolean[] pieces = new boolean[Math.max(0, bits.size())];
@@ -497,7 +510,38 @@ public final class LibtorrentEngine implements Engine {
                 status.nextAnnounce() / 1000,
                 status.numConnections(),
                 status.currentTracker() == null ? "" : status.currentTracker());
+        // The bitfield and the file storage point into these two; keep them until the end.
+        Reference.reachabilityFence(status);
+        Reference.reachabilityFence(info);
         return new TorrentDetail(general, files, peers, trackers, pieces);
+    }
+
+    /**
+     * The torrent's trackers as copies Java owns: libtorrent4j's {@code trackers()} wraps pointers
+     * into a vector it drops at once (see {@link #handles}).
+     */
+    private static List<AnnounceEntry> trackers(TorrentHandle h) {
+        announce_entry_vector vector = h.swig().trackers();
+        try {
+            List<AnnounceEntry> out = new ArrayList<>(vector.size());
+            for (int i = 0; i < vector.size(); i++) out.add(new AnnounceEntry(new announce_entry(vector.get(i))));
+            return out;
+        } finally {
+            Reference.reachabilityFence(vector);
+        }
+    }
+
+    /** The connected peers as copies Java owns, for the same reason as {@link #trackers}. */
+    private static List<PeerInfo> peers(TorrentHandle h) {
+        peer_info_vector vector = new peer_info_vector();
+        h.swig().get_peer_info(vector);
+        try {
+            List<PeerInfo> out = new ArrayList<>(vector.size());
+            for (int i = 0; i < vector.size(); i++) out.add(new PeerInfo(new peer_info(vector.get(i))));
+            return out;
+        } finally {
+            Reference.reachabilityFence(vector);
+        }
     }
 
     /** The worst of the tracker's endpoints decides, as a person would read it. */
@@ -534,7 +578,7 @@ public final class LibtorrentEngine implements Engine {
     @Override
     public void addTrackers(String id, List<String> urls) throws EngineException {
         TorrentHandle h = handle(id);
-        List<AnnounceEntry> existing = h.trackers();
+        List<AnnounceEntry> existing = trackers(h);
         int tier = existing.stream().mapToInt(AnnounceEntry::tier).max().orElse(-1) + 1;
         for (String url : urls) {
             String u = url.trim();
@@ -549,7 +593,7 @@ public final class LibtorrentEngine implements Engine {
     public void removeTracker(String id, String url) throws EngineException {
         TorrentHandle h = handle(id);
         List<AnnounceEntry> kept = new ArrayList<>();
-        for (AnnounceEntry e : h.trackers()) {
+        for (AnnounceEntry e : trackers(h)) {
             if (!e.url().equals(url)) kept.add(e);
         }
         h.replaceTrackers(kept);
@@ -808,21 +852,53 @@ public final class LibtorrentEngine implements Engine {
         handle.saveResumeData(flags);
     }
 
+    /**
+     * Every torrent in the session, as handles Java owns.
+     *
+     * <p>A SWIG vector's {@code get(i)} is a pointer into the vector, and the vector's finalizer
+     * frees it: a handle kept past the vector is a use-after-free that crashed the JVM on CI. So
+     * each element is only read for its hash, and the handle handed out is the session's own copy
+     * from {@code find_torrent}; the vector is kept reachable until that is done.
+     */
     private static List<TorrentHandle> handles(SessionManager s) {
-        torrent_handle_vector vector = s.swig().get_torrents();
-        List<TorrentHandle> out = new ArrayList<>(vector.size());
-        for (int i = 0; i < vector.size(); i++) {
-            TorrentHandle handle = new TorrentHandle(vector.get(i));
-            if (handle.isValid()) out.add(handle);
+        session_handle session = s.swig();
+        torrent_handle_vector vector = session.get_torrents();
+        try {
+            List<TorrentHandle> out = new ArrayList<>(vector.size());
+            for (int i = 0; i < vector.size(); i++) {
+                TorrentHandle handle = new TorrentHandle(session.find_torrent(bestHash(vector.get(i))));
+                if (handle.isValid()) out.add(handle);
+            }
+            return out;
+        } finally {
+            Reference.reachabilityFence(vector);
         }
-        return out;
     }
 
     private static TorrentHandle find(SessionManager s, String id) {
-        for (TorrentHandle handle : handles(s)) {
-            if (id(handle).equals(id)) return handle;
+        session_handle session = s.swig();
+        torrent_handle_vector vector = session.get_torrents();
+        try {
+            for (int i = 0; i < vector.size(); i++) {
+                sha1_hash best = bestHash(vector.get(i));
+                if (!best.to_hex().equals(id)) continue;
+                TorrentHandle handle = new TorrentHandle(session.find_torrent(best));
+                return handle.isValid() ? handle : null;
+            }
+            return null;
+        } finally {
+            Reference.reachabilityFence(vector);
         }
-        return null;
+    }
+
+    /** The best info-hash as libtorrent keys it (v2 truncated to 20 bytes), owned by Java. */
+    private static sha1_hash bestHash(torrent_handle handle) {
+        info_hash_t hashes = handle.info_hashes();
+        try {
+            return hashes.get_best();
+        } finally {
+            Reference.reachabilityFence(hashes);
+        }
     }
 
     private SessionManager running() throws EngineException {
@@ -833,7 +909,7 @@ public final class LibtorrentEngine implements Engine {
 
     /** The best info-hash (v2 if the torrent has one, else v1) in hex: the id everywhere. */
     private static String id(TorrentHandle handle) {
-        return handle.status().getInfoHashes().getBest().toHex();
+        return bestHash(handle.swig()).to_hex();
     }
 
     /** The name, or the hash while there is none; empty for a handle that is already gone. */

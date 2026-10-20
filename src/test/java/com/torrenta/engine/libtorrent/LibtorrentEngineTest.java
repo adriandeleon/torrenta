@@ -492,6 +492,51 @@ class LibtorrentEngineTest {
     }
 
     @Test
+    void handlesOutliveTheSwigVectorsTheyCameFrom(@TempDir Path dir) throws Exception {
+        // libtorrent4j's vector proxies hand out pointers into the vector and free the vector from a
+        // finalizer: a handle, tracker or peer kept past that is a use-after-free that crashed CI.
+        // A thread drives the collector and the finalizer the whole time the calls that used to
+        // keep such pointers run; with freed memory poisoned (MALLOC_PERTURB_) the old code dies.
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "gc");
+        java.util.concurrent.atomic.AtomicBoolean on = new java.util.concurrent.atomic.AtomicBoolean(true);
+        Thread collector = new Thread(() -> {
+            while (on.get()) collect();
+        });
+        collector.setDaemon(true);
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            Torrent t = engine.add(downloadsTorrent(dir, torrent));
+            engine.add(MAGNET);
+            await("seeding", () -> engine.torrents().stream().anyMatch(x -> x.state() == TorrentState.SEEDING));
+            collector.start();
+            for (int i = 0; i < 40; i++) {
+                assertEquals(2, engine.torrents().size());
+                TorrentDetail detail = engine.detail(t.id());
+                assertEquals(2, detail.files().size());
+                assertEquals(1 + i, detail.trackers().size());
+                engine.addTrackers(t.id(), List.of("udp://extra" + i + ".example.org:1/announce"));
+                engine.reannounce(t.id());
+                engine.setSequential(t.id(), i % 2 == 0);
+            }
+            engine.removeTracker(t.id(), "udp://extra0.example.org:1/announce");
+            assertEquals(40, engine.detail(t.id()).trackers().size());
+            engine.flush();
+        } finally {
+            on.set(false);
+            collector.join(5_000);
+        }
+    }
+
+    /** Runs the collector and the finalizer, then churns the native heap so freed memory is reused. */
+    @SuppressWarnings("removal")
+    private static void collect() {
+        System.gc();
+        System.runFinalization();
+        for (int i = 0; i < 64; i++) new org.libtorrent4j.swig.torrent_handle_vector().reserve(1024);
+    }
+
+    @Test
     void ipFilterRefusesTheRangesItIsGiven(@TempDir Path dir) throws Exception {
         try (LibtorrentEngine engine = engine(dir)) {
             engine.setIpFilter(List.of(new com.torrenta.engine.IpRange("10.0.0.0", "10.255.255.255")));

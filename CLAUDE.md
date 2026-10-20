@@ -1,6 +1,6 @@
 # Torrenta
 
-A keyboard-first, cross-platform BitTorrent client. JDK 25 + JavaFX 26 + Maven, modular (JPMS,
+A keyboard-first, cross-platform BitTorrent client. JDK 25 + JavaFX 27 + Maven, modular (JPMS,
 module `com.torrenta`). Same author, layout and conventions as Termina and Editora.
 
 ## Commands
@@ -146,6 +146,16 @@ release process with the names changed; Termina's README and memory hold the war
 - **`settings_pack` enum constants are SWIG objects**, like every other libtorrent4j constant:
   `toPack` runs only after the native has loaded. Keys are set by `swigValue()` through the pack's
   generic `setBoolean`/`setInteger`/`setString`; the typed setters cover only a few.
+- **A SWIG vector element is a pointer into the vector, and the vector's finalizer frees it.**
+  `torrent_handle_vector.get(i)`, `announce_entry_vector.get(i)`, `peer_info_vector.get(i)` (and
+  libtorrent4j's own `SessionHandle.torrents()`, `TorrentHandle.trackers()`/`peerInfo()`, which are
+  built on them) hand out proxies with `swigCMemOwn=false`; once the vector is unreachable the
+  collector frees the elements under them, and the next native call on one is a use-after-free that
+  killed the CI JVM inside `file_progress`. The engine therefore keeps handles only as the session's
+  own copies (`find_torrent`), copies trackers and peers through their SWIG copy constructors, and
+  holds every vector with `Reference.reachabilityFence` until the copies are made. Anything that
+  points into a parent (`status.pieces()`, `info.files()`) is used while the parent is fenced. CI
+  runs the Linux tests with `MALLOC_PERTURB_` so a slip crashes every time, not once in a hundred.
 - **Speed limits are re-evaluated every minute** (`Engine.refreshLimits(now)`, from the window's
   poller) and after any settings change; the pair in force is `Speed.alternativeActive(now)`,
   a pure rule with the overnight case tested. Limits are KiB/s in settings and bytes/s in the

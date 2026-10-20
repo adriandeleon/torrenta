@@ -8,7 +8,7 @@
   <a href="https://github.com/adriandeleon/torrenta/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/adriandeleon/torrenta/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/adriandeleon/torrenta"></a>
   <img alt="Java" src="https://img.shields.io/badge/Java-25-orange">
-  <img alt="JavaFX" src="https://img.shields.io/badge/JavaFX-26-blue">
+  <img alt="JavaFX" src="https://img.shields.io/badge/JavaFX-27-blue">
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-lightgrey">
 </p>
 
