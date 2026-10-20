@@ -39,6 +39,7 @@ Run Maven from the project root with a JDK 25.
 | Detail | `TorrentDetail` (general, files, peers, trackers, pieces) from `Engine.detail(id)`; `setFilePriority`, `addTrackers`, `removeTracker`; `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
 | Engine settings | `EngineSettings` (engine-neutral record; `listenInterfaces()` is the tested string), `Settings.engineSettings()` clamps the `connection.*` and `proxy.*` keys, `LibtorrentEngine.toPack` maps onto `settings_pack`; applied at start (`SessionParams`) and live (`applySettings`) | `com.torrenta.engine`, `store`, `.libtorrent` |
 | IP filter | `IpRange` (literals only, never resolves), `Blocklist` (pure parser for .p2p/.dat/CIDR/plain), `net.BlocklistFetch` (gzip by magic), `ui.IpFilterController` (cache, schedule, bans → `Engine.setIpFilter`), `peer_blocked` alerts counted | `com.torrenta.engine`, `net`, `ui` |
+| Watch folders | `WatchFolder` (entry + pure rules: destination, request, names, `.magnet` lines, magnet id, `Growth`), `WatchFolders` (the service: `configure`, `start`, `stop`, `poll`), `store.WatchFolderStore` (`watch-folders.json`), `ui.WatchFolderDialog`, Settings → Watch folders | `com.torrenta.engine`, `store`, `ui` |
 | Update | `update.UpdateCheck` (pure: payload, version rules, due), `UpdateService` (GitHub, off the FX thread, `-Dtorrenta.updateEndpoint` for a capture) — Termina's, verbatim | `com.torrenta.update` |
 | UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a vertical `SplitPane`, the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
@@ -159,6 +160,14 @@ release process with the names changed; Termina's README and memory hold the war
   holds every vector with `Reference.reachabilityFence` until the copies are made. Anything that
   points into a parent (`status.pieces()`, `info.files()`) is used while the parent is fenced. CI
   runs the Linux tests with `MALLOC_PERTURB_` so a slip crashes every time, not once in a hundred.
+- **Watch folders are a thread of the window, not of the engine** (`engine.WatchFolders`, owned by
+  `MainWindow`, started in `engineReady`, stopped on hide, restarted by the Settings page): one
+  `WatchService` thread plus a poll every minute as the safety net, every engine call on the
+  watcher's own scheduler thread. A file is read once its size has held for two looks
+  (`WatchFolder.Growth`), a second apart after an event; a file that is not a torrent is renamed
+  `.invalid` and said once; a file that failed to be handled is remembered and left alone until it
+  changes. Tests drive `configure` + `poll()` directly, never the service's timing. The list is
+  `watch-folders.json` (`store.WatchFolderStore`), this machine's, never synced.
 - **Settings sync never asks git to merge** (`sync/SyncEngine`, Editora's design): the clone under
   `<configDir>/sync/repo` is reset to the remote, the live settings are three-way merged per key
   against `refs/torrenta/base` (`SyncMerge`, this machine wins), written over the tree, committed
