@@ -5,6 +5,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Changed
+
+- **JavaFX 27**, as Editora; was 26.0.2.
+
 ### Added
 
 - **Torrents survive a restart.** Resume data is kept per torrent under `~/.torrenta/torrents/`,
