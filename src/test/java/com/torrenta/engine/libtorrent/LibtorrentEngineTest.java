@@ -403,6 +403,26 @@ class LibtorrentEngineTest {
     }
 
     @Test
+    void connectionSettingsReachTheSessionAtStartAndLive(@TempDir Path dir) throws Exception {
+        com.torrenta.engine.EngineSettings d = com.torrenta.engine.EngineSettings.defaults();
+        com.torrenta.engine.EngineSettings quiet = new com.torrenta.engine.EngineSettings(
+                d.listenPort(), true, "", d.ipv6(), false, 123, 7, 3, d.proxy(), "", 1080, "", "", true);
+        try (LibtorrentEngine engine =
+                new LibtorrentEngine(() -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), quiet)) {
+            engine.start();
+            assertEquals(123, engine.connectionsLimitForTest(), "applied at start");
+            List<EngineEvent> events = new CopyOnWriteArrayList<>();
+            engine.addListener(events::add);
+            engine.applySettings(new com.torrenta.engine.EngineSettings(
+                    d.listenPort(), true, "", d.ipv6(), false, 321, 7, 3, d.proxy(), "", 1080, "", "", true));
+            assertEquals(321, engine.connectionsLimitForTest(), "applied live");
+            assertTrue(events.stream().anyMatch(ev -> ev.message().startsWith("Connection settings applied")));
+            Torrent t = engine.add(MAGNET);
+            assertFalse(t.id().isEmpty(), "adding still works with a per-torrent limit set");
+        }
+    }
+
+    @Test
     void stopAfterMetadataIsAcceptedForAMagnet(@TempDir Path dir) throws Exception {
         try (LibtorrentEngine engine = engine(dir)) {
             engine.start();

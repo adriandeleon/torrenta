@@ -18,8 +18,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `capture:` lines (title, focus, engine, status bar) and exits. `-Dtorrenta.captureAction=` runs
   window actions first: `select-all`, `palette`, `palette:<query>`, or a command id such as
   `pause-resume`, `dialog-add` to press Add on an open Add dialog, `select-first`,
-  `detail:<tab>` to show the detail pane on a tab, or `settings` / `settings:<query>` to open the
-  Settings window (the PNG is then of it) and print the visible rows; the palette's ranking, the
+  `detail:<tab>` to show the detail pane on a tab, or `settings` / `settings:<query>` /
+  `settings-page:<category>` to open the Settings window (the PNG is then of it) and print the
+  visible rows; the palette's ranking, the
   open dialog's title and the log window's state are printed, and when a dialog is open the PNG is
   of the dialog.
 
@@ -33,6 +34,7 @@ Run Maven from the project root with a JDK 25.
 | Events | `EngineEvent` (level, torrent, message), raised by the engine from libtorrent alerts and by its own start/stop/remove; `Engine.addListener` | `com.torrenta.engine` |
 | Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL) | `com.torrenta.engine`, `com.torrenta.net` |
 | Detail | `TorrentDetail` (general, files, peers, trackers, pieces) from `Engine.detail(id)`; `setFilePriority`, `addTrackers`, `removeTracker`; `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
+| Engine settings | `EngineSettings` (engine-neutral record; `listenInterfaces()` is the tested string), `Settings.engineSettings()` clamps the `connection.*` and `proxy.*` keys, `LibtorrentEngine.toPack` maps onto `settings_pack`; applied at start (`SessionParams`) and live (`applySettings`) | `com.torrenta.engine`, `store`, `.libtorrent` |
 | Update | `update.UpdateCheck` (pure: payload, version rules, due), `UpdateService` (GitHub, off the FX thread, `-Dtorrenta.updateEndpoint` for a capture) — Termina's, verbatim | `com.torrenta.update` |
 | UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a vertical `SplitPane`, the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
@@ -136,6 +138,11 @@ release process with the names changed; Termina's README and memory hold the war
   `libglassgtk3` `destroy_and_delete_ctx` during `Application.terminate`). The capture hook closes
   any dialog and exits on the next pulse; a Quit while the Add dialog is open goes the same way and
   is a known gap until Quit is intercepted before `Platform.exit`.
+- **`settings_pack` enum constants are SWIG objects**, like every other libtorrent4j constant:
+  `toPack` runs only after the native has loaded. Keys are set by `swigValue()` through the pack's
+  generic `setBoolean`/`setInteger`/`setString`; the typed setters cover only a few.
+- **A proxy with a username is a different libtorrent type** (`socks5_pw`, `http_pw`); the record
+  decides with `proxyAuthenticated()`. `proxy_hostnames` is on, so lookups go through the proxy.
 - **Engine events arrive on libtorrent4j's alert thread.** `MainWindow` hops to the FX thread
   before touching the log or the status bar; `EventLog.add` is FX-only. The j.u.l bridge takes
   the hop as a parameter so tests run it inline.
@@ -168,8 +175,8 @@ release process with the names changed; Termina's README and memory hold the war
 Add dialogs (Ctrl+O / Ctrl+M only say so; inputs come from the command line), pause/resume/remove
 in the window (`Engine.remove` exists, nothing calls it yet), limits, a settings window, per-torrent
 detail, `-Pdist` with the native in the image.
-0.2 and 0.3 are feature-complete; 0.4 has begun with the Settings window shell. Next: the
-Connection page (port, UPnP, interfaces, connection limits, proxy), then protocol, IP filter,
-speed, queue and share limits, each a page and a PR. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
+0.2 and 0.3 are feature-complete; 0.4 has begun with the Settings window shell. The Connection
+page is in. Next: protocol (DHT, PEX, LSD, uTP, encryption, anonymous mode, default trackers),
+then IP filter, speed, queue and share limits, each a page and a PR. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
 run of release.yml, and the Homebrew/winget packagers need the `PACKAGES_TOKEN` secret copied from
 Termina's repository (the same PAT) before they do anything.

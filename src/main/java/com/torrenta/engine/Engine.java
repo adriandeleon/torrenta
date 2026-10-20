@@ -74,6 +74,9 @@ public interface Engine extends AutoCloseable {
     /** Writes what is needed to bring the torrents back; also done on {@link #stop()}. */
     void flush();
 
+    /** Applies connection settings now, to the running session; also the ones used at start. */
+    void applySettings(EngineSettings settings) throws EngineException;
+
     /**
      * Hears every {@link EngineEvent}, on an engine thread: the listener hands it to the FX thread
      * itself. Added before or after {@link #start()}.

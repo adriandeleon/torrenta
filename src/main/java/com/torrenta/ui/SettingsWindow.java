@@ -16,10 +16,14 @@ import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ListCell;
 import javafx.scene.control.ListView;
+import javafx.scene.control.PasswordField;
 import javafx.scene.control.ScrollPane;
+import javafx.scene.control.Spinner;
+import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TextField;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.BorderPane;
@@ -32,8 +36,10 @@ import javafx.stage.DirectoryChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
 import javafx.stage.Window;
+import javafx.util.StringConverter;
 
 import com.torrenta.AppInfo;
+import com.torrenta.engine.EngineSettings;
 import com.torrenta.store.Settings;
 
 /**
@@ -64,7 +70,8 @@ final class SettingsWindow {
     /** The pages. Connection, Speed, BitTorrent and Advanced join as their settings arrive. */
     enum Category {
         GENERAL(Group.APPLICATION, "General"),
-        ADDING(Group.APPLICATION, "Adding torrents");
+        ADDING(Group.APPLICATION, "Adding torrents"),
+        CONNECTION(Group.ENGINE, "Connection");
 
         final Group group;
         private final String title;
@@ -82,9 +89,21 @@ final class SettingsWindow {
     private record Row(Category category, Node node, String keywords, VBox section) {}
 
     /** The keys this window owns, for Reset. */
-    private static final String[] OWNED_KEYS = {
-        Settings.DOWNLOAD_DIR, Settings.UPDATE_CHECK, Settings.ADD_START_PAUSED, Settings.ADD_SEQUENTIAL
-    };
+    private static final String[] OWNED_KEYS = concat(
+            new String[] {
+                Settings.DOWNLOAD_DIR, Settings.UPDATE_CHECK, Settings.ADD_START_PAUSED, Settings.ADD_SEQUENTIAL
+            },
+            Settings.CONNECTION_KEYS);
+
+    private static String[] concat(String[] a, String[] b) {
+        String[] out = new String[a.length + b.length];
+        System.arraycopy(a, 0, out, 0, a.length);
+        System.arraycopy(b, 0, out, a.length, b.length);
+        return out;
+    }
+
+    /** Told after any connection setting changed; the window applies them to the engine. */
+    private Runnable onEngineSettingsChanged = () -> {};
 
     private final Settings settings;
     private final Stage stage = new Stage();
@@ -102,6 +121,24 @@ final class SettingsWindow {
     private CheckBox updateCheck;
     private CheckBox addStartPaused;
     private CheckBox addSequential;
+    private Spinner<Integer> port;
+    private CheckBox randomPort;
+    private TextField listenInterface;
+    private CheckBox ipv6;
+    private CheckBox upnp;
+    private Spinner<Integer> maxConnections;
+    private Spinner<Integer> maxPerTorrent;
+    private Spinner<Integer> uploadSlots;
+    private ChoiceBox<EngineSettings.ProxyType> proxyType;
+    private TextField proxyHost;
+    private Spinner<Integer> proxyPort;
+    private TextField proxyUsername;
+    private PasswordField proxyPassword;
+    private CheckBox proxyPeers;
+
+    void setOnEngineSettingsChanged(Runnable handler) {
+        onEngineSettingsChanged = handler;
+    }
 
     SettingsWindow(Settings settings) {
         this.settings = settings;
@@ -111,6 +148,14 @@ final class SettingsWindow {
     /** Types into the search box as the user would, so a capture can reach any row. */
     void searchForCapture(String query) {
         search.setText(query);
+    }
+
+    /** Selects a page by its enum name, so a capture can photograph it whole. */
+    void selectPageForCapture(String name) {
+        for (Category category : Category.values()) {
+            if (category.name().equalsIgnoreCase(name))
+                sidebar.getSelectionModel().select(category);
+        }
     }
 
     Scene scene() {
@@ -301,6 +346,7 @@ final class SettingsWindow {
         switch (category) {
             case GENERAL -> buildGeneral(page);
             case ADDING -> buildAdding(page);
+            case CONNECTION -> buildConnection(page);
         }
         page.setPadding(new Insets(0, PAGE_GUTTER, 0, 0));
         ScrollPane scroll = new ScrollPane(page);
@@ -415,6 +461,191 @@ final class SettingsWindow {
                 "add order streaming preview");
     }
 
+    private void buildConnection(VBox page) {
+        VBox listening = section(page, "Listening");
+        port = intSpinner(1024, 65535, Settings.CONN_PORT);
+        row(
+                Category.CONNECTION,
+                listening,
+                "Port",
+                "The TCP and uTP port other peers connect to. Forward it on the router, or let UPnP do it.",
+                port,
+                "listen incoming");
+        randomPort = bool(Settings.CONN_RANDOM_PORT);
+        port.disableProperty().bind(randomPort.selectedProperty());
+        row(
+                Category.CONNECTION,
+                listening,
+                "Random port",
+                "Let the system pick a free port each start; the event log says which.",
+                randomPort,
+                "listen ephemeral");
+        upnp = bool(Settings.CONN_UPNP);
+        row(
+                Category.CONNECTION,
+                listening,
+                "Map the port with UPnP / NAT-PMP",
+                "Ask the router to forward the port. The event log reports the mapping or its failure.",
+                upnp,
+                "router forward nat");
+        ipv6 = bool(Settings.CONN_IPV6);
+        row(
+                Category.CONNECTION,
+                listening,
+                "Listen on IPv6",
+                "As well as IPv4, where the machine has it.",
+                ipv6,
+                "v6 address");
+        listenInterface = text(Settings.CONN_INTERFACE);
+        listenInterface.setPrefColumnCount(18);
+        listenInterface.setPromptText("all interfaces");
+        row(
+                Category.CONNECTION,
+                listening,
+                "Bind to",
+                "An address or interface name, for a VPN or one network card only. Blank means every interface.",
+                listenInterface,
+                "interface address vpn tun");
+
+        VBox limits = section(page, "Limits");
+        maxConnections = intSpinner(2, 10_000, Settings.CONN_MAX_CONNECTIONS);
+        row(
+                Category.CONNECTION,
+                limits,
+                "Connections",
+                "Across every torrent.",
+                maxConnections,
+                "global peers maximum");
+        maxPerTorrent = intSpinner(1, 10_000, Settings.CONN_MAX_PER_TORRENT);
+        row(
+                Category.CONNECTION,
+                limits,
+                "Connections per torrent",
+                "Applied to each torrent as it is added.",
+                maxPerTorrent,
+                "peers maximum");
+        uploadSlots = intSpinner(1, 1_000, Settings.CONN_UPLOAD_SLOTS);
+        row(
+                Category.CONNECTION,
+                limits,
+                "Upload slots",
+                "How many peers are sent data at once.",
+                uploadSlots,
+                "unchoke");
+
+        VBox proxy = section(page, "Proxy");
+        proxyType = new ChoiceBox<>();
+        proxyType.getItems().addAll(EngineSettings.ProxyType.values());
+        proxyType.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(EngineSettings.ProxyType t) {
+                return t == null ? "" : t.label();
+            }
+
+            @Override
+            public EngineSettings.ProxyType fromString(String s) {
+                return null;
+            }
+        });
+        proxyType.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.set(Settings.PROXY_TYPE, now.name());
+            changed();
+        });
+        row(
+                Category.CONNECTION,
+                proxy,
+                "Type",
+                "SOCKS5 or HTTP; trackers always go through it, peers when the box below is on.",
+                proxyType,
+                "socks http none");
+        proxyHost = text(Settings.PROXY_HOST);
+        proxyHost.setPrefColumnCount(18);
+        row(
+                Category.CONNECTION,
+                proxy,
+                "Host",
+                "Host names are resolved through the proxy, so a lookup does not leak what it hides.",
+                proxyHost,
+                "server address");
+        proxyPort = intSpinner(1, 65535, Settings.PROXY_PORT);
+        row(Category.CONNECTION, proxy, "Proxy port", "", proxyPort, "");
+        proxyUsername = text(Settings.PROXY_USERNAME);
+        row(
+                Category.CONNECTION,
+                proxy,
+                "Username",
+                "Leave blank for a proxy without a login.",
+                proxyUsername,
+                "auth login");
+        proxyPassword = new PasswordField();
+        proxyPassword.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.set(Settings.PROXY_PASSWORD, now);
+            changed();
+        });
+        row(
+                Category.CONNECTION,
+                proxy,
+                "Password",
+                "Kept in the settings file, which only you can read.",
+                proxyPassword,
+                "auth secret");
+        proxyPeers = bool(Settings.PROXY_PEERS);
+        row(
+                Category.CONNECTION,
+                proxy,
+                "Use the proxy for peers",
+                "Off, and only tracker requests go through it; your own address is still visible to peers.",
+                proxyPeers,
+                "connections privacy");
+        for (var control : List.of(proxyHost, proxyPort, proxyUsername, proxyPassword, proxyPeers)) {
+            control.disableProperty().bind(proxyType.valueProperty().isEqualTo(EngineSettings.ProxyType.NONE));
+        }
+    }
+
+    /** A spinner that writes its key when the value changes, typed or stepped. */
+    private Spinner<Integer> intSpinner(int min, int max, String key) {
+        Spinner<Integer> spinner = new Spinner<>(new SpinnerValueFactory.IntegerSpinnerValueFactory(min, max, min));
+        spinner.setEditable(true);
+        spinner.setPrefWidth(110);
+        // Typed values commit on focus loss as well as Enter, or a typed port is lost on Tab.
+        spinner.focusedProperty().addListener((o, was, now) -> {
+            if (!now) spinner.increment(0);
+        });
+        spinner.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.set(key, String.valueOf(now));
+            changed();
+        });
+        return spinner;
+    }
+
+    private CheckBox bool(String key) {
+        CheckBox box = new CheckBox();
+        box.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.set(key, String.valueOf(now));
+            changed();
+        });
+        return box;
+    }
+
+    private TextField text(String key) {
+        TextField field = new TextField();
+        field.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.set(key, now.trim());
+            changed();
+        });
+        return field;
+    }
+
+    private void changed() {
+        settings.saveQuietly();
+        onEngineSettingsChanged.run();
+    }
+
     /** Puts the stored values into the controls, with the listeners held off. */
     private void reload() {
         loading = true;
@@ -423,6 +654,21 @@ final class SettingsWindow {
             updateCheck.setSelected(settings.updateCheck());
             addStartPaused.setSelected(settings.addStartPaused());
             addSequential.setSelected(settings.addSequential());
+            EngineSettings e = settings.engineSettings();
+            port.getValueFactory().setValue(e.listenPort());
+            randomPort.setSelected(e.randomPort());
+            upnp.setSelected(e.upnp());
+            ipv6.setSelected(e.ipv6());
+            listenInterface.setText(e.listenInterface());
+            maxConnections.getValueFactory().setValue(e.maxConnections());
+            maxPerTorrent.getValueFactory().setValue(e.maxConnectionsPerTorrent());
+            uploadSlots.getValueFactory().setValue(e.uploadSlots());
+            proxyType.setValue(e.proxy());
+            proxyHost.setText(e.proxyHost());
+            proxyPort.getValueFactory().setValue(e.proxyPort());
+            proxyUsername.setText(e.proxyUsername());
+            proxyPassword.setText(e.proxyPassword());
+            proxyPeers.setSelected(e.proxyPeers());
         } finally {
             loading = false;
         }

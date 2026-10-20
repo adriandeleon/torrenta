@@ -23,6 +23,7 @@ import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
+import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
@@ -41,6 +42,8 @@ import org.libtorrent4j.PeerInfo;
 import org.libtorrent4j.PieceIndexBitfield;
 import org.libtorrent4j.SessionHandle;
 import org.libtorrent4j.SessionManager;
+import org.libtorrent4j.SessionParams;
+import org.libtorrent4j.SettingsPack;
 import org.libtorrent4j.TorrentFlags;
 import org.libtorrent4j.TorrentHandle;
 import org.libtorrent4j.TorrentInfo;
@@ -67,6 +70,7 @@ import org.libtorrent4j.swig.error_code;
 import org.libtorrent4j.swig.libtorrent;
 import org.libtorrent4j.swig.load_torrent_limits;
 import org.libtorrent4j.swig.resume_data_flags_t;
+import org.libtorrent4j.swig.settings_pack;
 import org.libtorrent4j.swig.status_flags_t;
 import org.libtorrent4j.swig.torrent_flags_t;
 import org.libtorrent4j.swig.torrent_handle;
@@ -100,6 +104,9 @@ public final class LibtorrentEngine implements Engine {
     private SessionManager session;
     private ScheduledExecutorService flusher;
 
+    /** The connection settings in force; the session starts with them and takes changes live. */
+    private volatile EngineSettings engineSettings;
+
     /** Resume-data requests whose alert has not arrived yet; {@link #stop()} waits on this. */
     private final AtomicInteger pendingSaves = new AtomicInteger();
 
@@ -122,8 +129,14 @@ public final class LibtorrentEngine implements Engine {
     }
 
     public LibtorrentEngine(java.util.function.Supplier<Path> downloadDir, TorrentStore store) {
+        this(downloadDir, store, EngineSettings.defaults());
+    }
+
+    public LibtorrentEngine(
+            java.util.function.Supplier<Path> downloadDir, TorrentStore store, EngineSettings settings) {
         this.downloadDir = downloadDir;
         this.store = store;
+        this.engineSettings = settings;
     }
 
     @Override
@@ -139,7 +152,7 @@ public final class LibtorrentEngine implements Engine {
         SessionManager s;
         try {
             s = new SessionManager();
-            s.start();
+            s.start(new SessionParams(toPack(engineSettings)));
         } catch (LinkageError e) {
             // The JNI static initialiser wraps a failed System.load in a LinkageError whose own
             // message is a pointer to the project page; the cause says what actually went wrong.
@@ -225,6 +238,7 @@ public final class LibtorrentEngine implements Engine {
             }
         }
         params.setSavePath(request.savePath().toString());
+        params.setMaxConnections(engineSettings.maxConnectionsPerTorrent());
 
         // Renaming files for the layout needs the handle, so such a torrent is added paused and
         // resumed below once the names are right; a plain "start paused" stays paused.
@@ -550,6 +564,57 @@ public final class LibtorrentEngine implements Engine {
         SessionManager s = session;
         if (s == null || !s.isRunning()) return;
         for (TorrentHandle handle : handles(s)) requestSave(handle, true);
+    }
+
+    @Override
+    public void applySettings(EngineSettings settings) throws EngineException {
+        engineSettings = settings;
+        SessionManager s = session;
+        if (s == null || !s.isRunning()) return;
+        s.applySettings(toPack(settings));
+        emit(EngineEvent.session(EngineEvent.Level.INFO, "Connection settings applied: " + settings));
+    }
+
+    /** The session's connection limit as libtorrent has it; for the test. */
+    int connectionsLimitForTest() throws EngineException {
+        return running().settings().connectionsLimit();
+    }
+
+    /** {@link EngineSettings} onto libtorrent's pack. Enum constants are SWIG objects: after load only. */
+    private static SettingsPack toPack(EngineSettings s) {
+        SettingsPack pack = new SettingsPack();
+        pack.listenInterfaces(s.listenInterfaces());
+        pack.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), s.upnp());
+        pack.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), s.upnp());
+        pack.connectionsLimit(s.maxConnections());
+        pack.setInteger(settings_pack.int_types.unchoke_slots_limit.swigValue(), s.uploadSlots());
+
+        settings_pack.proxy_type_t type =
+                switch (s.proxy()) {
+                    case NONE -> settings_pack.proxy_type_t.none;
+                    case SOCKS5 ->
+                        s.proxyAuthenticated()
+                                ? settings_pack.proxy_type_t.socks5_pw
+                                : settings_pack.proxy_type_t.socks5;
+                    case HTTP ->
+                        s.proxyAuthenticated() ? settings_pack.proxy_type_t.http_pw : settings_pack.proxy_type_t.http;
+                };
+        pack.setInteger(settings_pack.int_types.proxy_type.swigValue(), type.swigValue());
+        pack.setString(
+                settings_pack.string_types.proxy_hostname.swigValue(),
+                s.proxyHost() == null ? "" : s.proxyHost().trim());
+        pack.setInteger(settings_pack.int_types.proxy_port.swigValue(), s.proxyPort());
+        pack.setString(
+                settings_pack.string_types.proxy_username.swigValue(),
+                s.proxyUsername() == null ? "" : s.proxyUsername());
+        pack.setString(
+                settings_pack.string_types.proxy_password.swigValue(),
+                s.proxyPassword() == null ? "" : s.proxyPassword());
+        pack.setBoolean(settings_pack.bool_types.proxy_peer_connections.swigValue(), s.proxyPeers());
+        pack.setBoolean(settings_pack.bool_types.proxy_tracker_connections.swigValue(), true);
+        // Resolve host names through the proxy, so a DNS lookup does not leak what the proxy hides.
+        pack.setBoolean(settings_pack.bool_types.proxy_hostnames.swigValue(), true);
+        return pack;
     }
 
     @Override

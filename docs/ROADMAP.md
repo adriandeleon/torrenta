@@ -95,7 +95,8 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 
 | Feature | T | Q | Torrenta |
 |---|---|---|---|
-| Listen port, random port, port test | ✓ | ✓ | 0.4 |
+| Listen port, random port | ✓ | ✓ | 0.4 |
+| Port test | ✓ | ✓ | later |
 | UPnP and NAT-PMP forwarding | ✓ | ✓ | 0.4 |
 | DHT, PEX, LSD, uTP toggles | ✓ | ✓ | 0.4 |
 | Encryption mode: require, prefer, allow | ✓ | ✓ | 0.4 |
@@ -221,8 +222,10 @@ Everything in Settings that the engine already knows how to do.
    update check, Add dialog defaults): sidebar, search across rows with dimmed pages, live apply,
    Reset. The Connection, Speed, BitTorrent and Advanced pages arrive with their settings in the
    PRs below, each mapping onto libtorrent's `settings_pack`.
-2. **Connection**: port, random port, port test, UPnP/NAT-PMP, interface binding, IPv6, connection
-   limits, proxy.
+2. **Connection** — done, except the port test (libtorrent has none; it needs an outside service
+   and goes with 0.8's OS integration or stays out): port, random port, UPnP/NAT-PMP, interface
+   binding, IPv6, connection limits, proxy. `EngineSettings` maps onto `settings_pack`, applied at
+   start and live; the per-torrent limit is set on each add.
 3. **Protocol**: DHT, PEX, LSD, uTP, encryption mode, anonymous mode, default trackers.
 4. **IP filter**: blocklist URL with scheduled refresh, `.dat`/`.p2p` import, manual bans, counts in
    the status bar.

@@ -42,6 +42,9 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 - **A Settings window** (`Ctrl+,`): a sidebar of pages, a search box that filters every row, and
   controls that apply the moment they change — the download folder, the update check, and the Add
   dialog's starting positions for Start paused and Sequential.
+- **Connection settings**: listening port or a random one, UPnP / NAT-PMP, IPv6, binding to an
+  address or interface, connection limits (global, per torrent, upload slots), and a SOCKS5 or
+  HTTP proxy with optional login, for trackers and optionally peers. Applied at start and live.
 - **An update check** against GitHub releases, after startup and at most once a day, with a
   manual Check for Updates, a Download item and a Skip Version item in the Help menu.
 - **An event log** (`Ctrl+Shift+L`): added, metadata received, checked, finished, removed, torrent

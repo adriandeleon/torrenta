@@ -10,6 +10,8 @@ import java.util.Properties;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.torrenta.engine.EngineSettings;
+
 /**
  * User preferences, stored as a plain properties file.
  *
@@ -37,6 +39,31 @@ public final class Settings {
     public static final String LAST_UPDATE_CHECK = "updates.lastCheckEpochMs";
     /** The version the user chose to skip; a manual check still reports it. */
     public static final String DISMISSED_UPDATE = "updates.dismissedVersion";
+    /** Connection: what EngineSettings carries. Clamped on read; the file is hand-editable. */
+    public static final String CONN_PORT = "connection.port";
+
+    public static final String CONN_RANDOM_PORT = "connection.randomPort";
+    public static final String CONN_INTERFACE = "connection.interface";
+    public static final String CONN_IPV6 = "connection.ipv6";
+    public static final String CONN_UPNP = "connection.upnp";
+    public static final String CONN_MAX_CONNECTIONS = "connection.maxConnections";
+    public static final String CONN_MAX_PER_TORRENT = "connection.maxConnectionsPerTorrent";
+    public static final String CONN_UPLOAD_SLOTS = "connection.uploadSlots";
+    public static final String PROXY_TYPE = "proxy.type";
+    public static final String PROXY_HOST = "proxy.host";
+    public static final String PROXY_PORT = "proxy.port";
+    public static final String PROXY_USERNAME = "proxy.username";
+    /** Stored as typed, in a mode-600 file; a keychain is a later concern. */
+    public static final String PROXY_PASSWORD = "proxy.password";
+
+    public static final String PROXY_PEERS = "proxy.peers";
+
+    public static final String[] CONNECTION_KEYS = {
+        CONN_PORT, CONN_RANDOM_PORT, CONN_INTERFACE, CONN_IPV6, CONN_UPNP, CONN_MAX_CONNECTIONS,
+        CONN_MAX_PER_TORRENT, CONN_UPLOAD_SLOTS, PROXY_TYPE, PROXY_HOST, PROXY_PORT, PROXY_USERNAME,
+        PROXY_PASSWORD, PROXY_PEERS
+    };
+
     /** The Add dialog's starting positions for its checkboxes. */
     public static final String ADD_START_PAUSED = "add.startPaused";
 
@@ -125,6 +152,43 @@ public final class Settings {
 
     public void setAddSequential(boolean on) {
         properties.setProperty(ADD_SEQUENTIAL, String.valueOf(on));
+    }
+
+    /** The connection settings as stored, each clamped to a sane range. */
+    public EngineSettings engineSettings() {
+        EngineSettings d = EngineSettings.defaults();
+        EngineSettings.ProxyType proxy;
+        try {
+            proxy = EngineSettings.ProxyType.valueOf(
+                    properties.getProperty(PROXY_TYPE, "NONE").trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            proxy = EngineSettings.ProxyType.NONE;
+        }
+        return new EngineSettings(
+                readInt(CONN_PORT, d.listenPort(), 1024, 65535),
+                readBoolean(CONN_RANDOM_PORT, d.randomPort()),
+                properties.getProperty(CONN_INTERFACE, "").trim(),
+                readBoolean(CONN_IPV6, d.ipv6()),
+                readBoolean(CONN_UPNP, d.upnp()),
+                readInt(CONN_MAX_CONNECTIONS, d.maxConnections(), 2, 10_000),
+                readInt(CONN_MAX_PER_TORRENT, d.maxConnectionsPerTorrent(), 1, 10_000),
+                readInt(CONN_UPLOAD_SLOTS, d.uploadSlots(), 1, 1_000),
+                proxy,
+                properties.getProperty(PROXY_HOST, "").trim(),
+                readInt(PROXY_PORT, d.proxyPort(), 1, 65535),
+                properties.getProperty(PROXY_USERNAME, ""),
+                properties.getProperty(PROXY_PASSWORD, ""),
+                readBoolean(PROXY_PEERS, d.proxyPeers()));
+    }
+
+    /** An int between the bounds; anything unreadable or outside them is the default. */
+    private int readInt(String key, int fallback, int min, int max) {
+        try {
+            int value = Integer.parseInt(properties.getProperty(key, "").trim());
+            return value < min || value > max ? fallback : value;
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
     }
 
     /** Forgets the given keys, so their getters fall back to the defaults. */

@@ -134,6 +134,7 @@ public final class MainWindow {
         palette = new CommandPalette(host, () -> table.requestFocus());
         logWindow = new LogWindow(stage, log);
         settingsWindow = new SettingsWindow(settings);
+        settingsWindow.setOnEngineSettingsChanged(this::applyEngineSettings);
         log.installLogBridge(Platform::runLater);
         host.getChildren().add(root);
 
@@ -208,6 +209,9 @@ public final class MainWindow {
             logWindow.show();
         } else if (action.equals("settings")) {
             settingsWindow.show(stage);
+        } else if (action.startsWith("settings-page:")) {
+            settingsWindow.show(stage);
+            settingsWindow.selectPageForCapture(action.substring("settings-page:".length()));
         } else if (action.startsWith("settings:")) {
             settingsWindow.show(stage);
             settingsWindow.searchForCapture(action.substring("settings:".length()));
@@ -268,6 +272,20 @@ public final class MainWindow {
         });
         poller.scheduleAtFixedRate(this::poll, 0, POLL_MS, TimeUnit.MILLISECONDS);
         maybeCheckForUpdates();
+    }
+
+    /** A connection setting changed: the engine takes it live, on a worker. */
+    private void applyEngineSettings() {
+        if (engine == null) return;
+        Engine e = engine;
+        var current = settings.engineSettings();
+        Thread.ofVirtual().name("engine-settings").start(() -> {
+            try {
+                e.applySettings(current);
+            } catch (EngineException ex) {
+                Platform.runLater(() -> setStatus(ex.getMessage()));
+            }
+        });
     }
 
     // ---- updates --------------------------------------------------------------------------------
