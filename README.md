@@ -76,7 +76,9 @@ Everything lives in one folder, `~/.torrenta` (`--config-dir DIR` or `TORRENTA_C
 it): `settings.properties`, hand-editable; `torrents/<info-hash>.fastresume`, one per torrent,
 libtorrent's resume data with the info dictionary inside, so deleting one file forgets one torrent;
 `native/<version>/`, the unpacked engine. Downloads go to `~/Downloads` until changed in
-Settings (`Ctrl+,`), which writes the same file.
+Settings (`Ctrl+,`), which writes the same file. The theme is there too, under General →
+Appearance: Editora Light and Dark (Caret & Ink, as Editora and Termina), Nord and Cupertino,
+light and dark, applied the moment one is picked (`ui.theme` in the file).
 
 After startup, at most once a day, Torrenta asks GitHub whether there is a newer release and says
 so in the status bar and the Help menu; nothing about you or the machine is sent beyond the request

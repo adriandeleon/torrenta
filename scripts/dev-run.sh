@@ -15,6 +15,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 mvn -q -B compile
+# A fresh folder: copy-dependencies adds, it never removes, so after a version bump the old jars
+# stayed beside the new ones and the run used whichever the module system picked (JavaFX 26 for
+# a while after the move to 27).
+rm -rf target/deps
 mvn -q -B dependency:copy-dependencies -DoutputDirectory=target/deps
 
 MODULE_PATH="$(python3 - <<'PY'

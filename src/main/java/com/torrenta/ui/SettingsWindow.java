@@ -128,6 +128,7 @@ final class SettingsWindow {
     /** Guards control listeners while a page is being populated from stored values. */
     private boolean loading;
 
+    private ChoiceBox<Theme> theme;
     private TextField downloadDir;
     private CheckBox updateCheck;
     private CheckBox addStartPaused;
@@ -440,6 +441,24 @@ final class SettingsWindow {
     // ---------------------------------------------------------------- pages
 
     private void buildGeneral(VBox page) {
+        VBox appearance = section(page, "Appearance");
+        theme = new ChoiceBox<>();
+        theme.getItems().addAll(Theme.values());
+        theme.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setTheme(now.id());
+            settings.saveQuietly();
+            // Global: every open window restyles, this one included.
+            javafx.application.Application.setUserAgentStylesheet(now.stylesheet());
+        });
+        row(
+                Category.GENERAL,
+                appearance,
+                "Theme",
+                "Editora's Caret & Ink pair, and AtlantaFX's Nord and Cupertino, light and dark. Applied at once.",
+                theme,
+                "appearance colors colours dark light nord cupertino editora style");
+
         VBox downloads = section(page, "Downloads");
         downloadDir = new TextField();
         downloadDir.setPrefColumnCount(28);
@@ -981,6 +1000,7 @@ final class SettingsWindow {
     private void reload() {
         loading = true;
         try {
+            theme.setValue(Theme.byId(settings.theme(), Theme.DEFAULT));
             downloadDir.setText(settings.downloadDir().toString());
             updateCheck.setSelected(settings.updateCheck());
             addStartPaused.setSelected(settings.addStartPaused());
