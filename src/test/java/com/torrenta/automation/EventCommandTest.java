@@ -106,17 +106,24 @@ class EventCommandTest {
 
     @Test
     void aNameWithSpacesAndQuotesStaysOneArgument() {
+        // The name keeps its quotes (a magnet's display name can say anything); the file on disk
+        // cannot, on Windows, so the torrent's own file is named without them.
         Torrent t = torrent("It's \"Big\" Movie", "", List.of());
-        EventCommand.Subject s = EventCommand.subject(t, detail("", "", "It's \"Big\" Movie.mkv"));
+        EventCommand.Subject s = EventCommand.subject(t, detail("", "", "Its Big Movie.mkv"));
         List<String> argv = EventCommand.substitute(EventCommand.tokens("/usr/bin/handle --name %N \"%F\""), s);
         assertEquals(
                 List.of(
                         "/usr/bin/handle",
                         "--name",
                         "It's \"Big\" Movie",
-                        SAVE.resolve("It's \"Big\" Movie.mkv").toString()),
+                        SAVE.resolve("Its Big Movie.mkv").toString()),
                 argv,
                 "substitution never re-splits");
+        Torrent unnameable = torrent("no\0name", "", List.of());
+        assertEquals(
+                SAVE,
+                EventCommand.subject(unnameable, null).contentPath(),
+                "a name no file system takes falls back to the save path rather than failing");
     }
 
     @Test

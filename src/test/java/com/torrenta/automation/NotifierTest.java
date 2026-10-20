@@ -71,6 +71,18 @@ class NotifierTest {
     }
 
     @Test
+    void windowsArgumentsSurviveTheCRuntimesQuoting() {
+        assertEquals("plain", Subprocess.windowsArgument("plain"));
+        assertEquals("two words", Subprocess.windowsArgument("two words"), "the JDK wraps this one itself");
+        assertEquals("Some \\\"quoted\\\" name", Subprocess.windowsArgument("Some \"quoted\" name"));
+        assertEquals("a\\\\\\\"b", Subprocess.windowsArgument("a\\\"b"), "backslashes before a quote double");
+        assertEquals(
+                "C:\\dir with space\\\\", Subprocess.windowsArgument("C:\\dir with space\\"), "a trailing one too");
+        assertEquals("C:\\dir\\", Subprocess.windowsArgument("C:\\dir\\"), "but not when there is nothing to wrap");
+        assertEquals("C:\\Program Files\\x", Subprocess.windowsArgument("C:\\Program Files\\x"), "inner ones stay");
+    }
+
+    @Test
     void eachPlatformsCommandLinePassesTheTextAsArguments() {
         assertEquals(
                 List.of("notify-send", "--app-name=Torrenta", "--", "T", "-starts with a dash"),

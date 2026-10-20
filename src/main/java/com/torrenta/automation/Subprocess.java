@@ -45,7 +45,7 @@ final class Subprocess {
     private Subprocess() {}
 
     static Result run(List<String> argv, Duration ceiling, int keepChars) {
-        ProcessBuilder pb = new ProcessBuilder(argv);
+        ProcessBuilder pb = new ProcessBuilder(windowsSafe(argv));
         pb.redirectErrorStream(true);
         // No terminal and nothing on standard input: a program that asks gets end-of-file.
         pb.redirectInput(ProcessBuilder.Redirect.from(new File(nullDevice())));
@@ -97,6 +97,60 @@ final class Subprocess {
             }
             return kept.toString();
         });
+    }
+
+    /**
+     * On Windows the JDK builds one command line for the child and, in its default (legacy)
+     * mode, wraps an argument with spaces in quotes without escaping the quotes inside it, so a
+     * torrent named {@code Some "quoted" name} would reach the program as {@code Some quoted
+     * name}. This does the escaping the C runtime expects beforehand; the program itself is left
+     * alone, and so is everything when the JDK's own safe mode is on, since that escapes too.
+     */
+    static List<String> windowsSafe(List<String> argv) {
+        if (!onWindows() || !legacyQuoting() || argv.size() < 2) return argv;
+        List<String> out = new java.util.ArrayList<>(argv.size());
+        out.add(argv.get(0));
+        for (String arg : argv.subList(1, argv.size())) out.add(windowsArgument(arg));
+        return out;
+    }
+
+    /**
+     * One argument as the Windows C runtime reads it back whole: a quote is escaped, with the
+     * backslashes before it doubled; trailing backslashes are doubled when the JDK will wrap the
+     * argument in quotes (it has whitespace), so the last one cannot swallow the closing quote.
+     */
+    static String windowsArgument(String arg) {
+        if (arg.indexOf('"') < 0 && !(arg.endsWith("\\") && hasWhitespace(arg))) return arg;
+        StringBuilder sb = new StringBuilder(arg.length() + 8);
+        int backslashes = 0;
+        for (int i = 0; i < arg.length(); i++) {
+            char c = arg.charAt(i);
+            if (c == '\\') {
+                backslashes++;
+                continue;
+            }
+            if (c == '"') {
+                sb.append("\\".repeat(backslashes * 2 + 1)).append('"');
+            } else {
+                sb.append("\\".repeat(backslashes)).append(c);
+            }
+            backslashes = 0;
+        }
+        sb.append("\\".repeat(hasWhitespace(arg) ? backslashes * 2 : backslashes));
+        return sb.toString();
+    }
+
+    private static boolean hasWhitespace(String s) {
+        return s.indexOf(' ') >= 0 || s.indexOf('\t') >= 0;
+    }
+
+    private static boolean onWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    }
+
+    /** The JDK escapes embedded quotes itself only when its ambiguous-commands mode is off. */
+    private static boolean legacyQuoting() {
+        return !"false".equalsIgnoreCase(System.getProperty("jdk.lang.Process.allowAmbiguousCommands", "true"));
     }
 
     static String nullDevice() {

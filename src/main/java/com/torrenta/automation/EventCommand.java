@@ -63,9 +63,9 @@ public final class EventCommand {
                 : detail.files().stream().map(TorrentDetail.FileStatus::path).toList();
         String root = rootFolder(paths);
         Path content;
-        if (!root.isEmpty()) content = save.resolve(root);
-        else if (paths.size() == 1) content = save.resolve(paths.get(0));
-        else if (paths.isEmpty()) content = save.resolve(torrent.name());
+        if (!root.isEmpty()) content = resolve(save, root);
+        else if (paths.size() == 1) content = resolve(save, paths.get(0));
+        else if (paths.isEmpty()) content = resolve(save, torrent.name());
         else content = save; // several files and no folder of their own
         String v1;
         String v2;
@@ -81,7 +81,7 @@ public final class EventCommand {
                 torrent.category(),
                 torrent.tags(),
                 content,
-                root.isEmpty() ? null : save.resolve(root),
+                root.isEmpty() ? null : resolve(save, root),
                 save,
                 paths.size(),
                 torrent.size(),
@@ -89,6 +89,19 @@ public final class EventCommand {
                 v1,
                 v2,
                 torrent.id());
+    }
+
+    /**
+     * {@code base/child}, or {@code base} alone when the child is not a path this file system
+     * can name (a magnet's display name with a quote in it, on Windows): the placeholder then
+     * points at the folder rather than failing the whole command.
+     */
+    private static Path resolve(Path base, String child) {
+        try {
+            return base.resolve(child);
+        } catch (java.nio.file.InvalidPathException e) {
+            return base;
+        }
     }
 
     /**
