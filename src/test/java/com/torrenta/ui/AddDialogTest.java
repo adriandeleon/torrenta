@@ -73,18 +73,26 @@ class AddDialogTest {
     @Test
     void addingWithoutAskingUsesTheDefaults() {
         AddRequest.Source source = new AddRequest.Magnet("magnet:?xt=urn:btih:abc");
-        AddRequest request = AddDialog.withoutAsking(source, Path.of("/data"), true, false);
+        Path data = Path.of("/data").toAbsolutePath();
+        Path incomplete = Path.of("/data/incomplete").toAbsolutePath();
+        AddDialog.Defaults direct = new AddDialog.Defaults(data, true, false, false, incomplete, false, false);
         assertEquals(
                 new AddRequest(
                         source,
-                        Path.of("/data"),
+                        data,
                         true,
                         false,
                         false,
                         AddRequest.StopCondition.NONE,
                         Map.of(),
-                        TorrentLabels.NONE),
-                request);
+                        TorrentLabels.NONE,
+                        AddRequest.Storage.DEFAULT),
+                AddDialog.withoutAsking(source, direct));
+        AddDialog.Defaults via = new AddDialog.Defaults(data, false, true, true, incomplete, true, true);
+        assertEquals(
+                new AddRequest.Storage(incomplete, true, true),
+                AddDialog.withoutAsking(source, via).storage(),
+                "the storage plan applies without the dialog too");
     }
 
     @Test

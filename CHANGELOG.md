@@ -20,6 +20,18 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   metadata arrives, or **Wait here for the file list** (`Ctrl+Enter`). "Next time, add with these
   settings without asking" (Settings → Adding torrents → Add without asking, `add.withoutAsking`)
   adds every input with the defaults and opens no dialog.
+- **Incomplete folder, `.part` suffix and pre-allocation** (Settings → General → Downloads, all
+  off by default). With the incomplete folder on, a new torrent downloads there and is moved to
+  its save path (its category's, when the category has one) the moment it completes; a file already
+  at the destination is never written over. The Add dialog's line under the save path says where
+  the files start and the free space of both folders. "Append .part to incomplete files" gives each
+  file the suffix after the check (a file that was already complete keeps its name) and takes it
+  off as the file completes; "Pre-allocate disk space" writes a file at its full size from its
+  first piece (libtorrent 2.x allocates a file when it is first written to, not when the torrent is
+  added). What is still owed to a torrent's files is `torrents/<info-hash>.storage` beside its
+  resume data, so a restart mid-download knows where to move and which names to take back. Keys
+  `download.incompleteEnabled`, `download.incompleteDir` (this machine's, never synced),
+  `download.partSuffix`, `download.preallocate`.
 - **Categories and tags.** A torrent is filed under one category or none and carries any number
   of tags. Torrent → Set Category… (`Ctrl+Shift+G`; a submenu of the categories in the Torrent and
   context menus, None and New category…) and Edit Tags… (`Ctrl+T`: a checkbox per tag, a field for

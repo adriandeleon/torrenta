@@ -78,7 +78,15 @@ Everything lives in one folder, `~/.torrenta` (`--config-dir DIR` or `TORRENTA_C
 it): `settings.properties`, hand-editable; `torrents/<info-hash>.fastresume`, one per torrent,
 libtorrent's resume data with the info dictionary inside, so deleting one file forgets one torrent;
 `native/<version>/`, the unpacked engine. Downloads go to `~/Downloads` until changed in
-Settings (`Ctrl+,`), which writes the same file. Categories (name and save path) are
+Settings (`Ctrl+,`), which writes the same file. Three more choices sit under the download folder
+there, all off by default: an **incomplete folder** (downloads start there and are moved to their
+save path, or their category's, when complete; a file already at the destination is never written
+over; `download.incompleteDir` is this machine's and does not sync), **append `.part` to incomplete
+files** (each file carries the suffix until it is complete, Transmission's `.part`, qBittorrent's
+`.!qB`), and **pre-allocate disk space** (a file is written at its full size from its first piece).
+What the engine still owes a torrent's files, the move and the names to take back, is
+`torrents/<info-hash>.storage` beside its resume data, so a restart mid-download knows both; the
+Add dialog's line under the save path says where the files start and how much room there is. Categories (name and save path) are
 `categories.json` and tags are `tags.json`, both small enough to edit by hand; which torrent is
 filed under which is `torrents/<info-hash>.labels` beside its resume data, written the moment it
 changes and deleted with the torrent. A torrent's own share limit (Torrent → Limits…)

@@ -34,6 +34,7 @@ import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
+import com.torrenta.engine.TorrentStorage;
 import com.torrenta.engine.TrackerHost;
 import com.torrenta.store.TorrentStore;
 import org.libtorrent4j.AddTorrentParams;
@@ -46,12 +47,14 @@ import org.libtorrent4j.BDecodeNode;
 import org.libtorrent4j.ErrorCode;
 import org.libtorrent4j.FileStorage;
 import org.libtorrent4j.LibTorrent;
+import org.libtorrent4j.MoveFlags;
 import org.libtorrent4j.PeerInfo;
 import org.libtorrent4j.PieceIndexBitfield;
 import org.libtorrent4j.SessionHandle;
 import org.libtorrent4j.SessionManager;
 import org.libtorrent4j.SessionParams;
 import org.libtorrent4j.SettingsPack;
+import org.libtorrent4j.StorageMode;
 import org.libtorrent4j.TorrentFlags;
 import org.libtorrent4j.TorrentHandle;
 import org.libtorrent4j.TorrentInfo;
@@ -60,6 +63,7 @@ import org.libtorrent4j.Vectors;
 import org.libtorrent4j.alerts.AddTorrentAlert;
 import org.libtorrent4j.alerts.Alert;
 import org.libtorrent4j.alerts.AlertType;
+import org.libtorrent4j.alerts.FileCompletedAlert;
 import org.libtorrent4j.alerts.FileErrorAlert;
 import org.libtorrent4j.alerts.FileRenameFailedAlert;
 import org.libtorrent4j.alerts.FileRenamedAlert;
@@ -69,6 +73,8 @@ import org.libtorrent4j.alerts.PortmapAlert;
 import org.libtorrent4j.alerts.PortmapErrorAlert;
 import org.libtorrent4j.alerts.SaveResumeDataAlert;
 import org.libtorrent4j.alerts.SaveResumeDataFailedAlert;
+import org.libtorrent4j.alerts.StorageMovedAlert;
+import org.libtorrent4j.alerts.StorageMovedFailedAlert;
 import org.libtorrent4j.alerts.TorrentAlert;
 import org.libtorrent4j.alerts.TorrentErrorAlert;
 import org.libtorrent4j.alerts.TrackerAlert;
@@ -89,6 +95,7 @@ import org.libtorrent4j.swig.session_handle;
 import org.libtorrent4j.swig.settings_pack;
 import org.libtorrent4j.swig.sha1_hash;
 import org.libtorrent4j.swig.status_flags_t;
+import org.libtorrent4j.swig.tcp_endpoint;
 import org.libtorrent4j.swig.torrent_flags_t;
 import org.libtorrent4j.swig.torrent_handle;
 import org.libtorrent4j.swig.torrent_handle_vector;
@@ -111,6 +118,13 @@ import org.libtorrent4j.swig.torrent_handle_vector;
  * for them, so they live in a {@code .labels} sidecar beside the resume data, written on the
  * caller's thread the moment they change, read back with the resume data at start, and held here
  * by id for the snapshots.
+ *
+ * <p>The incomplete folder and the {@code .part} suffix are the engine's own rules on top of
+ * libtorrent: a torrent is added with the incomplete folder as its save path and its destination
+ * in a {@code .storage} sidecar ({@link TorrentStorage}); when it finishes, {@code move_storage}
+ * takes it to the destination, never over a file already there. The suffix goes on after the
+ * check (so files that are already complete keep their names, as qBittorrent does it), comes off
+ * as each file completes, and the sidecar remembers which indices carry it.
  */
 public final class LibtorrentEngine implements Engine {
 
@@ -174,6 +188,11 @@ public final class LibtorrentEngine implements Engine {
     /** Category and tags by id; absent means none. The sidecar in the store is the durable copy. */
     private final Map<String, TorrentLabels> labels = new ConcurrentHashMap<>();
 
+    /** What the files are still owed, by id; absent means nothing. The sidecar is the durable copy. */
+    private final Map<String, TorrentStorage> storage = new ConcurrentHashMap<>();
+
+    /** Moves issued and not yet answered, so a second trigger does not issue another. */
+    private final Set<String> moving = ConcurrentHashMap.newKeySet();
     /**
      * The hosts of each torrent's trackers, by id, for the sidebar's Trackers section: from the
      * add parameters (a magnet's, a .torrent's, the resume data's), from any tracker alert, and
@@ -246,12 +265,14 @@ public final class LibtorrentEngine implements Engine {
         restoring.addAll(stored.keySet());
         for (Map.Entry<String, byte[]> entry : stored.entrySet()) {
             restoreLabels(entry.getKey());
+            restoreStorage(entry.getKey());
             error_code ec = new error_code();
             add_torrent_params params = libtorrent.read_resume_data_ex(Vectors.bytes2byte_vector(entry.getValue()), ec);
             if (ec.value() != 0) {
                 LOG.warning("Resume data for " + entry.getKey() + " is unreadable (" + ec.message() + "); skipped");
                 continue;
             }
+            restoreSuffixes(entry.getKey(), params);
             error_code added = new error_code();
             s.swig().add_torrent(params, added);
             if (added.value() != 0) {
@@ -276,6 +297,45 @@ public final class LibtorrentEngine implements Engine {
         } catch (IOException e) {
             LOG.warning("Labels for " + id + " could not be read (" + e.getMessage() + "); skipped");
         }
+    }
+
+    /** The storage sidecar, if there is one; an unreadable one costs the move, not the torrent. */
+    private void restoreStorage(String id) {
+        try {
+            store.loadStorage(id).ifPresent(bytes -> {
+                try {
+                    TorrentStorage owed = TorrentStorage.decode(bytes);
+                    if (!owed.isEmpty()) storage.put(id, owed);
+                } catch (IOException e) {
+                    LOG.warning("Storage record for " + id + " is unreadable (" + e.getMessage() + "); skipped");
+                }
+            });
+        } catch (IOException e) {
+            LOG.warning("Storage record for " + id + " could not be read (" + e.getMessage() + "); skipped");
+        }
+    }
+
+    /**
+     * libtorrent 2.1 writes a renamed file into the resume data relative to the torrent's root
+     * folder ({@code a.bin.part}) but reads it back relative to the save path, so a multi-file
+     * torrent restarted with suffixed names would write them beside its folder, not in it. The
+     * sidecar knows which files carry the suffix; their full names are put back here, before the
+     * add, from the original names in the info dictionary.
+     */
+    private void restoreSuffixes(String id, add_torrent_params params) {
+        TorrentStorage owed = storage.get(id);
+        if (owed == null || owed.suffixed().isEmpty()) return;
+        org.libtorrent4j.swig.torrent_info info = params.ti_ptr();
+        if (info == null || !info.is_valid()) return;
+        org.libtorrent4j.swig.int_string_map renamed =
+                new org.libtorrent4j.swig.int_string_map(params.get_renamed_files());
+        org.libtorrent4j.swig.file_storage files = info.files_impl();
+        for (int index : owed.suffixed()) {
+            if (index < 0 || index >= files.num_files()) continue;
+            renamed.put(index, TorrentStorage.suffixed(files.file_path(index)));
+        }
+        params.set_renamed_files(renamed);
+        Reference.reachabilityFence(info);
     }
 
     @Override
@@ -318,7 +378,15 @@ public final class LibtorrentEngine implements Engine {
                 info = params.getTorrentInfo();
             }
         }
-        params.setSavePath(request.savePath().toString());
+        // Into the incomplete folder when there is one; the destination goes in the sidecar and
+        // move_storage takes the files there when the torrent finishes.
+        AddRequest.Storage choices = request.storage();
+        Path destination = request.savePath().toAbsolutePath().normalize();
+        Path start = choices.incompletePath() == null
+                ? destination
+                : choices.incompletePath().toAbsolutePath().normalize();
+        params.setSavePath(start.toString());
+        if (choices.preallocate()) params.setStorageMode(StorageMode.STORAGE_MODE_ALLOCATE);
         params.setMaxConnections(engineSettings.maxConnectionsPerTorrent());
 
         // Renaming files for the layout needs the handle, so such a torrent is added paused and
@@ -363,6 +431,9 @@ public final class LibtorrentEngine implements Engine {
         }
         TorrentHandle handle = new TorrentHandle(raw);
         if (!request.labels().isEmpty()) writeLabels(id, request.labels());
+        TorrentStorage owed = new TorrentStorage(
+                start.equals(destination) ? "" : destination.toString(), choices.partSuffix(), Set.of());
+        if (!owed.isEmpty()) writeStorage(id, owed);
 
         return snapshot(handle);
     }
@@ -382,6 +453,132 @@ public final class LibtorrentEngine implements Engine {
         }
         params.setTrackers(trackers);
         params.setTrackerTiers(tiers);
+    }
+
+    /** Memory and sidecar together, under the store's lock; nothing owed means no sidecar. */
+    private void writeStorage(String id, TorrentStorage owed) throws EngineException {
+        synchronized (store) {
+            try {
+                if (owed.isEmpty()) {
+                    storage.remove(id);
+                    store.deleteStorage(id);
+                } else {
+                    storage.put(id, owed);
+                    store.saveStorage(id, owed.encode());
+                }
+            } catch (IOException e) {
+                throw new EngineException("Could not write the storage record of " + id + ": " + e.getMessage(), e);
+            }
+        }
+    }
+
+    /** The alert thread's version: a failed write is a log line, the torrent carries on. */
+    private void writeStorageQuietly(String id, TorrentStorage owed) {
+        try {
+            writeStorage(id, owed);
+        } catch (EngineException e) {
+            LOG.warning(e.getMessage());
+        }
+    }
+
+    /**
+     * Puts the suffix on every wanted file that is not complete and takes it off every one that
+     * is, by the torrent's current file progress; after the check, so a file that was already
+     * there keeps its name. Renames are disk jobs, confirmed later by {@code file_renamed_alert}.
+     * No metadata, nothing to name: a magnet comes back here once its metadata has been checked.
+     */
+    private void applySuffixes(String id, TorrentHandle h) {
+        TorrentStorage owed = storage.get(id);
+        if (owed == null || !owed.partSuffix()) return;
+        TorrentInfo info = h.status(StatusQuery.FLAGS).hasMetadata() ? h.torrentFile() : null;
+        if (info == null || !info.isValid()) return;
+        try {
+            FileStorage files = info.files();
+            long[] progress = h.fileProgress();
+            org.libtorrent4j.Priority[] priorities = h.filePriorities();
+            Set<Integer> suffixed = new java.util.TreeSet<>(owed.suffixed());
+            for (int i = 0; i < files.numFiles(); i++) {
+                if (files.padFileAt(i) || files.fileSize(i) <= 0) continue;
+                boolean wanted = i >= priorities.length || priorities[i] != org.libtorrent4j.Priority.IGNORE;
+                boolean complete = i < progress.length && progress[i] >= files.fileSize(i);
+                String path = files.filePath(i);
+                if (suffixed.contains(i)) {
+                    if (complete) {
+                        h.renameFile(i, TorrentStorage.unsuffixed(path));
+                        suffixed.remove(i);
+                    }
+                } else if (wanted && !complete && !path.endsWith(TorrentStorage.SUFFIX)) {
+                    h.renameFile(i, TorrentStorage.suffixed(path));
+                    suffixed.add(i);
+                }
+            }
+            if (!suffixed.equals(owed.suffixed())) writeStorageQuietly(id, owed.withSuffixed(suffixed));
+        } finally {
+            Reference.reachabilityFence(info);
+        }
+    }
+
+    /** Takes the suffix off one file that has just completed, if it carries it. */
+    private void unsuffix(String id, TorrentHandle h, int index) {
+        TorrentStorage owed = storage.get(id);
+        if (owed == null || !owed.suffixed().contains(index)) return;
+        TorrentInfo info = h.status(StatusQuery.FLAGS).hasMetadata() ? h.torrentFile() : null;
+        if (info == null || !info.isValid()) return;
+        try {
+            FileStorage files = info.files();
+            if (index < files.numFiles()) h.renameFile(index, TorrentStorage.unsuffixed(files.filePath(index)));
+        } finally {
+            Reference.reachabilityFence(info);
+        }
+        Set<Integer> left = new java.util.TreeSet<>(owed.suffixed());
+        left.remove(index);
+        writeStorageQuietly(id, owed.withSuffixed(left));
+    }
+
+    /**
+     * Moves a finished torrent to its destination, once. {@code dont_replace}: a file already at
+     * the destination is kept and the torrent uses it, so a complete copy is never written over.
+     * The answer is a {@code storage_moved} alert, where the record is cleared.
+     */
+    private void maybeMove(String id, TorrentHandle h) {
+        TorrentStorage owed = storage.get(id);
+        if (owed == null || owed.destination().isEmpty()) return;
+        TorrentStatus status = h.status(StatusQuery.FLAGS);
+        if (!status.isFinished()) return;
+        if (samePath(status.swig().getSave_path(), owed.destination())) {
+            writeStorageQuietly(id, owed.withDestination(""));
+            return;
+        }
+        if (!moving.add(id)) return;
+        h.moveStorage(owed.destination(), MoveFlags.DONT_REPLACE);
+    }
+
+    private static boolean samePath(String a, String b) {
+        try {
+            return Path.of(a)
+                    .toAbsolutePath()
+                    .normalize()
+                    .equals(Path.of(b).toAbsolutePath().normalize());
+        } catch (RuntimeException e) {
+            return a.equals(b);
+        }
+    }
+
+    /** The torrent's storage record, for the test; {@link TorrentStorage#NONE} when nothing is owed. */
+    TorrentStorage storageForTest(String id) {
+        return storage.getOrDefault(id, TorrentStorage.NONE);
+    }
+
+    /** The port the session listens on, for a test that connects two engines over loopback. */
+    int listenPortForTest() throws EngineException {
+        return running().swig().listen_port();
+    }
+
+    /** Tells the torrent about a peer on this machine, for the same test. */
+    void connectPeerForTest(String id, int port) throws EngineException {
+        handle(id)
+                .swig()
+                .connect_peer(new tcp_endpoint(Address.parseIp("127.0.0.1").swig(), port));
     }
 
     @Override
@@ -635,6 +832,8 @@ public final class LibtorrentEngine implements Engine {
         synchronized (store) {
             removed.add(id);
             labels.remove(id);
+            storage.remove(id);
+            moving.remove(id);
             trackerHosts.remove(id);
             trackerErrors.remove(id);
             try {
@@ -1401,6 +1600,7 @@ public final class LibtorrentEngine implements Engine {
             AlertType.TORRENT_FINISHED.swig(),
             AlertType.TORRENT_CHECKED.swig(),
             AlertType.TORRENT_ERROR.swig(),
+            AlertType.FILE_COMPLETED.swig(),
             AlertType.FILE_ERROR.swig(),
             AlertType.FILE_RENAMED.swig(),
             AlertType.FILE_RENAME_FAILED.swig(),
@@ -1413,6 +1613,8 @@ public final class LibtorrentEngine implements Engine {
             AlertType.PORTMAP.swig(),
             AlertType.PORTMAP_ERROR.swig(),
             AlertType.PEER_BLOCKED.swig(),
+            AlertType.STORAGE_MOVED.swig(),
+            AlertType.STORAGE_MOVED_FAILED.swig(),
             AlertType.SAVE_RESUME_DATA.swig(),
             AlertType.SAVE_RESUME_DATA_FAILED.swig(),
         };
@@ -1447,8 +1649,47 @@ public final class LibtorrentEngine implements Engine {
                         TorrentAlert<?> t = (TorrentAlert<?>) alert;
                         requestSave(t.handle(), false);
                         torrentEvent(t, EngineEvent.Level.INFO, "%s finished");
+                        if (t.handle().isValid()) {
+                            // Names first, then the move: both are disk jobs, done in this order.
+                            applySuffixes(id(t.handle()), t.handle());
+                            maybeMove(id(t.handle()), t.handle());
+                        }
                     }
-                    case TORRENT_CHECKED -> torrentEvent((TorrentAlert<?>) alert, EngineEvent.Level.INFO, "%s checked");
+                    case TORRENT_CHECKED -> {
+                        TorrentAlert<?> t = (TorrentAlert<?>) alert;
+                        torrentEvent(t, EngineEvent.Level.INFO, "%s checked");
+                        if (t.handle().isValid()) {
+                            applySuffixes(id(t.handle()), t.handle());
+                            // Finished at the check (the files were there, or a move was owed
+                            // from before a restart): the finished alert does not come again.
+                            maybeMove(id(t.handle()), t.handle());
+                        }
+                    }
+                    case FILE_COMPLETED -> {
+                        FileCompletedAlert t = (FileCompletedAlert) alert;
+                        if (t.handle().isValid()) unsuffix(id(t.handle()), t.handle(), t.index());
+                    }
+                    case STORAGE_MOVED -> {
+                        StorageMovedAlert t = (StorageMovedAlert) alert;
+                        if (t.handle().isValid()) {
+                            String id = id(t.handle());
+                            moving.remove(id);
+                            TorrentStorage owed = storage.get(id);
+                            if (owed != null) writeStorageQuietly(id, owed.withDestination(""));
+                            // The save path is part of the resume data: written now, not later.
+                            requestSave(t.handle(), false);
+                        }
+                        torrentEvent(t, EngineEvent.Level.INFO, "Moved %s to " + t.storagePath());
+                    }
+                    case STORAGE_MOVED_FAILED -> {
+                        StorageMovedFailedAlert t = (StorageMovedFailedAlert) alert;
+                        if (t.handle().isValid()) moving.remove(id(t.handle()));
+                        torrentEvent(
+                                t,
+                                EngineEvent.Level.ERROR,
+                                "%s could not be moved: " + t.error().getMessage()
+                                        + (t.filePath().isEmpty() ? "" : " (" + t.filePath() + ")"));
+                    }
                     case TORRENT_ERROR -> {
                         TorrentErrorAlert t = (TorrentErrorAlert) alert;
                         torrentEvent(
@@ -1459,7 +1700,13 @@ public final class LibtorrentEngine implements Engine {
                     }
                     case FILE_RENAMED -> {
                         FileRenamedAlert t = (FileRenamedAlert) alert;
-                        torrentEvent(t, EngineEvent.Level.INFO, "%s: file " + t.index() + " renamed to " + t.newName());
+                        // The suffix going on and off is the engine's own doing, one line per file
+                        // each way: not worth the log window's space.
+                        TorrentStorage owed = t.handle().isValid() ? storage.get(id(t.handle())) : null;
+                        if (owed == null || !owed.partSuffix()) {
+                            torrentEvent(
+                                    t, EngineEvent.Level.INFO, "%s: file " + t.index() + " renamed to " + t.newName());
+                        }
                     }
                     case FILE_RENAME_FAILED -> {
                         FileRenameFailedAlert t = (FileRenameFailedAlert) alert;

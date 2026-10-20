@@ -51,6 +51,7 @@ import javafx.util.StringConverter;
 
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
+import com.torrenta.engine.DownloadPlan;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 
@@ -67,6 +68,8 @@ import com.torrenta.engine.TorrentPreview;
  * <p>Enter adds, Shift+Enter adds paused, Escape cancels. In the tree Space ticks, + and −
  * change the priority, ← and → fold. A category with a save path fills the folder when chosen
  * (automatic torrent management, as qBittorrent calls it); the folder stays editable afterwards.
+ * The folder is where the files end up; when the incomplete folder is on, the lines under it say
+ * that they start there.
  *
  * <p>The same dialog, with the right column left out, chooses the files of a torrent already in
  * the list that was added before its file list arrived ({@link #chooseFiles}).
@@ -99,7 +102,9 @@ final class AddDialog {
     private final Label summary = new Label();
     private final TextField savePath = new TextField();
     private final DiskBar diskBar = new DiskBar();
-    private final Label diskText = new Label();
+    /** One label per line: the disk sentence, then where the files start if not here. */
+    private final VBox diskText = new VBox(1);
+
     private final CheckBox sequential = new CheckBox("Sequential download");
     private final CheckBox firstLast = new CheckBox("First and last pieces first");
     private final CheckBox skipCheck = new CheckBox("Skip hash check");
@@ -108,6 +113,8 @@ final class AddDialog {
     private final TextField tags = new TextField();
     private final CheckBox withoutAsking = new CheckBox("Next time, add with these settings without asking");
     private final List<Category> categories;
+    private final Defaults defaults;
+    /** Enter adds paused and Shift+Enter starts, rather than the other way round. */
     private final boolean startPausedDefault;
 
     private final StackPane treeHost = new StackPane();
@@ -140,10 +147,51 @@ final class AddDialog {
     private Choice result;
 
     /**
+     * What the settings say a new torrent starts as.
+     *
+     * @param savePath the download folder
+     * @param startPaused the Start paused box's starting position
+     * @param sequential the Sequential box's
+     * @param incompleteEnabled whether downloads start in the incomplete folder
+     * @param incompleteDir that folder
+     * @param partSuffix whether incomplete files carry {@code .part}
+     * @param preallocate whether files are allocated in full at the start
+     */
+    record Defaults(
+            Path savePath,
+            boolean startPaused,
+            boolean sequential,
+            boolean incompleteEnabled,
+            Path incompleteDir,
+            boolean partSuffix,
+            boolean preallocate) {
+
+        static Defaults from(com.torrenta.store.Settings settings) {
+            return new Defaults(
+                    settings.downloadDir(),
+                    settings.addStartPaused(),
+                    settings.addSequential(),
+                    settings.incompleteEnabled(),
+                    settings.incompleteDir(),
+                    settings.partSuffix(),
+                    settings.preallocate());
+        }
+
+        /** Where a torrent saved to {@code destination} starts and ends. */
+        DownloadPlan plan(Path destination) {
+            return DownloadPlan.of(destination, incompleteEnabled, incompleteDir);
+        }
+
+        AddRequest.Storage storage(Path destination) {
+            return AddRequest.Storage.of(plan(destination), partSuffix, preallocate);
+        }
+    }
+
+    /**
      * @param preview the torrent's contents, or null for a magnet
      * @param via where it came from, for the header
-     * @param startPausedDefault Enter adds paused and Shift+Enter starts, rather than the other
-     *     way round
+     * @param defaults the folder, Start paused (which makes Enter add paused and Shift+Enter
+     *     start), Sequential and the storage plan, from the settings
      * @param categories the categories that exist, offered as the torrent's
      */
     AddDialog(
@@ -151,11 +199,9 @@ final class AddDialog {
             AddRequest.Source source,
             TorrentPreview preview,
             Via via,
-            Path defaultSavePath,
-            boolean startPausedDefault,
-            boolean sequentialDefault,
+            Defaults defaults,
             List<Category> categories) {
-        this(owner, source, preview, via, defaultSavePath, startPausedDefault, sequentialDefault, categories, false);
+        this(owner, source, preview, via, defaults, categories, false);
     }
 
     /**
@@ -166,7 +212,13 @@ final class AddDialog {
     static AddDialog chooseFiles(
             Window owner, TorrentPreview preview, Map<Integer, com.torrenta.engine.Priority> priorities) {
         AddDialog dialog = new AddDialog(
-                owner, new AddRequest.Magnet(""), null, Via.FILE, Path.of(""), false, false, List.of(), true);
+                owner,
+                new AddRequest.Magnet(""),
+                null,
+                Via.FILE,
+                new Defaults(Path.of(""), false, false, false, Path.of(""), false, false),
+                List.of(),
+                true);
         dialog.initial = Map.copyOf(priorities);
         dialog.showFiles(dialog.source, preview);
         return dialog;
@@ -177,15 +229,14 @@ final class AddDialog {
             AddRequest.Source source,
             TorrentPreview preview,
             Via via,
-            Path defaultSavePath,
-            boolean startPausedDefault,
-            boolean sequentialDefault,
+            Defaults defaults,
             List<Category> categories,
             boolean existing) {
         this.source = source;
         this.preview = preview;
         this.existing = existing;
-        this.startPausedDefault = startPausedDefault;
+        this.defaults = defaults;
+        this.startPausedDefault = defaults.startPaused();
         this.categories = List.copyOf(categories);
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
@@ -214,16 +265,15 @@ final class AddDialog {
         left.setMinWidth(320);
 
         // ---- right: where and how ----
-        savePath.setText(defaultSavePath.toString());
+        savePath.setText(defaults.savePath().toString());
         savePath.textProperty().addListener((o, was, now) -> updateDisk());
         Button browse = new Button("Browse…");
         browse.setOnAction(e -> browse());
         HBox.setHgrow(savePath, Priority.ALWAYS);
         HBox pathRow = new HBox(6, savePath, browse);
-        diskText.getStyleClass().add("dialog-hint");
-        diskText.setWrapText(true);
+        diskText.setMinWidth(0);
 
-        sequential.setSelected(sequentialDefault);
+        sequential.setSelected(defaults.sequential());
         stop.getItems().addAll(AddRequest.StopCondition.values());
         stop.setValue(AddRequest.StopCondition.NONE);
         stop.setConverter(converter(c -> c == null ? "" : c.label()));
@@ -465,8 +515,8 @@ final class AddDialog {
         String files = hasFiles.get()
                 ? FileTree.files(root).size() + " files, " + Bytes.human(FileTree.wantedSize(root)) + " wanted"
                 : "placeholder: " + fetching.getText();
-        return kicker.getText() + " | " + title.getText() + " | " + summary.getText() + " | " + diskText.getText()
-                + " | " + files + " | buttons=" + buttons;
+        return kicker.getText() + " | " + title.getText() + " | " + summary.getText() + " | " + hint() + " | " + files
+                + " | buttons=" + buttons;
     }
 
     /** Picks a category as a person would, for the capture hook. */
@@ -484,16 +534,18 @@ final class AddDialog {
 
     private void confirm(boolean paused) {
         if (!hasFiles.get() || (!existing && savePath.getText().isBlank())) return;
+        Path destination = existing ? Path.of("") : Path.of(savePath.getText().trim());
         result = new Choice(
                 new AddRequest(
                         source,
-                        existing ? Path.of("") : Path.of(savePath.getText().trim()),
+                        destination,
                         paused,
                         sequential.isSelected(),
                         skipCheck.isSelected(),
                         stop.getValue(),
                         root == null ? Map.of() : FileTree.priorities(root),
-                        labels()),
+                        labels(),
+                        existing ? AddRequest.Storage.DEFAULT : defaults.storage(destination)),
                 firstLast.isSelected(),
                 false,
                 withoutAsking.isSelected());
@@ -503,16 +555,18 @@ final class AddDialog {
     /** Adds the magnet now, to stop once its metadata is in; the files are chosen then. */
     private void addNow() {
         if (hasFiles.get() || savePath.getText().isBlank()) return;
+        Path destination = Path.of(savePath.getText().trim());
         result = new Choice(
                 new AddRequest(
                         source,
-                        Path.of(savePath.getText().trim()),
+                        destination,
                         false,
                         sequential.isSelected(),
                         skipCheck.isSelected(),
                         AddRequest.StopCondition.METADATA_RECEIVED,
                         Map.of(),
-                        labels()),
+                        labels(),
+                        defaults.storage(destination)),
                 false,
                 true,
                 withoutAsking.isSelected());
@@ -730,15 +784,39 @@ final class AddDialog {
     private void updateDisk() {
         if (existing) return;
         String text = savePath.getText().trim();
-        Optional<FreeSpace.Disk> disk = text.isEmpty() ? Optional.empty() : FreeSpace.disk(Path.of(text));
-        long wanted = root == null ? -1 : FileTree.wantedSize(root);
-        if (disk.isEmpty()) {
-            diskBar.set(new FreeSpace.Bar(0, 0, true));
-            diskText.setText(text.isEmpty() ? "" : "Free space unknown");
-            return;
+        Path destination;
+        try {
+            destination = text.isEmpty() ? null : Path.of(text);
+        } catch (RuntimeException e) {
+            destination = null;
         }
-        diskBar.set(FreeSpace.bar(disk.get(), wanted));
-        diskText.setText(FreeSpace.sentence(disk.get(), wanted));
+        Optional<FreeSpace.Disk> disk = destination == null ? Optional.empty() : FreeSpace.disk(destination);
+        long wanted = root == null ? -1 : FileTree.wantedSize(root);
+        diskBar.set(disk.map(d -> FreeSpace.bar(d, wanted)).orElse(new FreeSpace.Bar(0, 0, true)));
+        String line = disk.map(d -> FreeSpace.sentence(d, wanted)).orElse(text.isEmpty() ? "" : "Free space unknown");
+        // With the incomplete folder on, the files start elsewhere: say where, and its free space.
+        DownloadPlan plan = destination == null ? null : defaults.plan(destination);
+        if (plan != null && plan.viaIncomplete()) {
+            line += "\n" + FreeSpace.hint(plan, FreeSpace.of(plan.start()), java.util.OptionalLong.empty());
+        }
+        diskText.getChildren().clear();
+        for (String part : line.split("\n")) {
+            if (part.isEmpty()) continue;
+            Label label = new Label(part);
+            label.getStyleClass().add("dialog-hint");
+            // A long folder is cut in the middle, keeping both its root and its last folder.
+            label.setTextOverrun(javafx.scene.control.OverrunStyle.CENTER_ELLIPSIS);
+            label.setMinWidth(0);
+            label.setMaxWidth(Double.MAX_VALUE);
+            diskText.getChildren().add(label);
+        }
+    }
+
+    /** The lines under the save path, for the capture hook; joined with " / ". */
+    String hint() {
+        return String.join(
+                " / ",
+                diskText.getChildren().stream().map(n -> ((Label) n).getText()).toList());
     }
 
     /** A thin bar: what is used of the volume, then in the accent what the torrent will take. */
@@ -831,9 +909,17 @@ final class AddDialog {
     }
 
     /** The request an input is added with when the dialog does not open: the settings' defaults. */
-    static AddRequest withoutAsking(AddRequest.Source source, Path folder, boolean paused, boolean sequential) {
+    static AddRequest withoutAsking(AddRequest.Source source, Defaults defaults) {
         return new AddRequest(
-                source, folder, paused, sequential, false, AddRequest.StopCondition.NONE, Map.of(), TorrentLabels.NONE);
+                source,
+                defaults.savePath(),
+                defaults.startPaused(),
+                defaults.sequential(),
+                false,
+                AddRequest.StopCondition.NONE,
+                Map.of(),
+                TorrentLabels.NONE,
+                defaults.storage(defaults.savePath()));
     }
 
     /**

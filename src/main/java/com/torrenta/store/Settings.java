@@ -29,6 +29,18 @@ public final class Settings {
 
     public static final String FILE_NAME = "settings.properties";
     public static final String DOWNLOAD_DIR = "download.dir";
+    /** Downloads start here and move to their save path when complete; the folder is this machine's. */
+    public static final String INCOMPLETE_ENABLED = "download.incompleteEnabled";
+
+    public static final String INCOMPLETE_DIR = "download.incompleteDir";
+    /** Incomplete files carry {@code .part} until each is done. */
+    public static final String PART_SUFFIX = "download.partSuffix";
+    /** Every file allocated in full when the torrent starts. */
+    public static final String PREALLOCATE = "download.preallocate";
+
+    public static final String[] DOWNLOAD_KEYS = {
+        DOWNLOAD_DIR, INCOMPLETE_ENABLED, INCOMPLETE_DIR, PART_SUFFIX, PREALLOCATE
+    };
     /** The transfer list's columns: order, widths, visibility. See {@code ui.ColumnLayout}. */
     public static final String TABLE_COLUMNS = "table.columns";
     /** The detail pane: shown, which tab, and the divider position (0..1 of the window). */
@@ -676,5 +688,55 @@ public final class Settings {
 
     public void downloadDir(Path dir) {
         properties.setProperty(DOWNLOAD_DIR, dir.toAbsolutePath().toString());
+    }
+
+    public boolean incompleteEnabled() {
+        return readBoolean(INCOMPLETE_ENABLED, false);
+    }
+
+    public void setIncompleteEnabled(boolean on) {
+        properties.setProperty(INCOMPLETE_ENABLED, String.valueOf(on));
+    }
+
+    /** The incomplete folder; {@code incomplete} under the download folder until set. */
+    public Path incompleteDir() {
+        String value = properties.getProperty(INCOMPLETE_DIR, "");
+        if (value.isBlank()) return downloadDir().resolve("incomplete");
+        try {
+            return Path.of(value).toAbsolutePath();
+        } catch (RuntimeException e) {
+            LOG.warning(INCOMPLETE_DIR + " is not a path: " + value + "; using the default");
+            return downloadDir().resolve("incomplete");
+        }
+    }
+
+    public void setIncompleteDir(Path dir) {
+        properties.setProperty(INCOMPLETE_DIR, dir.toAbsolutePath().toString());
+    }
+
+    public boolean partSuffix() {
+        return readBoolean(PART_SUFFIX, false);
+    }
+
+    public void setPartSuffix(boolean on) {
+        properties.setProperty(PART_SUFFIX, String.valueOf(on));
+    }
+
+    public boolean preallocate() {
+        return readBoolean(PREALLOCATE, false);
+    }
+
+    public void setPreallocate(boolean on) {
+        properties.setProperty(PREALLOCATE, String.valueOf(on));
+    }
+
+    /** Where a torrent saved to {@code destination} starts, by the incomplete-folder settings. */
+    public com.torrenta.engine.DownloadPlan plan(Path destination) {
+        return com.torrenta.engine.DownloadPlan.of(destination, incompleteEnabled(), incompleteDir());
+    }
+
+    /** The storage choices for a new torrent saved to {@code destination}. */
+    public com.torrenta.engine.AddRequest.Storage storage(Path destination) {
+        return com.torrenta.engine.AddRequest.Storage.of(plan(destination), partSuffix(), preallocate());
     }
 }

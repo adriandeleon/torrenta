@@ -20,6 +20,10 @@ class SyncKeysTest {
         assertFalse(SyncKeys.isSynced("sync.url"));
         assertFalse(SyncKeys.isSynced("sync.enabled"));
         assertFalse(SyncKeys.isSynced("download.dir"), "a folder of this machine");
+        assertFalse(SyncKeys.isSynced("download.incompleteDir"), "so is the incomplete folder");
+        assertTrue(SyncKeys.isSynced("download.incompleteEnabled"), "but whether it is used travels");
+        assertTrue(SyncKeys.isSynced("download.partSuffix"));
+        assertTrue(SyncKeys.isSynced("download.preallocate"));
         assertFalse(SyncKeys.isSynced("connection.interface"));
         assertFalse(SyncKeys.isSynced("proxy.password"), "a secret");
         assertFalse(SyncKeys.isSynced("updates.lastCheckEpochMs"), "a clock");

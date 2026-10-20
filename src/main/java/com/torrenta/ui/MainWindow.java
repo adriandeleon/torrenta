@@ -321,6 +321,7 @@ public final class MainWindow {
         if (currentDialog != null && currentDialog.isShowing()) {
             System.out.println("capture: dialog=" + currentDialog.title());
             System.out.println("capture: add-dialog=" + currentDialog.summaryForCapture());
+            System.out.println("capture: dialog-hint=" + currentDialog.hint());
         }
         if (limitsDialog != null && limitsDialog.isShowing())
             System.out.println("capture: dialog=" + limitsDialog.title());
@@ -574,9 +575,7 @@ public final class MainWindow {
         String text = input.trim();
         Engine e = engine;
         boolean withoutAsking = settings.addWithoutAsking();
-        Path folder = settings.downloadDir();
-        boolean paused = settings.addStartPaused();
-        boolean sequential = settings.addSequential();
+        AddDialog.Defaults defaults = AddDialog.Defaults.from(settings);
         Thread.ofVirtual().name("engine-inspect").start(() -> {
             try {
                 Inputs.Kind kind = Inputs.classify(text);
@@ -598,7 +597,7 @@ public final class MainWindow {
                             case URL -> new AddRequest.TorrentFile(new TorrentFetch().fetch(URI.create(text)), text);
                         };
                 if (withoutAsking) {
-                    Torrent added = e.add(AddDialog.withoutAsking(source, folder, paused, sequential));
+                    Torrent added = e.add(AddDialog.withoutAsking(source, defaults));
                     Platform.runLater(() -> setStatus("Added " + added.name()));
                     return;
                 }
@@ -656,15 +655,8 @@ public final class MainWindow {
             queuedDialogs.add(() -> openDialog(source, preview, via));
             return;
         }
-        AddDialog dialog = new AddDialog(
-                stage,
-                source,
-                preview,
-                via,
-                settings.downloadDir(),
-                settings.addStartPaused(),
-                settings.addSequential(),
-                labels.categories());
+        AddDialog dialog =
+                new AddDialog(stage, source, preview, via, AddDialog.Defaults.from(settings), labels.categories());
         FetchSlot slot = new FetchSlot();
         if (preview == null && source instanceof AddRequest.Magnet magnet) startFetch(magnet, slot, dialog);
         currentDialog = dialog;

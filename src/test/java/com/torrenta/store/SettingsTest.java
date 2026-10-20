@@ -37,6 +37,46 @@ class SettingsTest {
     }
 
     @Test
+    void incompleteFolderSuffixAndPreallocationRoundTrip(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        assertFalse(settings.incompleteEnabled(), "off by default");
+        assertFalse(settings.partSuffix());
+        assertFalse(settings.preallocate());
+        assertEquals(
+                settings.downloadDir().resolve("incomplete"),
+                settings.incompleteDir(),
+                "under the download folder until set");
+        assertFalse(settings.plan(dir.resolve("dl")).viaIncomplete());
+        assertEquals(com.torrenta.engine.AddRequest.Storage.DEFAULT, settings.storage(dir.resolve("dl")));
+
+        settings.setIncompleteEnabled(true);
+        settings.setIncompleteDir(dir.resolve("inc"));
+        settings.setPartSuffix(true);
+        settings.setPreallocate(true);
+        settings.save();
+        Settings read = new Settings(file);
+        read.load();
+        assertTrue(read.incompleteEnabled());
+        assertEquals(dir.resolve("inc").toAbsolutePath(), read.incompleteDir());
+        assertTrue(read.partSuffix());
+        assertTrue(read.preallocate());
+        com.torrenta.engine.DownloadPlan plan = read.plan(dir.resolve("dl"));
+        assertEquals(dir.resolve("inc").toAbsolutePath(), plan.start());
+        assertEquals(dir.resolve("dl").toAbsolutePath(), plan.destination());
+        assertEquals(
+                new com.torrenta.engine.AddRequest.Storage(dir.resolve("inc").toAbsolutePath(), true, true),
+                read.storage(dir.resolve("dl")));
+
+        read.set(Settings.INCOMPLETE_DIR, "\u0000bad");
+        assertEquals(read.downloadDir().resolve("incomplete"), read.incompleteDir(), "not a path: the default");
+        read.reset(Settings.DOWNLOAD_KEYS);
+        assertFalse(read.incompleteEnabled());
+        assertEquals(Settings.defaultDownloadDir(), read.downloadDir());
+    }
+
+    @Test
     void toolbarShowsUnlessTurnedOff(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Settings settings = new Settings(file);

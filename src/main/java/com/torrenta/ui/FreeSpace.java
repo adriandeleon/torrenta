@@ -7,6 +7,8 @@ import java.nio.file.Path;
 import java.util.Optional;
 import java.util.OptionalLong;
 
+import com.torrenta.engine.DownloadPlan;
+
 /** The volume a path is (or will be) on: its free space, and what a torrent would leave of it. */
 public final class FreeSpace {
 
@@ -32,6 +34,20 @@ public final class FreeSpace {
      * torrent will take on top of it, cut at what is free.
      */
     public record Bar(double used, double torrent, boolean fits) {}
+
+    /**
+     * The Add dialog's lines under the save path: the free space where the files end up and,
+     * when they start in the incomplete folder, that folder and its free space on a line of its
+     * own (the download has to fit there first). Pure: the dialog hands in what it measured.
+     */
+    public static String hint(DownloadPlan plan, OptionalLong freeAtStart, OptionalLong freeAtDestination) {
+        String destination = freeAtDestination.isPresent() ? Bytes.human(freeAtDestination.getAsLong()) + " free" : "";
+        if (!plan.viaIncomplete()) return destination;
+        String start = "Starts in " + plan.start()
+                + (freeAtStart.isPresent() ? " (" + Bytes.human(freeAtStart.getAsLong()) + " free)" : "");
+        String then = "Moved here when complete" + (destination.isEmpty() ? "" : " (" + destination + ")");
+        return start + "\n" + then;
+    }
 
     /**
      * Walks up to the nearest existing ancestor, since the save folder usually does not exist yet
