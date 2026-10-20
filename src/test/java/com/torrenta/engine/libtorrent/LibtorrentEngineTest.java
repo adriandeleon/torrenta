@@ -263,6 +263,106 @@ class LibtorrentEngineTest {
     }
 
     @Test
+    void aMagnetsFileListIsFetchedFromAPeerWithoutAddingIt(@TempDir Path dir) throws Exception {
+        Path seeds = dir.resolve("seeds");
+        byte[] torrent = twoFileTorrent(seeds, "pair");
+        int seedPort = freePort();
+        try (LibtorrentEngine seeder = new LibtorrentEngine(
+                        () -> seeds, new TorrentStore(dir.resolve("seed-store")), onPort(seedPort));
+                LibtorrentEngine engine = new LibtorrentEngine(
+                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), onPort(freePort()))) {
+            seeder.start();
+            Torrent seeded = seeder.add(AddRequest.defaults(new AddRequest.TorrentFile(torrent, "pair"), seeds));
+            await("seeding", () -> seeder.torrents().get(0).state() == TorrentState.SEEDING);
+            String magnet = seeder.magnetLink(seeded.id()) + "&x.pe=127.0.0.1:" + seedPort;
+
+            engine.start();
+            List<EngineEvent> events = new CopyOnWriteArrayList<>();
+            engine.addListener(events::add);
+            com.torrenta.engine.Engine.MetadataFetch fetch = engine.fetchMetadata(magnet);
+            assertTrue(engine.torrents().isEmpty(), "a fetch is not a torrent in the list");
+            assertThrows(EngineException.class, () -> engine.fetchMetadata(magnet), "one fetch per magnet");
+
+            byte[] fetched = fetch.torrent().get(30, java.util.concurrent.TimeUnit.SECONDS);
+            TorrentPreview preview = engine.inspect(fetched);
+            assertEquals("pair", preview.name());
+            assertEquals(
+                    List.of("pair/a.bin", "pair/sub/b.bin"),
+                    preview.files().stream().map(TorrentPreview.FileEntry::path).toList());
+            assertTrue(preview.v1() && preview.v2(), "TorrentBuilder makes hybrids");
+            assertTrue(
+                    preview.trackers().contains("udp://tracker.example.org:6969/announce"),
+                    "the link's trackers are in the .torrent: " + preview.trackers());
+            assertEquals(0, fetch.peers(), "over once the metadata is in");
+            await("the fetch has left the session", () -> engine.torrents().isEmpty());
+            assertTrue(events.stream().noneMatch(e -> e.torrentId() != null), "a fetch raises no events: " + events);
+            assertTrue(new TorrentStore(dir.resolve("store")).loadAll().isEmpty(), "and writes nothing");
+
+            Torrent added = engine.add(
+                    AddRequest.defaults(new AddRequest.TorrentFile(fetched, magnet), dir.resolve("downloads")));
+            assertEquals(seeded.id(), added.id());
+            assertEquals(2, engine.detail(added.id()).files().size(), "added with its files");
+        }
+    }
+
+    @Test
+    void aCancelledFetchLeavesRoomForTheRealAdd(@TempDir Path dir) throws Exception {
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        try (LibtorrentEngine engine = engine(dir, store)) {
+            engine.start();
+            com.torrenta.engine.Engine.MetadataFetch fetch = engine.fetchMetadata(MAGNET);
+            assertTrue(engine.torrents().isEmpty());
+            fetch.cancel();
+            fetch.cancel();
+            assertTrue(fetch.torrent().isCompletedExceptionally());
+            assertEquals(0, fetch.peers());
+
+            Torrent added = engine.add(MAGNET);
+            assertEquals(MAGNET_ID, added.id());
+            assertEquals(1, engine.torrents().size());
+            await("the real add writes its blob", () -> store.contains(MAGNET_ID));
+            assertThrows(EngineException.class, () -> engine.fetchMetadata(MAGNET), "already in the list");
+        }
+        try (LibtorrentEngine engine = engine(dir, store)) {
+            engine.start();
+            com.torrenta.engine.Engine.MetadataFetch fetch =
+                    engine.fetchMetadata("magnet:?xt=urn:btih:89abcdef0123456789abcdef0123456789abcdef");
+            engine.stop();
+            assertTrue(fetch.torrent().isCompletedExceptionally(), "stopping ends a fetch");
+        }
+        assertEquals(java.util.Set.of(MAGNET_ID), store.loadAll().keySet(), "a fetch never reaches the store");
+    }
+
+    private static int freePort() throws java.io.IOException {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            return socket.getLocalPort();
+        }
+    }
+
+    /** The defaults on a fixed port, without UPnP: two sessions in one test must not collide. */
+    private static com.torrenta.engine.EngineSettings onPort(int port) {
+        com.torrenta.engine.EngineSettings d = com.torrenta.engine.EngineSettings.defaults();
+        return new com.torrenta.engine.EngineSettings(
+                port,
+                false,
+                "",
+                d.ipv6(),
+                false,
+                d.maxConnections(),
+                d.maxConnectionsPerTorrent(),
+                d.uploadSlots(),
+                d.proxy(),
+                "",
+                1080,
+                "",
+                "",
+                true,
+                d.protocol(),
+                d.speed(),
+                d.queue());
+    }
+
+    @Test
     void addWithOptions(@TempDir Path dir) throws Exception {
         Path downloads = dir.resolve("downloads");
         byte[] torrent = twoFileTorrent(downloads, "pair");

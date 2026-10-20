@@ -17,7 +17,9 @@ A keyboard-first, cross-platform BitTorrent client built on JavaFX.
 Status: **early**. A themed window with a menu bar, an icon toolbar, a torrent list, a status bar and an event log,
 on a real engine: libtorrent, through [libtorrent4j](https://github.com/aldenml/libtorrent4j).
 Torrents arrive from a file, a magnet link, a URL, a drop or the clipboard through an Add dialog
-(save path, start paused, sequential, skip check, stop condition, file selection and priorities),
+(file selection and priorities, save path with what the torrent leaves free, category, tags, stop
+condition, sequential, first and last pieces, skip check; a magnet's file list fills in while it is
+open, or it is added at once to choose its files later),
 are listed with live columns, can be paused, resumed, rechecked, reannounced and removed, show
 their files, peers, trackers and pieces in a detail pane, and come back after a restart. No settings
 window or limits yet; see [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -137,7 +139,9 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 Every action is in the Torrent menu, the list's right-click menu and the palette, and applies to
 the whole selection. `.torrent` files and links can also be dropped on the window, and anything on
 the command line goes through the same Add dialog, which offers the categories: one with a save
-path fills the folder when chosen, so a new torrent in it lands there. The sidebar's choice and
+path fills the folder when chosen, so a new torrent in it lands there. In the dialog Enter adds,
+Shift+Enter adds paused and Esc cancels; in its file tree Space ticks, + and − change the priority
+and ← → fold. "Next time, add with these settings without asking" (or Settings → Adding) skips it. The sidebar's choice and
 the name filter narrow the list together, and both the choice and whether the sidebar shows are
 remembered. The status bar's "Alt speed" switches the
 alternative speed limits by hand; the schedule in Settings switches them by the clock. The status bar shows the latest event; an error count appears there while

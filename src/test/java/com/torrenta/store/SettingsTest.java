@@ -230,6 +230,26 @@ class SettingsTest {
     }
 
     @Test
+    void addWithoutAskingIsOptInAndFilesToPickAreMachineLocal(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        assertFalse(settings.addWithoutAsking(), "the dialog opens unless asked not to");
+        assertFalse(settings.filesToPick("abc"));
+        settings.setAddWithoutAsking(true);
+        settings.setFilesToPick("abc", true);
+        settings.save();
+        Settings read = new Settings(file);
+        read.load();
+        assertTrue(read.addWithoutAsking());
+        assertTrue(read.filesToPick("abc"));
+        assertTrue(read.syncedEntries().containsKey(Settings.ADD_WITHOUT_ASKING), "a preference, so it syncs");
+        assertTrue(read.syncedEntries().keySet().stream().noneMatch(k -> k.startsWith("torrent.")), "never synced");
+        read.setFilesToPick("abc", false);
+        assertFalse(read.filesToPick("abc"), "forgotten once chosen");
+    }
+
+    @Test
     void aBlankValueFallsBackToTheDefault(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Files.writeString(file, Settings.DOWNLOAD_DIR + "=\n");

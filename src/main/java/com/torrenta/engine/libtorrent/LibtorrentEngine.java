@@ -148,6 +148,26 @@ public final class LibtorrentEngine implements Engine {
      */
     private final Set<String> removed = ConcurrentHashMap.newKeySet();
 
+    /**
+     * Magnets the Add dialog is fetching the metadata of, by id: in the session, but in no
+     * snapshot, event or store until the person adds them for real.
+     */
+    private final Map<String, Fetch> fetches = new ConcurrentHashMap<>();
+
+    /**
+     * Fetches whose add alert has not arrived yet. That alert is the fetch's and must not write a
+     * blob, even if the fetch was cancelled before it came; alerts arrive in order, so the next
+     * add alert for the id is always the fetch's own.
+     */
+    private final Set<String> fetchAddAlerts = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Hashes of fetches that have ended. Their torrent is torn down asynchronously and its last
+     * alerts (the check that follows the metadata) can come after; they stay muted until the same
+     * torrent is added for real.
+     */
+    private final Set<String> endedFetches = ConcurrentHashMap.newKeySet();
+
     /** Category and tags by id; absent means none. The sidecar in the store is the durable copy. */
     private final Map<String, TorrentLabels> labels = new ConcurrentHashMap<>();
 
@@ -299,21 +319,7 @@ public final class LibtorrentEngine implements Engine {
         if (!engineSettings.protocol().pex()) flags = flags.or_(Flags.DISABLE_PEX);
         params.setFlags(flags);
 
-        List<String> defaults = engineSettings.protocol().defaultTrackers();
-        if (!defaults.isEmpty()) {
-            // Appended on a tier of their own, after the torrent's; duplicates stay out.
-            List<String> trackers = new ArrayList<>(params.getTrackers());
-            List<Integer> tiers = new ArrayList<>(params.getTrackerTiers());
-            int tier = tiers.stream().mapToInt(Integer::intValue).max().orElse(-1) + 1;
-            for (String url : defaults) {
-                if (!trackers.contains(url)) {
-                    trackers.add(url);
-                    tiers.add(tier);
-                }
-            }
-            params.setTrackers(trackers);
-            params.setTrackerTiers(tiers);
-        }
+        appendDefaultTrackers(params);
 
         if (info != null && !request.filePriorities().isEmpty()) {
             org.libtorrent4j.Priority[] priorities = new org.libtorrent4j.Priority[info.numFiles()];
@@ -324,6 +330,9 @@ public final class LibtorrentEngine implements Engine {
         }
 
         String id = params.getInfoHashes().getBest().toHex();
+        endedFetches.remove(id);
+        if (params.getInfoHashes().hasV1())
+            endedFetches.remove(params.getInfoHashes().getV1().toHex());
         if (info == null && request.stopCondition() == AddRequest.StopCondition.METADATA_RECEIVED)
             stopAfterMetadata.add(id);
 
@@ -339,6 +348,23 @@ public final class LibtorrentEngine implements Engine {
         if (!request.labels().isEmpty()) writeLabels(id, request.labels());
 
         return snapshot(handle);
+    }
+
+    /** The default trackers on a tier of their own, after the torrent's; duplicates stay out. */
+    private void appendDefaultTrackers(AddTorrentParams params) {
+        List<String> defaults = engineSettings.protocol().defaultTrackers();
+        if (defaults.isEmpty()) return;
+        List<String> trackers = new ArrayList<>(params.getTrackers());
+        List<Integer> tiers = new ArrayList<>(params.getTrackerTiers());
+        int tier = tiers.stream().mapToInt(Integer::intValue).max().orElse(-1) + 1;
+        for (String url : defaults) {
+            if (!trackers.contains(url)) {
+                trackers.add(url);
+                tiers.add(tier);
+            }
+        }
+        params.setTrackers(trackers);
+        params.setTrackerTiers(tiers);
     }
 
     @Override
@@ -408,9 +434,129 @@ public final class LibtorrentEngine implements Engine {
                     List.copyOf(params.getTrackers()),
                     params.getComment() == null ? "" : params.getComment(),
                     params.getCreatedBy() == null ? "" : params.getCreatedBy(),
-                    params.getCreationDate());
+                    params.getCreationDate(),
+                    info.swig().v1(),
+                    info.swig().v2());
         } finally {
             Reference.reachabilityFence(params);
+        }
+    }
+
+    @Override
+    public MetadataFetch fetchMetadata(String magnet) throws EngineException {
+        SessionManager s = running();
+        AddTorrentParams params;
+        try {
+            params = AddTorrentParams.parseMagnetUri(magnet);
+        } catch (RuntimeException e) {
+            throw new EngineException("Not a valid magnet link", e);
+        }
+        String id = params.getInfoHashes().getBest().toHex();
+        if (find(s, id) != null) throw new EngineException("Already in the list");
+        // Upload mode writes nothing; the folder is only somewhere for libtorrent to look. Out of
+        // the queue's hands, so a full download queue does not hold the file list back.
+        params.setSavePath(downloadDir.get().toString());
+        torrent_flags_t flags = params.getFlags()
+                .or_(Flags.UPLOAD_MODE)
+                .and_(Flags.AUTO_MANAGED.inv())
+                .and_(Flags.PAUSED.inv());
+        if (!engineSettings.protocol().pex()) flags = flags.or_(Flags.DISABLE_PEX);
+        params.setFlags(flags);
+        appendDefaultTrackers(params);
+
+        Fetch fetch = new Fetch(id, magnet);
+        if (fetches.putIfAbsent(id, fetch) != null) throw new EngineException("Already fetching its file list");
+        fetchAddAlerts.add(id);
+        error_code ec = new error_code();
+        s.swig().add_torrent(params.swig(), ec);
+        if (ec.value() != 0) {
+            fetches.remove(id, fetch);
+            throw new EngineException(ec.message());
+        }
+        return fetch;
+    }
+
+    /** One fetch: the dialog polls {@link #peers()} and waits on {@link #torrent()}. */
+    private final class Fetch implements MetadataFetch {
+        private final String id;
+        private final String magnet;
+        private final java.util.concurrent.CompletableFuture<byte[]> torrent =
+                new java.util.concurrent.CompletableFuture<>();
+
+        Fetch(String id, String magnet) {
+            this.id = id;
+            this.magnet = magnet;
+        }
+
+        @Override
+        public int peers() {
+            SessionManager s = session;
+            if (torrent.isDone() || s == null || !s.isRunning()) return 0;
+            TorrentHandle h = handle(s);
+            return h == null ? 0 : h.status().numPeers();
+        }
+
+        @Override
+        public java.util.concurrent.CompletableFuture<byte[]> torrent() {
+            return torrent;
+        }
+
+        @Override
+        public void cancel() {
+            end(null, new java.util.concurrent.CancellationException("Cancelled"));
+        }
+
+        /** Alert thread: the metadata is in. The .torrent is the info plus the link's trackers. */
+        void arrived(TorrentHandle handle) {
+            byte[] bytes;
+            try {
+                TorrentInfo info = handle.torrentFile();
+                AddTorrentParams params = AddTorrentParams.parseMagnetUri(magnet);
+                params.setTorrentInfo(info);
+                // A v2 torrent's piece layers come from peers as it downloads; the file would
+                // otherwise not be written at all.
+                bytes = Vectors.byte_vector2bytes(libtorrent
+                        .write_torrent_file(params.swig(), libtorrent.getAllow_missing_piece_layer())
+                        .bencode());
+                Reference.reachabilityFence(info);
+            } catch (RuntimeException e) {
+                end(null, e);
+                return;
+            }
+            end(bytes, null);
+        }
+
+        /** This fetch's torrent in the session, as a handle Java owns; null once it has left. */
+        private TorrentHandle handle(SessionManager s) {
+            session_handle sh = s.swig();
+            torrent_handle_vector vector = sh.get_torrents();
+            try {
+                for (int i = 0; i < vector.size(); i++) {
+                    if (fetchOf(vector.get(i)) != this) continue;
+                    TorrentHandle h = new TorrentHandle(sh.find_torrent(bestHash(vector.get(i))));
+                    return h.isValid() ? h : null;
+                }
+                return null;
+            } finally {
+                Reference.reachabilityFence(vector);
+            }
+        }
+
+        /** Out of the session first, then out of the map, so no snapshot sees it in between. */
+        synchronized void end(byte[] bytes, Throwable failure) {
+            if (torrent.isDone()) return;
+            SessionManager s = session;
+            endedFetches.add(id);
+            if (s != null && s.isRunning()) {
+                TorrentHandle h = handle(s);
+                if (h != null) {
+                    endedFetches.add(id(h));
+                    s.remove(h);
+                }
+            }
+            fetches.remove(id, this);
+            if (bytes != null) torrent.complete(bytes);
+            else torrent.completeExceptionally(failure);
         }
     }
 
@@ -997,6 +1143,7 @@ public final class LibtorrentEngine implements Engine {
     public synchronized void stop() {
         if (session == null) return;
         if (flusher != null) flusher.shutdownNow();
+        for (Fetch fetch : List.copyOf(fetches.values())) fetch.end(null, new EngineException("The engine stopped"));
         // Flush with the disk cache, then wait for the alerts, bounded: libtorrent answers every
         // request (success or "not modified"), but a wedged disk must not hold the quit.
         for (TorrentHandle handle : handles(session)) requestSave(handle, true, true);
@@ -1036,15 +1183,19 @@ public final class LibtorrentEngine implements Engine {
      * <p>A SWIG vector's {@code get(i)} is a pointer into the vector, and the vector's finalizer
      * frees it: a handle kept past the vector is a use-after-free that crashed the JVM on CI. So
      * each element is only read for its hash, and the handle handed out is the session's own copy
-     * from {@code find_torrent}; the vector is kept reachable until that is done.
+     * from {@code find_torrent}; the vector is kept reachable until that is done. Metadata fetches
+     * are left out.
      */
-    private static List<TorrentHandle> handles(SessionManager s) {
+    private List<TorrentHandle> handles(SessionManager s) {
         session_handle session = s.swig();
         torrent_handle_vector vector = session.get_torrents();
         try {
             List<TorrentHandle> out = new ArrayList<>(vector.size());
             for (int i = 0; i < vector.size(); i++) {
-                TorrentHandle handle = new TorrentHandle(session.find_torrent(bestHash(vector.get(i))));
+                // A magnet the Add dialog is fetching, or one on its way out, is not the person's.
+                sha1_hash best = bestHash(vector.get(i));
+                if (fetchOf(vector.get(i)) != null || endedFetches.contains(best.to_hex())) continue;
+                TorrentHandle handle = new TorrentHandle(session.find_torrent(best));
                 if (handle.isValid()) out.add(handle);
             }
             return out;
@@ -1066,6 +1217,23 @@ public final class LibtorrentEngine implements Engine {
             return null;
         } finally {
             Reference.reachabilityFence(vector);
+        }
+    }
+
+    /**
+     * The fetch a handle belongs to, if any, by either hash: a v1 magnet of a hybrid torrent has a
+     * new best hash (the v2 one) once its metadata is in, and is still the same fetch.
+     */
+    private Fetch fetchOf(torrent_handle raw) {
+        if (fetches.isEmpty()) return null;
+        info_hash_t hashes = raw.info_hashes();
+        try {
+            Fetch fetch = fetches.get(hashes.get_best().to_hex());
+            return fetch != null || !hashes.has_v1()
+                    ? fetch
+                    : fetches.get(hashes.getV1().to_hex());
+        } finally {
+            Reference.reachabilityFence(hashes);
         }
     }
 
@@ -1120,6 +1288,7 @@ public final class LibtorrentEngine implements Engine {
         static final torrent_flags_t SEED_MODE = TorrentFlags.SEED_MODE;
         static final torrent_flags_t STOP_WHEN_READY = TorrentFlags.STOP_WHEN_READY;
         static final torrent_flags_t DISABLE_PEX = TorrentFlags.DISABLE_PEX;
+        static final torrent_flags_t UPLOAD_MODE = TorrentFlags.UPLOAD_MODE;
     }
 
     private static boolean has(torrent_flags_t flags, torrent_flags_t flag) {
@@ -1208,6 +1377,11 @@ public final class LibtorrentEngine implements Engine {
                     case ADD_TORRENT -> onAdded((AddTorrentAlert) alert);
                     case METADATA_RECEIVED -> {
                         TorrentAlert<?> t = (TorrentAlert<?>) alert;
+                        Fetch fetch = t.handle().isValid() ? fetchOf(t.handle().swig()) : null;
+                        if (fetch != null) {
+                            fetch.arrived(t.handle());
+                            return;
+                        }
                         requestSave(t.handle(), false);
                         if (t.handle().isValid() && stopAfterMetadata.remove(id(t.handle()))) {
                             t.handle().unsetFlags(Flags.AUTO_MANAGED);
@@ -1302,6 +1476,7 @@ public final class LibtorrentEngine implements Engine {
          * resume data replaces it when the metadata arrives.
          */
         private void onAdded(AddTorrentAlert alert) {
+            if (fetchAddAlerts.remove(alert.params().getInfoHashes().getBest().toHex())) return;
             if (alert.error().isError()) {
                 String name = alert.params().getName();
                 emit(EngineEvent.error(
@@ -1323,9 +1498,12 @@ public final class LibtorrentEngine implements Engine {
         /** {@code template} has one {@code %s}, the torrent's name. */
         private void torrentEvent(TorrentAlert<?> alert, EngineEvent.Level level, String template) {
             TorrentHandle handle = alert.handle();
-            if (!handle.isValid()) return;
+            if (!handle.isValid() || fetchOf(handle.swig()) != null) return;
+            String id = id(handle);
+            // A torrent being torn down reads an all-zero hash; an ended fetch is not the person's.
+            if (id.chars().allMatch(c -> c == '0') || endedFetches.contains(id)) return;
             String name = nameOf(handle);
-            emit(new EngineEvent(java.time.Instant.now(), level, id(handle), name, template.formatted(name)));
+            emit(new EngineEvent(java.time.Instant.now(), level, id, name, template.formatted(name)));
         }
 
         private void onSaved(SaveResumeDataAlert alert) {

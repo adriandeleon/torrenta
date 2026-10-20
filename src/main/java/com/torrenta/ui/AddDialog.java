@@ -2,13 +2,19 @@ package com.torrenta.ui;
 
 import java.io.File;
 import java.nio.file.Path;
-import java.util.HashMap;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 
+import javafx.beans.Observable;
+import javafx.beans.binding.Bindings;
+import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.ReadOnlyObjectWrapper;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -16,19 +22,26 @@ import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.CheckBoxTreeItem;
 import javafx.scene.control.ChoiceBox;
+import javafx.scene.control.ContentDisplay;
+import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
+import javafx.scene.control.MenuItem;
+import javafx.scene.control.SelectionMode;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TreeItem;
+import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableView;
-import javafx.scene.control.cell.CheckBoxTreeTableCell;
-import javafx.scene.control.cell.ComboBoxTreeTableCell;
 import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyCodeCombination;
+import javafx.scene.input.KeyCombination;
+import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.ColumnConstraints;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.DirectoryChooser;
 import javafx.stage.Modality;
@@ -42,158 +55,365 @@ import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 
 /**
- * The Add dialog: what the torrent is, where it goes, how it starts, which files.
+ * The Add dialog: what the torrent is, which files, where it goes, how it starts.
  *
- * <p>One dialog for all three sources. A {@code .torrent} (from disk or a URL) comes with a
- * {@link TorrentPreview} and shows its files; a magnet has no metadata yet and shows what the link
- * says. Enter adds, Escape cancels, every control is reachable by keyboard.
+ * <p>Two columns: the file tree on the left, everything else on the right. One dialog for all
+ * three sources. A {@code .torrent} (from disk or a URL) comes with a {@link TorrentPreview} and
+ * shows its files at once. A magnet has none yet, and the dialog never waits for it: the window
+ * fetches the metadata while the dialog is open ({@link #showFiles} fills the tree in), and until
+ * then everything but the files can be set and <em>Add now, pick files when ready</em> adds the
+ * magnet to stop when its metadata arrives.
  *
- * <p>A category with a save path fills the folder when chosen (automatic torrent management, as
- * qBittorrent calls it); the folder stays editable afterwards.
+ * <p>Enter adds, Shift+Enter adds paused, Escape cancels. In the tree Space ticks, + and −
+ * change the priority, ← and → fold. A category with a save path fills the folder when chosen
+ * (automatic torrent management, as qBittorrent calls it); the folder stays editable afterwards.
+ *
+ * <p>The same dialog, with the right column left out, chooses the files of a torrent already in
+ * the list that was added before its file list arrived ({@link #chooseFiles}).
  */
 final class AddDialog {
 
+    /**
+     * What the person decided.
+     *
+     * @param request what to add, or for {@link #chooseFiles} the file priorities and whether to
+     *     start ({@code startPaused} false)
+     * @param firstAndLastFirst the torrent's limits get first-and-last-pieces-first after the add
+     * @param filesLater added before its file list; its files are to be chosen when it arrives
+     * @param withoutAsking from now on, add with these settings and do not open the dialog
+     */
+    record Choice(AddRequest request, boolean firstAndLastFirst, boolean filesLater, boolean withoutAsking) {}
+
+    /** Where the input came from, for the header's small caps. */
+    enum Via {
+        FILE,
+        URL,
+        MAGNET,
+        CLIPBOARD
+    }
+
     private final Stage stage = new Stage();
+    private final boolean existing;
+    private final Label kicker = new Label();
+    private final Label title = new Label();
+    private final Label summary = new Label();
     private final TextField savePath = new TextField();
-    private final Label freeSpace = new Label();
-    private final CheckBox startPaused = new CheckBox("Start paused");
+    private final DiskBar diskBar = new DiskBar();
+    private final Label diskText = new Label();
     private final CheckBox sequential = new CheckBox("Sequential download");
-    private final CheckBox skipCheck = new CheckBox("Skip hash check (the files are already complete)");
+    private final CheckBox firstLast = new CheckBox("First and last pieces first");
+    private final CheckBox skipCheck = new CheckBox("Skip hash check");
     private final ChoiceBox<AddRequest.StopCondition> stop = new ChoiceBox<>();
     private final ChoiceBox<String> category = new ChoiceBox<>();
     private final TextField tags = new TextField();
+    private final CheckBox withoutAsking = new CheckBox("Next time, add with these settings without asking");
     private final List<Category> categories;
-    private final Button add = new Button("Add");
+    private final boolean startPausedDefault;
+
+    private final StackPane treeHost = new StackPane();
     private final TreeTableView<FileTree.Node> tree = new TreeTableView<>();
-    private final AddRequest.Source source;
-    private final TorrentPreview preview;
-    private AddRequest result;
+    private final CheckBox allFiles = new CheckBox();
+    private final Label fetching = new Label();
+    private final VBox placeholder;
+    private FileTree.Node root;
+
+    private final Button cancel = keyed("Cancel", "Esc");
+    private final Button add = keyed("Add", "Enter");
+    private static final KeyCombination OTHER = new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN);
+    private static final KeyCombination WAIT = new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHORTCUT_DOWN);
+
+    private final Button addOther = keyed("Add paused", keyLabel(OTHER.getDisplayText()));
+    private final Button addNow = keyed("Add now, pick files when ready", "Enter");
+    private final Button wait = keyed("Wait here for the file list", keyLabel(WAIT.getDisplayText()));
+
+    /** Files are known: a .torrent, or a magnet whose metadata has arrived. */
+    private final BooleanProperty hasFiles = new SimpleBooleanProperty();
+    /** The person chose to wait in the dialog for a magnet's file list. */
+    private final BooleanProperty waiting = new SimpleBooleanProperty();
+
+    private final Instant opened = Instant.now();
+    /** The priorities a {@link #chooseFiles} tree starts with, by index; empty for an add. */
+    private Map<Integer, com.torrenta.engine.Priority> initial = Map.of();
+
+    private AddRequest.Source source;
+    private TorrentPreview preview;
+    private Choice result;
 
     /**
      * @param preview the torrent's contents, or null for a magnet
-     * @param origin where it came from: a path, a URL, or the magnet link
+     * @param via where it came from, for the header
+     * @param startPausedDefault Enter adds paused and Shift+Enter starts, rather than the other
+     *     way round
      * @param categories the categories that exist, offered as the torrent's
      */
     AddDialog(
             Window owner,
             AddRequest.Source source,
             TorrentPreview preview,
-            String origin,
+            Via via,
             Path defaultSavePath,
             boolean startPausedDefault,
             boolean sequentialDefault,
             List<Category> categories) {
+        this(owner, source, preview, via, defaultSavePath, startPausedDefault, sequentialDefault, categories, false);
+    }
+
+    /**
+     * For a torrent already in the list: its files with the priorities they have, a Start and a
+     * Keep paused, nothing else. The choice's request carries only the priorities and whether to
+     * start; its source and folder mean nothing.
+     */
+    static AddDialog chooseFiles(
+            Window owner, TorrentPreview preview, Map<Integer, com.torrenta.engine.Priority> priorities) {
+        AddDialog dialog = new AddDialog(
+                owner, new AddRequest.Magnet(""), null, Via.FILE, Path.of(""), false, false, List.of(), true);
+        dialog.initial = Map.copyOf(priorities);
+        dialog.showFiles(dialog.source, preview);
+        return dialog;
+    }
+
+    private AddDialog(
+            Window owner,
+            AddRequest.Source source,
+            TorrentPreview preview,
+            Via via,
+            Path defaultSavePath,
+            boolean startPausedDefault,
+            boolean sequentialDefault,
+            List<Category> categories,
+            boolean existing) {
         this.source = source;
         this.preview = preview;
+        this.existing = existing;
+        this.startPausedDefault = startPausedDefault;
         this.categories = List.copyOf(categories);
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
-        stage.setTitle(preview == null ? "Add Magnet Link" : "Add Torrent");
+        stage.setTitle(existing ? "Choose Files" : preview == null ? "Add Magnet Link" : "Add Torrent");
 
-        GridPane form = new GridPane();
-        form.setHgap(10);
-        form.setVgap(8);
-        ColumnConstraints labels = new ColumnConstraints();
-        labels.setHalignment(javafx.geometry.HPos.RIGHT);
-        ColumnConstraints fields = new ColumnConstraints();
-        fields.setHgrow(Priority.ALWAYS);
-        form.getColumnConstraints().addAll(labels, fields);
+        kicker.setText(kicker(via, existing));
+        kicker.getStyleClass().add("add-kicker");
+        title.setText(nameOf(source, preview));
+        title.getStyleClass().add("add-title");
+        summary.getStyleClass().add("add-summary");
+        summary.setText(preview != null ? summary(preview) : magnetSummary(source));
+        VBox header = new VBox(2, kicker, title, summary);
 
-        int row = 0;
-        form.addRow(row++, muted("Source"), selectable(origin));
-        form.addRow(row++, muted("Name"), selectable(nameOf(source, preview)));
-        form.addRow(
-                row++,
-                muted("Size"),
-                new Label(preview == null ? "Unknown until the metadata arrives" : Bytes.human(preview.size())));
+        // ---- left: the files ----
+        Label hint = new Label("Space toggles · + and − change priority · ← → fold");
+        hint.getStyleClass().add("dialog-hint");
+        fetching.getStyleClass().add("add-fetching");
+        placeholder = new VBox(10, bar(0.78), bar(0.56), bar(0.67), fetching);
+        placeholder.getStyleClass().add("add-placeholder");
+        placeholder.setPadding(new Insets(16));
+        treeHost.getStyleClass().add("add-files");
+        buildTree();
+        VBox.setVgrow(treeHost, Priority.ALWAYS);
+        VBox left = new VBox(6, treeHost, hint);
+        HBox.setHgrow(left, Priority.ALWAYS);
+        left.setMinWidth(320);
 
+        // ---- right: where and how ----
         savePath.setText(defaultSavePath.toString());
-        savePath.textProperty().addListener((o, was, now) -> updateFreeSpace());
+        savePath.textProperty().addListener((o, was, now) -> updateDisk());
         Button browse = new Button("Browse…");
         browse.setOnAction(e -> browse());
         HBox.setHgrow(savePath, Priority.ALWAYS);
         HBox pathRow = new HBox(6, savePath, browse);
-        form.addRow(row++, muted("Save to"), pathRow);
-        freeSpace.getStyleClass().add("dialog-hint");
-        form.add(freeSpace, 1, row++);
-        updateFreeSpace();
+        diskText.getStyleClass().add("dialog-hint");
+        diskText.setWrapText(true);
 
-        startPaused.setSelected(startPausedDefault);
         sequential.setSelected(sequentialDefault);
         stop.getItems().addAll(AddRequest.StopCondition.values());
         stop.setValue(AddRequest.StopCondition.NONE);
-        stop.setConverter(new StringConverter<>() {
-            @Override
-            public String toString(AddRequest.StopCondition c) {
-                return c == null ? "" : c.label();
-            }
-
-            @Override
-            public AddRequest.StopCondition fromString(String s) {
-                return null;
-            }
-        });
-        VBox options = new VBox(6, startPaused, sequential, skipCheck, new HBox(8, new Label("Stop:"), stop));
-        ((HBox) options.getChildren().get(3)).setAlignment(Pos.CENTER_LEFT);
-        form.addRow(row++, muted("Options"), options);
+        stop.setConverter(converter(c -> c == null ? "" : c.label()));
+        stop.setMaxWidth(Double.MAX_VALUE);
 
         category.getItems().add("");
         for (Category c : this.categories) category.getItems().add(c.name());
         category.setValue("");
-        category.setConverter(new StringConverter<>() {
-            @Override
-            public String toString(String name) {
-                return name == null || name.isEmpty() ? "None" : name;
-            }
-
-            @Override
-            public String fromString(String s) {
-                return null;
-            }
-        });
+        category.setConverter(converter(name -> name == null || name.isEmpty() ? "None" : name));
+        category.setMaxWidth(Double.MAX_VALUE);
         category.valueProperty().addListener((o, was, now) -> categoryPath(now).ifPresent(savePath::setText));
         tags.setPromptText("comma-separated");
-        HBox.setHgrow(tags, Priority.ALWAYS);
-        HBox filing = new HBox(8, category, new Label("Tags:"), tags);
-        filing.setAlignment(Pos.CENTER_LEFT);
-        form.addRow(row++, muted("Category"), filing);
 
-        VBox content = new VBox(12, form);
-        content.setPadding(new Insets(14));
-        if (preview != null && !preview.files().isEmpty()) {
-            buildTree();
-            VBox.setVgrow(tree, Priority.ALWAYS);
-            content.getChildren().addAll(muted("Files"), tree);
-        }
+        GridPane filing = new GridPane();
+        filing.setHgap(10);
+        filing.setVgap(4);
+        ColumnConstraints half = new ColumnConstraints();
+        half.setPercentWidth(50);
+        filing.getColumnConstraints().addAll(half, half);
+        filing.addRow(0, muted("Category"), muted("Stop when"));
+        filing.addRow(1, category, stop);
 
+        // First-and-last is piece priorities, which need the metadata: not for "Add now".
+        firstLast.disableProperty().bind(hasFiles.not());
+        VBox options = new VBox(6, sequential, firstLast, skipCheck);
+
+        VBox right = new VBox(
+                4,
+                muted("Save to"),
+                pathRow,
+                spaced(diskBar, 8),
+                diskText,
+                spaced(filing, 12),
+                spaced(muted("Tags"), 12),
+                tags,
+                spaced(muted("Options"), 12),
+                options);
+        right.setPrefWidth(300);
+        right.setMinWidth(300);
+        right.setMaxWidth(300);
+
+        HBox body = new HBox(18, left);
+        if (!existing) body.getChildren().add(right);
+        VBox.setVgrow(body, Priority.ALWAYS);
+
+        // ---- footer ----
         add.setDefaultButton(true);
-        add.setOnAction(e -> confirm());
-        add.disableProperty().bind(savePath.textProperty().isEmpty());
-        Button cancel = new Button("Cancel");
+        add.setOnAction(e -> confirm(startPausedDefault));
+        addOther.setOnAction(e -> confirm(!startPausedDefault));
+        if (startPausedDefault) {
+            add.setText(existing ? "Keep paused" : "Add paused");
+            addOther.setText(existing ? "Start" : "Add and start");
+        } else if (existing) {
+            add.setText("Start");
+            addOther.setText("Keep paused");
+        }
+        addNow.setOnAction(e -> addNow());
+        wait.setOnAction(e -> waitHere());
         cancel.setCancelButton(true);
-        cancel.setOnAction(e -> stage.hide());
+        cancel.setOnAction(e -> cancel());
+
+        // Which buttons show: Add and its partner once there are files (or while waiting for
+        // them), Add now and Wait while a magnet's metadata is still on its way.
+        var fetchingButtons = hasFiles.not().and(waiting.not());
+        for (Button b : List.of(addNow, wait)) {
+            b.visibleProperty().bind(fetchingButtons);
+            b.managedProperty().bind(fetchingButtons);
+        }
+        for (Button b : List.of(add, addOther)) {
+            b.visibleProperty().bind(fetchingButtons.not());
+            b.managedProperty().bind(fetchingButtons.not());
+        }
+        add.defaultButtonProperty().bind(fetchingButtons.not());
+        addNow.defaultButtonProperty().bind(fetchingButtons);
+        var noPath = existing
+                ? new SimpleBooleanProperty(false)
+                : savePath.textProperty().isEmpty();
+        add.disableProperty().bind(noPath.or(hasFiles.not()));
+        addOther.disableProperty().bind(noPath.or(hasFiles.not()));
+        addNow.disableProperty().bind(noPath);
+
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox buttons = new HBox(8, spacer, cancel, add);
-        content.getChildren().add(buttons);
+        HBox buttons = new HBox(6, spacer, cancel, wait, addOther, addNow, add);
+        // Wraps rather than clips where the chords are spelled out long (Shift+Enter).
+        withoutAsking.setWrapText(true);
+        withoutAsking.setMinWidth(180);
+        buttons.setAlignment(Pos.CENTER_LEFT);
+        // The checkbox shares the buttons' line, except beside Add now and Wait, which need it all.
+        HBox above = new HBox();
+        VBox footer = new VBox(8, above, buttons);
+        footer.getStyleClass().add("add-footer");
+        if (!existing) {
+            Runnable place = () -> {
+                above.getChildren().clear();
+                buttons.getChildren().remove(withoutAsking);
+                if (fetchingButtons.get()) above.getChildren().add(withoutAsking);
+                else buttons.getChildren().add(0, withoutAsking);
+                above.setManaged(fetchingButtons.get());
+            };
+            fetchingButtons.addListener((o, was, now) -> place.run());
+            place.run();
+        } else {
+            above.setManaged(false);
+        }
 
-        Scene scene =
-                new Scene(content, 640, preview != null && !preview.files().isEmpty() ? 590 : 360);
+        VBox content = new VBox(14, header, body, footer);
+        content.setPadding(new Insets(18, 20, 16, 20));
+        content.getStyleClass().add("add-dialog");
+
+        Scene scene = new Scene(content, existing ? 560 : 780, 560);
         scene.getStylesheets()
                 .add(AddDialog.class.getResource("/com/torrenta/styles/app.css").toExternalForm());
+        scene.getStylesheets()
+                .add(AddDialog.class
+                        .getResource("/com/torrenta/styles/add-dialog.css")
+                        .toExternalForm());
         Fonts.installUiFont(scene);
+        scene.getAccelerators().put(OTHER, () -> fire(addOther));
+        scene.getAccelerators().put(WAIT, () -> fire(wait));
         scene.setOnKeyPressed(e -> {
-            if (e.getCode() == KeyCode.ESCAPE) stage.hide();
+            if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+
+        if (preview != null) showFiles(source, preview);
+        else if (!existing) showFetching(0);
+        updateDisk();
     }
 
     /** Blocks on a nested event loop, as a dialog does; empty when cancelled. */
-    Optional<AddRequest> showAndWait() {
-        savePath.requestFocus();
-        savePath.end();
+    Optional<Choice> showAndWait() {
+        if (existing) {
+            tree.requestFocus();
+        } else {
+            savePath.requestFocus();
+            savePath.end();
+        }
         stage.showAndWait();
         return Optional.ofNullable(result);
+    }
+
+    /**
+     * The magnet's metadata has arrived: the tree fills in and Add takes over from Add now. The
+     * source becomes the fetched {@code .torrent}, so the files chosen here are the ones added.
+     * Ignored once the dialog has closed or files are already there.
+     */
+    void showFiles(AddRequest.Source fetched, TorrentPreview files) {
+        if (hasFiles.get() || (result != null)) return;
+        this.source = fetched;
+        this.preview = files;
+        title.setText(nameOf(fetched, files));
+        summary.setText(summary(files));
+        root = FileTree.build(files);
+        CheckBoxTreeItem<FileTree.Node> rootItem = toItem(root);
+        rootItem.setExpanded(true);
+        tree.setRoot(rootItem);
+        tree.setShowRoot(files.hasRootFolder());
+        for (FileTree.Node file : FileTree.files(root)) {
+            com.torrenta.engine.Priority own = initial.get(file.index());
+            if (own == com.torrenta.engine.Priority.IGNORE)
+                file.wantedProperty().set(false);
+            else if (own != null) file.priorityProperty().set(own);
+            file.wantedProperty().addListener((o, was, now) -> filesChanged());
+        }
+        treeHost.getChildren().setAll(tree);
+        hasFiles.set(true);
+        filesChanged();
+        if (tree.getSelectionModel().isEmpty()) tree.getSelectionModel().select(0);
+        // The tree takes the focus only from a button (Wait was pressed) or from nothing: never
+        // from a field the person is typing in when the files arrive.
+        javafx.scene.Node owner = stage.getScene().getFocusOwner();
+        if (existing || owner == null || owner instanceof Button) tree.requestFocus();
+    }
+
+    /** Once a second while the file list is on its way: how many peers are being asked. */
+    void showFetching(int peers) {
+        if (hasFiles.get()) return;
+        fetching.setText(
+                fetchingLine(peers, Duration.between(opened, Instant.now()).toSeconds()));
+        if (!treeHost.getChildren().contains(placeholder))
+            treeHost.getChildren().setAll(placeholder);
+    }
+
+    /** The fetch could not start (already in the list) or failed; Add now still works. */
+    void fetchFailed(String message) {
+        if (hasFiles.get()) return;
+        fetching.setText(message);
+        fetching.getStyleClass().add("add-fetch-failed");
+        waiting.set(false);
     }
 
     /** The dialog's scene, for the capture hook to photograph. */
@@ -209,29 +429,111 @@ final class AddDialog {
         return stage.getTitle();
     }
 
+    /** Whether it is still waiting on a magnet's file list. */
+    boolean awaitingFiles() {
+        return !hasFiles.get();
+    }
+
     /** Closes without adding, as Escape would. */
     void cancel() {
         result = null;
         stage.hide();
     }
 
-    /** Presses Add, for the capture hook. */
+    /** Presses the default button (Add, or Add now while fetching), for the capture hook. */
     void confirm() {
-        if (add.isDisabled()) return;
-        result = new AddRequest(
-                source,
-                Path.of(savePath.getText().trim()),
-                startPaused.isSelected(),
-                sequential.isSelected(),
-                skipCheck.isSelected(),
-                stop.getValue(),
-                filePriorities(),
-                new TorrentLabels(category.getValue(), List.of(tags.getText())));
+        fire(hasFiles.get() || waiting.get() ? add : addNow);
+    }
+
+    /** Presses a button by name ({@code paused}, {@code now}, {@code wait}), for the capture hook. */
+    void pressForCapture(String which) {
+        switch (which) {
+            case "paused" -> fire(startPausedDefault ? add : addOther);
+            case "now" -> fire(addNow);
+            case "wait" -> fire(wait);
+            default -> System.err.println("capture: no dialog button " + which);
+        }
+    }
+
+    /** What a screenshot cannot show: the header, the disk line, the buttons, the files. */
+    String summaryForCapture() {
+        List<String> buttons = new ArrayList<>();
+        for (Button b : List.of(cancel, wait, addOther, addNow, add)) {
+            if (b.isVisible())
+                buttons.add(b.getText() + (b.isDefaultButton() ? "*" : "") + (b.isDisabled() ? "(off)" : ""));
+        }
+        String files = hasFiles.get()
+                ? FileTree.files(root).size() + " files, " + Bytes.human(FileTree.wantedSize(root)) + " wanted"
+                : "placeholder: " + fetching.getText();
+        return kicker.getText() + " | " + title.getText() + " | " + summary.getText() + " | " + diskText.getText()
+                + " | " + files + " | buttons=" + buttons;
+    }
+
+    /** Picks a category as a person would, for the capture hook. */
+    void selectCategoryForCapture(String name) {
+        if (category.getItems().contains(name)) category.setValue(name);
+    }
+
+    /** Presses a key in the tree, as a person would, for the capture hook. */
+    void keyForCapture(KeyCode code) {
+        if (tree.getRoot() == null) return;
+        tree.requestFocus();
+        if (tree.getSelectionModel().isEmpty()) tree.getSelectionModel().select(0);
+        tree.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false));
+    }
+
+    private void confirm(boolean paused) {
+        if (!hasFiles.get() || (!existing && savePath.getText().isBlank())) return;
+        result = new Choice(
+                new AddRequest(
+                        source,
+                        existing ? Path.of("") : Path.of(savePath.getText().trim()),
+                        paused,
+                        sequential.isSelected(),
+                        skipCheck.isSelected(),
+                        stop.getValue(),
+                        root == null ? Map.of() : FileTree.priorities(root),
+                        labels()),
+                firstLast.isSelected(),
+                false,
+                withoutAsking.isSelected());
         stage.hide();
     }
 
+    /** Adds the magnet now, to stop once its metadata is in; the files are chosen then. */
+    private void addNow() {
+        if (hasFiles.get() || savePath.getText().isBlank()) return;
+        result = new Choice(
+                new AddRequest(
+                        source,
+                        Path.of(savePath.getText().trim()),
+                        false,
+                        sequential.isSelected(),
+                        skipCheck.isSelected(),
+                        AddRequest.StopCondition.METADATA_RECEIVED,
+                        Map.of(),
+                        labels()),
+                false,
+                true,
+                withoutAsking.isSelected());
+        stage.hide();
+    }
+
+    private void waitHere() {
+        waiting.set(true);
+        if (!tags.isFocused() && !savePath.isFocused()) add.requestFocus();
+    }
+
+    private TorrentLabels labels() {
+        return new TorrentLabels(category.getValue(), List.of(tags.getText()));
+    }
+
+    private static void fire(Button button) {
+        if (button.isVisible() && !button.isDisabled()) button.fire();
+    }
+
     /** The folder a category brings with it, if it has one. */
-    private java.util.Optional<String> categoryPath(String name) {
+    private Optional<String> categoryPath(String name) {
         if (name == null || name.isEmpty()) return Optional.empty();
         return categories.stream()
                 .filter(c -> c.name().equals(name))
@@ -240,93 +542,180 @@ final class AddDialog {
                 .map(Path::toString);
     }
 
-    /** Picks a category as a person would, for the capture hook. */
-    void selectCategoryForCapture(String name) {
-        if (category.getItems().contains(name)) category.setValue(name);
-    }
-
-    private Map<Integer, com.torrenta.engine.Priority> filePriorities() {
-        Map<Integer, com.torrenta.engine.Priority> out = new HashMap<>();
-        if (tree.getRoot() == null) return out;
-        collect(tree.getRoot(), out);
-        return out;
-    }
-
-    private static void collect(TreeItem<FileTree.Node> item, Map<Integer, com.torrenta.engine.Priority> out) {
-        FileTree.Node node = item.getValue();
-        if (node.isFile()) {
-            boolean wanted = !(item instanceof CheckBoxTreeItem<?> box) || box.isSelected();
-            com.torrenta.engine.Priority priority =
-                    wanted ? node.priorityProperty().get() : com.torrenta.engine.Priority.IGNORE;
-            if (priority != com.torrenta.engine.Priority.NORMAL) out.put(node.index(), priority);
-        }
-        for (TreeItem<FileTree.Node> child : item.getChildren()) collect(child, out);
-    }
+    // ---- the tree --------------------------------------------------------------------------------
 
     private void buildTree() {
-        FileTree.Node root = FileTree.build(preview);
-        CheckBoxTreeItem<FileTree.Node> rootItem = toItem(root);
-        rootItem.setExpanded(true);
-        tree.setRoot(rootItem);
-        tree.setShowRoot(preview.hasRootFolder());
-        tree.setEditable(true);
+        tree.setEditable(true); // the checkbox cells take clicks only in an editable table
         tree.getStyleClass().add("file-tree");
-        tree.setColumnResizePolicy(TreeTableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        tree.setColumnResizePolicy(TreeTableView.CONSTRAINED_RESIZE_POLICY_ALL_COLUMNS);
+        tree.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
 
-        TreeTableColumn<FileTree.Node, FileTree.Node> name = new TreeTableColumn<>("File");
-        name.setPrefWidth(360);
+        TreeTableColumn<FileTree.Node, FileTree.Node> name = new TreeTableColumn<>();
+        Label filesHeader = new Label("FILES");
+        HBox nameHeader = new HBox(8, allFiles, filesHeader);
+        nameHeader.setAlignment(Pos.CENTER_LEFT);
+        name.setGraphic(nameHeader);
+        name.setSortable(false);
+        name.setPrefWidth(300);
+        allFiles.setFocusTraversable(false);
+        allFiles.setOnAction(e -> setWanted(root, allFiles.isSelected()));
         name.setCellValueFactory(p -> new ReadOnlyObjectWrapper<>(p.getValue().getValue()));
-        name.setCellFactory(CheckBoxTreeTableCell.forTreeTableColumn(
-                index -> ((CheckBoxTreeItem<FileTree.Node>) tree.getTreeItem(index)).selectedProperty(),
-                new StringConverter<>() {
-                    @Override
-                    public String toString(FileTree.Node node) {
-                        return node == null ? "" : node.name();
-                    }
+        name.setCellFactory(column -> new NameCell());
 
-                    @Override
-                    public FileTree.Node fromString(String s) {
-                        return null;
-                    }
-                }));
-
-        TreeTableColumn<FileTree.Node, String> size = new TreeTableColumn<>("Size");
-        size.setPrefWidth(90);
+        TreeTableColumn<FileTree.Node, String> size = new TreeTableColumn<>("SIZE");
+        size.setSortable(false);
+        size.setPrefWidth(92);
+        size.setMinWidth(92);
+        size.setMaxWidth(110);
+        size.getStyleClass().add("add-size-column");
         size.setCellValueFactory(p ->
                 new ReadOnlyObjectWrapper<>(Bytes.human(p.getValue().getValue().size())));
 
-        TreeTableColumn<FileTree.Node, com.torrenta.engine.Priority> priority = new TreeTableColumn<>("Priority");
-        priority.setPrefWidth(110);
-        priority.setCellValueFactory(
-                p -> p.getValue().getValue().isFile() ? p.getValue().getValue().priorityProperty() : null);
-        priority.setCellFactory(ComboBoxTreeTableCell.forTreeTableColumn(
-                new StringConverter<>() {
-                    @Override
-                    public String toString(com.torrenta.engine.Priority value) {
-                        return value == null ? "" : value.label();
-                    }
-
-                    @Override
-                    public com.torrenta.engine.Priority fromString(String s) {
-                        return null;
-                    }
-                },
-                com.torrenta.engine.Priority.LOW,
-                com.torrenta.engine.Priority.NORMAL,
-                com.torrenta.engine.Priority.HIGH));
-        priority.setOnEditCommit(e -> {
-            FileTree.Node node = e.getRowValue().getValue();
-            if (node.isFile() && e.getNewValue() != null)
-                node.priorityProperty().set(e.getNewValue());
+        TreeTableColumn<FileTree.Node, String> priority = new TreeTableColumn<>("PRIORITY");
+        priority.setSortable(false);
+        priority.setEditable(false);
+        priority.setPrefWidth(72);
+        priority.setMinWidth(72);
+        priority.setMaxWidth(110);
+        priority.setCellValueFactory(p -> {
+            FileTree.Node node = p.getValue().getValue();
+            List<Observable> deps = new ArrayList<>();
+            for (FileTree.Node f : FileTree.files(node)) {
+                deps.add(f.wantedProperty());
+                deps.add(f.priorityProperty());
+            }
+            return Bindings.createStringBinding(() -> FileTree.label(node), deps.toArray(Observable[]::new));
+        });
+        priority.setCellFactory(column -> new TreeTableCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty ? null : item);
+                getStyleClass().removeAll("priority-high", "priority-skip");
+                if (!empty && "High".equals(item)) getStyleClass().add("priority-high");
+                if (!empty && "Skip".equals(item)) getStyleClass().add("priority-skip");
+            }
         });
         tree.getColumns().addAll(List.of(name, size, priority));
+
+        ContextMenu menu = new ContextMenu();
+        for (com.torrenta.engine.Priority p : List.of(
+                com.torrenta.engine.Priority.HIGH,
+                com.torrenta.engine.Priority.NORMAL,
+                com.torrenta.engine.Priority.LOW,
+                com.torrenta.engine.Priority.IGNORE)) {
+            MenuItem item = new MenuItem(p.label());
+            item.setOnAction(e -> selectedNodes().forEach(n -> setPriority(n, p)));
+            menu.getItems().add(item);
+        }
+        tree.setContextMenu(menu);
+        tree.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+            if (treeKey(e.getCode())) e.consume();
+        });
     }
 
+    /** Space, + and −; ← and → are the tree's own. True when the key was taken. */
+    private boolean treeKey(KeyCode code) {
+        List<FileTree.Node> nodes = selectedNodes();
+        if (nodes.isEmpty()) return false;
+        switch (code) {
+            case SPACE -> {
+                boolean all = nodes.stream()
+                        .flatMap(n -> FileTree.files(n).stream())
+                        .allMatch(f -> f.wantedProperty().get());
+                nodes.forEach(n -> setWanted(n, !all));
+            }
+            case PLUS, ADD, EQUALS -> nodes.forEach(n -> FileTree.step(n, +1));
+            case MINUS, SUBTRACT -> nodes.forEach(n -> FileTree.step(n, -1));
+            default -> {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private List<FileTree.Node> selectedNodes() {
+        return tree.getSelectionModel().getSelectedItems().stream()
+                .filter(java.util.Objects::nonNull)
+                .map(TreeItem::getValue)
+                .toList();
+    }
+
+    private static void setWanted(FileTree.Node node, boolean wanted) {
+        if (node == null) return;
+        for (FileTree.Node f : FileTree.files(node)) f.wantedProperty().set(wanted);
+    }
+
+    private static void setPriority(FileTree.Node node, com.torrenta.engine.Priority p) {
+        for (FileTree.Node f : FileTree.files(node)) {
+            if (p == com.torrenta.engine.Priority.IGNORE) {
+                f.wantedProperty().set(false);
+            } else {
+                f.priorityProperty().set(p);
+                f.wantedProperty().set(true);
+            }
+        }
+    }
+
+    /**
+     * The name with its checkbox. The stock {@code CheckBoxTreeTableCell} draws only "selected",
+     * so a folder with some files ticked looked fully ticked; this one shows the item's
+     * indeterminate state too, and cuts long names in the middle so the extension stays.
+     */
+    private static final class NameCell extends TreeTableCell<FileTree.Node, FileTree.Node> {
+        private final CheckBox box = new CheckBox();
+        private final javafx.beans.value.ChangeListener<Boolean> mixed = (o, was, now) -> box.setIndeterminate(now);
+        private CheckBoxTreeItem<FileTree.Node> bound;
+
+        NameCell() {
+            box.setFocusTraversable(false);
+            setTextOverrun(javafx.scene.control.OverrunStyle.CENTER_ELLIPSIS);
+            setGraphicTextGap(8);
+        }
+
+        @Override
+        protected void updateItem(FileTree.Node node, boolean empty) {
+            super.updateItem(node, empty);
+            if (bound != null) {
+                box.selectedProperty().unbindBidirectional(bound.selectedProperty());
+                bound.indeterminateProperty().removeListener(mixed);
+                bound = null;
+            }
+            if (empty
+                    || node == null
+                    || !(getTableRow().getTreeItem() instanceof CheckBoxTreeItem<FileTree.Node> item)) {
+                setText(null);
+                setGraphic(null);
+                return;
+            }
+            bound = item;
+            box.setIndeterminate(item.isIndeterminate());
+            box.selectedProperty().bindBidirectional(item.selectedProperty());
+            item.indeterminateProperty().addListener(mixed);
+            setText(node.name());
+            setGraphic(box);
+        }
+    }
+
+    /** The header box and the disk bar follow the ticks. */
+    private void filesChanged() {
+        if (root == null) return;
+        List<FileTree.Node> files = FileTree.files(root);
+        long wanted = files.stream().filter(f -> f.wantedProperty().get()).count();
+        allFiles.setIndeterminate(wanted > 0 && wanted < files.size());
+        allFiles.setSelected(wanted == files.size());
+        updateDisk();
+    }
+
+    /** Files are bound to their node's wanted flag; folders follow their files, as the item does. */
     private static CheckBoxTreeItem<FileTree.Node> toItem(FileTree.Node node) {
         CheckBoxTreeItem<FileTree.Node> item = new CheckBoxTreeItem<>(node, null, true);
         for (FileTree.Node child : node.children()) item.getChildren().add(toItem(child));
+        if (node.isFile()) item.selectedProperty().bindBidirectional(node.wantedProperty());
         return item;
     }
+
+    // ---- the right column ------------------------------------------------------------------------
 
     private void browse() {
         DirectoryChooser chooser = new DirectoryChooser();
@@ -338,10 +727,125 @@ final class AddDialog {
         if (chosen != null) savePath.setText(chosen.getAbsolutePath());
     }
 
-    private void updateFreeSpace() {
+    private void updateDisk() {
+        if (existing) return;
         String text = savePath.getText().trim();
-        OptionalLong free = text.isEmpty() ? OptionalLong.empty() : FreeSpace.of(Path.of(text));
-        freeSpace.setText(free.isPresent() ? Bytes.human(free.getAsLong()) + " free" : "");
+        Optional<FreeSpace.Disk> disk = text.isEmpty() ? Optional.empty() : FreeSpace.disk(Path.of(text));
+        long wanted = root == null ? -1 : FileTree.wantedSize(root);
+        if (disk.isEmpty()) {
+            diskBar.set(new FreeSpace.Bar(0, 0, true));
+            diskText.setText(text.isEmpty() ? "" : "Free space unknown");
+            return;
+        }
+        diskBar.set(FreeSpace.bar(disk.get(), wanted));
+        diskText.setText(FreeSpace.sentence(disk.get(), wanted));
+    }
+
+    /** A thin bar: what is used of the volume, then in the accent what the torrent will take. */
+    private static final class DiskBar extends Region {
+        private final Region used = new Region();
+        private final Region torrent = new Region();
+        private FreeSpace.Bar bar = new FreeSpace.Bar(0, 0, true);
+
+        DiskBar() {
+            getStyleClass().add("disk-bar");
+            used.getStyleClass().add("disk-used");
+            torrent.getStyleClass().add("disk-torrent");
+            getChildren().addAll(used, torrent);
+            setMinHeight(6);
+            setPrefHeight(6);
+            setMaxHeight(6);
+        }
+
+        void set(FreeSpace.Bar bar) {
+            this.bar = bar;
+            torrent.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("over"), !bar.fits());
+            requestLayout();
+        }
+
+        @Override
+        protected void layoutChildren() {
+            double w = getWidth();
+            double h = getHeight();
+            double u = Math.round(w * bar.used());
+            double t = bar.torrent() > 0 ? Math.max(2, Math.round(w * bar.torrent())) : 0;
+            used.resizeRelocate(0, 0, u, h);
+            torrent.resizeRelocate(u, 0, Math.min(t, w - u), h);
+        }
+    }
+
+    // ---- the rules -------------------------------------------------------------------------------
+
+    /** "ADD TORRENT · FROM FILE", or "CHOOSE FILES" for a torrent already in the list. */
+    static String kicker(Via via, boolean existing) {
+        if (existing) return "CHOOSE FILES";
+        String from =
+                switch (via) {
+                    case FILE -> "FROM FILE";
+                    case URL -> "FROM URL";
+                    case MAGNET -> "FROM MAGNET LINK";
+                    case CLIPBOARD -> "FROM CLIPBOARD";
+                };
+        return "ADD TORRENT · " + from;
+    }
+
+    /** "5.9 GiB · 3 files · hybrid v1+v2 · 4 trackers · “Encoded by …”". */
+    static String summary(TorrentPreview p) {
+        List<String> parts = new ArrayList<>();
+        parts.add(Bytes.human(p.size()));
+        parts.add(count(p.files().size(), "file"));
+        String version = p.v1() && p.v2() ? "hybrid v1+v2" : p.v2() ? "v2" : p.v1() ? "v1" : "";
+        if (!version.isEmpty()) parts.add(version);
+        if (p.isPrivate()) parts.add("private");
+        parts.add(p.trackers().isEmpty() ? "no trackers" : count(p.trackers().size(), "tracker"));
+        String comment = p.comment().strip().replaceAll("\\s+", " ");
+        if (!comment.isEmpty()) parts.add("“" + comment + "”");
+        return String.join(" · ", parts);
+    }
+
+    /** What a magnet says before its metadata: only its trackers. */
+    static String magnetSummary(AddRequest.Source source) {
+        if (!(source instanceof AddRequest.Magnet magnet)) return "";
+        int trackers = MagnetNames.trackers(magnet.uri());
+        return "Size unknown until the file list arrives · "
+                + (trackers == 0 ? "no trackers, DHT only" : count(trackers, "tracker"));
+    }
+
+    /** "Fetching file list · 3 peers · 12s"; a minute and more reads "1m 05s". */
+    static String fetchingLine(int peers, long seconds) {
+        long s = Math.max(0, seconds);
+        String elapsed = s < 60 ? s + "s" : String.format(Locale.ROOT, "%dm %02ds", s / 60, s % 60);
+        return "Fetching file list · " + count(Math.max(0, peers), "peer") + " · " + elapsed;
+    }
+
+    /**
+     * A chord as the buttons show it, with the key spelled out as the plain Enter beside it is:
+     * JavaFX writes Enter as an arrow ("Shift+↵", "⌘↵" on macOS).
+     */
+    static String keyLabel(String displayText) {
+        return displayText.replace("↵", "Enter").replace("⏎", "Enter");
+    }
+
+    private static String count(int n, String noun) {
+        return n + " " + noun + (n == 1 ? "" : "s");
+    }
+
+    /** The request an input is added with when the dialog does not open: the settings' defaults. */
+    static AddRequest withoutAsking(AddRequest.Source source, Path folder, boolean paused, boolean sequential) {
+        return new AddRequest(
+                source, folder, paused, sequential, false, AddRequest.StopCondition.NONE, Map.of(), TorrentLabels.NONE);
+    }
+
+    /**
+     * The folder "add with these settings" keeps as the download folder: the one chosen, unless it
+     * is the default already or came with the category (a category's folder is the category's,
+     * not every torrent's).
+     */
+    static Optional<Path> folderToRemember(Path chosen, Path defaultFolder, Optional<Path> categoryFolder) {
+        Path c = chosen.toAbsolutePath().normalize();
+        if (c.equals(defaultFolder.toAbsolutePath().normalize())) return Optional.empty();
+        if (categoryFolder.map(f -> f.toAbsolutePath().normalize().equals(c)).orElse(false)) return Optional.empty();
+        return Optional.of(chosen);
     }
 
     static String nameOf(AddRequest.Source source, TorrentPreview preview) {
@@ -353,16 +857,52 @@ final class AddDialog {
         return "";
     }
 
+    // ---- small pieces ----------------------------------------------------------------------------
+
+    private static Button keyed(String text, String key) {
+        Button button = new Button(text);
+        button.setMinWidth(Region.USE_PREF_SIZE);
+        Label hint = new Label(key);
+        hint.getStyleClass().add("key-hint");
+        button.setGraphic(hint);
+        button.setContentDisplay(ContentDisplay.RIGHT);
+        button.setGraphicTextGap(6);
+        return button;
+    }
+
+    private static Region bar(double fraction) {
+        Region bar = new Region();
+        bar.getStyleClass().add("add-placeholder-bar");
+        bar.setMinHeight(12);
+        bar.setPrefHeight(12);
+        bar.setMaxWidth(Region.USE_PREF_SIZE);
+        bar.setPrefWidth(380 * fraction);
+        return bar;
+    }
+
+    private static VBox spaced(javafx.scene.Node node, double top) {
+        VBox box = new VBox(node);
+        box.setPadding(new Insets(top, 0, 0, 0));
+        return box;
+    }
+
+    private static <T> StringConverter<T> converter(java.util.function.Function<T, String> show) {
+        return new StringConverter<>() {
+            @Override
+            public String toString(T value) {
+                return show.apply(value);
+            }
+
+            @Override
+            public T fromString(String s) {
+                return null;
+            }
+        };
+    }
+
     private static Label muted(String text) {
         Label label = new Label(text);
         label.getStyleClass().add("dialog-label");
         return label;
-    }
-
-    private static TextField selectable(String text) {
-        TextField field = new TextField(text);
-        field.setEditable(false);
-        field.getStyleClass().add("dialog-value");
-        return field;
     }
 }
