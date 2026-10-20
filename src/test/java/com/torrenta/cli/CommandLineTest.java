@@ -55,9 +55,20 @@ class CommandLineTest {
     }
 
     @Test
+    void configDirInBothSpellings() {
+        assertEquals("/tmp/c", CommandLine.parse("--config-dir", "/tmp/c").configDir());
+        assertEquals(
+                "/tmp/c", CommandLine.parse("--config-dir=/tmp/c", "a.torrent").configDir());
+        assertNull(CommandLine.parse("a.torrent").configDir());
+        assertNotNull(CommandLine.parse("--config-dir").error(), "a value is required");
+        assertNotNull(CommandLine.parse("--config-dir=").error(), "a value is required");
+    }
+
+    @Test
     void usageNamesTheLauncher() {
         String usage = CommandLine.usage("torrenta");
         assertTrue(usage.startsWith("Usage: torrenta"));
         assertTrue(usage.contains("--version"));
+        assertTrue(usage.contains("--config-dir"));
     }
 }

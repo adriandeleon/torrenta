@@ -6,36 +6,74 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import com.torrenta.cli.CommandLine;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentState;
+import com.torrenta.store.TorrentStore;
 import org.libtorrent4j.AddTorrentParams;
+import org.libtorrent4j.AlertListener;
 import org.libtorrent4j.LibTorrent;
+import org.libtorrent4j.SessionHandle;
 import org.libtorrent4j.SessionManager;
 import org.libtorrent4j.TorrentHandle;
 import org.libtorrent4j.TorrentInfo;
 import org.libtorrent4j.TorrentStatus;
+import org.libtorrent4j.Vectors;
+import org.libtorrent4j.alerts.AddTorrentAlert;
+import org.libtorrent4j.alerts.Alert;
+import org.libtorrent4j.alerts.AlertType;
+import org.libtorrent4j.alerts.SaveResumeDataAlert;
+import org.libtorrent4j.alerts.SaveResumeDataFailedAlert;
+import org.libtorrent4j.alerts.TorrentAlert;
+import org.libtorrent4j.swig.add_torrent_params;
 import org.libtorrent4j.swig.error_code;
+import org.libtorrent4j.swig.libtorrent;
+import org.libtorrent4j.swig.resume_data_flags_t;
 import org.libtorrent4j.swig.torrent_handle;
 import org.libtorrent4j.swig.torrent_handle_vector;
 
 /**
  * The engine on libtorrent, through libtorrent4j.
  *
- * <p>One {@link SessionManager}, one download directory. Torrents are enumerated from the session
- * each time rather than tracked here, so there is exactly one source of truth and nothing to keep
- * in step. No resume data, limits or settings yet.
+ * <p>One {@link SessionManager}, one download directory, one {@link TorrentStore}. Torrents are
+ * enumerated from the session each time rather than tracked here, so there is exactly one source of
+ * truth and nothing to keep in step.
+ *
+ * <p>Persistence is libtorrent's resume data, one blob per torrent in the store. It is written when
+ * a torrent is added (so a magnet survives a crash before its metadata arrives), when the metadata
+ * arrives, when a download finishes, every couple of minutes if anything changed, and on {@link
+ * #stop()}, which waits for the writes to land. Resume data is produced asynchronously — a request
+ * on the handle, an alert with the answer — so the alert listener is where the store gets written,
+ * on libtorrent4j's alert thread.
  */
 public final class LibtorrentEngine implements Engine {
 
-    private final Path downloadDir;
-    private SessionManager session;
+    private static final Logger LOG = Logger.getLogger(LibtorrentEngine.class.getName());
 
-    public LibtorrentEngine(Path downloadDir) {
+    private static final long PERIODIC_FLUSH_SECONDS = 120;
+    private static final long STOP_FLUSH_TIMEOUT_MS = 5000;
+
+    private final Path downloadDir;
+    private final TorrentStore store;
+    private SessionManager session;
+    private ScheduledExecutorService flusher;
+
+    /** Resume-data requests whose alert has not arrived yet; {@link #stop()} waits on this. */
+    private final AtomicInteger pendingSaves = new AtomicInteger();
+
+    public LibtorrentEngine(Path downloadDir, TorrentStore store) {
         this.downloadDir = downloadDir;
+        this.store = store;
     }
 
     @Override
@@ -57,7 +95,40 @@ public final class LibtorrentEngine implements Engine {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             throw new EngineException("The BitTorrent engine failed to load: " + cause.getMessage(), e);
         }
+        s.addListener(new Listener());
         session = s;
+        restore(s);
+
+        flusher = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "engine-flush");
+            t.setDaemon(true);
+            return t;
+        });
+        flusher.scheduleAtFixedRate(this::flush, PERIODIC_FLUSH_SECONDS, PERIODIC_FLUSH_SECONDS, TimeUnit.SECONDS);
+    }
+
+    /** Re-adds every stored torrent. One bad blob costs that torrent and a log line, not the rest. */
+    private void restore(SessionManager s) {
+        Map<String, byte[]> stored;
+        try {
+            stored = store.loadAll();
+        } catch (IOException e) {
+            LOG.log(Level.WARNING, "Could not read the torrent store " + store.dir(), e);
+            return;
+        }
+        for (Map.Entry<String, byte[]> entry : stored.entrySet()) {
+            error_code ec = new error_code();
+            add_torrent_params params = libtorrent.read_resume_data_ex(Vectors.bytes2byte_vector(entry.getValue()), ec);
+            if (ec.value() != 0) {
+                LOG.warning("Resume data for " + entry.getKey() + " is unreadable (" + ec.message() + "); skipped");
+                continue;
+            }
+            error_code added = new error_code();
+            s.swig().add_torrent(params, added);
+            if (added.value() != 0) {
+                LOG.warning("Could not bring back " + entry.getKey() + ": " + added.message());
+            }
+        }
     }
 
     @Override
@@ -90,7 +161,7 @@ public final class LibtorrentEngine implements Engine {
         params.setSavePath(downloadDir.toString());
 
         // The synchronous add, so the caller gets a handle (and an error) straight away; the
-        // asynchronous one reports through an alert that nothing listens to yet.
+        // add_torrent_alert that follows is what writes the first resume data.
         error_code ec = new error_code();
         torrent_handle handle = s.swig().add_torrent(params.swig(), ec);
         if (ec.value() != 0) throw new EngineException(ec.message());
@@ -98,15 +169,27 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
+    public void remove(String id, boolean deleteFiles) throws EngineException {
+        SessionManager s = running();
+        TorrentHandle handle = find(s, id);
+        if (handle == null) throw new EngineException("No such torrent: " + id);
+        if (deleteFiles) s.remove(handle, SessionHandle.DELETE_FILES);
+        else s.remove(handle);
+        // Forgotten before libtorrent confirms: a crash in between loses nothing worse than a
+        // torrent that comes back once, which beats one that cannot be removed.
+        try {
+            store.delete(id);
+        } catch (IOException e) {
+            throw new EngineException("Removed from the session, but its resume data stayed: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
     public List<Torrent> torrents() {
         SessionManager s = session;
         if (s == null || !s.isRunning()) return List.of();
-        torrent_handle_vector handles = s.swig().get_torrents();
-        List<Torrent> out = new ArrayList<>(handles.size());
-        for (int i = 0; i < handles.size(); i++) {
-            TorrentHandle handle = new TorrentHandle(handles.get(i));
-            if (handle.isValid()) out.add(snapshot(handle));
-        }
+        List<Torrent> out = new ArrayList<>();
+        for (TorrentHandle handle : handles(s)) out.add(snapshot(handle));
         return out;
     }
 
@@ -117,11 +200,65 @@ public final class LibtorrentEngine implements Engine {
         return new Rates(s.downloadRate(), s.uploadRate());
     }
 
+    /** Asks every torrent for fresh resume data, if it changed. Answers land through the alert. */
+    @Override
+    public void flush() {
+        SessionManager s = session;
+        if (s == null || !s.isRunning()) return;
+        for (TorrentHandle handle : handles(s)) requestSave(handle, true);
+    }
+
     @Override
     public synchronized void stop() {
         if (session == null) return;
+        if (flusher != null) flusher.shutdownNow();
+        // Flush with the disk cache, then wait for the alerts, bounded: libtorrent answers every
+        // request (success or "not modified"), but a wedged disk must not hold the quit.
+        for (TorrentHandle handle : handles(session)) requestSave(handle, true, true);
+        long deadline = System.currentTimeMillis() + STOP_FLUSH_TIMEOUT_MS;
+        while (pendingSaves.get() > 0 && System.currentTimeMillis() < deadline) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        if (pendingSaves.get() > 0) {
+            LOG.warning(pendingSaves.get() + " resume-data write(s) did not finish before stop");
+        }
         session.stop();
         session = null;
+    }
+
+    private void requestSave(TorrentHandle handle, boolean onlyIfModified) {
+        requestSave(handle, onlyIfModified, false);
+    }
+
+    private void requestSave(TorrentHandle handle, boolean onlyIfModified, boolean flushDisk) {
+        if (!handle.isValid()) return;
+        resume_data_flags_t flags = TorrentHandle.SAVE_INFO_DICT;
+        if (onlyIfModified) flags = flags.or_(TorrentHandle.ONLY_IF_MODIFIED);
+        if (flushDisk) flags = flags.or_(TorrentHandle.FLUSH_DISK_CACHE);
+        pendingSaves.incrementAndGet();
+        handle.saveResumeData(flags);
+    }
+
+    private static List<TorrentHandle> handles(SessionManager s) {
+        torrent_handle_vector vector = s.swig().get_torrents();
+        List<TorrentHandle> out = new ArrayList<>(vector.size());
+        for (int i = 0; i < vector.size(); i++) {
+            TorrentHandle handle = new TorrentHandle(vector.get(i));
+            if (handle.isValid()) out.add(handle);
+        }
+        return out;
+    }
+
+    private static TorrentHandle find(SessionManager s, String id) {
+        for (TorrentHandle handle : handles(s)) {
+            if (id(handle).equals(id)) return handle;
+        }
+        return null;
     }
 
     private SessionManager running() throws EngineException {
@@ -130,13 +267,19 @@ public final class LibtorrentEngine implements Engine {
         return s;
     }
 
+    /** The best info-hash (v2 if the torrent has one, else v1) in hex: the id everywhere. */
+    private static String id(TorrentHandle handle) {
+        return handle.status().getInfoHashes().getBest().toHex();
+    }
+
     private static Torrent snapshot(TorrentHandle handle) {
         // The default status query leaves the name out (it costs a string copy per call); ask.
         TorrentStatus status = handle.status(TorrentHandle.QUERY_NAME);
+        String id = status.getInfoHashes().getBest().toHex();
         String name = status.name();
-        if (name == null || name.isEmpty()) name = handle.infoHash().toHex();
+        if (name == null || name.isEmpty()) name = id;
         return new Torrent(
-                handle.infoHash().toHex(),
+                id,
                 name,
                 status.totalWanted(),
                 status.progress(),
@@ -157,5 +300,69 @@ public final class LibtorrentEngine implements Engine {
             case SEEDING -> TorrentState.SEEDING;
             case UNKNOWN -> TorrentState.UNKNOWN;
         };
+    }
+
+    /** Runs on libtorrent4j's alert thread. Nothing here may block on the session. */
+    private final class Listener implements AlertListener {
+
+        private final int[] types = {
+            AlertType.ADD_TORRENT.swig(),
+            AlertType.METADATA_RECEIVED.swig(),
+            AlertType.TORRENT_FINISHED.swig(),
+            AlertType.SAVE_RESUME_DATA.swig(),
+            AlertType.SAVE_RESUME_DATA_FAILED.swig(),
+        };
+
+        @Override
+        public int[] types() {
+            return types;
+        }
+
+        @Override
+        public void alert(Alert<?> alert) {
+            try {
+                switch (alert.type()) {
+                    case ADD_TORRENT -> onAdded((AddTorrentAlert) alert);
+                    case METADATA_RECEIVED, TORRENT_FINISHED -> requestSave(((TorrentAlert<?>) alert).handle(), false);
+                    case SAVE_RESUME_DATA -> onSaved((SaveResumeDataAlert) alert);
+                    case SAVE_RESUME_DATA_FAILED -> onSaveFailed((SaveResumeDataFailedAlert) alert);
+                    default -> {}
+                }
+            } catch (RuntimeException e) {
+                LOG.log(Level.WARNING, "Alert handling failed: " + alert.what(), e);
+            }
+        }
+
+        /**
+         * The add params written straight away. For a magnet that is the link's content — hashes,
+         * name, trackers, save path — which is exactly what brings it back after a crash; the real
+         * resume data replaces it when the metadata arrives.
+         */
+        private void onAdded(AddTorrentAlert alert) {
+            if (alert.error().isError()) return;
+            write(alert.params());
+        }
+
+        private void onSaved(SaveResumeDataAlert alert) {
+            pendingSaves.decrementAndGet();
+            write(alert.params());
+        }
+
+        private void onSaveFailed(SaveResumeDataFailedAlert alert) {
+            pendingSaves.decrementAndGet();
+            // "Resume data not modified" is the normal answer to an only-if-modified request.
+            if (alert.error().isError()) {
+                LOG.fine("Resume data not written for " + alert.handle().infoHash() + ": " + alert.message());
+            }
+        }
+
+        private void write(AddTorrentParams params) {
+            String id = params.getInfoHashes().getBest().toHex();
+            try {
+                store.save(id, AddTorrentParams.writeResumeDataBuf(params));
+            } catch (IOException e) {
+                LOG.log(Level.WARNING, "Could not write resume data for " + id, e);
+            }
+        }
     }
 }

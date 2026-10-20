@@ -167,9 +167,9 @@ platforms before the next starts.
 ### 0.2 — Usable
 The point at which Torrenta can be left running.
 
-1. **Persistence.** Session state and per-torrent resume data (libtorrent `save_resume_data`,
-   written on change and on exit, loaded at start); a settings file under the platform config dir;
-   `TorrentStore` as the one owner of what is on disk.
+1. **Persistence** — done. Per-torrent resume data (libtorrent `save_resume_data` with the info
+   dict, written on add, metadata, finish, periodically and on exit, loaded at start); a settings
+   file; `TorrentStore` as the one owner of what is on disk; `--config-dir`.
 2. **Stable table.** Rows keyed by info-hash and updated in place; selection, sort and scroll survive
    a tick. Column chooser, column order and widths remembered. Filter box.
 3. **Actions and chords.** Pause, resume, force resume, remove, remove with data, recheck,
@@ -282,11 +282,11 @@ result pre-filled. Searches are rate-limited per provider and cached for the ses
 - Threads: FX thread for the scene only; one engine poll thread; one alert thread; virtual threads
   for actions, search and RSS; every engine call off the FX thread, enforced by an assertion in
   `LibtorrentEngine`.
-- Persistence: resume data as libtorrent's bencoded files under `<config>/torrents/<hash>.fastresume`
-  plus the `.torrent`; settings as one properties file; categories, tags, RSS rules, providers as
-  JSON. Written atomically (temp file and move), as `NativeLibrary` already does.
-- Config dir: platform conventions (`~/.config/torrenta`, `~/Library/Application Support/Torrenta`,
-  `%APPDATA%\Torrenta`), overridable with `--config-dir` for tests and captures.
+- Persistence: resume data as libtorrent's bencoded files under `<config>/torrents/<hash>.fastresume`,
+  with the info dict inside so the file alone re-adds the torrent; settings as one properties file;
+  categories, tags, RSS rules, providers as JSON. Written atomically (temp file and move).
+- Config dir: `~/.torrenta` on every platform, as Termina uses `~/.termina`; `--config-dir` and
+  `TORRENTA_CONFIG_DIR` override it for tests and captures.
 - Tests: pure rules in JUnit; the engine in a real session on all three platforms; the window by
   capture, with CI asserting what the capture prints.
 
@@ -299,7 +299,8 @@ result pre-filled. Searches are rate-limited per provider and cached for the ses
 - **Platforms the engine does not ship for**: Intel macOS and ARM Linux. The app says so and stays
   up. FrostWire's jlibtorrent fork covers both, if demand appears.
 - **Resume data compatibility across libtorrent versions** is the one place data loss can happen:
-  keep the `.torrent` beside the resume file so a torrent can always be re-added.
+  the resume file carries the info dict, so the worst case is a recheck, never a lost torrent;
+  run the restart test on every libtorrent4j bump.
 - **Wayland.** JavaFX runs through XWayland; fractional scaling misreports geometry, as Termina
   found. Capture and check on a Wayland desktop before each release.
 - **Search providers** change and go away. Definitions as data, Torznab for the long tail, no

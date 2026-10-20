@@ -24,6 +24,12 @@ Run Maven from the project root with a JDK 25.
 | UI | The window: menu bar, torrent list, status bar | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
+| Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
+
+**Persistence is the engine's job, the store's format is not the engine's business.** `TorrentStore`
+holds bytes by info-hash and never looks inside; `LibtorrentEngine` decides that the bytes are
+resume data (with the info dict), writes them on add, on metadata, on finish, every two minutes if
+modified, and on stop, and re-adds them on start. Removing a torrent deletes its blob.
 
 **Nothing on the FX thread calls the engine.** `App` starts it on a worker after the window is
 shown; `MainWindow` polls it once a second on its own thread and hands the FX thread an immutable
@@ -47,6 +53,17 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
   for both because automatic modules open every package.
 - **`TorrentHandle.status()` leaves the name out.** Ask with `status(TorrentHandle.QUERY_NAME)`,
   or every magnet shows as its hash.
+- **Resume data is asynchronous.** `saveResumeData(flags)` is a request; the answer is a
+  `save_resume_data_alert` (or `..._failed_alert`, which is also the normal reply to an
+  only-if-modified request that found nothing modified) on libtorrent4j's alert thread. That is
+  where the store gets written. `stop()` counts outstanding requests and waits, bounded to 5 s, so
+  the last state lands before the session goes.
+- **The add alert's params are enough to bring a magnet back.** `add_torrent_alert.params()` written
+  as resume data holds the hashes, name, trackers and save path, so a magnet survives a crash before
+  its metadata arrives; the real resume data replaces the blob later.
+- **The id is `getInfoHashes().getBest().toHex()`**, not `infoHash()`: a v2-only torrent has an
+  all-zero v1 hash, and two of them would collide.
+- **Alerts arrive on their own thread; tests `await`, bounded, never sleep-and-hope.**
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
   write under `~/.torrenta`. `LibtorrentEngineTest` starts a real session on purpose: it is the one
   test that proves the native loads on each CI platform.
@@ -65,6 +82,7 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 
 ## Not done
 
-Add dialogs (Ctrl+O / Ctrl+M only say so; inputs come from the command line), resume data,
-pause/resume/remove, limits, settings, per-torrent detail, `-Pdist` with the native in the image.
+Add dialogs (Ctrl+O / Ctrl+M only say so; inputs come from the command line), pause/resume/remove
+in the window (`Engine.remove` exists, nothing calls it yet), limits, a settings window, per-torrent
+detail, `-Pdist` with the native in the image.
 The table replaces its items each tick, which drops the selection — fix before adding row actions.
