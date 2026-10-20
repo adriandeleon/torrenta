@@ -17,7 +17,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `TORRENTA_CAPTURE=/tmp/shot.png ./mvnw javafx:run`) renders the real window, writes a PNG, prints
   `capture:` lines (title, focus, engine, status bar) and exits. `-Dtorrenta.captureAction=` runs
   window actions first: `select-all`, `palette`, `palette:<query>`, or a command id such as
-  `pause-resume`, `dialog-add` to press Add on an open Add dialog, `select-first`,
+  `pause-resume`, `dialog-add` to press Add on an open Add dialog (`dialog-press:now|wait|paused`
+for the others, `dialog-key:<KeyCode>` for a key in its file tree), `choose-files` for the
+selected torrent, `select-first`,
   `detail:<tab>` to show the detail pane on a tab, or `settings` / `settings:<query>` /
   `settings-page:<category>` to open the Settings window (the PNG is then of it) and print the
   visible rows; the palette's ranking, the
@@ -32,8 +34,8 @@ Run Maven from the project root with a JDK 25.
 |---|---|---|
 | Entry | `--help`/`--version`, toolkit start, theme | `com.torrenta.App`, `com.torrenta.cli` |
 | Events | `EngineEvent` (level, torrent, message), raised by the engine from libtorrent alerts and by its own start/stop/remove; `Engine.addListener` | `com.torrenta.engine` |
-| Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL) | `com.torrenta.engine`, `com.torrenta.net` |
-| Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags; JSON for the `<hash>.labels` sidecar), `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `Sidebar` (a tree: All, Categories, Tags; Status and Tracker sections later), `TagsDialog` | `com.torrenta.engine`, `store`, `ui` |
+| Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Engine.fetchMetadata` (a magnet's file list while the dialog is open), `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL); `ui.AddDialog` (rules as statics), `FileTree` (wanted + priority ladder), `FreeSpace` (disk bar and sentence) | `com.torrenta.engine`, `com.torrenta.net`, `ui` |
+| Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags; JSON for the `<hash>.labels` sidecar), `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `ui.FilterQuery` (the filter box's `key:value` language → predicate + chips), `Sidebar` (a tree: All, Categories, Tags; Status and Tracker sections later), `TagsDialog` | `com.torrenta.engine`, `store`, `ui` |
 | Detail | `TorrentDetail` (general, files, peers, trackers, pieces) from `Engine.detail(id)`; `setFilePriority`, `addTrackers`, `removeTracker`; `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
 | Engine settings | `EngineSettings` (engine-neutral record; `listenInterfaces()` is the tested string), `Settings.engineSettings()` clamps the `connection.*` and `proxy.*` keys, `LibtorrentEngine.toPack` maps onto `settings_pack`; applied at start (`SessionParams`) and live (`applySettings`) | `com.torrenta.engine`, `store`, `.libtorrent` |
 | IP filter | `IpRange` (literals only, never resolves), `Blocklist` (pure parser for .p2p/.dat/CIDR/plain), `net.BlocklistFetch` (gzip by magic), `ui.IpFilterController` (cache, schedule, bans → `Engine.setIpFilter`), `peer_blocked` alerts counted | `com.torrenta.engine`, `net`, `ui` |
@@ -213,6 +215,18 @@ release process with the names changed; Termina's README and memory hold the war
   the caller's thread the moment it changes (never through the resume-data alert), read back in
   `restore()`, deleted by `TorrentStore.delete`. The engine holds them in a map by id for the
   snapshots. The sidebar is not focus-traversable for the same reason as the filter box.
+- **The Add dialog's magnet fetch is a real torrent, hidden.** `fetchMetadata` adds the magnet in
+  upload mode, out of the queue, and keeps it in `fetches`: `handles()` skips it (so no snapshot,
+  flush or settings walk sees it), its events are dropped, and its add alert is swallowed by id
+  (`fetchAddAlerts`) so no blob is written even if it was cancelled before the alert came. On
+  metadata it writes the `.torrent` (`write_torrent_file` with the link's trackers,
+  `allow_missing_piece_layer` for v2) and leaves the session. It must be cancelled before the same
+  magnet is added for real (duplicate otherwise): the window's add worker closes the `FetchSlot`
+  first. A v1 magnet of a hybrid torrent gets a new best hash (the v2 one) when its metadata
+  arrives, so the fetch is matched by either hash (`fetchOf`), never by `id()`.
+- **"Add now, pick files when ready"** adds with stop-after-metadata and marks
+  `torrent.<hash>.pickFiles` in the settings; `MainWindow.chooseFiles(id)` opens the dialog's
+  tree for a torrent in the list and clears the mark. Nothing shows the mark on the row yet.
 - **A removed torrent's alert carries only the hash.** `remove()` reads the name first and raises
   the event itself; the `TORRENT_REMOVED` alert is not listened to.
 - **Rows are `TorrentRow` objects, never `Torrent` snapshots.** The list has an extractor on the

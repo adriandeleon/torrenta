@@ -113,7 +113,9 @@ final class SettingsWindow {
 
     /** The keys this window owns, for Reset. */
     private static final String[] OWNED_KEYS = concat(
-            new String[] {Settings.UPDATE_CHECK, Settings.ADD_START_PAUSED, Settings.ADD_SEQUENTIAL},
+            new String[] {
+                Settings.UPDATE_CHECK, Settings.ADD_START_PAUSED, Settings.ADD_SEQUENTIAL, Settings.ADD_WITHOUT_ASKING
+            },
             concat(
                     concat(Settings.DOWNLOAD_KEYS, Settings.AUTOMATION_KEYS),
                     concat(
@@ -271,6 +273,7 @@ final class SettingsWindow {
     private CheckBox updateCheck;
     private CheckBox addStartPaused;
     private CheckBox addSequential;
+    private CheckBox addWithoutAsking;
     private Spinner<Integer> port;
     private CheckBox randomPort;
     private TextField listenInterface;
@@ -1350,7 +1353,7 @@ final class SettingsWindow {
                 Category.ADDING,
                 defaults,
                 "Start paused",
-                "New torrents wait until resumed. The box in the Add dialog starts in this position.",
+                "New torrents wait until resumed: Enter in the Add dialog adds paused, and Shift+Enter starts.",
                 addStartPaused,
                 "add stopped");
         addSequential = new CheckBox();
@@ -1366,6 +1369,20 @@ final class SettingsWindow {
                 "Fetch pieces in order rather than rarest first, for playing while downloading.",
                 addSequential,
                 "add order streaming preview");
+        addWithoutAsking = new CheckBox();
+        addWithoutAsking.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setAddWithoutAsking(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.ADDING,
+                defaults,
+                "Add without asking",
+                "Torrents and magnets are added at once with these defaults, into the download folder;"
+                        + " the Add dialog does not open.",
+                addWithoutAsking,
+                "skip dialog confirm prompt silent automatic next time");
     }
 
     private void buildConnection(VBox page) {
@@ -1952,6 +1969,7 @@ final class SettingsWindow {
             syncInterval.getValueFactory().setValue(settings.syncIntervalMinutes());
             addStartPaused.setSelected(settings.addStartPaused());
             addSequential.setSelected(settings.addSequential());
+            addWithoutAsking.setSelected(settings.addWithoutAsking());
             AutomationSettings a = settings.automation();
             onAdded.setText(a.onAdded());
             onFinished.setText(a.onFinished());

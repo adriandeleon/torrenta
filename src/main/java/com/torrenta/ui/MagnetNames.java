@@ -3,7 +3,7 @@ package com.torrenta.ui;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 
-/** The {@code dn} of a magnet link, decoded; what the dialog can show before the metadata. */
+/** What a magnet link says about itself, decoded: what the dialog can show before the metadata. */
 public final class MagnetNames {
 
     private MagnetNames() {}
@@ -21,5 +21,15 @@ public final class MagnetNames {
             }
         }
         return "";
+    }
+
+    /** How many distinct trackers ({@code tr=}) the link names. */
+    public static int trackers(String magnet) {
+        int q = magnet.indexOf('?');
+        if (q < 0) return 0;
+        return (int) java.util.Arrays.stream(magnet.substring(q + 1).split("&"))
+                .filter(pair -> pair.startsWith("tr="))
+                .distinct()
+                .count();
     }
 }

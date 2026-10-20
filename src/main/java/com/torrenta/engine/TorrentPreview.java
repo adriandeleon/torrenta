@@ -13,6 +13,8 @@ import java.util.List;
  * @param comment the torrent's comment, or empty
  * @param createdBy the creating program, or empty
  * @param creationDate epoch seconds, or 0
+ * @param v1 the info has v1 (SHA-1) piece hashes
+ * @param v2 the info has v2 (SHA-256 merkle) piece hashes; both is a hybrid torrent
  */
 public record TorrentPreview(
         String id,
@@ -23,7 +25,9 @@ public record TorrentPreview(
         List<String> trackers,
         String comment,
         String createdBy,
-        long creationDate) {
+        long creationDate,
+        boolean v1,
+        boolean v2) {
 
     /** One file: its index in the torrent, its path inside it (forward slashes), its size. */
     public record FileEntry(int index, String path, long size) {}

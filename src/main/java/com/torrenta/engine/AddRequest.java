@@ -87,9 +87,9 @@ public record AddRequest(
     public record Magnet(String uri) implements Source {}
 
     public enum StopCondition {
-        NONE("Don't stop"),
-        METADATA_RECEIVED("After the metadata arrives"),
-        FILES_CHECKED("After the files are checked");
+        NONE("Never"),
+        METADATA_RECEIVED("Metadata arrives"),
+        FILES_CHECKED("Files are checked");
 
         private final String label;
 
