@@ -102,6 +102,103 @@
 }
 
 /*
+ * The state language: every row's Status cell is a glyph, a lead and the rest of a sentence
+ * (ui.StatusLine), and the row carries its state as a pseudo-class (st-downloading, st-stalled …,
+ * ui.RowState). Colour is scoped under .state-colors on the scene root, which Settings → General →
+ * "Colour rows by state" removes; the glyphs and sentences say it in monochrome too.
+ */
+.root {
+    -torrenta-down: -color-accent-fg;
+    -torrenta-up: ladder(-color-bg-default, #9aa2d4 49%, #4f58a0 50%);
+    -torrenta-stall: -color-warning-fg;
+    -torrenta-error: -color-danger-fg;
+    -torrenta-done: -color-success-fg;
+    -torrenta-idle: -color-fg-muted;
+}
+
+.torrent-table .state-glyph {
+    -fx-min-width: 1.5em;
+    -fx-text-fill: -color-cell-fg;
+}
+
+.torrent-table .state-lead {
+    -fx-text-fill: -color-cell-fg;
+}
+
+.torrent-table .state-rest {
+    -fx-text-fill: -color-fg-muted;
+}
+
+/* Paused, queued and done rows recede: nothing is happening and nothing is wrong. */
+.torrent-table .table-row-cell:inactive {
+    -color-cell-fg: -color-fg-muted;
+}
+
+.torrent-table .table-row-cell:inactive:selected {
+    -color-cell-fg: -color-cell-fg-selected;
+}
+
+.torrent-table:focused .table-row-cell:inactive:selected {
+    -color-cell-fg: -color-cell-fg-selected-focused;
+}
+
+.state-colors .torrent-table .table-row-cell:st-downloading .state-glyph {
+    -fx-text-fill: -torrenta-down;
+}
+
+.state-colors .torrent-table .table-row-cell:st-seeding .state-glyph,
+.state-colors .torrent-table .table-row-cell:st-seeding .state-lead {
+    -fx-text-fill: -torrenta-up;
+}
+
+.state-colors .torrent-table .table-row-cell:st-stalled .state-glyph,
+.state-colors .torrent-table .table-row-cell:st-stalled .state-lead {
+    -fx-text-fill: -torrenta-stall;
+}
+
+.state-colors .torrent-table .table-row-cell:st-error .state-glyph,
+.state-colors .torrent-table .table-row-cell:st-error .state-lead {
+    -fx-text-fill: -torrenta-error;
+}
+
+.state-colors .torrent-table .table-row-cell:st-done .state-glyph,
+.state-colors .torrent-table .table-row-cell:st-done .state-lead {
+    -fx-text-fill: -torrenta-done;
+}
+
+.state-colors .torrent-table .table-row-cell:st-metadata .state-glyph,
+.state-colors .torrent-table .table-row-cell:st-checking .state-glyph,
+.state-colors .torrent-table .table-row-cell:st-moving .state-glyph,
+.state-colors .torrent-table .table-row-cell:st-queued .state-glyph,
+.state-colors .torrent-table .table-row-cell:st-paused .state-glyph {
+    -fx-text-fill: -torrenta-idle;
+}
+
+.state-colors .torrent-table .table-row-cell:st-seeding .progress-bar {
+    -color-progress-bar-fill: -torrenta-up;
+}
+
+.state-colors .torrent-table .table-row-cell:st-stalled .progress-bar {
+    -color-progress-bar-fill: -torrenta-stall;
+}
+
+.state-colors .torrent-table .table-row-cell:st-error .progress-bar {
+    -color-progress-bar-fill: -torrenta-error;
+}
+
+.state-colors .torrent-table .table-row-cell:st-done .progress-bar {
+    -color-progress-bar-fill: -torrenta-done;
+}
+
+.state-colors .torrent-table .table-row-cell:st-paused .progress-bar,
+.state-colors .torrent-table .table-row-cell:st-queued .progress-bar,
+.state-colors .torrent-table .table-row-cell:st-checking .progress-bar,
+.state-colors .torrent-table .table-row-cell:st-metadata .progress-bar,
+.state-colors .torrent-table .table-row-cell:st-moving .progress-bar {
+    -color-progress-bar-fill: -torrenta-idle;
+}
+
+/*
  * Looked-up colours Editora's chrome speaks in, defined on the root so every theme has them: the
  * keyboard's periwinkle (a brand hue with no AtlantaFX role; ladder() picks a lighter one on a dark
  * ground and a deep ink on a light one) and the selection wash of overlay rows.

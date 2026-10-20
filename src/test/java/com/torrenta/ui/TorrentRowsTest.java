@@ -182,4 +182,19 @@ class TorrentRowsTest {
                         .test(row));
         assertEquals(true, MainWindow.rowFilter(null, null).test(row), "no sidebar choice is All");
     }
+
+    @Test
+    void theStallClockCountsFromTheFirstQuietTickAndResetsOnAByte() {
+        TorrentRows rows = new TorrentRows();
+        rows.apply(List.of(t("a", 0)), 1000);
+        TorrentRow a = rows.get("a");
+        assertEquals(0, a.quietSeconds(), "quiet since now, which is no time yet");
+        rows.apply(List.of(t("a", 0)), 1090);
+        assertEquals(90, a.quietSeconds());
+        rows.apply(List.of(t("a", 5)), 1100);
+        assertEquals(0, a.quietSeconds(), "a byte arrived");
+        rows.apply(List.of(t("a", 0)), 1200);
+        rows.apply(List.of(t("a", 0)), 1230);
+        assertEquals(30, a.quietSeconds(), "counted again from the new silence");
+    }
 }

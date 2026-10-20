@@ -153,4 +153,23 @@ class FormatTest {
         assertEquals("—", Format.dateTime(0, ZoneOffset.UTC));
         assertEquals("2026-10-20 03:40", Format.dateTime(1792467600L, ZoneOffset.UTC));
     }
+
+    @Test
+    void wholePercentFloorsSoOnlyFinishedSaysAHundred() {
+        assertEquals("0%", Format.wholePercent(0));
+        assertEquals("62%", Format.wholePercent(0.62));
+        assertEquals("99%", Format.wholePercent(0.9997));
+        assertEquals("100%", Format.wholePercent(1));
+        assertEquals("0%", Format.wholePercent(-0.1));
+    }
+
+    @Test
+    void coarseDurationsDoNotTick() {
+        assertEquals("under a minute", Format.coarse(59));
+        assertEquals("1 min", Format.coarse(60));
+        assertEquals("18 min", Format.coarse(18 * 60 + 59));
+        assertEquals("2 h", Format.coarse(7200));
+        assertEquals("2 h 5 min", Format.coarse(7200 + 300 + 30));
+        assertEquals("3 d", Format.coarse(3 * 86400 + 7200));
+    }
 }

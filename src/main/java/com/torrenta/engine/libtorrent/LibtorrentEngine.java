@@ -1582,7 +1582,11 @@ public final class LibtorrentEngine implements Engine {
                 l.tags(),
                 error != null && error.isError() ? error.getMessage() : "",
                 hosts == null ? List.of() : hosts.stream().sorted().toList(),
-                errors != null && !errors.isEmpty());
+                errors != null && !errors.isEmpty(),
+                // Parked by the queue: paused, but auto-managed, so libtorrent resumes it itself.
+                has(flags, Flags.PAUSED) && has(flags, Flags.AUTO_MANAGED),
+                status.queuePosition(),
+                status.isMovingStorage());
     }
 
     /** libtorrent's seven states folded into the list's six. Package-private for the test. */

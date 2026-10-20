@@ -26,6 +26,9 @@ package com.torrenta.engine;
  * @param error what stopped the torrent (a missing file, a full disk), or empty while nothing has
  * @param trackers the hosts of its trackers, each once, sorted; empty for a trackerless torrent
  * @param trackerError some tracker of its last answered with an error and has not answered since
+ * @param queued parked by the queue (paused and auto-managed), waiting for a slot
+ * @param queuePosition its place in the download or seed queue, 0 first; -1 when not queued
+ * @param moving its files are being moved to a new location
  */
 public record Torrent(
         String id,
@@ -51,12 +54,71 @@ public record Torrent(
         java.util.List<String> tags,
         String error,
         java.util.List<String> trackers,
-        boolean trackerError) {
+        boolean trackerError,
+        boolean queued,
+        int queuePosition,
+        boolean moving) {
 
     public Torrent {
         category = category == null ? "" : category;
         tags = tags == null ? java.util.List.of() : java.util.List.copyOf(tags);
         error = error == null ? "" : error;
         trackers = trackers == null ? java.util.List.of() : java.util.List.copyOf(trackers);
+    }
+
+    /** A torrent that is not queued and not moving: what most tests want. */
+    public Torrent(
+            String id,
+            String name,
+            long size,
+            long done,
+            double progress,
+            TorrentState state,
+            long downloadRate,
+            long uploadRate,
+            int peers,
+            int seeds,
+            long uploaded,
+            long downloaded,
+            long added,
+            long completed,
+            String tracker,
+            String savePath,
+            boolean paused,
+            boolean sequential,
+            long seedingTime,
+            String category,
+            java.util.List<String> tags,
+            String error,
+            java.util.List<String> trackers,
+            boolean trackerError) {
+        this(
+                id,
+                name,
+                size,
+                done,
+                progress,
+                state,
+                downloadRate,
+                uploadRate,
+                peers,
+                seeds,
+                uploaded,
+                downloaded,
+                added,
+                completed,
+                tracker,
+                savePath,
+                paused,
+                sequential,
+                seedingTime,
+                category,
+                tags,
+                error,
+                trackers,
+                trackerError,
+                false,
+                -1,
+                false);
     }
 }

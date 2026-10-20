@@ -72,6 +72,8 @@ public final class Settings {
     public static final String UI_SIDEBAR_COLLAPSED = "ui.sidebar.collapsed";
     /** The sections a choice or a fold can name. */
     public static final java.util.List<String> SIDEBAR_AXES = java.util.List.of("status", "category", "tag", "tracker");
+    /** Rows coloured by state (glyph, sentence, progress bar); off leaves the glyphs uncoloured. */
+    public static final String UI_STATE_COLORS = "ui.stateColors";
     /** The theme id ({@code editora-dark}, {@code nord-light}, …); the UI maps it and falls back. */
     public static final String THEME = "ui.theme";
 
@@ -377,6 +379,14 @@ public final class Settings {
 
     public void setToolbar(boolean shown) {
         properties.setProperty(UI_TOOLBAR, String.valueOf(shown));
+    }
+
+    public boolean stateColors() {
+        return readBoolean(UI_STATE_COLORS, true);
+    }
+
+    public void setStateColors(boolean on) {
+        properties.setProperty(UI_STATE_COLORS, String.valueOf(on));
     }
 
     public boolean sidebar() {

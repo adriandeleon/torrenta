@@ -145,6 +145,8 @@ public final class MainWindow {
     private volatile boolean detailWanted;
     /** The global share limit as the poll thread applies it; refreshed with the engine settings. */
     private volatile ShareLimit globalShareLimit = ShareLimit.NONE;
+    /** Per-torrent share limits as of the last poll, for the status sentences ("ratio 1.2 of 2"). */
+    private volatile java.util.Map<String, ShareLimit> shareOverrides = java.util.Map.of();
 
     private Engine engine;
     private String engineDescription = "";
@@ -181,6 +183,8 @@ public final class MainWindow {
         settingsWindow.setOnEngineSettingsChanged(this::applyEngineSettings);
         settingsWindow.setLabels(labels, new LabelsHost());
         settingsWindow.setOnIpFilterChanged(this::refreshIpFilter, this::ipFilterStatusText);
+        settingsWindow.setOnAppearanceChanged(this::applyStateColors);
+        applyStateColors();
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
         settingsWindow.setOnTestNotification(() -> {
             Automation a = automation;
@@ -354,6 +358,11 @@ public final class MainWindow {
         if (sidebar.isVisible()) System.out.println("capture: sidebar=" + sidebar.summary());
         System.out.println("capture: filter=" + sidebarSelection.describe() + " shown=" + filtered.size());
         System.out.println("capture: focus-sidebar=" + sidebar.hasFocus() + " cursor=" + sidebar.cursorForCapture());
+        for (TorrentRow row : table.getItems()) {
+            Torrent t = row.torrent();
+            StatusLine line = StatusLine.of(t, row.quietSeconds(), shareLimitFor(t));
+            System.out.println("capture: row=" + line.state().glyph() + " " + t.name() + " | " + line.text());
+        }
         if (detailWanted) System.out.println("capture: detail=" + detail.summary());
         if (settingsWindow.isShowing())
             System.out.println("capture: settings=" + settingsWindow.visibleRowsForCapture());
@@ -528,6 +537,7 @@ public final class MainWindow {
             javafx.application.Application.setUserAgentStylesheet(
                     Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
             applyEngineSettings();
+            applyStateColors();
             refreshIpFilter(false);
             if (settingsWindow.isShowing()) settingsWindow.reloadFromSettings();
         }
@@ -1041,7 +1051,7 @@ public final class MainWindow {
         }
         TorrentDetail shown = detailSnapshot;
         Platform.runLater(() -> {
-            rows.apply(snapshot);
+            rows.apply(snapshot, System.currentTimeMillis() / 1000);
             refreshSidebar(snapshot);
             rates.setText(ratesText(current));
             if (detailWanted) {
@@ -1060,6 +1070,7 @@ public final class MainWindow {
     private void enforceShareLimits(List<Torrent> snapshot) {
         ShareLimit global = globalShareLimit;
         java.util.Map<String, ShareLimit> overrides = settings.shareOverrides();
+        shareOverrides = overrides;
         if (!global.limited() && overrides.isEmpty()) return;
         for (Torrent t : snapshot) {
             Optional<ShareLimit.Action> due = ShareLimit.decide(t, global, overrides.get(t.id()));
@@ -1955,6 +1966,7 @@ public final class MainWindow {
         table.setPlaceholder(new Label("No torrents match the filter"));
         table.getStyleClass().add("torrent-table");
         table.setOnKeyPressed(this::onTableKey);
+        table.setRowFactory(t -> new StateRow());
 
         TableColumn<TorrentRow, String> name = column("name", "Name", 360, true, Torrent::name, s -> s);
         name.setComparator(String.CASE_INSENSITIVE_ORDER);
@@ -1967,7 +1979,7 @@ public final class MainWindow {
                         column("size", "Size", 90, true, Torrent::size, v -> v == 0 ? "—" : Bytes.human(v)),
                         column("done", "Done", 90, false, Torrent::done, Bytes::human),
                         progress,
-                        column("state", "State", 130, true, Format::stateLabel, s -> s),
+                        statusColumn(),
                         column("seeds", "Seeds", 70, true, Torrent::seeds, String::valueOf),
                         column("peers", "Peers", 70, true, Torrent::peers, String::valueOf),
                         column("down", "Down", 90, true, Torrent::downloadRate, Bytes::rate),
@@ -2020,6 +2032,106 @@ public final class MainWindow {
             }
         });
         return column;
+    }
+
+    /** The share limit in force for a torrent: its own, else the global one. */
+    private ShareLimit shareLimitFor(Torrent t) {
+        ShareLimit own = shareOverrides.get(t.id());
+        return own != null ? own : globalShareLimit;
+    }
+
+    /**
+     * The Status column: the state's glyph, then the sentence, its lead in the state's colour. The
+     * id stays {@code state}, so a remembered layout keeps its place and width for it. It sorts by
+     * state, in {@link RowState}'s order: errors and stalls first.
+     */
+    private TableColumn<TorrentRow, StatusLine> statusColumn() {
+        TableColumn<TorrentRow, StatusLine> column = new TableColumn<>("Status");
+        column.setId("state");
+        column.setPrefWidth(300);
+        column.setCellValueFactory(cell -> {
+            TorrentRow row = cell.getValue();
+            return row.torrentProperty().map(t -> StatusLine.of(t, row.quietSeconds(), shareLimitFor(t)));
+        });
+        column.setCellFactory(c -> new StatusCell());
+        return column;
+    }
+
+    /** Glyph, lead and rest as three labels, coloured by the row's state pseudo-class in app.css. */
+    private static final class StatusCell extends TableCell<TorrentRow, StatusLine> {
+        private final Label glyph = new Label();
+        private final Label lead = new Label();
+        private final Label rest = new Label();
+        private final HBox box = new HBox(glyph, lead, rest);
+
+        StatusCell() {
+            glyph.getStyleClass().add("state-glyph");
+            lead.getStyleClass().add("state-lead");
+            rest.getStyleClass().add("state-rest");
+            glyph.setMinWidth(Region.USE_PREF_SIZE);
+            lead.setMinWidth(Region.USE_PREF_SIZE);
+            box.setAlignment(Pos.CENTER_LEFT);
+            box.setSpacing(0);
+            setText(null);
+        }
+
+        @Override
+        protected void updateItem(StatusLine item, boolean empty) {
+            super.updateItem(item, empty);
+            if (empty || item == null) {
+                setGraphic(null);
+                return;
+            }
+            glyph.setText(item.state().glyph());
+            lead.setText(item.lead());
+            rest.setText(item.rest());
+            setGraphic(box);
+        }
+    }
+
+    /**
+     * A table row that carries its torrent's {@link RowState} as a pseudo-class ({@code st-seeding}
+     * …) and {@code inactive} for the dimmed states, so app.css colours the glyph, the lead and the
+     * progress bar from one place. It listens to the row's torrent, since an in-place update does
+     * not call {@code updateItem}.
+     */
+    private static final class StateRow extends javafx.scene.control.TableRow<TorrentRow> {
+        private static final javafx.css.PseudoClass INACTIVE = javafx.css.PseudoClass.getPseudoClass("inactive");
+        // Invalidation, not change: two equal snapshots fire no change, yet the stall clock moved.
+        private final javafx.beans.InvalidationListener onTorrent = o -> restyle();
+        private TorrentRow watched;
+        private RowState shown;
+
+        @Override
+        protected void updateItem(TorrentRow item, boolean empty) {
+            super.updateItem(item, empty);
+            if (watched != null) watched.torrentProperty().removeListener(onTorrent);
+            watched = empty ? null : item;
+            if (watched != null) watched.torrentProperty().addListener(onTorrent);
+            restyle();
+        }
+
+        private void restyle() {
+            RowState next = watched == null ? null : RowState.of(watched.torrent(), watched.quietSeconds());
+            if (next == shown) return;
+            if (shown != null)
+                pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass(shown.pseudoClass()), false);
+            if (next != null) pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass(next.pseudoClass()), true);
+            pseudoClassStateChanged(INACTIVE, next != null && next.inactive());
+            shown = next;
+        }
+    }
+
+    /**
+     * State colours on or off (Settings → General → Appearance): a style class on the scene root
+     * that every state rule in app.css is scoped under. Off, rows keep their glyphs and sentences
+     * in the ordinary text colour, and the bars in the accent.
+     */
+    private void applyStateColors() {
+        var classes = host.getStyleClass();
+        boolean on = settings.stateColors();
+        if (on && !classes.contains("state-colors")) classes.add("state-colors");
+        if (!on) classes.remove("state-colors");
     }
 
     private VBox buildEmptyState() {
