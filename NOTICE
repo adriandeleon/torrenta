@@ -13,6 +13,15 @@ native libraries, which statically link:
   OpenSSL — https://www.openssl.org — Apache-2.0
 
 --------------------------------------------------------------------------------
+Bundled font
+--------------------------------------------------------------------------------
+
+src/main/resources/com/torrenta/fonts/inter/
+    Inter — https://github.com/rsms/inter (© The Inter Project Authors),
+    licensed under the SIL Open Font License 1.1 (OFL.txt beside the files).
+    The interface font, as in Editora and Termina.
+
+--------------------------------------------------------------------------------
 Vendored source
 --------------------------------------------------------------------------------
 

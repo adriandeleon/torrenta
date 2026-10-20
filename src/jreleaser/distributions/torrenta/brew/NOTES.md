@@ -22,7 +22,7 @@ Two other things live here rather than in `jreleaser.yml`:
 - **`zap`.** Removes `~/.torrenta`, which holds settings and the session log.
 
 There is deliberately no `depends_on macos:`. The bundle's own `LSMinimumSystemVersion` is jpackage's
-default of 10.11, and the real floor — whatever JavaFX 26 and the jlink runtime actually require — has
+default of 10.11, and the real floor — whatever JavaFX 27 and the jlink runtime actually require — has
 not been tested. A version stated too high blocks installs that would have worked; too low lets a
 broken one through. Omitting it lets Homebrew allow any macOS, which is at least not a claim.
 

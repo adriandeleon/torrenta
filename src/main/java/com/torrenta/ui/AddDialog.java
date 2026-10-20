@@ -149,6 +149,7 @@ final class AddDialog {
                 new Scene(content, 640, preview != null && !preview.files().isEmpty() ? 560 : 330);
         scene.getStylesheets()
                 .add(AddDialog.class.getResource("/com/torrenta/styles/app.css").toExternalForm());
+        Fonts.installUiFont(scene);
         scene.setOnKeyPressed(e -> {
             if (e.getCode() == KeyCode.ESCAPE) stage.hide();
         });

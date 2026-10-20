@@ -11,6 +11,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   seen once on CI): libtorrent4j's vector proxies hand out pointers that its finalizer frees. The
   engine now keeps only handles, trackers and peers it owns.
 
+### Changed
+
+- **JavaFX 27**, as Editora; was 26.0.2.
+
 ### Added
 
 - **Torrents survive a restart.** Resume data is kept per torrent under `~/.torrenta/torrents/`,
@@ -54,6 +58,7 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 - **Protocol settings**: DHT, peer exchange, local peer discovery, uTP, the encryption policy
   (require, prefer, off), anonymous mode, and default trackers added to every torrent, new and
   existing. Applied at start and live.
+- **Inter as the interface font**, bundled, the same face Editora and Termina use.
 - **An IP filter**: a PeerGuardian or eMule blocklist by URL (plain or gzipped), downloaded on a
   schedule and kept beside the settings, a local list file, and manual bans — including Ban Peer
   from the Peers tab. The settings page shows how many ranges are loaded and how many peers were

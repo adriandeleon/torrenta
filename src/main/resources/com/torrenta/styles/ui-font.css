@@ -1,0 +1,17 @@
+/*
+ * The interface font: Inter, on every platform, as in Editora and Termina ("Inter speaks,
+ * JetBrains Mono works").
+ *
+ * Inter is bundled (fonts/inter/, all four faces) and registered by Fonts.load() before any CSS is
+ * applied, so the family always resolves. Nothing else supplies it: the Caret & Ink theme sets no
+ * .root font family, so without this sheet the whole interface falls back to JavaFX's logical
+ * "System" face — a different typeface on each platform, and one whose bold JavaFX cannot
+ * rasterise cleanly on macOS. Inter has a real bold on every platform.
+ *
+ * A scene stylesheet rather than a rule in app.css, because dialogs, alerts, the Settings window
+ * and the log window each live in a scene of their own, and because a scene sheet survives the
+ * runtime setUserAgentStylesheet that a theme switch performs. Fonts.installUiFont attaches it.
+ */
+.root {
+    -fx-font-family: "Inter", "System", "sans-serif";
+}

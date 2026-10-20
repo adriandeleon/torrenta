@@ -329,6 +329,7 @@ final class DetailPane extends VBox {
     private void askTrackers() {
         TextInputDialog prompt = new TextInputDialog();
         prompt.initOwner(getScene() == null ? null : getScene().getWindow());
+        Fonts.installUiFont(prompt.getDialogPane());
         prompt.setTitle("Add Trackers");
         prompt.setHeaderText("Tracker URLs, separated by spaces");
         prompt.setContentText("URLs:");

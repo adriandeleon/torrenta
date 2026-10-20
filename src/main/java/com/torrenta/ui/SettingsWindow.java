@@ -268,6 +268,7 @@ final class SettingsWindow {
                 .add(SettingsWindow.class
                         .getResource("/com/torrenta/styles/settings.css")
                         .toExternalForm());
+        Fonts.installUiFont(scene);
         scene.setOnKeyPressed(e -> {
             if (e.getCode() == KeyCode.ESCAPE) stage.hide();
         });

@@ -95,6 +95,7 @@ final class LogWindow {
         Scene scene = new Scene(root, 820, 420);
         scene.getStylesheets()
                 .add(LogWindow.class.getResource("/com/torrenta/styles/app.css").toExternalForm());
+        Fonts.installUiFont(scene);
         scene.setOnKeyPressed(e -> {
             if (e.getCode() == KeyCode.ESCAPE) stage.hide();
         });
