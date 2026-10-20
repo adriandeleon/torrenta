@@ -68,6 +68,32 @@ public final class Settings {
     public static final String PROTO_ANONYMOUS = "protocol.anonymous";
     public static final String PROTO_DEFAULT_TRACKERS = "protocol.defaultTrackers";
 
+    /** Speed page. KiB/s, 0 for none; the schedule as HH:mm and a comma list of day names. */
+    public static final String SPEED_DOWNLOAD = "speed.download";
+
+    public static final String SPEED_UPLOAD = "speed.upload";
+    public static final String SPEED_ALT_DOWNLOAD = "speed.altDownload";
+    public static final String SPEED_ALT_UPLOAD = "speed.altUpload";
+    public static final String SPEED_ALT_ON = "speed.altOn";
+    public static final String SPEED_SCHEDULE_ON = "speed.schedule.on";
+    public static final String SPEED_SCHEDULE_FROM = "speed.schedule.from";
+    public static final String SPEED_SCHEDULE_TO = "speed.schedule.to";
+    public static final String SPEED_SCHEDULE_DAYS = "speed.schedule.days";
+    public static final String SPEED_COUNT_OVERHEAD = "speed.countOverhead";
+
+    public static final String[] SPEED_KEYS = {
+        SPEED_DOWNLOAD,
+        SPEED_UPLOAD,
+        SPEED_ALT_DOWNLOAD,
+        SPEED_ALT_UPLOAD,
+        SPEED_ALT_ON,
+        SPEED_SCHEDULE_ON,
+        SPEED_SCHEDULE_FROM,
+        SPEED_SCHEDULE_TO,
+        SPEED_SCHEDULE_DAYS,
+        SPEED_COUNT_OVERHEAD
+    };
+
     /** IP filter page. Bans are space-separated ranges or addresses. */
     public static final String IPFILTER_ENABLED = "ipfilter.enabled";
 
@@ -258,6 +284,18 @@ public final class Settings {
                 encryption,
                 readBoolean(PROTO_ANONYMOUS, pd.anonymous()),
                 trackers);
+        EngineSettings.Speed sd = EngineSettings.Speed.defaults();
+        EngineSettings.Speed speed = new EngineSettings.Speed(
+                readInt(SPEED_DOWNLOAD, sd.download(), 0, 10_000_000),
+                readInt(SPEED_UPLOAD, sd.upload(), 0, 10_000_000),
+                readInt(SPEED_ALT_DOWNLOAD, sd.alternativeDownload(), 0, 10_000_000),
+                readInt(SPEED_ALT_UPLOAD, sd.alternativeUpload(), 0, 10_000_000),
+                readBoolean(SPEED_ALT_ON, sd.alternativeOn()),
+                readBoolean(SPEED_SCHEDULE_ON, sd.scheduleOn()),
+                readMinutes(SPEED_SCHEDULE_FROM, sd.scheduleFrom()),
+                readMinutes(SPEED_SCHEDULE_TO, sd.scheduleTo()),
+                readDays(SPEED_SCHEDULE_DAYS, sd.scheduleDays()),
+                readBoolean(SPEED_COUNT_OVERHEAD, sd.countOverhead()));
         return new EngineSettings(
                 readInt(CONN_PORT, d.listenPort(), 1024, 65535),
                 readBoolean(CONN_RANDOM_PORT, d.randomPort()),
@@ -273,7 +311,50 @@ public final class Settings {
                 properties.getProperty(PROXY_USERNAME, ""),
                 properties.getProperty(PROXY_PASSWORD, ""),
                 readBoolean(PROXY_PEERS, d.proxyPeers()),
-                protocol);
+                protocol,
+                speed);
+    }
+
+    /** {@code HH:mm} as minutes after midnight; anything unreadable is the default. */
+    private int readMinutes(String key, int fallback) {
+        return parseMinutes(properties.getProperty(key, "")).orElse(fallback);
+    }
+
+    public static java.util.OptionalInt parseMinutes(String text) {
+        if (text == null) return java.util.OptionalInt.empty();
+        java.util.regex.Matcher m =
+                java.util.regex.Pattern.compile("^\\s*(\\d{1,2}):(\\d{2})\\s*$").matcher(text);
+        if (!m.matches()) return java.util.OptionalInt.empty();
+        int h = Integer.parseInt(m.group(1));
+        int min = Integer.parseInt(m.group(2));
+        if (h > 23 || min > 59) return java.util.OptionalInt.empty();
+        return java.util.OptionalInt.of(h * 60 + min);
+    }
+
+    public static String formatMinutes(int minutes) {
+        return String.format(java.util.Locale.ROOT, "%02d:%02d", minutes / 60, minutes % 60);
+    }
+
+    /** A comma list of day names, in any case, three letters or full; unreadable names are dropped. */
+    private java.util.Set<java.time.DayOfWeek> readDays(String key, java.util.Set<java.time.DayOfWeek> fallback) {
+        String text = properties.getProperty(key);
+        if (text == null) return fallback;
+        java.util.Set<java.time.DayOfWeek> days = java.util.EnumSet.noneOf(java.time.DayOfWeek.class);
+        for (String part : text.split(",")) {
+            String name = part.trim().toUpperCase(java.util.Locale.ROOT);
+            if (name.isEmpty()) continue;
+            for (java.time.DayOfWeek day : java.time.DayOfWeek.values()) {
+                if (day.name().equals(name) || day.name().startsWith(name) && name.length() >= 3) days.add(day);
+            }
+        }
+        return days;
+    }
+
+    public static String formatDays(java.util.Set<java.time.DayOfWeek> days) {
+        return days.stream()
+                .sorted()
+                .map(d -> d.name().substring(0, 3))
+                .collect(java.util.stream.Collectors.joining(","));
     }
 
     /** An int between the bounds; anything unreadable or outside them is the default. */

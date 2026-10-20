@@ -420,7 +420,8 @@ class LibtorrentEngineTest {
                 "",
                 "",
                 true,
-                com.torrenta.engine.EngineSettings.Protocol.defaults());
+                com.torrenta.engine.EngineSettings.Protocol.defaults(),
+                com.torrenta.engine.EngineSettings.Speed.defaults());
         try (LibtorrentEngine engine =
                 new LibtorrentEngine(() -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), quiet)) {
             engine.start();
@@ -442,7 +443,8 @@ class LibtorrentEngineTest {
                     "",
                     "",
                     true,
-                    com.torrenta.engine.EngineSettings.Protocol.defaults()));
+                    com.torrenta.engine.EngineSettings.Protocol.defaults(),
+                    com.torrenta.engine.EngineSettings.Speed.defaults()));
             assertEquals(321, engine.connectionsLimitForTest(), "applied live");
             assertTrue(events.stream().anyMatch(ev -> ev.message().startsWith("Engine settings applied")));
             Torrent t = engine.add(MAGNET);
@@ -508,6 +510,27 @@ class LibtorrentEngineTest {
             engine.setIpFilter(List.of());
             assertFalse(engine.isBlockedForTest("1.2.3.4"), "cleared");
             assertEquals(0, engine.blockedPeers());
+        }
+    }
+
+    @Test
+    void speedLimitsFollowTheHandSwitch(@TempDir Path dir) throws Exception {
+        com.torrenta.engine.EngineSettings.Speed speed = new com.torrenta.engine.EngineSettings.Speed(
+                1000, 100, 200, 20, false, false, 0, 0, java.util.EnumSet.noneOf(java.time.DayOfWeek.class), false);
+        com.torrenta.engine.EngineSettings settings =
+                com.torrenta.engine.EngineSettings.defaults().withSpeed(speed);
+        try (LibtorrentEngine engine = new LibtorrentEngine(
+                () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), settings)) {
+            engine.start();
+            assertEquals(1000 * 1024, engine.rateLimitsForTest()[0], "normal pair at start");
+            assertEquals(100 * 1024, engine.rateLimitsForTest()[1]);
+            engine.applySettings(settings.withSpeed(speed.withAlternativeOn(true)));
+            assertTrue(engine.refreshLimits(java.time.LocalDateTime.now()), "alternative in force");
+            assertEquals(200 * 1024, engine.rateLimitsForTest()[0]);
+            assertEquals(20 * 1024, engine.rateLimitsForTest()[1]);
+            engine.applySettings(settings.withSpeed(speed.withAlternativeOn(false)));
+            assertFalse(engine.refreshLimits(java.time.LocalDateTime.now()));
+            assertEquals(1000 * 1024, engine.rateLimitsForTest()[0], "back to normal");
         }
     }
 

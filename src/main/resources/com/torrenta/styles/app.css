@@ -143,3 +143,13 @@
     -fx-text-fill: -color-accent-fg;
     -fx-cursor: hand;
 }
+
+/* The alternative-speed toggle in the status bar: muted off, accent while in force. */
+.alt-speed {
+    -fx-text-fill: -color-fg-muted;
+    -fx-cursor: hand;
+}
+
+.alt-speed:active {
+    -fx-text-fill: -color-accent-fg;
+}

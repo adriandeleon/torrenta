@@ -106,6 +106,36 @@ class SettingsTest {
     }
 
     @Test
+    void speedSettingsAreRead(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Files.writeString(
+                file,
+                String.join(
+                        "\n",
+                        Settings.SPEED_DOWNLOAD + "=2048",
+                        Settings.SPEED_SCHEDULE_FROM + "=23:15",
+                        Settings.SPEED_SCHEDULE_TO + "=25:00", // unreadable: default
+                        Settings.SPEED_SCHEDULE_DAYS + "=mon, TUESDAY ,nonsense,sat",
+                        ""));
+        Settings settings = new Settings(file);
+        settings.load();
+        var sp = settings.engineSettings().speed();
+        assertEquals(2048, sp.download());
+        assertEquals(0, sp.upload());
+        assertEquals(23 * 60 + 15, sp.scheduleFrom());
+        assertEquals(8 * 60, sp.scheduleTo());
+        assertEquals(
+                java.util.EnumSet.of(
+                        java.time.DayOfWeek.MONDAY, java.time.DayOfWeek.TUESDAY, java.time.DayOfWeek.SATURDAY),
+                sp.scheduleDays());
+        assertEquals(
+                "Mon,Tue,Sat".toUpperCase().replace("MON", "MON"),
+                Settings.formatDays(sp.scheduleDays()).toUpperCase());
+        assertEquals("07:05", Settings.formatMinutes(7 * 60 + 5));
+        assertTrue(Settings.parseMinutes("24:00").isEmpty());
+    }
+
+    @Test
     void aBlankValueFallsBackToTheDefault(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Files.writeString(file, Settings.DOWNLOAD_DIR + "=\n");
