@@ -7,6 +7,17 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Watch folders** (Settings → Watch folders). A `.torrent` dropped into a watched folder is
+  added without a dialog, once it has stopped growing; a `.magnet` file holds one magnet link per
+  line, as qBittorrent reads them. Each entry says what becomes of the file (deleted, or renamed
+  `.added`), where the torrent saves (the download folder, the watch folder itself, or another
+  folder; the category's folder when the category has one), its category, and whether it starts
+  paused. A file that is not a torrent is renamed `.invalid` once and reported once; a torrent
+  already in the session is reported and the file is still handled; a folder that does not exist
+  is noted on the page's status line. Folders are watched through the file system and polled
+  every minute as the safety net (network mounts, macOS). The list is `watch-folders.json` beside
+  the settings, this machine's, never synced. One event-log line per add: "Added X from watch
+  folder Y".
 - **Incomplete folder, `.part` suffix and pre-allocation** (Settings → General → Downloads, all
   off by default). With the incomplete folder on, a new torrent downloads there and is moved to
   its save path (its category's, when the category has one) the moment it completes; a file already

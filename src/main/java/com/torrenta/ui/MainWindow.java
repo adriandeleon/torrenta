@@ -71,9 +71,11 @@ import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
+import com.torrenta.engine.WatchFolders;
 import com.torrenta.net.TorrentFetch;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.Settings;
+import com.torrenta.store.WatchFolderStore;
 import com.torrenta.update.ReleaseInfo;
 import com.torrenta.update.UpdateCheck;
 import com.torrenta.update.UpdateService;
@@ -115,6 +117,8 @@ public final class MainWindow {
     private javafx.scene.control.Dialog<?> promptDialog;
 
     private final LabelStore labels;
+    private final WatchFolderStore watchStore;
+    private WatchFolders watcher;
     private Sidebar sidebar;
     private SidebarSelection sidebarSelection = SidebarSelection.ALL;
     private String lastClipboardOffer = "";
@@ -154,6 +158,8 @@ public final class MainWindow {
         this.ipFilter = new IpFilterController(settings, configDir);
         this.labels = new LabelStore(configDir);
         labels.load();
+        this.watchStore = new WatchFolderStore(configDir);
+        watchStore.load();
         stage.setTitle(AppInfo.NAME);
 
         BorderPane root = new BorderPane();
@@ -173,6 +179,7 @@ public final class MainWindow {
         settingsWindow.setOnIpFilterChanged(this::refreshIpFilter, this::ipFilterStatusText);
         settingsWindow.setOnAppearanceChanged(this::applyStateColors);
         applyStateColors();
+        settingsWindow.setWatchFolders(watchStore, new WatchHost());
         sync = new SettingsSync(settings, configDir, new SyncHost());
         settingsWindow.setSync(sync);
         sync.addListener(() -> {
@@ -208,6 +215,7 @@ public final class MainWindow {
         stage.setOnHidden(e -> {
             rememberDivider();
             stopPolling();
+            stopWatching();
             updates.shutdown();
             sync.shutdown();
         });
@@ -239,6 +247,7 @@ public final class MainWindow {
             return promptDialog.getDialogPane().getScene();
         if (aboutDialog != null && aboutDialog.isShowing())
             return aboutDialog.getDialogPane().getScene();
+        if (settingsWindow.dialogScene() != null) return settingsWindow.dialogScene();
         if (settingsWindow.isShowing()) return settingsWindow.scene();
         return stage.getScene();
     }
@@ -250,6 +259,7 @@ public final class MainWindow {
         if (tagsDialog != null && tagsDialog.isShowing()) tagsDialog.cancel();
         if (promptDialog != null && promptDialog.isShowing()) promptDialog.close();
         if (aboutDialog != null && aboutDialog.isShowing()) aboutDialog.close();
+        settingsWindow.closeDialogsForCapture();
     }
 
     /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
@@ -279,6 +289,9 @@ public final class MainWindow {
         } else if (action.startsWith("settings:")) {
             settingsWindow.show(stage);
             settingsWindow.searchForCapture(action.substring("settings:".length()));
+        } else if (action.equals("settings-watch-add")) {
+            settingsWindow.show(stage);
+            settingsWindow.openWatchDialogForCapture();
         } else if (action.equals("dialog-add")) {
             if (currentDialog != null && currentDialog.isShowing()) currentDialog.confirm();
         } else if (action.startsWith("dialog-category:")) {
@@ -333,6 +346,9 @@ public final class MainWindow {
         if (detailWanted) System.out.println("capture: detail=" + detail.summary());
         if (settingsWindow.isShowing())
             System.out.println("capture: settings=" + settingsWindow.visibleRowsForCapture());
+        if (!settingsWindow.dialogTitle().isEmpty())
+            System.out.println("capture: dialog=" + settingsWindow.dialogTitle());
+        if (watcher != null) System.out.println("capture: watch=" + watchStatusText());
     }
 
     /**
@@ -373,6 +389,77 @@ public final class MainWindow {
         poller.scheduleAtFixedRate(() -> ipFilter.refresh(false, this::reportIpFilter), 1, 1, TimeUnit.HOURS);
         // The schedule is checked every minute; a change of state applies the other pair.
         poller.scheduleAtFixedRate(this::refreshLimits, 0, 60, TimeUnit.SECONDS);
+        watcher = new WatchFolders(engine, new WatcherHost());
+        restartWatching();
+    }
+
+    // ---- watch folders --------------------------------------------------------------------------
+
+    /** What the watcher needs; called on its thread, so everything FX-owned hops. */
+    private final class WatcherHost implements WatchFolders.Host {
+        @Override
+        public Path defaultDownloadDir() {
+            return settings.downloadDir();
+        }
+
+        @Override
+        public Optional<com.torrenta.engine.Category> category(String name) {
+            return labels.category(name);
+        }
+
+        @Override
+        public AddRequest.Storage storage(Path destination) {
+            return settings.storage(destination);
+        }
+
+        @Override
+        public void report(EngineEvent event) {
+            Platform.runLater(() -> {
+                log.add(event);
+                setStatus(event.message());
+            });
+        }
+
+        @Override
+        public void statusChanged() {
+            Platform.runLater(settingsWindow::refreshWatchStatus);
+        }
+    }
+
+    /** What the Settings page needs. */
+    private final class WatchHost implements SettingsWindow.WatchHost {
+        @Override
+        public void watchFoldersChanged() {
+            restartWatching();
+        }
+
+        @Override
+        public String watchStatus() {
+            return watchStatusText();
+        }
+    }
+
+    private String watchStatusText() {
+        WatchFolders w = watcher;
+        return WatchFolders.statusText(
+                watchStore.entries().size(), w == null ? List.of() : w.missing(), w != null && w.isRunning());
+    }
+
+    /** Any thread. (Re)starts the watcher on the stored list; a no-op until the engine is up. */
+    private void restartWatching() {
+        WatchFolders w = watcher;
+        if (w == null) return;
+        List<com.torrenta.engine.WatchFolder> entries = watchStore.entries();
+        // start() waits for a poll in progress, which may be inside the engine: not on the FX thread.
+        Thread.ofVirtual().name("watch-folders-start").start(() -> {
+            w.start(entries);
+            Platform.runLater(settingsWindow::refreshWatchStatus);
+        });
+    }
+
+    private void stopWatching() {
+        WatchFolders w = watcher;
+        if (w != null) Thread.ofVirtual().name("watch-folders-stop").start(w::stop);
     }
 
     // ---- speed ----------------------------------------------------------------------------------

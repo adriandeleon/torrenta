@@ -43,6 +43,9 @@ scripts/dev-run.sh -- "magnet:?xt=urn:btih:…"    # with arguments for the app
 
 Builds need a JDK 25: the formatter (Palantir 2.92) does not run on JDK 27.
 
+A folder can be watched for `.torrent` and `.magnet` files (Settings → Watch folders): what lands
+there is added without a dialog, then deleted or renamed `.added`.
+
 ### Building a native app image
 
 ```bash
@@ -87,7 +90,9 @@ What the engine still owes a torrent's files, the move and the names to take bac
 Add dialog's line under the save path says where the files start and how much room there is. Categories (name and save path) are
 `categories.json` and tags are `tags.json`, both small enough to edit by hand; which torrent is
 filed under which is `torrents/<info-hash>.labels` beside its resume data, written the moment it
-changes and deleted with the torrent. A torrent's own share limit (Torrent → Limits…)
+changes and deleted with the torrent. Watch folders are `watch-folders.json` (folder, what to do
+with the file, save path, category, start paused), this machine's and never synced; a file that is
+not a torrent is renamed `.invalid` and left alone. A torrent's own share limit (Torrent → Limits…)
 is kept there as `torrent.<info-hash>.share` and goes with the torrent when it is removed; its rate
 caps and connection counts are libtorrent's and live in its resume data. The global queue and share
 limits are `queue.*` and `share.*`. The theme is there too, under General →

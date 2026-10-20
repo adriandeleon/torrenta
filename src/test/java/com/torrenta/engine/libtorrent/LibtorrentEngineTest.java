@@ -1016,6 +1016,135 @@ class LibtorrentEngineTest {
         }
     }
 
+    @Test
+    void watchFoldersAddWhatIsDroppedIn(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] pair = twoFileTorrent(downloads, "pair");
+        byte[] other = twoFileTorrent(downloads, "other");
+        Path inbox = Files.createDirectories(dir.resolve("inbox"));
+        Path later = dir.resolve("later");
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            com.torrenta.engine.WatchFolders.Host host = new com.torrenta.engine.WatchFolders.Host() {
+                @Override
+                public Path defaultDownloadDir() {
+                    return downloads;
+                }
+
+                @Override
+                public java.util.Optional<com.torrenta.engine.Category> category(String name) {
+                    return name.equals("Movies")
+                            ? java.util.Optional.of(new com.torrenta.engine.Category("Movies"))
+                            : java.util.Optional.empty();
+                }
+
+                @Override
+                public AddRequest.Storage storage(Path destination) {
+                    return AddRequest.Storage.DEFAULT;
+                }
+
+                @Override
+                public void report(EngineEvent event) {
+                    events.add(event);
+                }
+            };
+            List<com.torrenta.engine.WatchFolder> entries = List.of(
+                    new com.torrenta.engine.WatchFolder(
+                            inbox.toString(),
+                            com.torrenta.engine.WatchFolder.AfterAdd.RENAME,
+                            com.torrenta.engine.WatchFolder.SaveTo.WATCH_FOLDER,
+                            "",
+                            "Movies",
+                            true),
+                    new com.torrenta.engine.WatchFolder(
+                            later.toString(),
+                            com.torrenta.engine.WatchFolder.AfterAdd.DELETE,
+                            com.torrenta.engine.WatchFolder.SaveTo.DEFAULT,
+                            "",
+                            "",
+                            false));
+            try (com.torrenta.engine.WatchFolders watcher = new com.torrenta.engine.WatchFolders(engine, host)) {
+                watcher.configure(entries);
+                assertEquals(List.of(later), watcher.missing(), "a folder that is not there is noted, not fatal");
+                assertEquals(1, events.size(), "and said once");
+                assertTrue(events.get(0).message().contains("does not exist"));
+
+                // A .torrent: read once it has held its size for two looks, then renamed.
+                Path dropped = inbox.resolve("pair.torrent");
+                Files.write(dropped, pair);
+                assertTrue(watcher.poll(), "the first look only notes the size: come back soon");
+                assertTrue(engine.torrents().isEmpty(), "not read half-way");
+                assertFalse(watcher.poll(), "the second look adds it");
+                await("in the session", () -> engine.torrents().size() == 1);
+                Torrent t = engine.torrents().get(0);
+                assertEquals("pair", t.name());
+                assertTrue(t.paused(), "the entry's start-paused");
+                assertEquals(inbox.toString(), t.savePath(), "saved to the watch folder itself");
+                assertEquals("Movies", t.category());
+                assertFalse(Files.exists(dropped));
+                assertTrue(Files.isRegularFile(inbox.resolve("pair.torrent.added")));
+                assertTrue(
+                        events.stream().anyMatch(e -> e.message().equals("Added pair from watch folder " + inbox)),
+                        events.toString());
+
+                // The same torrent again: not added twice, the file still handled.
+                Files.write(inbox.resolve("again.torrent"), pair);
+                watcher.poll();
+                watcher.poll();
+                assertEquals(1, engine.torrents().size());
+                assertTrue(Files.isRegularFile(inbox.resolve("again.torrent.added")));
+                assertTrue(
+                        events.stream().anyMatch(e -> e.message().startsWith("Already in the session: again.torrent")));
+
+                // Not a torrent: set aside once, said once, never looked at again.
+                Files.write(inbox.resolve("junk.torrent"), "not bencode".getBytes());
+                watcher.poll();
+                watcher.poll();
+                watcher.poll();
+                watcher.poll();
+                assertTrue(Files.isRegularFile(inbox.resolve("junk.torrent.invalid")));
+                assertEquals(
+                        1,
+                        events.stream()
+                                .filter(e -> e.message().startsWith("Not a torrent: junk.torrent"))
+                                .count(),
+                        events.toString());
+                assertEquals(1, engine.torrents().size());
+
+                // A .magnet file: one link per line; comments and blanks are skipped.
+                Files.writeString(inbox.resolve("links.magnet"), "# one\n" + MAGNET + "\n\n");
+                watcher.poll();
+                watcher.poll();
+                await(
+                        "the magnet in the session",
+                        () -> engine.torrents().stream().anyMatch(x -> x.id().equals(MAGNET_ID)));
+                assertTrue(Files.isRegularFile(inbox.resolve("links.magnet.added")));
+
+                // The missing folder appears: polled from then on, and this entry deletes.
+                Files.createDirectories(later);
+                Files.write(later.resolve("other.torrent"), other);
+                watcher.poll();
+                assertEquals(List.of(), watcher.missing());
+                watcher.poll();
+                await(
+                        "other in the session",
+                        () -> engine.torrents().stream().anyMatch(x -> x.name().equals("other")));
+                assertFalse(Files.exists(later.resolve("other.torrent")), "deleted, as that entry says");
+                assertEquals(
+                        downloads.toString(),
+                        engine.torrents().stream()
+                                .filter(x -> x.name().equals("other"))
+                                .findFirst()
+                                .orElseThrow()
+                                .savePath(),
+                        "the download folder");
+                assertEquals(3, engine.torrents().size());
+                assertFalse(watcher.poll(), "nothing left to look at");
+            }
+        }
+    }
+
     private static LibtorrentEngine engine(Path dir) {
         return engine(dir, new TorrentStore(dir.resolve("store")));
     }

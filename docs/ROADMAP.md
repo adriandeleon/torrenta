@@ -255,7 +255,9 @@ Everything in Settings that the engine already knows how to do.
    relative to the torrent's folder but reads it back relative to the save path, so the engine
    puts the full names back from its `.storage` sidecar before re-adding. Allocation is on each
    file's first write in libtorrent 2.x, not at add.
-4. **Watch folders.**
+4. ✓ **Watch folders.** A `WatchService` thread plus a poll every minute as the safety net; a
+   file is read once its size has held for two looks; the add is the engine's own path, with no
+   dialog. The list is `watch-folders.json`, this machine's, never synced.
 5. **Run on event** (added, finished, seeding done) with placeholders; desktop notifications.
 
 ### 0.6 — Search
