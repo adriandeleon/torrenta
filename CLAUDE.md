@@ -21,7 +21,7 @@ Run Maven from the project root with a JDK 25.
 | Layer | What | Where |
 |---|---|---|
 | Entry | `--help`/`--version`, toolkit start, theme | `com.torrenta.App`, `com.torrenta.cli` |
-| UI | The window: menu bar, torrent list, status bar | `com.torrenta.ui` |
+| UI | The window: menu bar, filter, torrent list, status bar; `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
 | Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
@@ -44,6 +44,11 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
   touches native code is loaded** — `LibtorrentEngine.start()` is the only entry point for that
   reason. The failure otherwise is a `LinkageError` whose message is a link to the project page;
   the cause has the real reason.
+- **No static field in the engine package may touch a libtorrent4j constant.** `TorrentHandle.QUERY_*`
+  and friends are SWIG objects; a `static final` built from one runs at class load, before the
+  native is unpacked, and the JNI class then fails to initialise for the life of the JVM
+  (`NoClassDefFoundError: Could not initialize class ... libtorrent_jni` in every later test). Use a
+  nested holder class (`StatusQuery`) or compute inside the method.
 - **`System.load` needs an absolute path.** A relative `-Dtorrenta.nativeDir` produced "Expecting
   an absolute path of the library"; `NativeLibrary` absolutises.
 - **The per-OS jar cannot be `requires`d.** Its automatic module name depends on the OS
@@ -64,6 +69,11 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 - **The id is `getInfoHashes().getBest().toHex()`**, not `infoHash()`: a v2-only torrent has an
   all-zero v1 hash, and two of them would collide.
 - **Alerts arrive on their own thread; tests `await`, bounded, never sleep-and-hope.**
+- **Nothing in the chrome may be focus-traversable** (Termina's rule holds here). The filter box
+  took initial focus on a fresh launch because the table is hidden until the first torrent, so it
+  was the first traversable node. It is `setFocusTraversable(false)`; Ctrl+F reaches it.
+- **Rows are `TorrentRow` objects, never `Torrent` snapshots.** The list has an extractor on the
+  row's torrent property, which is what makes the `SortedList` re-sort on an in-place update.
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
   write under `~/.torrenta`. `LibtorrentEngineTest` starts a real session on purpose: it is the one
   test that proves the native loads on each CI platform.
@@ -85,4 +95,5 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 Add dialogs (Ctrl+O / Ctrl+M only say so; inputs come from the command line), pause/resume/remove
 in the window (`Engine.remove` exists, nothing calls it yet), limits, a settings window, per-torrent
 detail, `-Pdist` with the native in the image.
-The table replaces its items each tick, which drops the selection — fix before adding row actions.
+Row actions (context menu, chords) are next; `TorrentRows` keeps row identity, so the selection
+is safe to build on.

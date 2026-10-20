@@ -2,16 +2,15 @@ package com.torrenta.ui;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
-import javafx.beans.property.ReadOnlyObjectWrapper;
-import javafx.collections.FXCollections;
-import javafx.collections.ObservableList;
+import javafx.collections.transformation.FilteredList;
+import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
@@ -19,9 +18,14 @@ import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
+import javafx.scene.control.SelectionMode;
 import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
+import javafx.scene.control.TextField;
+import javafx.scene.control.cell.ProgressBarTableCell;
+import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
@@ -32,35 +36,40 @@ import javafx.scene.layout.VBox;
 import javafx.stage.Stage;
 
 import com.torrenta.AppInfo;
-import com.torrenta.cli.CommandLine;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Torrent;
+import com.torrenta.store.Settings;
 
 /**
- * The one window: a menu bar over the torrent list, with a status bar below.
+ * The one window: a menu bar, a filter box over the torrent list, a status bar.
  *
  * <p>The engine arrives after the window is up ({@link #engineReady}), because loading it takes
  * longer than a first frame should. Until then inputs queue. Once it is there a worker polls it
- * once a second and hands the FX thread a fresh list; nothing on the FX thread ever calls into the
- * engine.
+ * once a second and hands the FX thread a fresh list, which {@link TorrentRows} reconciles into the
+ * rows the table already shows; nothing on the FX thread ever calls into the engine.
  */
 public final class MainWindow {
 
     private static final long POLL_MS = 1000;
 
     private final Stage stage;
+    private final Settings settings;
     private final Label status = new Label();
     private final Label rates = new Label();
-    private final ObservableList<Torrent> torrents = FXCollections.observableArrayList();
+    private final TorrentRows rows = new TorrentRows();
+    private final FilteredList<TorrentRow> filtered = new FilteredList<>(rows.list());
+    private final TextField filter = new TextField();
+    private TableView<TorrentRow> table;
 
     private Engine engine;
     private String engineDescription = "";
     private final List<String> pendingInputs = new ArrayList<>();
     private ScheduledExecutorService poller;
 
-    public MainWindow(Stage stage) {
+    public MainWindow(Stage stage, Settings settings) {
         this.stage = stage;
+        this.settings = settings;
         stage.setTitle(AppInfo.NAME);
 
         BorderPane root = new BorderPane();
@@ -73,6 +82,7 @@ public final class MainWindow {
                 .add(MainWindow.class
                         .getResource("/com/torrenta/styles/app.css")
                         .toExternalForm());
+        scene.getAccelerators().put(KeyCombination.keyCombination("Shortcut+F"), this::focusFilter);
         stage.setScene(scene);
         stage.setOnHidden(e -> stopPolling());
         setStatus("Starting the engine…");
@@ -81,6 +91,7 @@ public final class MainWindow {
 
     public void show() {
         stage.show();
+        table.requestFocus();
     }
 
     /** The status bar's text; read by the development capture. */
@@ -138,8 +149,7 @@ public final class MainWindow {
         List<Torrent> snapshot = engine.torrents();
         Engine.Rates current = engine.rates();
         Platform.runLater(() -> {
-            // setAll rather than clear+addAll, so the table sees one change and keeps its scroll.
-            torrents.setAll(snapshot);
+            rows.apply(snapshot);
             rates.setText(ratesText(current));
         });
     }
@@ -164,50 +174,151 @@ public final class MainWindow {
         Menu file = new Menu("File");
         file.getItems().addAll(addTorrent, addMagnet, new SeparatorMenuItem(), quit);
 
+        MenuItem findItem = new MenuItem("Filter Torrents");
+        // The accelerator is the scene's, so it works while the menu is closed; this is the label.
+        findItem.setOnAction(e -> focusFilter());
+        Menu view = new Menu("View");
+        view.getItems().add(findItem);
+
         MenuItem about = new MenuItem("About " + AppInfo.NAME);
         about.setOnAction(e -> setStatus(AppInfo.NAME + " " + AppInfo.VERSION + " — " + AppInfo.COPYRIGHT));
         Menu help = new Menu("Help");
         help.getItems().add(about);
 
-        MenuBar bar = new MenuBar(file, help);
+        MenuBar bar = new MenuBar(file, view, help);
         bar.setUseSystemMenuBar(true);
         return bar;
     }
 
-    private StackPane buildCenter() {
-        TableView<Torrent> table = buildTable();
+    private VBox buildCenter() {
+        table = buildTable();
         VBox empty = buildEmptyState();
-        // The empty state is the whole centre until the first torrent, and the table after it.
-        empty.visibleProperty().bind(Bindings.isEmpty(torrents));
+        // The empty state is the whole centre until the first torrent, and the table after it;
+        // a filter that matches nothing shows the table's own placeholder instead.
+        empty.visibleProperty().bind(Bindings.isEmpty(rows.list()));
         empty.managedProperty().bind(empty.visibleProperty());
-        table.visibleProperty().bind(Bindings.isNotEmpty(torrents));
+        table.visibleProperty().bind(Bindings.isNotEmpty(rows.list()));
         table.managedProperty().bind(table.visibleProperty());
-        return new StackPane(table, empty);
+        // The first torrent makes the table appear; it takes the focus then, unless the person is
+        // typing a filter at that moment.
+        table.visibleProperty().addListener((o, was, now) -> {
+            if (now && !filter.isFocused()) table.requestFocus();
+        });
+        StackPane centre = new StackPane(table, empty);
+        VBox.setVgrow(centre, Priority.ALWAYS);
+        return new VBox(buildFilterBar(), centre);
     }
 
-    private TableView<Torrent> buildTable() {
-        TableView<Torrent> table = new TableView<>(torrents);
-        table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        table.setPlaceholder(new Label(""));
+    private HBox buildFilterBar() {
+        filter.setPromptText("Filter by name (Ctrl+F)");
+        // Not traversable: the scene hands initial focus to the first traversable node, and while
+        // the table is hidden (no torrents yet) that would be this box, so every keystroke on a
+        // fresh launch would land in the filter. Ctrl+F reaches it; Tab does not need to.
+        filter.setFocusTraversable(false);
+        filter.textProperty().addListener((o, was, text) -> filtered.setPredicate(nameFilter(text)));
+        filter.setOnKeyPressed(e -> {
+            if (e.getCode() == KeyCode.ESCAPE) {
+                filter.clear();
+                table.requestFocus();
+                e.consume();
+            } else if (e.getCode() == KeyCode.ENTER) {
+                table.requestFocus();
+                e.consume();
+            }
+        });
+        HBox.setHgrow(filter, Priority.ALWAYS);
+        HBox bar = new HBox(filter);
+        bar.setPadding(new Insets(6, 8, 6, 8));
+        bar.getStyleClass().add("filter-bar");
+        return bar;
+    }
+
+    /** Case-insensitive substring on the name; blank matches everything. Package-private for tests. */
+    static java.util.function.Predicate<TorrentRow> nameFilter(String text) {
+        String needle = text == null ? "" : text.trim().toLowerCase(java.util.Locale.ROOT);
+        if (needle.isEmpty()) return row -> true;
+        return row -> row.torrent().name().toLowerCase(java.util.Locale.ROOT).contains(needle);
+    }
+
+    private void focusFilter() {
+        filter.requestFocus();
+        filter.selectAll();
+    }
+
+    private TableView<TorrentRow> buildTable() {
+        // Sorted over filtered over the live rows: the table's comparator drives the sort, and the
+        // rows list's extractor makes a changed rate re-sort its row without a sort() call.
+        SortedList<TorrentRow> sorted = new SortedList<>(filtered);
+        TableView<TorrentRow> table = new TableView<>(sorted);
+        sorted.comparatorProperty().bind(table.comparatorProperty());
+        table.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+        // Widths are remembered, so they are not stretched to fit; the last column does not flex.
+        table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
+        table.setTableMenuButtonVisible(true);
+        table.setPlaceholder(new Label("No torrents match the filter"));
         table.getStyleClass().add("torrent-table");
 
-        TableColumn<Torrent, String> name = column("Name", t -> t.name());
-        name.setPrefWidth(360);
-        TableColumn<Torrent, String> size = column("Size", t -> t.size() == 0 ? "—" : Bytes.human(t.size()));
-        TableColumn<Torrent, String> progress =
-                column("Progress", t -> String.format(Locale.ROOT, "%.1f %%", t.progress() * 100));
-        TableColumn<Torrent, String> down = column("Down", t -> Bytes.rate(t.downloadRate()));
-        TableColumn<Torrent, String> up = column("Up", t -> Bytes.rate(t.uploadRate()));
-        TableColumn<Torrent, String> peers = column("Peers", t -> t.seeds() + " / " + t.peers());
-        TableColumn<Torrent, String> state = column("State", t -> t.state().label());
-        table.getColumns().addAll(List.of(name, size, progress, down, up, peers, state));
+        TableColumn<TorrentRow, String> name = column("name", "Name", 360, true, Torrent::name, s -> s);
+        name.setComparator(String.CASE_INSENSITIVE_ORDER);
+        TableColumn<TorrentRow, Double> progress =
+                column("progress", "Progress", 110, true, Torrent::progress, Format::percent);
+        progress.setCellFactory(ProgressBarTableCell.forTableColumn());
+        table.getColumns()
+                .addAll(List.of(
+                        name,
+                        column("size", "Size", 90, true, Torrent::size, v -> v == 0 ? "—" : Bytes.human(v)),
+                        column("done", "Done", 90, false, Torrent::done, Bytes::human),
+                        progress,
+                        column("state", "State", 130, true, t -> t.state().label(), s -> s),
+                        column("seeds", "Seeds", 70, true, Torrent::seeds, String::valueOf),
+                        column("peers", "Peers", 70, true, Torrent::peers, String::valueOf),
+                        column("down", "Down", 90, true, Torrent::downloadRate, Bytes::rate),
+                        column("up", "Up", 90, true, Torrent::uploadRate, Bytes::rate),
+                        column("eta", "ETA", 80, true, Format::etaSeconds, Format::eta),
+                        column(
+                                "ratio",
+                                "Ratio",
+                                70,
+                                true,
+                                t -> Format.ratioValue(t.uploaded(), t.downloaded()),
+                                Format::ratio),
+                        column("added", "Added", 130, false, Torrent::added, Format::dateTime),
+                        column("completed", "Completed", 130, false, Torrent::completed, Format::dateTime),
+                        column("tracker", "Tracker", 160, false, Torrent::tracker, Format::host),
+                        column("path", "Save path", 240, false, Torrent::savePath, s -> s)));
+
+        ColumnMemory.apply(table, ColumnLayout.parse(settings.get(Settings.TABLE_COLUMNS, "")));
+        ColumnMemory.watch(table, () -> {
+            settings.set(Settings.TABLE_COLUMNS, ColumnLayout.format(ColumnMemory.capture(table)));
+            settings.saveQuietly();
+        });
         return table;
     }
 
-    private static TableColumn<Torrent, String> column(
-            String title, java.util.function.Function<Torrent, String> value) {
-        TableColumn<Torrent, String> column = new TableColumn<>(title);
-        column.setCellValueFactory(cell -> new ReadOnlyObjectWrapper<>(value.apply(cell.getValue())));
+    /**
+     * A column whose cell value is a typed, comparable field of the row's current snapshot — so the
+     * sort compares numbers, not their text — rendered through {@code text}. The value observes the
+     * row's torrent property, so a new snapshot refreshes the cell in place.
+     */
+    private static <T extends Comparable<? super T>> TableColumn<TorrentRow, T> column(
+            String id,
+            String title,
+            double width,
+            boolean visible,
+            Function<Torrent, T> value,
+            Function<T, String> text) {
+        TableColumn<TorrentRow, T> column = new TableColumn<>(title);
+        column.setId(id);
+        column.setPrefWidth(width);
+        column.setVisible(visible);
+        column.setCellValueFactory(cell -> cell.getValue().torrentProperty().map(value));
+        column.setCellFactory(c -> new TableCell<>() {
+            @Override
+            protected void updateItem(T item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(empty || item == null ? null : text.apply(item));
+            }
+        });
         return column;
     }
 
@@ -237,10 +348,5 @@ public final class MainWindow {
 
     private void setStatus(String text) {
         status.setText(text);
-    }
-
-    /** True when the input would be handled as a magnet rather than a file. */
-    static boolean isMagnet(String input) {
-        return CommandLine.isMagnet(input);
     }
 }

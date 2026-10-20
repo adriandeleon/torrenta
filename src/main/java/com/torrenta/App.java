@@ -57,13 +57,14 @@ public final class App extends Application {
         // Applied before any window is built, so the first frame is already themed.
         Application.setUserAgentStylesheet(Theme.EDITORA_DARK.stylesheet());
 
-        MainWindow window = new MainWindow(stage);
-        window.show();
-        cli.inputs().forEach(window::addInput);
-
         Path configDir = ConfigDir.resolve(cli.configDir());
         Settings settings = new Settings(configDir.resolve(Settings.FILE_NAME));
         settings.load();
+
+        MainWindow window = new MainWindow(stage, settings);
+        window.show();
+        cli.inputs().forEach(window::addInput);
+
         // The unpacked engine lives beside the settings unless a -D says otherwise (the tests do).
         if (System.getProperty("torrenta.nativeDir") == null) {
             System.setProperty("torrenta.nativeDir", configDir.resolve("native").toString());

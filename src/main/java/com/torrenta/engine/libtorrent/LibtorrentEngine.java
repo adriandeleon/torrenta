@@ -39,6 +39,7 @@ import org.libtorrent4j.swig.add_torrent_params;
 import org.libtorrent4j.swig.error_code;
 import org.libtorrent4j.swig.libtorrent;
 import org.libtorrent4j.swig.resume_data_flags_t;
+import org.libtorrent4j.swig.status_flags_t;
 import org.libtorrent4j.swig.torrent_handle;
 import org.libtorrent4j.swig.torrent_handle_vector;
 
@@ -272,22 +273,39 @@ public final class LibtorrentEngine implements Engine {
         return handle.status().getInfoHashes().getBest().toHex();
     }
 
+    /**
+     * Initialised on first use, never when this class loads: {@code TorrentHandle}'s constants are
+     * SWIG objects, and touching one before {@link NativeLibrary#ensureAvailable()} has run makes
+     * the JNI class fail to initialise — and then every later use of it, for the life of the JVM.
+     */
+    private static final class StatusQuery {
+        /** The default status query leaves the strings out (they cost a copy per call); ask. */
+        static final status_flags_t FLAGS = TorrentHandle.QUERY_NAME.or_(TorrentHandle.QUERY_SAVE_PATH);
+    }
+
     private static Torrent snapshot(TorrentHandle handle) {
-        // The default status query leaves the name out (it costs a string copy per call); ask.
-        TorrentStatus status = handle.status(TorrentHandle.QUERY_NAME);
+        TorrentStatus status = handle.status(StatusQuery.FLAGS);
         String id = status.getInfoHashes().getBest().toHex();
         String name = status.name();
         if (name == null || name.isEmpty()) name = id;
+        String tracker = status.currentTracker();
         return new Torrent(
                 id,
                 name,
                 status.totalWanted(),
+                status.totalWantedDone(),
                 status.progress(),
                 state(status.state()),
                 status.downloadPayloadRate(),
                 status.uploadPayloadRate(),
                 status.numPeers(),
-                status.numSeeds());
+                status.numSeeds(),
+                status.allTimeUpload(),
+                status.allTimeDownload(),
+                status.addedTime(),
+                status.completedTime(),
+                tracker == null ? "" : tracker,
+                status.swig().getSave_path());
     }
 
     /** libtorrent's seven states folded into the list's six. Package-private for the test. */
