@@ -14,10 +14,12 @@
 
 A keyboard-first, cross-platform BitTorrent client built on JavaFX.
 
-Status: **early**. A themed window with a menu bar, a torrent list and a status bar, on a real
-engine: libtorrent, through [libtorrent4j](https://github.com/aldenml/libtorrent4j). Torrents given
-on the command line are added, listed, and come back after a restart without a recheck. No dialogs,
-settings window or limits yet; see [docs/ROADMAP.md](docs/ROADMAP.md).
+Status: **early**. A themed window with a menu bar, a torrent list, a status bar and an event log,
+on a real engine: libtorrent, through [libtorrent4j](https://github.com/aldenml/libtorrent4j).
+Torrents arrive from a file, a magnet link, a URL, a drop or the clipboard through an Add dialog
+(save path, start paused, sequential, skip check, stop condition, file selection and priorities),
+are listed with live columns, can be paused, resumed, rechecked, reannounced and removed, and come
+back after a restart. No settings window or limits yet; see [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Running
 
@@ -62,8 +64,9 @@ window (`download.dir` in the settings file already works).
 
 | Chord | Action |
 |---|---|
-| `Ctrl+O` (`Cmd+O` on macOS) | Add a `.torrent` file |
-| `Ctrl+M` | Add a magnet link |
+| `Ctrl+O` (`Cmd+O` on macOS) | Add `.torrent` files, through the Add dialog |
+| `Ctrl+M` | Add a magnet link or a link to a `.torrent` (the clipboard's, if it holds one) |
+| `Ctrl+V` | Add whatever magnet or torrent link is on the clipboard; the status bar says when there is one |
 | `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
 | `Ctrl+Shift+P` | Command palette: every command, found by typing part of its name |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
@@ -78,7 +81,8 @@ window (`download.dir` in the settings file already works).
 | `Ctrl+Q` | Quit |
 
 Every action is in the Torrent menu, the list's right-click menu and the palette, and applies to
-the whole selection. The status bar shows the latest event; an error count appears there while
+the whole selection. `.torrent` files and links can also be dropped on the window, and anything on
+the command line goes through the same Add dialog. The status bar shows the latest event; an error count appears there while
 there are errors, and a click on it opens the log.
 
 The list's columns (fifteen, from the header's ⋮ menu) keep their order, widths and visibility in

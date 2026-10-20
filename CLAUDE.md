@@ -14,7 +14,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `TORRENTA_CAPTURE=/tmp/shot.png ./mvnw javafx:run`) renders the real window, writes a PNG, prints
   `capture:` lines (title, focus, engine, status bar) and exits. `-Dtorrenta.captureAction=` runs
   window actions first: `select-all`, `palette`, `palette:<query>`, or a command id such as
-  `pause-resume`; the palette's visible ranking is printed.
+  `pause-resume`, or `dialog-add` to press Add on an open Add dialog; the palette's ranking, the
+  open dialog's title and the log window's state are printed, and when a dialog is open the PNG is
+  of the dialog.
 
 Run Maven from the project root with a JDK 25.
 
@@ -24,7 +26,8 @@ Run Maven from the project root with a JDK 25.
 |---|---|---|
 | Entry | `--help`/`--version`, toolkit start, theme | `com.torrenta.App`, `com.torrenta.cli` |
 | Events | `EngineEvent` (level, torrent, message), raised by the engine from libtorrent alerts and by its own start/stop/remove; `Engine.addListener` | `com.torrenta.engine` |
-| UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`; `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
+| Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL) | `com.torrenta.engine`, `com.torrenta.net` |
+| UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
 | Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
@@ -81,6 +84,17 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 - **"Paused" means paused by a person.** libtorrent's queue pauses auto-managed torrents too;
   `Torrent.paused` is `PAUSED && !AUTO_MANAGED`, and `pause()` clears `AUTO_MANAGED` first so the
   queue does not resume what the user stopped.
+- **A hybrid torrent has padding files.** `TorrentBuilder` makes v1+v2 torrents whose file list
+  interleaves `.pad/NNN` entries; `inspect` leaves them out but keeps the torrent's own indices, so
+  a test that wants "file 1" must read the index off the preview. `totalSize()` counts padding;
+  the preview sums the real files.
+- **`add_torrent` checks the files at once, paused or not, and a `force_recheck` issued during that
+  check is dropped.** Renames through the handle are confirmed by `file_renamed_alert` but a
+  recheck afterwards still did not find the files under the new names in 2.1.0-39. That is why the
+  "no root folder" layout is not in the Add dialog; see the roadmap before trying again.
+- **Test compilation patches the module**, so a test that needs a JDK module the main code does
+  not (`jdk.httpserver`, for the fetch test's local server) gets `--add-modules` and `--add-reads`
+  in the compiler plugin's test execution. At run time the tests are on the classpath.
 - **Engine events arrive on libtorrent4j's alert thread.** `MainWindow` hops to the FX thread
   before touching the log or the status bar; `EventLog.add` is FX-only. The j.u.l bridge takes
   the hop as a parameter so tests run it inline.
@@ -109,5 +123,6 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 Add dialogs (Ctrl+O / Ctrl+M only say so; inputs come from the command line), pause/resume/remove
 in the window (`Engine.remove` exists, nothing calls it yet), limits, a settings window, per-torrent
 detail, `-Pdist` with the native in the image.
-0.2 is complete. Next is 0.3: the Add dialog, the detail pane, the native app image with the
-engine's native inside it, the update check. First/last piece first waits for 0.4.
+0.2 is complete and 0.3's Add dialog is in. Next: the detail pane, then the native app image with
+the engine's native inside it, then the update check. Content layout and first/last piece first
+wait for 0.4.

@@ -7,6 +7,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -17,14 +19,18 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.torrenta.cli.CommandLine;
+import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
+import com.torrenta.engine.Priority;
 import com.torrenta.engine.Torrent;
+import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.store.TorrentStore;
 import org.libtorrent4j.AddTorrentParams;
 import org.libtorrent4j.AlertListener;
+import org.libtorrent4j.FileStorage;
 import org.libtorrent4j.LibTorrent;
 import org.libtorrent4j.SessionHandle;
 import org.libtorrent4j.SessionManager;
@@ -37,6 +43,8 @@ import org.libtorrent4j.alerts.AddTorrentAlert;
 import org.libtorrent4j.alerts.Alert;
 import org.libtorrent4j.alerts.AlertType;
 import org.libtorrent4j.alerts.FileErrorAlert;
+import org.libtorrent4j.alerts.FileRenameFailedAlert;
+import org.libtorrent4j.alerts.FileRenamedAlert;
 import org.libtorrent4j.alerts.ListenFailedAlert;
 import org.libtorrent4j.alerts.ListenSucceededAlert;
 import org.libtorrent4j.alerts.PortmapAlert;
@@ -88,7 +96,10 @@ public final class LibtorrentEngine implements Engine {
     private final List<Consumer<EngineEvent>> listeners = new CopyOnWriteArrayList<>();
 
     /** Ids re-added from the store at start, so their add alert reads "Restored", not "Added". */
-    private final java.util.Set<String> restoring = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Set<String> restoring = ConcurrentHashMap.newKeySet();
+
+    /** Magnets to pause once their metadata arrives: the dialog's "stop after metadata". */
+    private final Set<String> stopAfterMetadata = ConcurrentHashMap.newKeySet();
 
     public LibtorrentEngine(Path downloadDir, TorrentStore store) {
         this.downloadDir = downloadDir;
@@ -159,34 +170,113 @@ public final class LibtorrentEngine implements Engine {
 
     @Override
     public Torrent add(String input) throws EngineException {
-        SessionManager s = running();
-        AddTorrentParams params;
+        AddRequest.Source source;
         if (CommandLine.isMagnet(input)) {
-            try {
-                params = AddTorrentParams.parseMagnetUri(input);
-            } catch (RuntimeException e) {
-                throw new EngineException("Not a valid magnet link", e);
-            }
+            source = new AddRequest.Magnet(input);
         } else {
             File file = new File(input);
             if (!file.isFile()) throw new EngineException("No such file: " + input);
-            TorrentInfo info;
             try {
-                info = new TorrentInfo(file);
-            } catch (RuntimeException e) {
-                throw new EngineException("Not a valid .torrent file: " + input, e);
+                source = new AddRequest.TorrentFile(Files.readAllBytes(file.toPath()), input);
+            } catch (IOException e) {
+                throw new EngineException("Could not read " + input + ": " + e.getMessage(), e);
             }
-            params = new AddTorrentParams();
-            params.setTorrentInfo(info);
         }
-        params.setSavePath(downloadDir.toString());
+        return add(AddRequest.defaults(source, downloadDir));
+    }
+
+    @Override
+    public Torrent add(AddRequest request) throws EngineException {
+        SessionManager s = running();
+        AddTorrentParams params;
+        TorrentInfo info = null;
+        switch (request.source()) {
+            case AddRequest.Magnet magnet -> {
+                try {
+                    params = AddTorrentParams.parseMagnetUri(magnet.uri());
+                } catch (RuntimeException e) {
+                    throw new EngineException("Not a valid magnet link", e);
+                }
+            }
+            case AddRequest.TorrentFile file -> {
+                info = decode(file.bytes(), file.origin());
+                params = new AddTorrentParams();
+                params.setTorrentInfo(info);
+            }
+        }
+        params.setSavePath(request.savePath().toString());
+
+        // Renaming files for the layout needs the handle, so such a torrent is added paused and
+        // resumed below once the names are right; a plain "start paused" stays paused.
+        // A .torrent already has its metadata, so "stop after metadata" means "start paused".
+        boolean pauseNow = request.startPaused()
+                || (info != null && request.stopCondition() == AddRequest.StopCondition.METADATA_RECEIVED);
+
+        torrent_flags_t flags = params.getFlags();
+        if (pauseNow) flags = flags.or_(Flags.PAUSED).and_(Flags.AUTO_MANAGED.inv());
+        if (request.sequential()) flags = flags.or_(Flags.SEQUENTIAL_DOWNLOAD);
+        if (request.skipCheck()) flags = flags.or_(Flags.SEED_MODE);
+        if (request.stopCondition() == AddRequest.StopCondition.FILES_CHECKED) flags = flags.or_(Flags.STOP_WHEN_READY);
+        params.setFlags(flags);
+
+        if (info != null && !request.filePriorities().isEmpty()) {
+            org.libtorrent4j.Priority[] priorities = new org.libtorrent4j.Priority[info.numFiles()];
+            for (int i = 0; i < priorities.length; i++) {
+                priorities[i] = toLibtorrent(request.filePriorities().getOrDefault(i, Priority.NORMAL));
+            }
+            params.filePriorities(priorities);
+        }
+
+        String id = params.getInfoHashes().getBest().toHex();
+        if (info == null && request.stopCondition() == AddRequest.StopCondition.METADATA_RECEIVED)
+            stopAfterMetadata.add(id);
 
         // The synchronous add, so the caller gets a handle (and an error) straight away; the
         // add_torrent_alert that follows is what writes the first resume data.
         error_code ec = new error_code();
-        torrent_handle handle = s.swig().add_torrent(params.swig(), ec);
-        if (ec.value() != 0) throw new EngineException(ec.message());
-        return snapshot(new TorrentHandle(handle));
+        torrent_handle raw = s.swig().add_torrent(params.swig(), ec);
+        if (ec.value() != 0) {
+            stopAfterMetadata.remove(id);
+            throw new EngineException(ec.message());
+        }
+        TorrentHandle handle = new TorrentHandle(raw);
+
+        return snapshot(handle);
+    }
+
+    @Override
+    public TorrentPreview inspect(byte[] torrent) throws EngineException {
+        NativeLibrary.ensureAvailable();
+        TorrentInfo info = decode(torrent, "the torrent");
+        FileStorage files = info.files();
+        List<TorrentPreview.FileEntry> entries = new ArrayList<>(files.numFiles());
+        for (int i = 0; i < files.numFiles(); i++) {
+            if (files.padFileAt(i)) continue;
+            entries.add(new TorrentPreview.FileEntry(i, files.filePath(i).replace('\\', '/'), files.fileSize(i)));
+        }
+        // The real files' bytes, not totalSize(): a hybrid torrent's padding files are not content.
+        long size = entries.stream().mapToLong(TorrentPreview.FileEntry::size).sum();
+        return new TorrentPreview(
+                info.infoHashes().getBest().toHex(), info.name(), size, List.copyOf(entries), info.isPrivate());
+    }
+
+    private static TorrentInfo decode(byte[] bytes, String origin) throws EngineException {
+        try {
+            TorrentInfo info = new TorrentInfo(bytes);
+            if (!info.isValid()) throw new EngineException("Not a valid .torrent: " + origin);
+            return info;
+        } catch (RuntimeException e) {
+            throw new EngineException("Not a valid .torrent: " + origin, e);
+        }
+    }
+
+    private static org.libtorrent4j.Priority toLibtorrent(Priority priority) {
+        return switch (priority) {
+            case IGNORE -> org.libtorrent4j.Priority.IGNORE;
+            case LOW -> org.libtorrent4j.Priority.LOW;
+            case NORMAL -> org.libtorrent4j.Priority.DEFAULT;
+            case HIGH -> org.libtorrent4j.Priority.TOP_PRIORITY;
+        };
     }
 
     @Override
@@ -391,6 +481,8 @@ public final class LibtorrentEngine implements Engine {
         static final torrent_flags_t PAUSED = TorrentFlags.PAUSED;
         static final torrent_flags_t AUTO_MANAGED = TorrentFlags.AUTO_MANAGED;
         static final torrent_flags_t SEQUENTIAL_DOWNLOAD = TorrentFlags.SEQUENTIAL_DOWNLOAD;
+        static final torrent_flags_t SEED_MODE = TorrentFlags.SEED_MODE;
+        static final torrent_flags_t STOP_WHEN_READY = TorrentFlags.STOP_WHEN_READY;
     }
 
     private static boolean has(torrent_flags_t flags, torrent_flags_t flag) {
@@ -448,6 +540,8 @@ public final class LibtorrentEngine implements Engine {
             AlertType.TORRENT_CHECKED.swig(),
             AlertType.TORRENT_ERROR.swig(),
             AlertType.FILE_ERROR.swig(),
+            AlertType.FILE_RENAMED.swig(),
+            AlertType.FILE_RENAME_FAILED.swig(),
             AlertType.TRACKER_ERROR.swig(),
             AlertType.TRACKER_WARNING.swig(),
             AlertType.LISTEN_SUCCEEDED.swig(),
@@ -471,7 +565,13 @@ public final class LibtorrentEngine implements Engine {
                     case METADATA_RECEIVED -> {
                         TorrentAlert<?> t = (TorrentAlert<?>) alert;
                         requestSave(t.handle(), false);
-                        torrentEvent(t, EngineEvent.Level.INFO, "Metadata received for %s");
+                        if (t.handle().isValid() && stopAfterMetadata.remove(id(t.handle()))) {
+                            t.handle().unsetFlags(Flags.AUTO_MANAGED);
+                            t.handle().pause();
+                            torrentEvent(t, EngineEvent.Level.INFO, "Metadata received for %s; stopped as asked");
+                        } else {
+                            torrentEvent(t, EngineEvent.Level.INFO, "Metadata received for %s");
+                        }
                     }
                     case TORRENT_FINISHED -> {
                         TorrentAlert<?> t = (TorrentAlert<?>) alert;
@@ -486,6 +586,18 @@ public final class LibtorrentEngine implements Engine {
                                 EngineEvent.Level.ERROR,
                                 "%s: " + t.error().getMessage()
                                         + (t.filename().isEmpty() ? "" : " (" + t.filename() + ")"));
+                    }
+                    case FILE_RENAMED -> {
+                        FileRenamedAlert t = (FileRenamedAlert) alert;
+                        torrentEvent(t, EngineEvent.Level.INFO, "%s: file " + t.index() + " renamed to " + t.newName());
+                    }
+                    case FILE_RENAME_FAILED -> {
+                        FileRenameFailedAlert t = (FileRenameFailedAlert) alert;
+                        torrentEvent(
+                                t,
+                                EngineEvent.Level.ERROR,
+                                "%s: file " + t.getIndex() + " could not be renamed: "
+                                        + t.getError().getMessage());
                     }
                     case FILE_ERROR -> {
                         FileErrorAlert t = (FileErrorAlert) alert;

@@ -39,9 +39,9 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Feature | T | Q | Torrenta |
 |---|---|---|---|
 | Add `.torrent` file, magnet, HTTP(S) URL to a `.torrent` | ✓ | ✓ | 0.3 |
-| Add dialog: save path, category/labels, file selection and priorities, start paused, sequential, skip hash check | ◐ | ✓ | 0.3 |
+| Add dialog: save path, file selection and priorities, start paused, sequential, skip hash check (category/labels in 0.5) | ◐ | ✓ | 0.3 |
 | Stop condition on add (after metadata, after files checked) | ✗ | ✓ | 0.3 |
-| Content layout on add (original, subfolder, flat) and rename on add | ✗ | ✓ | 0.3 |
+| Content layout on add (original, subfolder, flat) and rename on add | ✗ | ✓ | 0.4 |
 | Drag and drop files, magnets and URLs onto the window | ✓ | ✓ | 0.3 |
 | Clipboard watch: offer a magnet or URL found on the clipboard | ✗ | ✗ | 0.3 |
 | Watch folders, one save path per folder | ✓ | ✓ | 0.5 |
@@ -189,9 +189,13 @@ with nothing to download is not one.
 ### 0.3 — Add, inspect, install
 What a first public release needs.
 
-1. **Add dialog** for files, magnets and URLs: save path with free-space readout, start paused,
-   sequential, skip check, stop condition, content layout, file tree with priorities. Drag and drop
-   and clipboard detection. The add from the command line reuses it.
+1. **Add dialog** — done, except content layout. Files, magnets and URLs; save path with
+   free-space readout; start paused, sequential, skip check, stop condition; file tree with
+   checkboxes and priorities; drag and drop; clipboard detection with `Ctrl+V`; the command line
+   goes through it. **Content layout (no root folder) moved to 0.4**: libtorrent4j 2.1.0-39 has no
+   `torrent_info::rename_file`, and renaming through the handle after adding is confirmed by
+   libtorrent's alerts yet a recheck afterwards never found the files under their new names; it
+   needs either a binding change or a different sequence, and was not worth holding the dialog.
 2. **Detail pane**: General, Files, Peers, Trackers, Pieces. Collapsible, remembered.
 3. **Native app image and installers** (`-Pdist`, from Termina): jlink plus jpackage with the
    libtorrent4j native placed in the image's library dir and `libtorrent4j.jni.path` set by the

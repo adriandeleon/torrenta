@@ -1,5 +1,8 @@
 package com.torrenta.ui;
 
+import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,22 +37,30 @@ import javafx.scene.control.TextField;
 import javafx.scene.control.cell.ProgressBarTableCell;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.DragEvent;
+import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
+import javafx.scene.input.TransferMode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
 import com.torrenta.AppInfo;
+import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineException;
+import com.torrenta.engine.Inputs;
 import com.torrenta.engine.Torrent;
+import com.torrenta.engine.TorrentPreview;
+import com.torrenta.net.TorrentFetch;
 import com.torrenta.store.Settings;
 
 /**
@@ -81,6 +92,8 @@ public final class MainWindow {
     private final Label errorBadge = new Label();
     private TableView<TorrentRow> table;
     private List<Command> commands = List.of();
+    private AddDialog currentDialog;
+    private String lastClipboardOffer = "";
 
     private Engine engine;
     private String engineDescription = "";
@@ -116,6 +129,14 @@ public final class MainWindow {
         scene.getAccelerators().put(chord(KeyCode.F), this::focusFilter);
         scene.getAccelerators().put(shiftChord(KeyCode.P), () -> palette.show(commands));
         scene.getAccelerators().put(shiftChord(KeyCode.L), logWindow::show);
+        scene.getAccelerators().put(chord(KeyCode.V), this::addFromClipboard);
+        scene.setOnDragOver(this::onDragOver);
+        scene.setOnDragDropped(this::onDragDropped);
+        // A magnet copied elsewhere is the commonest way a torrent arrives; say so when the window
+        // comes back to the front, once per link, and leave the adding to a keystroke.
+        stage.focusedProperty().addListener((o, was, now) -> {
+            if (now) offerClipboard();
+        });
         stage.setScene(scene);
         stage.setOnHidden(e -> stopPolling());
         setStatus("Starting the engine…");
@@ -137,6 +158,11 @@ public final class MainWindow {
         return engineDescription;
     }
 
+    /** What to photograph: the open Add dialog if there is one, else the window. */
+    public javafx.scene.Scene captureScene() {
+        return currentDialog != null && currentDialog.isShowing() ? currentDialog.scene() : stage.getScene();
+    }
+
     /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
     public List<String> eventLines() {
         return log.events().stream()
@@ -153,6 +179,8 @@ public final class MainWindow {
             table.getSelectionModel().selectAll();
         } else if (action.equals("event-log")) {
             logWindow.show();
+        } else if (action.equals("dialog-add")) {
+            if (currentDialog != null && currentDialog.isShowing()) currentDialog.confirm();
         } else if (action.equals("palette")) {
             palette.show(commands);
         } else if (action.startsWith("palette:")) {
@@ -168,6 +196,8 @@ public final class MainWindow {
                 + table.getSelectionModel().getSelectedItems().size());
         if (palette.isShowing()) System.out.println("capture: palette=" + palette.visibleCommands());
         if (logWindow.isShowing()) System.out.println("capture: log-window=showing");
+        if (currentDialog != null && currentDialog.isShowing())
+            System.out.println("capture: dialog=" + currentDialog.title());
     }
 
     /**
@@ -204,23 +234,131 @@ public final class MainWindow {
         setStatus(failure.getMessage());
     }
 
-    /** A {@code .torrent} path or a {@code magnet:} link, from the command line or a dialog. */
+    /**
+     * A {@code .torrent} path, a URL to one, or a {@code magnet:} link — from the command line, a
+     * drop, the clipboard or a dialog — opens the Add dialog for it. Reading, fetching and decoding
+     * happen on a worker; the dialog opens on the FX thread when there is something to show.
+     */
     public void addInput(String input) {
         if (engine == null) {
             pendingInputs.add(input);
             return;
         }
+        String text = input.trim();
+        Engine e = engine;
+        Thread.ofVirtual().name("engine-inspect").start(() -> {
+            try {
+                switch (Inputs.classify(text)) {
+                    case MAGNET -> Platform.runLater(() -> openDialog(new AddRequest.Magnet(text), null, text));
+                    case FILE -> {
+                        Path file = Path.of(text);
+                        if (!Files.isRegularFile(file)) throw new EngineException("No such file: " + text);
+                        byte[] bytes = Files.readAllBytes(file);
+                        TorrentPreview preview = e.inspect(bytes);
+                        Platform.runLater(() -> openDialog(new AddRequest.TorrentFile(bytes, text), preview, text));
+                    }
+                    case URL -> {
+                        byte[] bytes = new TorrentFetch().fetch(URI.create(text));
+                        TorrentPreview preview = e.inspect(bytes);
+                        Platform.runLater(() -> openDialog(new AddRequest.TorrentFile(bytes, text), preview, text));
+                    }
+                }
+            } catch (EngineException | IOException | RuntimeException ex) {
+                String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                Platform.runLater(() -> setStatus(message));
+            }
+        });
+    }
+
+    /** FX thread. Shows the dialog and, if confirmed, adds on a worker. */
+    private void openDialog(AddRequest.Source source, TorrentPreview preview, String origin) {
+        AddDialog dialog = new AddDialog(stage, source, preview, origin, settings.downloadDir());
+        currentDialog = dialog;
+        Optional<AddRequest> request = dialog.showAndWait();
+        currentDialog = null;
+        table.requestFocus();
+        if (request.isEmpty() || engine == null) return;
+        Engine e = engine;
         Thread.ofVirtual().name("engine-add").start(() -> {
             String outcome;
             try {
-                Torrent added = engine.add(input);
+                Torrent added = e.add(request.get());
                 outcome = "Added " + added.name();
-            } catch (EngineException e) {
-                outcome = e.getMessage();
+            } catch (EngineException ex) {
+                outcome = ex.getMessage();
             }
             String text = outcome;
             Platform.runLater(() -> setStatus(text));
         });
+    }
+
+    private void addTorrentFile() {
+        FileChooser chooser = new FileChooser();
+        chooser.setTitle("Add Torrent File");
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Torrent files", "*.torrent"));
+        List<java.io.File> files = chooser.showOpenMultipleDialog(stage);
+        if (files != null) files.forEach(f -> addInput(f.getAbsolutePath()));
+    }
+
+    private void addMagnetLink() {
+        javafx.scene.control.TextInputDialog prompt =
+                new javafx.scene.control.TextInputDialog(clipboardCandidate().orElse(""));
+        prompt.initOwner(stage);
+        prompt.setTitle("Add Magnet Link");
+        prompt.setHeaderText("Magnet link, or a link to a .torrent");
+        prompt.setContentText("Link:");
+        prompt.getEditor().setPrefColumnCount(48);
+        prompt.showAndWait().map(String::trim).filter(t -> !t.isEmpty()).ifPresent(this::addInput);
+    }
+
+    /** The clipboard's text if it is a magnet or a link to a .torrent. */
+    private static Optional<String> clipboardCandidate() {
+        try {
+            String text = Clipboard.getSystemClipboard().getString();
+            return Inputs.looksAddable(text) ? Optional.of(text.trim()) : Optional.empty();
+        } catch (RuntimeException e) {
+            return Optional.empty();
+        }
+    }
+
+    private void offerClipboard() {
+        clipboardCandidate().ifPresent(text -> {
+            if (text.equals(lastClipboardOffer)) return;
+            lastClipboardOffer = text;
+            setStatus((Inputs.classify(text) == Inputs.Kind.MAGNET ? "Magnet link" : "Torrent link")
+                    + " on the clipboard — press Ctrl+V to add it");
+        });
+    }
+
+    private void addFromClipboard() {
+        if (currentDialog != null) return;
+        clipboardCandidate().ifPresentOrElse(this::addInput, () -> setStatus("Nothing to add on the clipboard"));
+    }
+
+    private void onDragOver(DragEvent e) {
+        Dragboard board = e.getDragboard();
+        if (board.hasFiles() || (board.hasString() && Inputs.looksAddable(board.getString()))) {
+            e.acceptTransferModes(TransferMode.COPY);
+        }
+        e.consume();
+    }
+
+    private void onDragDropped(DragEvent e) {
+        Dragboard board = e.getDragboard();
+        boolean taken = false;
+        if (board.hasFiles()) {
+            for (java.io.File file : board.getFiles()) {
+                if (file.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".torrent")) {
+                    addInput(file.getAbsolutePath());
+                    taken = true;
+                }
+            }
+        } else if (board.hasString() && Inputs.looksAddable(board.getString())) {
+            addInput(board.getString().trim());
+            taken = true;
+        }
+        e.setDropCompleted(taken);
+        e.consume();
     }
 
     private void poll() {
@@ -437,18 +575,22 @@ public final class MainWindow {
     private MenuBar buildMenuBar() {
         MenuItem addTorrent = new MenuItem("Add Torrent File…");
         addTorrent.setAccelerator(chord(KeyCode.O));
-        addTorrent.setOnAction(e -> setStatus("Add torrent file: no dialog yet; pass the path on the command line"));
+        addTorrent.setOnAction(e -> addTorrentFile());
 
         MenuItem addMagnet = new MenuItem("Add Magnet Link…");
         addMagnet.setAccelerator(chord(KeyCode.M));
-        addMagnet.setOnAction(e -> setStatus("Add magnet link: no dialog yet; pass the link on the command line"));
+        addMagnet.setOnAction(e -> addMagnetLink());
+
+        MenuItem addClipboard = new MenuItem("Add from Clipboard");
+        addClipboard.setAccelerator(chord(KeyCode.V));
+        addClipboard.setOnAction(e -> addFromClipboard());
 
         MenuItem quit = new MenuItem("Quit");
         quit.setAccelerator(chord(KeyCode.Q));
         quit.setOnAction(e -> stage.close());
 
         Menu file = new Menu("File");
-        file.getItems().addAll(addTorrent, addMagnet, new SeparatorMenuItem(), quit);
+        file.getItems().addAll(addTorrent, addMagnet, addClipboard, new SeparatorMenuItem(), quit);
 
         Menu torrent = new Menu("Torrent");
         torrent.getItems().addAll(torrentItems());
@@ -629,7 +771,7 @@ public final class MainWindow {
     private VBox buildEmptyState() {
         Label title = new Label("No torrents yet");
         title.getStyleClass().add("empty-title");
-        Label hint = new Label("Press Ctrl+O to add a .torrent file, or Ctrl+M to paste a magnet link.");
+        Label hint = new Label("Press Ctrl+O to add a .torrent file, Ctrl+M for a magnet link, or drop either here.");
         hint.getStyleClass().add("empty-hint");
         VBox box = new VBox(8, title, hint);
         box.setAlignment(Pos.CENTER);

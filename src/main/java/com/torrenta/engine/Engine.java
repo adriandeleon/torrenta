@@ -22,8 +22,14 @@ public interface Engine extends AutoCloseable {
     /** Engine name and version, for the status bar and bug reports. Valid after {@link #start()}. */
     String description();
 
-    /** Adds a {@code .torrent} file (a path) or a {@code magnet:} link. */
+    /** Adds a {@code .torrent} file (a path) or a {@code magnet:} link, with the defaults. */
     Torrent add(String input) throws EngineException;
+
+    /** Adds with the dialog's choices. */
+    Torrent add(AddRequest request) throws EngineException;
+
+    /** Reads a {@code .torrent} without adding it, for the dialog. */
+    TorrentPreview inspect(byte[] torrent) throws EngineException;
 
     /** Removes the torrent and forgets it; with {@code deleteFiles}, its data on disk too. */
     void remove(String id, boolean deleteFiles) throws EngineException;

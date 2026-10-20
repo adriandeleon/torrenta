@@ -4,13 +4,17 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 
+import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
+import com.torrenta.engine.Priority;
 import com.torrenta.engine.Torrent;
+import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.store.TorrentStore;
 import org.junit.jupiter.api.Test;
@@ -204,6 +208,97 @@ class LibtorrentEngineTest {
             assertTrue(events.stream().allMatch(e -> e.at() != null && e.torrent() != null));
         }
         assertTrue(events.stream().anyMatch(e -> e.message().equals("Engine stopped")));
+    }
+
+    /** A two-file torrent whose data is already in {@code downloads/<name>/}. */
+    private static byte[] twoFileTorrent(Path downloads, String name) throws Exception {
+        Path root = downloads.resolve(name);
+        Files.createDirectories(root.resolve("sub"));
+        Files.write(root.resolve("a.bin"), new byte[100 * 1024]);
+        Files.write(root.resolve("sub").resolve("b.bin"), new byte[50 * 1024]);
+        NativeLibrary.ensureAvailable();
+        return new TorrentBuilder().path(root.toFile()).generate().entry().bencode();
+    }
+
+    @Test
+    void inspectShowsTheFilesWithoutAdding(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "pair");
+        try (LibtorrentEngine engine = engine(dir)) {
+            TorrentPreview preview = engine.inspect(torrent);
+            assertEquals("pair", preview.name());
+            assertEquals(150 * 1024, preview.size());
+            assertEquals(2, preview.files().size());
+            assertEquals("pair/a.bin", preview.files().get(0).path());
+            assertEquals(100 * 1024, preview.files().get(0).size());
+            assertEquals("pair/sub/b.bin", preview.files().get(1).path());
+            assertTrue(preview.hasRootFolder());
+            assertFalse(preview.isPrivate());
+            assertEquals(40, preview.id().length());
+            assertThrows(EngineException.class, () -> engine.inspect("not bencode".getBytes()));
+        }
+    }
+
+    @Test
+    void addWithOptions(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "pair");
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            // Indices come from the preview: a hybrid torrent has padding files between the real ones.
+            TorrentPreview preview = engine.inspect(torrent);
+            int b = preview.files().stream()
+                    .filter(f -> f.path().endsWith("b.bin"))
+                    .findFirst()
+                    .orElseThrow()
+                    .index();
+            AddRequest paused = new AddRequest(
+                    new AddRequest.TorrentFile(torrent, "pair.torrent"),
+                    downloads,
+                    true,
+                    true,
+                    false,
+                    AddRequest.StopCondition.NONE,
+                    Map.of(b, Priority.IGNORE));
+            Torrent t = engine.add(paused);
+            assertTrue(t.paused(), "start paused");
+            assertTrue(t.sequential());
+            assertTrue(t.size() >= 100 * 1024 && t.size() < 150 * 1024, "b.bin is not wanted: " + t.size());
+            engine.remove(t.id(), false);
+            await("gone", () -> engine.torrents().isEmpty());
+
+            // Skip check: seed mode trusts the files, so it is seeding without a pass over the disk.
+            AddRequest trusted = new AddRequest(
+                    new AddRequest.TorrentFile(torrent, "pair.torrent"),
+                    downloads,
+                    false,
+                    false,
+                    true,
+                    AddRequest.StopCondition.NONE,
+                    Map.of());
+            Torrent seeded = engine.add(trusted);
+            await("seeding", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+            assertEquals(1.0, engine.torrents().get(0).progress(), 1e-6);
+            engine.remove(seeded.id(), false);
+            await("gone again", () -> engine.torrents().isEmpty());
+        }
+    }
+
+    @Test
+    void stopAfterMetadataIsAcceptedForAMagnet(@TempDir Path dir) throws Exception {
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            Torrent t = engine.add(new AddRequest(
+                    new AddRequest.Magnet(MAGNET),
+                    dir.resolve("downloads"),
+                    false,
+                    false,
+                    false,
+                    AddRequest.StopCondition.METADATA_RECEIVED,
+                    Map.of()));
+            assertFalse(t.paused(), "runs until the metadata arrives");
+            assertEquals(TorrentState.FETCHING_METADATA, t.state());
+        }
     }
 
     @Test

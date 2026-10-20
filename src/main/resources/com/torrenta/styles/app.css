@@ -109,3 +109,19 @@
     -fx-text-fill: -color-danger-fg;
     -fx-cursor: hand;
 }
+
+/* The Add dialog. */
+.dialog-label {
+    -fx-text-fill: -color-fg-muted;
+}
+
+.dialog-value {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent;
+    -fx-padding: 2 0 2 0;
+}
+
+.dialog-hint {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.9em;
+}
