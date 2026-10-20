@@ -23,6 +23,9 @@ package com.torrenta.engine;
  *     what a seeding-time limit measures
  * @param category the category it is filed under, or empty
  * @param tags its tags, sorted; empty for none
+ * @param error what stopped the torrent (a missing file, a full disk), or empty while nothing has
+ * @param trackers the hosts of its trackers, each once, sorted; empty for a trackerless torrent
+ * @param trackerError some tracker of its last answered with an error and has not answered since
  */
 public record Torrent(
         String id,
@@ -45,10 +48,15 @@ public record Torrent(
         boolean sequential,
         long seedingTime,
         String category,
-        java.util.List<String> tags) {
+        java.util.List<String> tags,
+        String error,
+        java.util.List<String> trackers,
+        boolean trackerError) {
 
     public Torrent {
         category = category == null ? "" : category;
         tags = tags == null ? java.util.List.of() : java.util.List.copyOf(tags);
+        error = error == null ? "" : error;
+        trackers = trackers == null ? java.util.List.of() : java.util.List.copyOf(trackers);
     }
 }

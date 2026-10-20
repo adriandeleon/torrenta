@@ -14,17 +14,20 @@ import java.util.TreeMap;
  *
  * <p>Everything in the settings file syncs except what describes one installation: the sync
  * connection itself, folders and interfaces of this machine, the clocks of the last checks, the
- * per-torrent entries and the sidebar's chosen filter (the torrents are this machine's), and the
- * proxy password, which does not belong in a repository even a private one. Pure.
+ * per-torrent entries and the sidebar's choices and folds (the torrents are this machine's), and
+ * the proxy password, which does not belong in a repository even a private one. Pure.
  */
 public final class SyncKeys {
 
-    /** {@code torrent.<hash>.*} describes a torrent of this machine, which another has not got. */
-    static final List<String> LOCAL_PREFIXES = List.of("sync.", "torrent.");
+    /**
+     * {@code torrent.<hash>.*} describes a torrent of this machine, which another has not got;
+     * {@code ui.sidebar.*} is what the sidebar has chosen and folded (whether it shows,
+     * {@code ui.sidebar} without the dot, travels).
+     */
+    static final List<String> LOCAL_PREFIXES = List.of("sync.", "torrent.", "ui.sidebar.");
 
     static final List<String> LOCAL_KEYS = List.of(
             "download.dir",
-            "ui.sidebar.filter",
             "connection.interface",
             "ipfilter.file",
             "ipfilter.lastRefreshEpochMs",

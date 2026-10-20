@@ -17,12 +17,20 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   Categories are `categories.json`, tags `tags.json`, a torrent's own filing is
   `torrents/<info-hash>.labels` beside its resume data, written as it changes, restored at start
   and removed with the torrent (libtorrent's resume data has no field for them).
-- **A sidebar** on the left of the list: All, the categories (each with its count, plus
-  Uncategorised) and the tags (plus Untagged). Choosing one narrows the list, together with the
-  name filter; the choice and whether the sidebar shows (View → Sidebar, `Ctrl+Shift+B`,
-  `ui.sidebar`) survive a restart (`ui.sidebar.filter`, never synced: it names this machine's
-  categories). `Ctrl+B` focuses it; arrows choose, `Enter`, `Space` and `Esc` return to the list.
-  Built as a tree so Status and Tracker sections can join it.
+- **A sidebar** on the left of the list: All, then Status, Categories (each with its count, plus
+  Uncategorised), Tags (plus Untagged) and Trackers (one entry per tracker host, plus Trackerless
+  and, while some torrent's tracker answers with an error, Tracker error). Each section keeps a
+  choice of its own, and the list shows what passes all of them together with the name filter;
+  every count is live, from the same poll as the table. The Status entries are qBittorrent's:
+  Downloading, Seeding, Completed, Paused, Active (moving now), Inactive, Stalled (wanting to move
+  and not), Checking, Errored; the palette has a "Show: …" command for each. The choices
+  (`ui.sidebar.status`, `.category`, `.tag`, `.tracker`), the folded sections
+  (`ui.sidebar.collapsed`) and whether the sidebar shows (View → Sidebar, `Ctrl+Shift+B`,
+  `ui.sidebar`) survive a restart; the choices and folds are never synced, they name this
+  machine's torrents. `Ctrl+B` focuses it; arrows walk every section, `Space` chooses, `Enter`
+  chooses and returns to the list, `Esc` returns. A torrent's tracker hosts come from its add
+  parameters and from every tracker answer, so the section costs the poll nothing; a tracker
+  error (and the State column's "Error") comes from the alerts too.
 - **Queue and share limits** (Settings → Queue and share limits): how many torrents download, seed
   and run at once (0 for no limit), whether a slow torrent holds a slot, and a global share limit:
   a ratio and a seeding time, either of which, once reached by a finished torrent, pauses it or

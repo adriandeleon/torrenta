@@ -249,7 +249,7 @@ Everything in Settings that the engine already knows how to do.
 ### 0.5 — Organisation and automation
 
 1. ✓ **Categories and tags** with sidebar filters and automatic torrent management.
-2. **Sidebar** status and tracker filters, counts, remembered selection.
+2. ✓ **Sidebar** status and tracker filters, counts, remembered selection.
 3. **Incomplete folder, suffix, pre-allocation.**
 4. **Watch folders.**
 5. **Run on event** (added, finished, seeding done) with placeholders; desktop notifications.

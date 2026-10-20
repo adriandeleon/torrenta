@@ -116,7 +116,7 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+M` | Add a magnet link or a link to a `.torrent` (the clipboard's, if it holds one) |
 | `Ctrl+V` | Add whatever magnet or torrent link is on the clipboard; the status bar says when there is one |
 | `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
-| `Ctrl+B` / `Ctrl+Shift+B` | Focus the sidebar (All, categories, tags, each with a count; arrows choose, `Enter`, `Space` or `Esc` return to the list) / show or hide it |
+| `Ctrl+B` / `Ctrl+Shift+B` | Focus the sidebar (All, then Status, Categories, Tags and Trackers, every entry with a count; arrows walk every section, `Space` makes the entry the section's choice, `Enter` chooses and returns to the list, `Esc` returns without choosing; `Left`/`Right` fold a section) / show or hide it |
 | `Ctrl+Shift+P` | Command palette: every command, found by typing part of its name |
 | `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Categories and tags (names, save paths, delete), Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
 | `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces |
@@ -137,9 +137,12 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 Every action is in the Torrent menu, the list's right-click menu and the palette, and applies to
 the whole selection. `.torrent` files and links can also be dropped on the window, and anything on
 the command line goes through the same Add dialog, which offers the categories: one with a save
-path fills the folder when chosen, so a new torrent in it lands there. The sidebar's choice and
-the name filter narrow the list together, and both the choice and whether the sidebar shows are
-remembered. The status bar's "Alt speed" switches the
+path fills the folder when chosen, so a new torrent in it lands there. The sidebar keeps one
+choice per section — a status (Downloading, Seeding, Completed, Paused, Active, Inactive, Stalled,
+Checking, Errored), a category, a tag and a tracker host (or Trackerless, or Tracker error) — and
+the list shows what passes all of them and the name filter; the palette's "Show: Downloading" and
+the like pick a status without the mouse. The choices, the folded sections and whether the sidebar
+shows are remembered. The status bar's "Alt speed" switches the
 alternative speed limits by hand; the schedule in Settings switches them by the clock. The status bar shows the latest event; an error count appears there while
 there are errors, and a click on it opens the log.
 

@@ -36,7 +36,10 @@ class TorrentRowsTest {
                 false,
                 0,
                 "",
-                List.of());
+                List.of(),
+                "",
+                java.util.List.of(),
+                false);
     }
 
     @Test
@@ -107,7 +110,10 @@ class TorrentRowsTest {
                 false,
                 0,
                 "",
-                List.of()));
+                List.of(),
+                "",
+                java.util.List.of(),
+                false));
         assertEquals(true, MainWindow.nameFilter("").test(row));
         assertEquals(true, MainWindow.nameFilter(null).test(row));
         assertEquals(true, MainWindow.nameFilter("  desktop ").test(row));
@@ -138,18 +144,42 @@ class TorrentRowsTest {
                 false,
                 0,
                 "Linux",
-                List.of("iso")));
+                List.of("iso"),
+                "",
+                java.util.List.of(),
+                false));
+        SidebarSelection linux = SidebarSelection.ALL.with(SidebarFilter.category("Linux"));
+        assertEquals(true, MainWindow.rowFilter("ubuntu", linux).test(row));
+        assertEquals(
+                false,
+                MainWindow.rowFilter("ubuntu", SidebarSelection.ALL.with(SidebarFilter.category("Movies")))
+                        .test(row));
+        assertEquals(false, MainWindow.rowFilter("fedora", linux).test(row));
         assertEquals(
                 true,
-                MainWindow.rowFilter("ubuntu", SidebarFilter.category("Linux")).test(row));
+                MainWindow.rowFilter("", linux.with(SidebarFilter.tag("iso"))).test(row));
+        assertEquals(
+                true,
+                MainWindow.rowFilter("", linux.with(SidebarFilter.status(SidebarStatus.SEEDING)))
+                        .test(row),
+                "status, category and name compose");
         assertEquals(
                 false,
-                MainWindow.rowFilter("ubuntu", SidebarFilter.category("Movies")).test(row));
+                MainWindow.rowFilter("", linux.with(SidebarFilter.status(SidebarStatus.DOWNLOADING)))
+                        .test(row));
         assertEquals(
                 false,
-                MainWindow.rowFilter("fedora", SidebarFilter.category("Linux")).test(row));
-        assertEquals(true, MainWindow.rowFilter("", SidebarFilter.tag("iso")).test(row));
-        assertEquals(false, MainWindow.rowFilter("", SidebarFilter.UNTAGGED).test(row));
+                MainWindow.rowFilter("", linux.with(SidebarFilter.tracker("t.example.org")))
+                        .test(row),
+                "a trackerless torrent is under no host");
+        assertEquals(
+                true,
+                MainWindow.rowFilter("", linux.with(SidebarFilter.TRACKERLESS)).test(row));
+        assertEquals(true, MainWindow.rowFilter("", null).test(row), "no selection is All");
+        assertEquals(
+                false,
+                MainWindow.rowFilter("", SidebarSelection.ALL.with(SidebarFilter.UNTAGGED))
+                        .test(row));
         assertEquals(true, MainWindow.rowFilter(null, null).test(row), "no sidebar choice is All");
     }
 }
