@@ -141,7 +141,8 @@ public final class MainWindow {
         ToolBar bar = buildToolbar();
         root.setTop(new VBox(buildMenuBar(), bar));
         table.setContextMenu(buildContextMenu());
-        palette = new CommandPalette(host, () -> table.requestFocus());
+        palette = new CommandPalette(
+                host, () -> table.requestFocus(), shiftChord(KeyCode.P).getDisplayText());
         logWindow = new LogWindow(stage, log);
         settingsWindow = new SettingsWindow(settings);
         settingsWindow.setOnEngineSettingsChanged(this::applyEngineSettings);

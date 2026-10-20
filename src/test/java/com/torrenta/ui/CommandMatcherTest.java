@@ -81,4 +81,18 @@ class CommandMatcherTest {
     void aNullLabelIsNotAMatchRatherThanACrash() {
         assertEquals(CommandMatcher.NO_MATCH, CommandMatcher.score("c", null));
     }
+
+    @Test
+    void positionsAreTheRankedPlacement() {
+        assertEquals(java.util.List.of(0, 6), CommandMatcher.positions("ct", "Close Tab"));
+        assertEquals(
+                java.util.List.of(6, 7, 8), CommandMatcher.positions("tab", "Close Tab"), "the run, not scattered");
+        assertEquals(
+                java.util.List.of(0, 4),
+                CommandMatcher.positions("nw", "New Window"),
+                "the initials, not the w of New");
+        assertEquals(java.util.List.of(0, 1), CommandMatcher.positions("c t", "Ct"), "spaces in the query are nothing");
+        assertEquals(java.util.List.of(), CommandMatcher.positions("", "Close Tab"));
+        assertEquals(java.util.List.of(), CommandMatcher.positions("zz", "Close Tab"));
+    }
 }

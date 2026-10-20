@@ -7,6 +7,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **The command palette looks and feels as Editora's**: one card with no internal rules, the input
+  as its first row led by the chord that opened it, rows that embolden the characters the query
+  matched in the accent, the chord in the keyboard's own hue, a tinted selection with an accent bar,
+  and a legend at the foot. The matched characters are the ones the ranking reasoned about.
 - **An icon toolbar** under the menu bar, with Editora's glyphs: add a torrent file, add a magnet
   link, pause/resume, force resume, recheck, remove, filter, event log, settings, and the command
   palette at the right. Each button is one of the existing commands, so it greys out with them.
