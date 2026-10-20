@@ -5,6 +5,16 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Added
+
+- **Torrents survive a restart.** Resume data is kept per torrent under `~/.torrenta/torrents/`,
+  written when a torrent is added, when its metadata arrives, when it finishes, periodically and on
+  quit, and loaded at start, so a complete torrent comes back seeding without a recheck and a magnet
+  comes back even before its metadata ever arrived.
+- **A settings file**, `~/.torrenta/settings.properties`, with `download.dir`.
+- **`--config-dir DIR`** and `TORRENTA_CONFIG_DIR` move the whole folder.
+- `Engine.remove(id, deleteFiles)`, for the window to use next.
+
 Project scaffold: a themed window with a menu bar, a torrent list and a status bar; the
 `--help`/`--version` command line, which also takes `.torrent` paths and magnet links; the Caret &
 Ink themes carried over from Editora and Termina; the development screen capture; CI on all three

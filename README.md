@@ -14,9 +14,10 @@
 
 A keyboard-first, cross-platform BitTorrent client built on JavaFX.
 
-Status: **scaffold**. A themed window with a menu bar, a torrent list and a status bar, on a real
+Status: **early**. A themed window with a menu bar, a torrent list and a status bar, on a real
 engine: libtorrent, through [libtorrent4j](https://github.com/aldenml/libtorrent4j). Torrents given
-on the command line are added and listed; there are no dialogs, settings, resume data or limits yet.
+on the command line are added, listed, and come back after a restart without a recheck. No dialogs,
+settings window or limits yet; see [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Running
 
@@ -48,6 +49,14 @@ TORRENTA_CAPTURE=/tmp/torrenta.png ./mvnw javafx:run
 
 Renders the real window, writes it to a PNG, prints a few `capture:` facts (size, title, focus owner,
 engine, status bar) and exits. CI runs the first form under Xvfb on Linux as a smoke test.
+
+## Files
+
+Everything lives in one folder, `~/.torrenta` (`--config-dir DIR` or `TORRENTA_CONFIG_DIR` to move
+it): `settings.properties`, hand-editable; `torrents/<info-hash>.fastresume`, one per torrent,
+libtorrent's resume data with the info dictionary inside, so deleting one file forgets one torrent;
+`native/<version>/`, the unpacked engine. Downloads go to `~/Downloads` until there is a setting
+window (`download.dir` in the settings file already works).
 
 ## Keyboard
 
@@ -87,6 +96,7 @@ src/main/java/com/torrenta                    App, AppInfo, DevCapture
 src/main/java/com/torrenta/cli                CommandLine (--help, --version, inputs)
 src/main/java/com/torrenta/engine             Engine, Torrent, TorrentState — no libtorrent types
 src/main/java/com/torrenta/engine/libtorrent  LibtorrentEngine, NativeLibrary
+src/main/java/com/torrenta/store              ConfigDir, Settings, TorrentStore
 src/main/java/com/torrenta/ui                 MainWindow, Theme, Bytes
 src/main/resources/com/torrenta               build-info.properties, styles/
 branding/                         icon
@@ -97,9 +107,9 @@ scripts/render-icon.py            branding/torrenta-icon.svg → torrenta.png (P
 ## Not done
 
 Add-torrent and add-magnet dialogs (the chords only say so in the status bar; pass inputs on the
-command line), resume data across restarts, pause/resume/remove, speed limits, a download-folder
-setting, per-torrent detail (files, peers, trackers), a native app image (`-Pdist`, to be taken from
-Termina, plus the native library in the image), installers, releases.
+command line), pause/resume/remove in the window, speed limits, a settings window, per-torrent
+detail (files, peers, trackers), a native app image (`-Pdist`, to be taken from Termina, plus the
+native library in the image), installers, releases. The order is in [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## License
 

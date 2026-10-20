@@ -10,6 +10,9 @@ module com.torrenta {
     // scripts/dev-run.sh, the classpath under the javafx plugin, addModules in a future jlink.
     requires libtorrent4j;
 
+    // Settings, the store and the engine log through j.u.l; nothing is lost without a handler.
+    requires java.logging;
+
     // ImageIO, for the development screen capture only. Nothing else here touches AWT, and
     // App.main forces it headless before any AWT class can load.
     requires java.desktop;

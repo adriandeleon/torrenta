@@ -10,6 +10,9 @@ import com.torrenta.cli.CommandLine;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.libtorrent.LibtorrentEngine;
+import com.torrenta.store.ConfigDir;
+import com.torrenta.store.Settings;
+import com.torrenta.store.TorrentStore;
 import com.torrenta.ui.MainWindow;
 import com.torrenta.ui.Theme;
 
@@ -58,9 +61,18 @@ public final class App extends Application {
         window.show();
         cli.inputs().forEach(window::addInput);
 
-        // The engine loads a native library and opens sockets: hundreds of milliseconds that the
-        // first frame should not wait for. The window is up with "Starting the engine…" meanwhile.
-        engine = new LibtorrentEngine(defaultDownloadDir());
+        Path configDir = ConfigDir.resolve(cli.configDir());
+        Settings settings = new Settings(configDir.resolve(Settings.FILE_NAME));
+        settings.load();
+        // The unpacked engine lives beside the settings unless a -D says otherwise (the tests do).
+        if (System.getProperty("torrenta.nativeDir") == null) {
+            System.setProperty("torrenta.nativeDir", configDir.resolve("native").toString());
+        }
+
+        // The engine loads a native library, opens sockets and re-adds every stored torrent:
+        // hundreds of milliseconds that the first frame should not wait for. The window is up with
+        // "Starting the engine…" meanwhile.
+        engine = new LibtorrentEngine(settings.downloadDir(), new TorrentStore(configDir.resolve(TorrentStore.FOLDER)));
         Thread starter = new Thread(
                 () -> {
                     try {
@@ -80,10 +92,5 @@ public final class App extends Application {
     @Override
     public void stop() {
         if (engine != null) engine.stop();
-    }
-
-    /** Where downloads go until there is a setting for it: the platform's Downloads folder. */
-    static Path defaultDownloadDir() {
-        return Path.of(System.getProperty("user.home"), "Downloads");
     }
 }
