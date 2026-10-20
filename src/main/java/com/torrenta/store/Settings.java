@@ -35,6 +35,8 @@ public final class Settings {
     public static final String DETAIL_DIVIDER = "detail.divider";
     /** Ask GitHub for a newer release after startup, at most once a day. */
     public static final String UPDATE_CHECK = "updates.check";
+    /** Whether the icon toolbar under the menu bar shows; View → Toolbar flips it. */
+    public static final String UI_TOOLBAR = "ui.toolbar";
     /** The theme id ({@code editora-dark}, {@code nord-light}, …); the UI maps it and falls back. */
     public static final String THEME = "ui.theme";
 
@@ -178,6 +180,14 @@ public final class Settings {
 
     public boolean addStartPaused() {
         return readBoolean(ADD_START_PAUSED, false);
+    }
+
+    public boolean toolbar() {
+        return readBoolean(UI_TOOLBAR, true);
+    }
+
+    public void setToolbar(boolean shown) {
+        properties.setProperty(UI_TOOLBAR, String.valueOf(shown));
     }
 
     public void setAddStartPaused(boolean on) {
