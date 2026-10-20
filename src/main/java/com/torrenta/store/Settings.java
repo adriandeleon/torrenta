@@ -24,6 +24,8 @@ public final class Settings {
 
     public static final String FILE_NAME = "settings.properties";
     public static final String DOWNLOAD_DIR = "download.dir";
+    /** The transfer list's columns: order, widths, visibility. See {@code ui.ColumnLayout}. */
+    public static final String TABLE_COLUMNS = "table.columns";
 
     private final Path file;
     private final Properties properties = new Properties();
@@ -64,6 +66,24 @@ public final class Settings {
             Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } finally {
             Files.deleteIfExists(tmp);
+        }
+    }
+
+    /** A raw value, for keys whose shape another class owns. */
+    public String get(String key, String fallback) {
+        return properties.getProperty(key, fallback);
+    }
+
+    public void set(String key, String value) {
+        properties.setProperty(key, value);
+    }
+
+    /** For callers that have nowhere to report a failed write but the log: a UI change listener. */
+    public void saveQuietly() {
+        try {
+            save();
+        } catch (IOException e) {
+            LOG.log(Level.WARNING, "Could not write " + file, e);
         }
     }
 

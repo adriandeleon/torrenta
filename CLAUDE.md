@@ -44,6 +44,11 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
   touches native code is loaded** — `LibtorrentEngine.start()` is the only entry point for that
   reason. The failure otherwise is a `LinkageError` whose message is a link to the project page;
   the cause has the real reason.
+- **No static field in the engine package may touch a libtorrent4j constant.** `TorrentHandle.QUERY_*`
+  and friends are SWIG objects; a `static final` built from one runs at class load, before the
+  native is unpacked, and the JNI class then fails to initialise for the life of the JVM
+  (`NoClassDefFoundError: Could not initialize class ... libtorrent_jni` in every later test). Use a
+  nested holder class (`StatusQuery`) or compute inside the method.
 - **`System.load` needs an absolute path.** A relative `-Dtorrenta.nativeDir` produced "Expecting
   an absolute path of the library"; `NativeLibrary` absolutises.
 - **The per-OS jar cannot be `requires`d.** Its automatic module name depends on the OS

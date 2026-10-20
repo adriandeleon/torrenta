@@ -30,3 +30,12 @@
     -fx-background-insets: 0;
     -fx-padding: 0;
 }
+
+.filter-bar {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: transparent transparent -color-border-default transparent;
+}
+
+.torrent-table .progress-bar {
+    -fx-pref-height: 12;
+}
