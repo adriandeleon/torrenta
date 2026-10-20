@@ -28,6 +28,11 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   download, skip hash check, a stop condition (after the metadata arrives, after the files are
   checked), and for torrents with metadata a file tree with checkboxes and per-file priorities.
   The status bar notices a magnet or torrent link on the clipboard when the window comes back.
+- **A detail pane** (`Ctrl+I`) under the list for the selected torrent: General (hashes, save
+  path, pieces, availability, counters, times, tracker), Files (a tree with progress and an
+  editable priority per file; open a file), Peers (address, client, flags, progress, rates,
+  totals), Trackers (status and message; add, remove, reannounce), and a Pieces map. The pane's
+  visibility, tab and height are remembered.
 - **An event log** (`Ctrl+Shift+L`): added, metadata received, checked, finished, removed, torrent
   and disk errors, tracker errors and warnings, listen ports, port mapping, engine start and stop,
   plus the app's own warnings. Filter by level, copy, clear. The status bar shows the latest event

@@ -14,7 +14,8 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `TORRENTA_CAPTURE=/tmp/shot.png ./mvnw javafx:run`) renders the real window, writes a PNG, prints
   `capture:` lines (title, focus, engine, status bar) and exits. `-Dtorrenta.captureAction=` runs
   window actions first: `select-all`, `palette`, `palette:<query>`, or a command id such as
-  `pause-resume`, or `dialog-add` to press Add on an open Add dialog; the palette's ranking, the
+  `pause-resume`, `dialog-add` to press Add on an open Add dialog, `select-first`, or
+  `detail:<tab>` to show the detail pane on a tab; the palette's ranking, the
   open dialog's title and the log window's state are printed, and when a dialog is open the PNG is
   of the dialog.
 
@@ -27,7 +28,8 @@ Run Maven from the project root with a JDK 25.
 | Entry | `--help`/`--version`, toolkit start, theme | `com.torrenta.App`, `com.torrenta.cli` |
 | Events | `EngineEvent` (level, torrent, message), raised by the engine from libtorrent alerts and by its own start/stop/remove; `Engine.addListener` | `com.torrenta.engine` |
 | Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL) | `com.torrenta.engine`, `com.torrenta.net` |
-| UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
+| Detail | `TorrentDetail` (general, files, peers, trackers, pieces) from `Engine.detail(id)`; `setFilePriority`, `addTrackers`, `removeTracker`; `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
+| UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a vertical `SplitPane`; `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
 | Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
@@ -95,6 +97,19 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 - **Test compilation patches the module**, so a test that needs a JDK module the main code does
   not (`jdk.httpserver`, for the fetch test's local server) gets `--add-modules` and `--add-reads`
   in the compiler plugin's test execution. At run time the tests are on the classpath.
+- **The detail pane is polled only for the one selected torrent**, on the poll thread, with the
+  pieces bitfield (`QUERY_PIECES`): a status copy per piece, which is why it is not fetched for
+  every row. `detailId` and `detailWanted` are volatile hand-offs from the FX thread.
+- **libtorrent 2.1 keeps trackers, comment, creator and web seeds outside `torrent_info`.** A
+  `.torrent` is read with `load_torrent_parsed` (via `BDecodeNode.bdecode`), which fills them into
+  the add parameters; `new TorrentInfo(bytes)` reads the info dictionary alone and the torrent is
+  added **without its trackers**, silently. The Add dialog shows comment and creator from the
+  preview; General cannot read them back (the handle has no accessor), and `AnnounceInfohash` has
+  no scrape counts.
+- **Durations from libtorrent4j are milliseconds** (`activeDuration`, `seedingDuration`,
+  `nextAnnounce`); the engine divides, the records promise seconds.
+- **A resume-data answer can arrive after the torrent was removed.** The engine marks removed ids
+  and ignores late writes for them; without that, the remove test saw the blob come back.
 - **Engine events arrive on libtorrent4j's alert thread.** `MainWindow` hops to the FX thread
   before touching the log or the status bar; `EventLog.add` is FX-only. The j.u.l bridge takes
   the hop as a parameter so tests run it inline.
@@ -123,6 +138,6 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 Add dialogs (Ctrl+O / Ctrl+M only say so; inputs come from the command line), pause/resume/remove
 in the window (`Engine.remove` exists, nothing calls it yet), limits, a settings window, per-torrent
 detail, `-Pdist` with the native in the image.
-0.2 is complete and 0.3's Add dialog is in. Next: the detail pane, then the native app image with
-the engine's native inside it, then the update check. Content layout and first/last piece first
-wait for 0.4.
+0.2 is complete; 0.3 has the Add dialog and the detail pane. Next: the native app image with the
+engine's native inside it, then the update check. Content layout, file rename and first/last piece
+first wait for 0.4.

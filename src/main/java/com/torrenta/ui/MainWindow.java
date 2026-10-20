@@ -30,6 +30,7 @@ import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SelectionMode;
 import javafx.scene.control.SeparatorMenuItem;
+import javafx.scene.control.SplitPane;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
@@ -59,6 +60,7 @@ import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Inputs;
 import com.torrenta.engine.Torrent;
+import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.net.TorrentFetch;
 import com.torrenta.store.Settings;
@@ -94,6 +96,10 @@ public final class MainWindow {
     private List<Command> commands = List.of();
     private AddDialog currentDialog;
     private String lastClipboardOffer = "";
+    private final DetailPane detail = new DetailPane();
+    private SplitPane split;
+    private volatile String detailId;
+    private volatile boolean detailWanted;
 
     private Engine engine;
     private String engineDescription = "";
@@ -138,7 +144,10 @@ public final class MainWindow {
             if (now) offerClipboard();
         });
         stage.setScene(scene);
-        stage.setOnHidden(e -> stopPolling());
+        stage.setOnHidden(e -> {
+            rememberDivider();
+            stopPolling();
+        });
         setStatus("Starting the engine…");
         rates.setText(ratesText(Engine.Rates.ZERO));
     }
@@ -181,6 +190,11 @@ public final class MainWindow {
             logWindow.show();
         } else if (action.equals("dialog-add")) {
             if (currentDialog != null && currentDialog.isShowing()) currentDialog.confirm();
+        } else if (action.equals("select-first")) {
+            table.getSelectionModel().clearAndSelect(0);
+        } else if (action.startsWith("detail:")) {
+            setDetailVisible(true);
+            detail.selectTab(action.substring("detail:".length()));
         } else if (action.equals("palette")) {
             palette.show(commands);
         } else if (action.startsWith("palette:")) {
@@ -198,6 +212,7 @@ public final class MainWindow {
         if (logWindow.isShowing()) System.out.println("capture: log-window=showing");
         if (currentDialog != null && currentDialog.isShowing())
             System.out.println("capture: dialog=" + currentDialog.title());
+        if (detailWanted) System.out.println("capture: detail=" + detail.summary());
     }
 
     /**
@@ -364,10 +379,56 @@ public final class MainWindow {
     private void poll() {
         List<Torrent> snapshot = engine.torrents();
         Engine.Rates current = engine.rates();
+        // The detail pane costs a status with the pieces bitfield; only for one shown torrent.
+        String id = detailWanted ? detailId : null;
+        TorrentDetail detailSnapshot = null;
+        if (id != null) {
+            try {
+                detailSnapshot = engine.detail(id);
+            } catch (EngineException e) {
+                detailSnapshot = null; // gone between the selection and the poll
+            }
+        }
+        TorrentDetail shown = detailSnapshot;
         Platform.runLater(() -> {
             rows.apply(snapshot);
             rates.setText(ratesText(current));
+            if (detailWanted) {
+                if (shown != null && shown.general().id().equals(detailId)) detail.show(shown);
+                else if (detailId == null) detail.clear();
+            }
         });
+    }
+
+    private void setDetailVisible(boolean visible) {
+        detailWanted = visible;
+        detail.setVisible(visible);
+        detail.setManaged(visible);
+        if (visible) {
+            if (!split.getItems().contains(detail)) split.getItems().add(detail);
+            split.setDividerPositions(dividerFromSettings());
+        } else {
+            split.getItems().remove(detail);
+        }
+        settings.set(Settings.DETAIL_VISIBLE, String.valueOf(visible));
+        settings.saveQuietly();
+    }
+
+    private double dividerFromSettings() {
+        try {
+            double d = Double.parseDouble(settings.get(Settings.DETAIL_DIVIDER, "0.62"));
+            return d > 0.1 && d < 0.95 ? d : 0.62;
+        } catch (NumberFormatException e) {
+            return 0.62;
+        }
+    }
+
+    private void rememberDivider() {
+        if (split.getDividers().isEmpty() || !detailWanted) return;
+        settings.set(
+                Settings.DETAIL_DIVIDER, String.format(java.util.Locale.ROOT, "%.3f", split.getDividerPositions()[0]));
+        settings.set(Settings.DETAIL_TAB, detail.activeTab());
+        settings.saveQuietly();
     }
 
     private void stopPolling() {
@@ -650,8 +711,70 @@ public final class MainWindow {
             if (now && !filter.isFocused()) table.requestFocus();
         });
         StackPane centre = new StackPane(table, empty);
-        VBox.setVgrow(centre, Priority.ALWAYS);
-        return new VBox(buildFilterBar(), centre);
+        split = new SplitPane(centre);
+        split.setOrientation(javafx.geometry.Orientation.VERTICAL);
+        VBox.setVgrow(split, Priority.ALWAYS);
+
+        // The pane follows the selection: one torrent shows it, anything else clears it.
+        table.getSelectionModel().getSelectedItems().addListener((javafx.collections.ListChangeListener<TorrentRow>)
+                c -> {
+                    var selected = table.getSelectionModel().getSelectedItems();
+                    detailId = selected.size() == 1 ? selected.get(0).id() : null;
+                    if (detailId == null && detailWanted) detail.clear();
+                });
+        detail.selectTab(settings.get(Settings.DETAIL_TAB, "general"));
+        detail.setOnFilePriority((index, priority) -> {
+            String id = detailId;
+            if (id != null) onTorrent("Priority set for", id, (e, t) -> e.setFilePriority(t, index, priority));
+        });
+        detail.setOnOpenFile(row -> {
+            String id = detailId;
+            Torrent t = id == null
+                    ? null
+                    : rows.get(id) == null ? null : rows.get(id).torrent();
+            if (t != null)
+                opener.accept(Path.of(t.savePath()).resolve(row.path()).toUri().toString());
+        });
+        detail.setOnAddTrackers(urls -> {
+            String id = detailId;
+            if (id != null) onTorrent("Trackers added to", id, (e, t) -> e.addTrackers(t, urls));
+        });
+        detail.setOnRemoveTracker(url -> {
+            String id = detailId;
+            if (id != null) onTorrent("Tracker removed from", id, (e, t) -> e.removeTracker(t, url));
+        });
+        detail.setOnReannounce(() -> {
+            String id = detailId;
+            if (id != null) onTorrent("Reannounced", id, (e, t) -> e.reannounce(t));
+        });
+        Platform.runLater(() -> {
+            setDetailVisible(Boolean.parseBoolean(settings.get(Settings.DETAIL_VISIBLE, "true")));
+            split.getDividers().forEach(d -> d.positionProperty().addListener(o -> rememberDivider()));
+        });
+        return new VBox(buildFilterBar(), split);
+    }
+
+    /** An engine action on one torrent by id. */
+    private interface IdAction {
+        void apply(Engine engine, String id) throws EngineException;
+    }
+
+    private void onTorrent(String verb, String id, IdAction action) {
+        if (engine == null) return;
+        Engine e = engine;
+        TorrentRow row = rows.get(id);
+        String name = row == null ? id : row.torrent().name();
+        Thread.ofVirtual().name("engine-detail-action").start(() -> {
+            String text;
+            try {
+                action.apply(e, id);
+                text = verb + " " + name;
+            } catch (EngineException ex) {
+                text = ex.getMessage();
+            }
+            String outcome = text;
+            Platform.runLater(() -> setStatus(outcome));
+        });
     }
 
     private HBox buildFilterBar() {

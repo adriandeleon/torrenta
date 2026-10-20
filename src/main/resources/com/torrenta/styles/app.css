@@ -125,3 +125,16 @@
     -fx-text-fill: -color-fg-muted;
     -fx-font-size: 0.9em;
 }
+
+/* The detail pane under the list. */
+.detail-pane {
+    -fx-background-color: -color-bg-default;
+}
+
+.detail-value {
+    -fx-text-fill: -color-fg-default;
+}
+
+.pieces-map {
+    -fx-background-color: -color-bg-subtle;
+}
