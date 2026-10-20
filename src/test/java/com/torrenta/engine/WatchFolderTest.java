@@ -137,9 +137,12 @@ class WatchFolderTest {
         assertEquals(
                 "Watching 1 folder, every 60 seconds and as files appear.",
                 WatchFolders.statusText(1, List.of(), true));
+        // The folders print as the platform does (a backslash on Windows), so the expectation does too.
+        Path a = Path.of("/a");
+        Path b = Path.of("/b");
         assertEquals(
-                "Watching 2 folders, every 60 seconds and as files appear. Not found: /a, /b.",
-                WatchFolders.statusText(2, List.of(Path.of("/a"), Path.of("/b")), true));
+                "Watching 2 folders, every 60 seconds and as files appear. Not found: " + a + ", " + b + ".",
+                WatchFolders.statusText(2, List.of(a, b), true));
     }
 
     private static WatchFolder entry(WatchFolder.SaveTo saveTo, String savePath) {
