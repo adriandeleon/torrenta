@@ -712,7 +712,7 @@ final class SettingsWindow {
         VBox trackers = section(page, "Trackers");
         defaultTrackers = new TextArea();
         defaultTrackers.setPrefRowCount(4);
-        defaultTrackers.setPrefColumnCount(34);
+        defaultTrackers.setPrefColumnCount(26);
         defaultTrackers.setPromptText("udp://tracker.example.org:6969/announce");
         defaultTrackers.textProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -797,7 +797,7 @@ final class SettingsWindow {
         VBox bans = section(page, "Manual bans");
         ipFilterBans = new TextArea();
         ipFilterBans.setPrefRowCount(4);
-        ipFilterBans.setPrefColumnCount(34);
+        ipFilterBans.setPrefColumnCount(24);
         ipFilterBans.setPromptText("1.2.3.4\n10.0.0.0/8\n1.2.3.0-1.2.3.255");
         ipFilterBans.textProperty().addListener((o, was, now) -> {
             if (loading) return;
