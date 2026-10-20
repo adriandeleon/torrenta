@@ -21,6 +21,7 @@
         <build.timestamp>${maven.build.timestamp}</build.timestamp>
 
         <javafx.version>26.0.2</javafx.version>
+        <atlantafx.version>3.0.0</atlantafx.version>
         <spotless.version>3.6.0</spotless.version>
         <palantir.version>2.92.0</palantir.version>
         <jacoco.version>0.8.13</jacoco.version>
@@ -64,6 +65,14 @@
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-controls</artifactId>
             <version>${javafx.version}</version>
+        </dependency>
+
+        <!-- Control themes: Nord and Cupertino come from AtlantaFX itself; the Editora pair is
+             authored in-house (see NOTICE) on the same variables. -->
+        <dependency>
+            <groupId>io.github.mkpaz</groupId>
+            <artifactId>atlantafx-base</artifactId>
+            <version>${atlantafx.version}</version>
         </dependency>
 
         <dependency>
