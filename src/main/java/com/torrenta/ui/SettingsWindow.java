@@ -14,7 +14,9 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
 import javafx.scene.Scene;
+import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.Label;
@@ -26,6 +28,7 @@ import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
+import javafx.scene.control.TextInputDialog;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
@@ -42,6 +45,7 @@ import javafx.util.StringConverter;
 import com.torrenta.AppInfo;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.store.Settings;
+import com.torrenta.sync.SyncEngine;
 
 /**
  * The Settings window: a sidebar of pages, a search box that filters rows across all of them, and
@@ -72,6 +76,7 @@ final class SettingsWindow {
     enum Category {
         GENERAL(Group.APPLICATION, "General"),
         ADDING(Group.APPLICATION, "Adding torrents"),
+        SYNC(Group.APPLICATION, "Sync"),
         CONNECTION(Group.ENGINE, "Connection"),
         PROTOCOL(Group.ENGINE, "Protocol"),
         IP_FILTER(Group.ENGINE, "IP filter"),
@@ -157,6 +162,222 @@ final class SettingsWindow {
 
     void setOnEngineSettingsChanged(Runnable handler) {
         onEngineSettingsChanged = handler;
+    }
+
+    private SettingsSync sync;
+    private CheckBox syncEnabled;
+    private TextField syncUrl;
+    private TextField syncBranch;
+    private Spinner<Integer> syncInterval;
+    private Label syncStatus;
+    private Button syncNow;
+    private Button syncDisconnect;
+
+    /** The service the Sync page drives and reports on. */
+    void setSync(SettingsSync sync) {
+        this.sync = sync;
+        sync.addListener(this::refreshSyncStatus);
+        refreshSyncStatus();
+    }
+
+    /** FX thread: the live settings were replaced by a sync; show them. */
+    void reloadFromSettings() {
+        reload();
+    }
+
+    private void buildSync(VBox page) {
+        VBox repository = section(page, "Repository");
+        syncEnabled = new CheckBox();
+        syncEnabled.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            if (now) connectSync();
+            else {
+                settings.setSyncEnabled(false);
+                settings.saveQuietly();
+                if (sync != null) sync.settingsChanged();
+            }
+        });
+        row(
+                Category.SYNC,
+                repository,
+                "Keep settings in sync",
+                "Through a Git repository of yours, a private one on GitHub say. Every computer that connects to it"
+                        + " gets the same settings: themes, columns, connection, protocol, filter and bans. Not this"
+                        + " machine's folders, interface, clocks or proxy password.",
+                syncEnabled,
+                "git github repository share machines computers");
+        syncUrl = new TextField();
+        syncUrl.setPrefColumnCount(18);
+        syncUrl.setPromptText("https://github.com/you/torrenta-settings.git");
+        syncUrl.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setSyncUrl(now);
+            settings.saveQuietly();
+            if (sync != null) sync.settingsChanged();
+        });
+        Button create = new Button("Create on GitHub…");
+        create.setOnAction(e -> createSyncRepository());
+        row(
+                Category.SYNC,
+                repository,
+                "Repository",
+                "Its URL as git would clone it, HTTPS or SSH, without a password or token in it. Create on GitHub"
+                        + " makes a private one through the GitHub CLI and fills this in.",
+                new HBox(6, syncUrl, create),
+                "url clone remote private gh");
+        syncBranch = new TextField();
+        syncBranch.setPrefColumnCount(10);
+        syncBranch.setPromptText("main");
+        syncBranch.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setSyncBranch(now);
+            settings.saveQuietly();
+        });
+        row(Category.SYNC, repository, "Branch", "main unless the repository uses another.", syncBranch, "branch");
+        syncInterval = new Spinner<>(1, 1440, 15, 5);
+        syncInterval.setEditable(true);
+        syncInterval.setPrefWidth(90);
+        syncInterval.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setSyncIntervalMinutes(now);
+            settings.saveQuietly();
+            if (sync != null) sync.settingsChanged();
+        });
+        row(
+                Category.SYNC,
+                repository,
+                "Every, in minutes",
+                "How often to look while the window is in front. A change here syncs half a minute after it"
+                        + " anyway, and so does startup.",
+                syncInterval,
+                "interval automatic timer schedule");
+
+        VBox status = section(page, "Status");
+        syncStatus = new Label("Not connected.");
+        syncStatus.setWrapText(true);
+        syncStatus.getStyleClass().add("settings-row-description");
+        syncNow = new Button("Sync now");
+        syncNow.setOnAction(e -> {
+            if (sync != null) sync.syncNow();
+        });
+        syncDisconnect = new Button("Disconnect");
+        syncDisconnect.setOnAction(e -> disconnectSync());
+        VBox statusBox = new VBox(8, syncStatus, new HBox(8, syncNow, syncDisconnect));
+        status.getChildren().add(statusBox);
+        rows.add(new Row(Category.SYNC, statusBox, "status last sync now disconnect account", status));
+    }
+
+    /** The switch went on: refuse a URL with a secret, show what connecting brings, then sync. */
+    private void connectSync() {
+        String url = syncUrl.getText().trim();
+        if (!SyncEngine.isUsableUrl(url)) {
+            syncEnabled.setSelected(false);
+            syncStatus.setText("Enter the repository's URL first.");
+            return;
+        }
+        if (SyncEngine.hasCredentials(url)) {
+            syncEnabled.setSelected(false);
+            syncStatus.setText("The URL carries a password or token; git signs in by itself, take it out.");
+            return;
+        }
+        settings.setSyncUrl(url);
+        settings.setSyncEnabled(true);
+        settings.saveQuietly();
+        if (sync == null) return;
+        syncStatus.setText("Looking at the repository…");
+        sync.preview(url, settings.syncBranch(), report -> {
+            if (!report.ok()) {
+                settings.setSyncEnabled(false);
+                settings.saveQuietly();
+                reload();
+                syncStatus.setText(report.summary());
+                return;
+            }
+            if (!report.received().isEmpty()) {
+                Alert ask = new Alert(
+                        Alert.AlertType.CONFIRMATION,
+                        "The repository already holds settings: "
+                                + report.received().size()
+                                + " would come to this machine"
+                                + (report.conflicts().isEmpty()
+                                        ? ""
+                                        : ", and " + report.conflicts().size()
+                                                + " that differ here keep this machine's value")
+                                + ". Connect?");
+                ask.setHeaderText("Connect to the repository");
+                ask.initOwner(stage);
+                Fonts.installUiFont(ask.getDialogPane());
+                if (ask.showAndWait().filter(b -> b == ButtonType.OK).isEmpty()) {
+                    settings.setSyncEnabled(false);
+                    settings.saveQuietly();
+                    reload();
+                    syncStatus.setText("Not connected.");
+                    return;
+                }
+            }
+            sync.settingsChanged();
+            sync.syncNow();
+        });
+    }
+
+    private void createSyncRepository() {
+        TextInputDialog ask = new TextInputDialog("torrenta-settings");
+        ask.initOwner(stage);
+        ask.setTitle("Create on GitHub");
+        ask.setHeaderText("A private repository under the GitHub CLI's account");
+        ask.setContentText("Name:");
+        Fonts.installUiFont(ask.getDialogPane());
+        ask.showAndWait().map(String::trim).filter(n -> !n.isEmpty()).ifPresent(name -> {
+            if (sync == null) return;
+            syncStatus.setText("Creating " + name + " on GitHub…");
+            sync.createOnGitHub(name, created -> {
+                if (created.ok()) {
+                    syncUrl.setText(created.url());
+                    syncStatus.setText("Created. Switch sync on to connect.");
+                } else {
+                    syncStatus.setText("GitHub CLI: " + created.error());
+                }
+            });
+        });
+    }
+
+    private void disconnectSync() {
+        Alert ask = new Alert(
+                Alert.AlertType.CONFIRMATION,
+                "Stop syncing, forget the repository and remove the local copy? The settings stay as they are.");
+        ask.setHeaderText("Disconnect");
+        ask.initOwner(stage);
+        Fonts.installUiFont(ask.getDialogPane());
+        if (ask.showAndWait().filter(b -> b == ButtonType.OK).isEmpty()) return;
+        if (sync != null) sync.disconnect();
+        reload();
+    }
+
+    /** FX thread: the Status section, from the service's state. */
+    private void refreshSyncStatus() {
+        if (syncStatus == null || sync == null) return;
+        SettingsSync.State s = sync.state();
+        String text =
+                switch (s.phase()) {
+                    case OFF -> "Not connected.";
+                    case SYNCING -> "Syncing…";
+                    case IDLE ->
+                        s.report() == null
+                                ? "Connected; the first sync is due."
+                                : "Last sync " + at(s.at()) + ": " + s.report().summary() + ".";
+                    case PROBLEM ->
+                        "⚠ " + (s.report() == null ? "" : s.report().summary())
+                                + (s.at() == null ? "" : " (" + at(s.at()) + ")");
+                };
+        if (!s.account().isEmpty()) text += "\nSigning in as " + s.account() + " through the GitHub CLI.";
+        syncStatus.setText(text);
+        boolean on = s.phase() != SettingsSync.Phase.OFF;
+        syncNow.setDisable(!on || s.phase() == SettingsSync.Phase.SYNCING);
+        syncDisconnect.setDisable(!on && settings.syncUrl().isEmpty());
+    }
+
+    private static String at(java.time.LocalDateTime when) {
+        return when == null ? "" : when.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
     }
 
     void setOnIpFilterChanged(
@@ -398,6 +619,7 @@ final class SettingsWindow {
             case CONNECTION -> buildConnection(page);
             case PROTOCOL -> buildProtocol(page);
             case IP_FILTER -> buildIpFilter(page);
+            case SYNC -> buildSync(page);
             case SPEED -> buildSpeed(page);
         }
         page.setPadding(new Insets(0, PAGE_GUTTER, 0, 0));
@@ -1003,6 +1225,10 @@ final class SettingsWindow {
             theme.setValue(Theme.byId(settings.theme(), Theme.DEFAULT));
             downloadDir.setText(settings.downloadDir().toString());
             updateCheck.setSelected(settings.updateCheck());
+            syncEnabled.setSelected(settings.syncEnabled());
+            syncUrl.setText(settings.syncUrl());
+            syncBranch.setText(settings.syncBranch().equals("main") ? "" : settings.syncBranch());
+            syncInterval.getValueFactory().setValue(settings.syncIntervalMinutes());
             addStartPaused.setSelected(settings.addStartPaused());
             addSequential.setSelected(settings.addSequential());
             EngineSettings e = settings.engineSettings();

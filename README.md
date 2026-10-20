@@ -80,6 +80,14 @@ Settings (`Ctrl+,`), which writes the same file. The theme is there too, under G
 Appearance: Editora Light and Dark (Caret & Ink, as Editora and Termina), Nord and Cupertino,
 light and dark, applied the moment one is picked (`ui.theme` in the file).
 
+**Settings sync.** Settings → Sync connects the settings file to a Git repository of yours (a
+private one on GitHub, say: "Create on GitHub" makes it through the `gh` CLI). Every computer that
+connects to it gets the same settings, merged one key at a time; a key changed on both sides keeps
+this machine's value and says so. It syncs after startup, half a minute after a change, and every
+few minutes while the window is in front, without ever asking for a password: git signs in the way
+it does for you, and with two `gh` accounts the one that can read the repository is used. Folders,
+the network interface, the clocks of the last checks and the proxy password stay on each machine.
+
 After startup, at most once a day, Torrenta asks GitHub whether there is a newer release and says
 so in the status bar and the Help menu; nothing about you or the machine is sent beyond the request
 itself. Help → Check for Updates asks now; Skip Version keeps that one quiet; `updates.check=false`

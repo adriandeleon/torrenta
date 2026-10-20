@@ -113,6 +113,8 @@ public final class MainWindow {
     private final Label updateBadge = new Label();
     private final Label altSpeedToggle = new Label();
     private ReleaseInfo availableUpdate;
+    private SettingsSync sync;
+    private final Label syncBadge = new Label("Sync ⚠");
     private Alert aboutDialog;
     private SplitPane split;
     private volatile String detailId;
@@ -148,6 +150,16 @@ public final class MainWindow {
         settingsWindow = new SettingsWindow(settings);
         settingsWindow.setOnEngineSettingsChanged(this::applyEngineSettings);
         settingsWindow.setOnIpFilterChanged(this::refreshIpFilter, this::ipFilterStatusText);
+        sync = new SettingsSync(settings, configDir, new SyncHost());
+        settingsWindow.setSync(sync);
+        sync.addListener(() -> {
+            boolean problem = sync.state().phase() == SettingsSync.Phase.PROBLEM;
+            syncBadge.setVisible(problem);
+            syncBadge.setManaged(problem);
+        });
+        // Every save (a Settings change, a column drag) is a reason to sync soon; the service
+        // ignores its own. Saves happen on the FX thread, but the listener does not assume it.
+        settings.setOnSaved(() -> Platform.runLater(sync::markDirty));
         detail.setOnBanPeer(this::banPeer);
         log.installLogBridge(Platform::runLater);
         host.getChildren().add(root);
@@ -174,6 +186,7 @@ public final class MainWindow {
             rememberDivider();
             stopPolling();
             updates.shutdown();
+            sync.shutdown();
         });
         setStatus("Starting the engine…");
         rates.setText(ratesText(Engine.Rates.ZERO));
@@ -323,6 +336,31 @@ public final class MainWindow {
         settings.saveQuietly();
         setStatus(on ? "Alternative speed limits on" : "Alternative speed limits off");
         applyEngineSettings();
+    }
+
+    // ---- settings sync --------------------------------------------------------------------------
+
+    /** What a sync round needs from the window. */
+    private final class SyncHost implements SettingsSync.Host {
+        @Override
+        public void reportStatus(String text) {
+            setStatus(text);
+        }
+
+        @Override
+        public void settingsApplied() {
+            // The file changed under every reader: re-apply what the settings drive.
+            javafx.application.Application.setUserAgentStylesheet(
+                    Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
+            applyEngineSettings();
+            refreshIpFilter(false);
+            if (settingsWindow.isShowing()) settingsWindow.reloadFromSettings();
+        }
+
+        @Override
+        public boolean windowFocused() {
+            return stage.isFocused();
+        }
     }
 
     // ---- IP filter ------------------------------------------------------------------------------
@@ -1230,11 +1268,19 @@ public final class MainWindow {
         updateBadge.setVisible(false);
         updateBadge.setManaged(false);
         updateBadge.setOnMouseClicked(e -> downloadUpdate());
+        // "Sync ⚠" while the last sync failed; a click opens the Sync page. Cleared by a good one.
+        syncBadge.getStyleClass().add("error-badge");
+        syncBadge.setVisible(false);
+        syncBadge.setManaged(false);
+        syncBadge.setOnMouseClicked(e -> {
+            settingsWindow.show(stage);
+            settingsWindow.selectPageForCapture("Sync");
+        });
         // The alternative-speed toggle: a click flips the manual switch; the schedule shows too.
         altSpeedToggle.getStyleClass().add("alt-speed");
         altSpeedToggle.setText("Alt speed: off");
         altSpeedToggle.setOnMouseClicked(e -> toggleAlternativeSpeed());
-        HBox bar = new HBox(12, status, spacer, altSpeedToggle, updateBadge, errorBadge, rates);
+        HBox bar = new HBox(12, status, spacer, altSpeedToggle, updateBadge, syncBadge, errorBadge, rates);
         bar.setPadding(new Insets(4, 10, 4, 10));
         bar.getStyleClass().add("status-bar");
         return bar;
