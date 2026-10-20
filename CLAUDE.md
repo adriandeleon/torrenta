@@ -94,6 +94,10 @@ release process with the names changed; Termina's README and memory hold the war
 - **The id is `getInfoHashes().getBest().toHex()`**, not `infoHash()`: a v2-only torrent has an
   all-zero v1 hash, and two of them would collide.
 - **Alerts arrive on their own thread; tests `await`, bounded, never sleep-and-hope.**
+- **The interface font is Inter, bundled, loaded before any stylesheet** (`Fonts.load()` in
+  `App.start`), and attached per scene and per dialog pane (`Fonts.installUiFont`), never in
+  app.css: every window and dialog is its own scene, and a scene sheet survives a theme switch.
+  A new Stage or Dialog without the call shows the system face.
 - **Nothing in the chrome may be focus-traversable** (Termina's rule holds here). The filter box
   took initial focus on a fresh launch because the table is hidden until the first torrent, so it
   was the first traversable node. It is `setFocusTraversable(false)`; Ctrl+F reaches it.

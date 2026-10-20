@@ -147,6 +147,7 @@ public final class MainWindow {
                 .add(MainWindow.class
                         .getResource("/com/torrenta/styles/app.css")
                         .toExternalForm());
+        Fonts.installUiFont(scene);
         scene.getAccelerators().put(chord(KeyCode.F), this::focusFilter);
         scene.getAccelerators().put(shiftChord(KeyCode.P), () -> palette.show(commands));
         scene.getAccelerators().put(shiftChord(KeyCode.L), logWindow::show);
@@ -482,6 +483,7 @@ public final class MainWindow {
         javafx.scene.control.TextInputDialog prompt =
                 new javafx.scene.control.TextInputDialog(clipboardCandidate().orElse(""));
         prompt.initOwner(stage);
+        Fonts.installUiFont(prompt.getDialogPane());
         prompt.setTitle("Add Magnet Link");
         prompt.setHeaderText("Magnet link, or a link to a .torrent");
         prompt.setContentText("Link:");
@@ -648,6 +650,7 @@ public final class MainWindow {
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, Actions.removeQuestion(selected.size(), deleteFiles));
         confirm.setHeaderText(deleteFiles ? "Remove and delete files" : "Remove");
         confirm.initOwner(stage);
+        Fonts.installUiFont(confirm.getDialogPane());
         ButtonType yes = new ButtonType(deleteFiles ? "Delete files" : "Remove", ButtonType.OK.getButtonData());
         confirm.getButtonTypes().setAll(yes, ButtonType.CANCEL);
         Optional<ButtonType> answer = confirm.showAndWait();
