@@ -490,6 +490,28 @@ class LibtorrentEngineTest {
     }
 
     @Test
+    void ipFilterRefusesTheRangesItIsGiven(@TempDir Path dir) throws Exception {
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.setIpFilter(List.of(new com.torrenta.engine.IpRange("10.0.0.0", "10.255.255.255")));
+            engine.start();
+            assertTrue(engine.isBlockedForTest("10.1.2.3"), "set before start, applied at start");
+            assertFalse(engine.isBlockedForTest("192.168.1.1"));
+
+            List<EngineEvent> events = new CopyOnWriteArrayList<>();
+            engine.addListener(events::add);
+            engine.setIpFilter(List.of(
+                    com.torrenta.engine.IpRange.cidr("192.168.0.0/16"), com.torrenta.engine.IpRange.single("1.2.3.4")));
+            assertFalse(engine.isBlockedForTest("10.1.2.3"), "replaced, not merged");
+            assertTrue(engine.isBlockedForTest("192.168.1.1"));
+            assertTrue(engine.isBlockedForTest("1.2.3.4"));
+            assertTrue(events.stream().anyMatch(ev -> ev.message().equals("IP filter: 2 ranges")));
+            engine.setIpFilter(List.of());
+            assertFalse(engine.isBlockedForTest("1.2.3.4"), "cleared");
+            assertEquals(0, engine.blockedPeers());
+        }
+    }
+
+    @Test
     void stopAfterMetadataIsAcceptedForAMagnet(@TempDir Path dir) throws Exception {
         try (LibtorrentEngine engine = engine(dir)) {
             engine.start();

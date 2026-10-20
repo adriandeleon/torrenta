@@ -24,6 +24,7 @@ import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineSettings;
+import com.torrenta.engine.IpRange;
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
@@ -31,6 +32,7 @@ import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.store.TorrentStore;
 import org.libtorrent4j.AddTorrentParams;
+import org.libtorrent4j.Address;
 import org.libtorrent4j.AlertListener;
 import org.libtorrent4j.AnnounceEndpoint;
 import org.libtorrent4j.AnnounceEntry;
@@ -67,6 +69,7 @@ import org.libtorrent4j.alerts.TrackerErrorAlert;
 import org.libtorrent4j.alerts.TrackerWarningAlert;
 import org.libtorrent4j.swig.add_torrent_params;
 import org.libtorrent4j.swig.error_code;
+import org.libtorrent4j.swig.ip_filter;
 import org.libtorrent4j.swig.libtorrent;
 import org.libtorrent4j.swig.load_torrent_limits;
 import org.libtorrent4j.swig.resume_data_flags_t;
@@ -106,6 +109,11 @@ public final class LibtorrentEngine implements Engine {
 
     /** The connection settings in force; the session starts with them and takes changes live. */
     private volatile EngineSettings engineSettings;
+
+    /** The filter in force, kept so a start after a set applies it; empty means none. */
+    private volatile List<IpRange> ipFilter = List.of();
+
+    private final java.util.concurrent.atomic.AtomicLong blockedPeers = new java.util.concurrent.atomic.AtomicLong();
 
     /** Resume-data requests whose alert has not arrived yet; {@link #stop()} waits on this. */
     private final AtomicInteger pendingSaves = new AtomicInteger();
@@ -161,6 +169,7 @@ public final class LibtorrentEngine implements Engine {
         }
         s.addListener(new Listener());
         session = s;
+        if (!ipFilter.isEmpty()) s.swig().set_ip_filter(toFilter(ipFilter));
         emit(EngineEvent.session(EngineEvent.Level.INFO, "Engine started: " + description()));
         restore(s);
 
@@ -671,6 +680,37 @@ public final class LibtorrentEngine implements Engine {
         return pack;
     }
 
+    @Override
+    public void setIpFilter(List<IpRange> ranges) throws EngineException {
+        ipFilter = List.copyOf(ranges);
+        SessionManager s = session;
+        if (s == null || !s.isRunning()) return;
+        s.swig().set_ip_filter(toFilter(ipFilter));
+        emit(EngineEvent.session(
+                EngineEvent.Level.INFO,
+                ipFilter.isEmpty() ? "IP filter cleared" : "IP filter: " + ipFilter.size() + " ranges"));
+    }
+
+    @Override
+    public long blockedPeers() {
+        return blockedPeers.get();
+    }
+
+    /** Whether the session's filter refuses the address; for the test. */
+    boolean isBlockedForTest(String ip) throws EngineException {
+        return running().swig().get_ip_filter().access(Address.parseIp(ip).swig()) != 0;
+    }
+
+    private static ip_filter toFilter(List<IpRange> ranges) {
+        ip_filter filter = new ip_filter();
+        long blocked = ip_filter.access_flags.blocked.swigValue();
+        for (IpRange r : ranges) {
+            filter.add_rule(
+                    Address.parseIp(r.first()).swig(), Address.parseIp(r.last()).swig(), blocked);
+        }
+        return filter;
+    }
+
     /** Whether DHT is on in the session; for the test. */
     boolean dhtEnabledForTest() throws EngineException {
         return running().settings().isEnableDht();
@@ -856,6 +896,7 @@ public final class LibtorrentEngine implements Engine {
             AlertType.LISTEN_FAILED.swig(),
             AlertType.PORTMAP.swig(),
             AlertType.PORTMAP_ERROR.swig(),
+            AlertType.PEER_BLOCKED.swig(),
             AlertType.SAVE_RESUME_DATA.swig(),
             AlertType.SAVE_RESUME_DATA_FAILED.swig(),
         };
@@ -949,6 +990,8 @@ public final class LibtorrentEngine implements Engine {
                                 "Port mapping with " + a.mapTransport() + " failed: "
                                         + a.error().getMessage()));
                     }
+                    // Counted, not logged: a busy blocklist refuses peers by the hundred.
+                    case PEER_BLOCKED -> blockedPeers.incrementAndGet();
                     case SAVE_RESUME_DATA -> onSaved((SaveResumeDataAlert) alert);
                     case SAVE_RESUME_DATA_FAILED -> onSaveFailed((SaveResumeDataFailedAlert) alert);
                     default -> {}

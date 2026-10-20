@@ -65,6 +65,7 @@ final class DetailPane extends VBox {
     private Consumer<List<String>> onAddTrackers = urls -> {};
     private Consumer<String> onRemoveTracker = url -> {};
     private Runnable onReannounce = () -> {};
+    private Consumer<String> onBanPeer = address -> {};
 
     DetailPane() {
         getStyleClass().add("detail-pane");
@@ -104,6 +105,10 @@ final class DetailPane extends VBox {
 
     void setOnReannounce(Runnable handler) {
         onReannounce = handler;
+    }
+
+    void setOnBanPeer(Consumer<String> handler) {
+        onBanPeer = handler;
     }
 
     /** The active tab's name, one of {@link #TABS}; remembered by the window. */

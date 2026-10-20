@@ -61,8 +61,8 @@ public final class App extends Application {
         Settings settings = new Settings(configDir.resolve(Settings.FILE_NAME));
         settings.load();
 
-        MainWindow window =
-                new MainWindow(stage, settings, uri -> getHostServices().showDocument(uri));
+        MainWindow window = new MainWindow(
+                stage, settings, configDir, uri -> getHostServices().showDocument(uri));
         window.show();
         cli.inputs().forEach(window::addInput);
 

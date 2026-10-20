@@ -77,6 +77,12 @@ public interface Engine extends AutoCloseable {
     /** Applies connection settings now, to the running session; also the ones used at start. */
     void applySettings(EngineSettings settings) throws EngineException;
 
+    /** Replaces the IP filter: peers in these ranges are refused. Empty clears it. */
+    void setIpFilter(List<IpRange> ranges) throws EngineException;
+
+    /** Peers refused by the filter since the engine started. */
+    long blockedPeers();
+
     /**
      * Hears every {@link EngineEvent}, on an engine thread: the listener hands it to the FX thread
      * itself. Added before or after {@link #start()}.

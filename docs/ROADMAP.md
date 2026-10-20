@@ -229,8 +229,10 @@ Everything in Settings that the engine already knows how to do.
 3. **Protocol** — done: DHT, PEX (a per-torrent flag, set on add and carried to existing
    torrents), LSD, uTP, encryption mode, anonymous mode, default trackers (appended on add and to
    existing torrents).
-4. **IP filter**: blocklist URL with scheduled refresh, `.dat`/`.p2p` import, manual bans, counts in
-   the status bar.
+4. **IP filter** — done: blocklist URL with scheduled refresh (gzip by magic number, cached as
+   `blocklist.txt` beside the settings), `.dat`/`.p2p`/CIDR/plain parsing, a local list file,
+   manual bans with Ban Peer in the Peers tab; the count of ranges and of refused peers is on the
+   settings page and in the status bar on each apply.
 5. **Speed**: global limits, alternative limits, schedule, overhead options; status-bar toggle.
 6. **Queue and share limits**: active limits, slow threshold, queue positions, global and
    per-torrent ratio/time limits with their action; super seeding.
