@@ -14,8 +14,8 @@ import java.util.TreeMap;
  *
  * <p>Everything in the settings file syncs except what describes one installation: the sync
  * connection itself, folders and interfaces of this machine, the clocks of the last checks, the
- * per-torrent entries (the torrents are this machine's), and the proxy password, which does not
- * belong in a repository even a private one. Pure.
+ * per-torrent entries and the sidebar's chosen filter (the torrents are this machine's), and the
+ * proxy password, which does not belong in a repository even a private one. Pure.
  */
 public final class SyncKeys {
 
@@ -24,6 +24,7 @@ public final class SyncKeys {
 
     static final List<String> LOCAL_KEYS = List.of(
             "download.dir",
+            "ui.sidebar.filter",
             "connection.interface",
             "ipfilter.file",
             "ipfilter.lastRefreshEpochMs",

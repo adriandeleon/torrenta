@@ -7,6 +7,22 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Categories and tags.** A torrent is filed under one category or none and carries any number
+  of tags. Torrent → Set Category… (`Ctrl+Shift+G`; a submenu of the categories in the Torrent and
+  context menus, None and New category…) and Edit Tags… (`Ctrl+T`: a checkbox per tag, a field for
+  new ones) act on the selection; the Add dialog offers the category and takes tags, and a category
+  with a save path fills the dialog's folder when chosen, so new torrents in it download there.
+  Settings → Categories and tags (also Torrent → Manage Categories and Tags…) adds, repaths and
+  deletes them; deleting unfiles the torrents. Category and Tags columns, hidden by default.
+  Categories are `categories.json`, tags `tags.json`, a torrent's own filing is
+  `torrents/<info-hash>.labels` beside its resume data, written as it changes, restored at start
+  and removed with the torrent (libtorrent's resume data has no field for them).
+- **A sidebar** on the left of the list: All, the categories (each with its count, plus
+  Uncategorised) and the tags (plus Untagged). Choosing one narrows the list, together with the
+  name filter; the choice and whether the sidebar shows (View → Sidebar, `Ctrl+Shift+B`,
+  `ui.sidebar`) survive a restart (`ui.sidebar.filter`, never synced: it names this machine's
+  categories). `Ctrl+B` focuses it; arrows choose, `Enter`, `Space` and `Esc` return to the list.
+  Built as a tree so Status and Tracker sections can join it.
 - **Queue and share limits** (Settings → Queue and share limits): how many torrents download, seed
   and run at once (0 for no limit), whether a slow torrent holds a slot, and a global share limit:
   a ratio and a seeding time, either of which, once reached by a finished torrent, pauses it or

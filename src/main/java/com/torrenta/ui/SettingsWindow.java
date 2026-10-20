@@ -1,6 +1,7 @@
 package com.torrenta.ui;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -26,6 +27,8 @@ import javafx.scene.control.PasswordField;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Spinner;
 import javafx.scene.control.SpinnerValueFactory;
+import javafx.scene.control.TableColumn;
+import javafx.scene.control.TableView;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TextInputDialog;
@@ -45,6 +48,7 @@ import javafx.util.StringConverter;
 import com.torrenta.AppInfo;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
+import com.torrenta.store.LabelStore;
 import com.torrenta.store.Settings;
 import com.torrenta.sync.SyncEngine;
 
@@ -78,6 +82,7 @@ final class SettingsWindow {
         GENERAL(Group.APPLICATION, "General"),
         ADDING(Group.APPLICATION, "Adding torrents"),
         SYNC(Group.APPLICATION, "Sync"),
+        LABELS(Group.APPLICATION, "Categories and tags"),
         CONNECTION(Group.ENGINE, "Connection"),
         PROTOCOL(Group.ENGINE, "Protocol"),
         IP_FILTER(Group.ENGINE, "IP filter"),
@@ -124,6 +129,44 @@ final class SettingsWindow {
 
     /** Told after any connection setting changed; the window applies them to the engine. */
     private Runnable onEngineSettingsChanged = () -> {};
+
+    /** What the Categories and tags page tells the window, on the FX thread. */
+    interface LabelsHost {
+        /** A category was added or its save path changed, or a tag was added. */
+        void labelsChanged();
+
+        /** The category is gone; the torrents filed under it are to be unfiled. */
+        void categoryDeleted(String name);
+
+        /** The tag is gone; the torrents carrying it are to drop it. */
+        void tagDeleted(String name);
+    }
+
+    private LabelStore labelStore;
+    private LabelsHost labelsHost = new LabelsHost() {
+        @Override
+        public void labelsChanged() {}
+
+        @Override
+        public void categoryDeleted(String name) {}
+
+        @Override
+        public void tagDeleted(String name) {}
+    };
+    private TableView<com.torrenta.engine.Category> categoryTable;
+    private TextField categoryName;
+    private TextField categoryPath;
+    private Button categoryDelete;
+    private ListView<String> tagList;
+    private TextField newTag;
+    private Button tagDelete;
+
+    /** The store the Categories and tags page edits, and who to tell. */
+    void setLabels(LabelStore store, LabelsHost host) {
+        this.labelStore = store;
+        this.labelsHost = host;
+        reloadLabels();
+    }
 
     private final Settings settings;
     private final Stage stage = new Stage();
@@ -631,6 +674,7 @@ final class SettingsWindow {
             case PROTOCOL -> buildProtocol(page);
             case IP_FILTER -> buildIpFilter(page);
             case SYNC -> buildSync(page);
+            case LABELS -> buildLabels(page);
             case SPEED -> buildSpeed(page);
             case QUEUE -> buildQueue(page);
         }
@@ -733,6 +777,183 @@ final class SettingsWindow {
                 "Ask GitHub for a newer release after startup, at most once a day. Help → Check for Updates asks regardless.",
                 updateCheck,
                 "release version github automatic");
+    }
+
+    /**
+     * Categories (name and save path) and tags, as lists with a form under each. Not settings
+     * keys: the lists live in {@code categories.json} and {@code tags.json}, through the store,
+     * and the window re-files the torrents when one is deleted.
+     */
+    private void buildLabels(VBox page) {
+        VBox categories = section(page, "Categories");
+        categoryTable = new TableView<>();
+        categoryTable.setPrefHeight(170);
+        categoryTable.setPlaceholder(new Label("No categories yet"));
+        categoryTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        TableColumn<com.torrenta.engine.Category, String> name = new TableColumn<>("Name");
+        name.setPrefWidth(160);
+        name.setCellValueFactory(c ->
+                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().name()));
+        TableColumn<com.torrenta.engine.Category, String> path = new TableColumn<>("Save path");
+        path.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                c.getValue().savePath().isEmpty()
+                        ? "(the download folder)"
+                        : c.getValue().savePath()));
+        categoryTable.getColumns().addAll(List.of(name, path));
+        categoryName = new TextField();
+        categoryName.setPromptText("name");
+        categoryName.setPrefColumnCount(12);
+        categoryPath = new TextField();
+        categoryPath.setPromptText("save path, empty for the download folder");
+        HBox.setHgrow(categoryPath, Priority.ALWAYS);
+        Button browse = new Button("Browse…");
+        browse.setOnAction(e -> {
+            DirectoryChooser chooser = new DirectoryChooser();
+            chooser.setTitle("Save path for the category");
+            File current = new File(categoryPath.getText().trim());
+            while (current != null && !current.isDirectory()) current = current.getParentFile();
+            if (current != null) chooser.setInitialDirectory(current);
+            File chosen = chooser.showDialog(stage);
+            if (chosen != null) categoryPath.setText(chosen.getAbsolutePath());
+        });
+        Button save = new Button("Save");
+        save.setDefaultButton(false);
+        save.disableProperty().bind(categoryName.textProperty().map(String::isBlank));
+        save.setOnAction(e -> saveCategory());
+        categoryName.setOnAction(e -> saveCategory());
+        categoryPath.setOnAction(e -> saveCategory());
+        categoryDelete = new Button("Delete");
+        categoryDelete
+                .disableProperty()
+                .bind(categoryTable.getSelectionModel().selectedItemProperty().isNull());
+        categoryDelete.setOnAction(e -> deleteCategory());
+        categoryTable.getSelectionModel().selectedItemProperty().addListener((o, was, now) -> {
+            if (now == null) return;
+            categoryName.setText(now.name());
+            categoryPath.setText(now.savePath());
+        });
+        HBox form = new HBox(6, categoryName, categoryPath, browse, save, categoryDelete);
+        form.setAlignment(Pos.CENTER_LEFT);
+        Label hint = new Label("A category with a save path fills the Add dialog's folder when chosen: new torrents"
+                + " filed under it download there. Changing the path moves nothing already added. Save with"
+                + " an existing name changes that category's path; Delete unfiles its torrents.");
+        hint.setWrapText(true);
+        hint.getStyleClass().add("settings-row-description");
+        VBox categoryBox = new VBox(8, hint, categoryTable, form);
+        categories.getChildren().add(categoryBox);
+        rows.add(new Row(
+                Category.LABELS,
+                categoryBox,
+                "Categories | name save path folder download automatic torrent management delete",
+                categories));
+
+        VBox tags = section(page, "Tags");
+        tagList = new ListView<>();
+        tagList.setPrefHeight(130);
+        tagList.setPlaceholder(new Label("No tags yet"));
+        newTag = new TextField();
+        newTag.setPromptText("new tags, comma-separated");
+        HBox.setHgrow(newTag, Priority.ALWAYS);
+        Button addTag = new Button("Add");
+        addTag.disableProperty().bind(newTag.textProperty().map(String::isBlank));
+        addTag.setOnAction(e -> addTags());
+        newTag.setOnAction(e -> addTags());
+        tagDelete = new Button("Delete");
+        tagDelete
+                .disableProperty()
+                .bind(tagList.getSelectionModel().selectedItemProperty().isNull());
+        tagDelete.setOnAction(e -> deleteTag());
+        HBox tagForm = new HBox(6, newTag, addTag, tagDelete);
+        tagForm.setAlignment(Pos.CENTER_LEFT);
+        Label tagHint = new Label("Any number of tags per torrent (Torrent → Edit Tags…, Ctrl+T). A tag typed in a"
+                + " dialog is added here by itself; Delete takes it off every torrent.");
+        tagHint.setWrapText(true);
+        tagHint.getStyleClass().add("settings-row-description");
+        VBox tagBox = new VBox(8, tagHint, tagList, tagForm);
+        tags.getChildren().add(tagBox);
+        rows.add(new Row(Category.LABELS, tagBox, "Tags | labels add delete", tags));
+    }
+
+    private void saveCategory() {
+        if (labelStore == null || categoryName.getText().isBlank()) return;
+        try {
+            labelStore.putCategory(new com.torrenta.engine.Category(categoryName.getText(), categoryPath.getText()));
+        } catch (IOException | IllegalArgumentException e) {
+            report("Could not save the category: " + e.getMessage());
+            return;
+        }
+        String saved = categoryName.getText().trim();
+        reloadLabels();
+        categoryTable.getItems().stream()
+                .filter(c -> c.name().equals(saved))
+                .findFirst()
+                .ifPresent(c -> categoryTable.getSelectionModel().select(c));
+        labelsHost.labelsChanged();
+    }
+
+    private void deleteCategory() {
+        com.torrenta.engine.Category selected =
+                categoryTable.getSelectionModel().getSelectedItem();
+        if (labelStore == null || selected == null) return;
+        try {
+            labelStore.removeCategory(selected.name());
+        } catch (IOException e) {
+            report("Could not delete the category: " + e.getMessage());
+            return;
+        }
+        categoryName.clear();
+        categoryPath.clear();
+        reloadLabels();
+        labelsHost.categoryDeleted(selected.name());
+    }
+
+    private void addTags() {
+        if (labelStore == null || newTag.getText().isBlank()) return;
+        try {
+            labelStore.addTags(List.of(newTag.getText()));
+        } catch (IOException e) {
+            report("Could not save the tags: " + e.getMessage());
+            return;
+        }
+        newTag.clear();
+        reloadLabels();
+        labelsHost.labelsChanged();
+    }
+
+    private void deleteTag() {
+        String selected = tagList.getSelectionModel().getSelectedItem();
+        if (labelStore == null || selected == null) return;
+        try {
+            labelStore.removeTag(selected);
+        } catch (IOException e) {
+            report("Could not delete the tag: " + e.getMessage());
+            return;
+        }
+        reloadLabels();
+        labelsHost.tagDeleted(selected);
+    }
+
+    /** The store's lists into the two controls; keeps the category selection where it can. */
+    private void reloadLabels() {
+        if (labelStore == null || categoryTable == null) return;
+        com.torrenta.engine.Category selected =
+                categoryTable.getSelectionModel().getSelectedItem();
+        categoryTable.getItems().setAll(labelStore.categories());
+        if (selected != null) {
+            categoryTable.getItems().stream()
+                    .filter(c -> c.name().equals(selected.name()))
+                    .findFirst()
+                    .ifPresent(c -> categoryTable.getSelectionModel().select(c));
+        }
+        tagList.getItems().setAll(labelStore.tags());
+    }
+
+    /** A failed write has nowhere to go but a dialog here: the window's status bar is not ours. */
+    private void report(String message) {
+        Alert alert = new Alert(Alert.AlertType.WARNING, message);
+        alert.initOwner(stage);
+        Fonts.installUiFont(alert.getDialogPane());
+        alert.showAndWait();
     }
 
     private void buildAdding(VBox page) {
@@ -1334,6 +1555,7 @@ final class SettingsWindow {
     private void reload() {
         loading = true;
         try {
+            reloadLabels();
             theme.setValue(Theme.byId(settings.theme(), Theme.DEFAULT));
             downloadDir.setText(settings.downloadDir().toString());
             updateCheck.setSelected(settings.updateCheck());

@@ -1,6 +1,7 @@
 package com.torrenta.ui;
 
 import java.time.ZoneOffset;
+import java.util.List;
 
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentState;
@@ -30,7 +31,9 @@ class FormatTest {
                 "",
                 false,
                 false,
-                0);
+                0,
+                "",
+                List.of());
     }
 
     @Test
@@ -38,8 +41,34 @@ class FormatTest {
         Torrent running = torrent(TorrentState.DOWNLOADING, 100, 10, 1);
         assertEquals("Downloading", Format.stateLabel(running));
         Torrent paused = new Torrent(
-                "id", "n", 100, 10, 0.1, TorrentState.DOWNLOADING, 0, 0, 0, 0, 0, 0, 0, 0, "", "", true, false, 0);
+                "id",
+                "n",
+                100,
+                10,
+                0.1,
+                TorrentState.DOWNLOADING,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                "",
+                "",
+                true,
+                false,
+                0,
+                "",
+                List.of());
         assertEquals("Paused", Format.stateLabel(paused));
+    }
+
+    @Test
+    void tagsColumnIsCommaSeparated() {
+        assertEquals("", Format.tags(List.of()));
+        assertEquals("4k, hd", Format.tags(List.of("4k", "hd")));
     }
 
     @Test

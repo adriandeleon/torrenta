@@ -30,6 +30,7 @@ import com.torrenta.engine.Priority;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
+import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
@@ -102,6 +103,11 @@ import org.libtorrent4j.swig.torrent_handle_vector;
  * #stop()}, which waits for the writes to land. Resume data is produced asynchronously — a request
  * on the handle, an alert with the answer — so the alert listener is where the store gets written,
  * on libtorrent4j's alert thread.
+ *
+ * <p>A torrent's category and tags are not libtorrent's: {@code add_torrent_params} has no field
+ * for them, so they live in a {@code .labels} sidecar beside the resume data, written on the
+ * caller's thread the moment they change, read back with the resume data at start, and held here
+ * by id for the snapshots.
  */
 public final class LibtorrentEngine implements Engine {
 
@@ -141,6 +147,9 @@ public final class LibtorrentEngine implements Engine {
      * request was in flight — and writing it would bring the torrent back at the next start.
      */
     private final Set<String> removed = ConcurrentHashMap.newKeySet();
+
+    /** Category and tags by id; absent means none. The sidecar in the store is the durable copy. */
+    private final Map<String, TorrentLabels> labels = new ConcurrentHashMap<>();
 
     public LibtorrentEngine(Path downloadDir, TorrentStore store) {
         this(() -> downloadDir, store);
@@ -202,6 +211,7 @@ public final class LibtorrentEngine implements Engine {
         }
         restoring.addAll(stored.keySet());
         for (Map.Entry<String, byte[]> entry : stored.entrySet()) {
+            restoreLabels(entry.getKey());
             error_code ec = new error_code();
             add_torrent_params params = libtorrent.read_resume_data_ex(Vectors.bytes2byte_vector(entry.getValue()), ec);
             if (ec.value() != 0) {
@@ -213,6 +223,22 @@ public final class LibtorrentEngine implements Engine {
             if (added.value() != 0) {
                 LOG.warning("Could not bring back " + entry.getKey() + ": " + added.message());
             }
+        }
+    }
+
+    /** The sidecar, if there is one; an unreadable one costs the labels, not the torrent. */
+    private void restoreLabels(String id) {
+        try {
+            store.loadLabels(id).ifPresent(bytes -> {
+                try {
+                    TorrentLabels l = TorrentLabels.decode(bytes);
+                    if (!l.isEmpty()) labels.put(id, l);
+                } catch (IOException e) {
+                    LOG.warning("Labels for " + id + " are unreadable (" + e.getMessage() + "); skipped");
+                }
+            });
+        } catch (IOException e) {
+            LOG.warning("Labels for " + id + " could not be read (" + e.getMessage() + "); skipped");
         }
     }
 
@@ -310,8 +336,52 @@ public final class LibtorrentEngine implements Engine {
             throw new EngineException(ec.message());
         }
         TorrentHandle handle = new TorrentHandle(raw);
+        if (!request.labels().isEmpty()) writeLabels(id, request.labels());
 
         return snapshot(handle);
+    }
+
+    @Override
+    public String category(String id) throws EngineException {
+        return labelsOf(id).category();
+    }
+
+    @Override
+    public void setCategory(String id, String category) throws EngineException {
+        writeLabels(id, labelsOf(id).withCategory(category));
+    }
+
+    @Override
+    public List<String> tags(String id) throws EngineException {
+        return labelsOf(id).tags();
+    }
+
+    @Override
+    public void setTags(String id, List<String> tags) throws EngineException {
+        writeLabels(id, labelsOf(id).withTags(tags));
+    }
+
+    /** The torrent's labels, none if it has none; an id the session lacks is an error. */
+    private TorrentLabels labelsOf(String id) throws EngineException {
+        handle(id);
+        return labels.getOrDefault(id, TorrentLabels.NONE);
+    }
+
+    /** Memory and sidecar together, under the store's lock; no labels means no sidecar. */
+    private void writeLabels(String id, TorrentLabels l) throws EngineException {
+        synchronized (store) {
+            try {
+                if (l.isEmpty()) {
+                    labels.remove(id);
+                    store.deleteLabels(id);
+                } else {
+                    labels.put(id, l);
+                    store.saveLabels(id, l.encode());
+                }
+            } catch (IOException e) {
+                throw new EngineException("Could not write the labels of " + id + ": " + e.getMessage(), e);
+            }
+        }
     }
 
     @Override
@@ -401,6 +471,7 @@ public final class LibtorrentEngine implements Engine {
         // so a write that already passed the check cannot land after this delete.
         synchronized (store) {
             removed.add(id);
+            labels.remove(id);
             try {
                 store.delete(id);
             } catch (IOException e) {
@@ -1055,13 +1126,14 @@ public final class LibtorrentEngine implements Engine {
         return flags.and_(flag).non_zero();
     }
 
-    private static Torrent snapshot(TorrentHandle handle) {
+    private Torrent snapshot(TorrentHandle handle) {
         TorrentStatus status = handle.status(StatusQuery.FLAGS);
         torrent_flags_t flags = status.flags();
         String id = status.getInfoHashes().getBest().toHex();
         String name = status.name();
         if (name == null || name.isEmpty()) name = id;
         String tracker = status.currentTracker();
+        TorrentLabels l = labels.getOrDefault(id, TorrentLabels.NONE);
         return new Torrent(
                 id,
                 name,
@@ -1084,7 +1156,9 @@ public final class LibtorrentEngine implements Engine {
                 has(flags, Flags.SEQUENTIAL_DOWNLOAD),
                 // Milliseconds from libtorrent4j; the record promises seconds. Finished rather than
                 // seeding: a torrent with files left out never becomes a seed, but it is done.
-                status.finishedDuration() / 1000);
+                status.finishedDuration() / 1000,
+                l.category(),
+                l.tags());
     }
 
     /** libtorrent's seven states folded into the list's six. Package-private for the test. */

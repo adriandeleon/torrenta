@@ -277,3 +277,58 @@
     -fx-font-size: 11.5px;
     -fx-text-fill: -color-fg-muted;
 }
+
+/*
+ * The sidebar of filters beside the list: the subtle ground, a rule on its right, sections as
+ * bold headings with no selection affordance, counts in the muted ink at the right edge.
+ */
+.sidebar {
+    -fx-background-color: -color-bg-subtle;
+    -fx-border-color: transparent -color-border-default transparent transparent;
+}
+
+.sidebar .sidebar-tree {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 4 0 4 0;
+}
+
+.sidebar .tree-cell {
+    -fx-background-color: transparent;
+    -fx-padding: 4 10 4 6;
+}
+
+.sidebar .tree-cell:section {
+    -fx-font-weight: bold;
+}
+
+.sidebar .tree-cell:section > .tree-disclosure-node > .arrow {
+    -fx-background-color: -color-fg-muted;
+}
+
+.sidebar .tree-cell:filled:selected,
+.sidebar .tree-view:focused .tree-cell:filled:selected {
+    -fx-background-color: -color-accent-subtle;
+    -fx-background-radius: 6;
+    -fx-background-insets: 0 4 0 4;
+}
+
+.sidebar .tree-cell:filled:selected .label {
+    -fx-text-fill: -color-accent-fg;
+}
+
+.sidebar .sidebar-count {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.9em;
+}
+
+.sidebar .tree-cell:filled:selected .sidebar-count {
+    -fx-text-fill: -color-accent-fg;
+}
+
+/* The Edit Tags dialog's list of checkboxes. */
+.tags-list {
+    -fx-background-color: -color-bg-default;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 4;
+}

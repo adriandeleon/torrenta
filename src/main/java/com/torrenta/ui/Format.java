@@ -29,6 +29,11 @@ public final class Format {
         return t.paused() ? "Paused" : t.state().label();
     }
 
+    /** The Tags column: comma-separated, as the dialogs take them. */
+    public static String tags(java.util.List<String> tags) {
+        return String.join(", ", tags);
+    }
+
     public static String percent(double progress) {
         return String.format(Locale.ROOT, "%.1f %%", progress * 100);
     }

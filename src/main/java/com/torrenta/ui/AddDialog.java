@@ -37,6 +37,8 @@ import javafx.stage.Window;
 import javafx.util.StringConverter;
 
 import com.torrenta.engine.AddRequest;
+import com.torrenta.engine.Category;
+import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 
 /**
@@ -45,6 +47,9 @@ import com.torrenta.engine.TorrentPreview;
  * <p>One dialog for all three sources. A {@code .torrent} (from disk or a URL) comes with a
  * {@link TorrentPreview} and shows its files; a magnet has no metadata yet and shows what the link
  * says. Enter adds, Escape cancels, every control is reachable by keyboard.
+ *
+ * <p>A category with a save path fills the folder when chosen (automatic torrent management, as
+ * qBittorrent calls it); the folder stays editable afterwards.
  */
 final class AddDialog {
 
@@ -55,6 +60,9 @@ final class AddDialog {
     private final CheckBox sequential = new CheckBox("Sequential download");
     private final CheckBox skipCheck = new CheckBox("Skip hash check (the files are already complete)");
     private final ChoiceBox<AddRequest.StopCondition> stop = new ChoiceBox<>();
+    private final ChoiceBox<String> category = new ChoiceBox<>();
+    private final TextField tags = new TextField();
+    private final List<Category> categories;
     private final Button add = new Button("Add");
     private final TreeTableView<FileTree.Node> tree = new TreeTableView<>();
     private final AddRequest.Source source;
@@ -64,6 +72,7 @@ final class AddDialog {
     /**
      * @param preview the torrent's contents, or null for a magnet
      * @param origin where it came from: a path, a URL, or the magnet link
+     * @param categories the categories that exist, offered as the torrent's
      */
     AddDialog(
             Window owner,
@@ -72,9 +81,11 @@ final class AddDialog {
             String origin,
             Path defaultSavePath,
             boolean startPausedDefault,
-            boolean sequentialDefault) {
+            boolean sequentialDefault,
+            List<Category> categories) {
         this.source = source;
         this.preview = preview;
+        this.categories = List.copyOf(categories);
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
         stage.setTitle(preview == null ? "Add Magnet Link" : "Add Torrent");
@@ -126,6 +137,27 @@ final class AddDialog {
         ((HBox) options.getChildren().get(3)).setAlignment(Pos.CENTER_LEFT);
         form.addRow(row++, muted("Options"), options);
 
+        category.getItems().add("");
+        for (Category c : this.categories) category.getItems().add(c.name());
+        category.setValue("");
+        category.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(String name) {
+                return name == null || name.isEmpty() ? "None" : name;
+            }
+
+            @Override
+            public String fromString(String s) {
+                return null;
+            }
+        });
+        category.valueProperty().addListener((o, was, now) -> categoryPath(now).ifPresent(savePath::setText));
+        tags.setPromptText("comma-separated");
+        HBox.setHgrow(tags, Priority.ALWAYS);
+        HBox filing = new HBox(8, category, new Label("Tags:"), tags);
+        filing.setAlignment(Pos.CENTER_LEFT);
+        form.addRow(row++, muted("Category"), filing);
+
         VBox content = new VBox(12, form);
         content.setPadding(new Insets(14));
         if (preview != null && !preview.files().isEmpty()) {
@@ -146,7 +178,7 @@ final class AddDialog {
         content.getChildren().add(buttons);
 
         Scene scene =
-                new Scene(content, 640, preview != null && !preview.files().isEmpty() ? 560 : 330);
+                new Scene(content, 640, preview != null && !preview.files().isEmpty() ? 590 : 360);
         scene.getStylesheets()
                 .add(AddDialog.class.getResource("/com/torrenta/styles/app.css").toExternalForm());
         Fonts.installUiFont(scene);
@@ -193,8 +225,24 @@ final class AddDialog {
                 sequential.isSelected(),
                 skipCheck.isSelected(),
                 stop.getValue(),
-                filePriorities());
+                filePriorities(),
+                new TorrentLabels(category.getValue(), List.of(tags.getText())));
         stage.hide();
+    }
+
+    /** The folder a category brings with it, if it has one. */
+    private java.util.Optional<String> categoryPath(String name) {
+        if (name == null || name.isEmpty()) return Optional.empty();
+        return categories.stream()
+                .filter(c -> c.name().equals(name))
+                .findFirst()
+                .flatMap(Category::path)
+                .map(Path::toString);
+    }
+
+    /** Picks a category as a person would, for the capture hook. */
+    void selectCategoryForCapture(String name) {
+        if (category.getItems().contains(name)) category.setValue(name);
     }
 
     private Map<Integer, com.torrenta.engine.Priority> filePriorities() {

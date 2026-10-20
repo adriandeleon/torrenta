@@ -60,6 +60,7 @@ import javafx.stage.Stage;
 
 import com.torrenta.AppInfo;
 import com.torrenta.engine.AddRequest;
+import com.torrenta.engine.Category;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
@@ -67,9 +68,11 @@ import com.torrenta.engine.Inputs;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
+import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.net.TorrentFetch;
+import com.torrenta.store.LabelStore;
 import com.torrenta.store.Settings;
 import com.torrenta.update.ReleaseInfo;
 import com.torrenta.update.UpdateCheck;
@@ -107,6 +110,13 @@ public final class MainWindow {
     private List<Command> commands = List.of();
     private AddDialog currentDialog;
     private LimitsDialog limitsDialog;
+    private TagsDialog tagsDialog;
+    /** A choice or text prompt of the category commands, while one is up. */
+    private javafx.scene.control.Dialog<?> promptDialog;
+
+    private final LabelStore labels;
+    private Sidebar sidebar;
+    private SidebarFilter sidebarFilter = SidebarFilter.ALL;
     private String lastClipboardOffer = "";
     private final DetailPane detail = new DetailPane();
     private final UpdateService updates = new UpdateService();
@@ -140,6 +150,8 @@ public final class MainWindow {
         this.settings = settings;
         this.opener = opener;
         this.ipFilter = new IpFilterController(settings, configDir);
+        this.labels = new LabelStore(configDir);
+        labels.load();
         stage.setTitle(AppInfo.NAME);
 
         BorderPane root = new BorderPane();
@@ -155,6 +167,7 @@ public final class MainWindow {
         logWindow = new LogWindow(stage, log);
         settingsWindow = new SettingsWindow(settings);
         settingsWindow.setOnEngineSettingsChanged(this::applyEngineSettings);
+        settingsWindow.setLabels(labels, new LabelsHost());
         settingsWindow.setOnIpFilterChanged(this::refreshIpFilter, this::ipFilterStatusText);
         sync = new SettingsSync(settings, configDir, new SyncHost());
         settingsWindow.setSync(sync);
@@ -217,6 +230,9 @@ public final class MainWindow {
     public javafx.scene.Scene captureScene() {
         if (currentDialog != null && currentDialog.isShowing()) return currentDialog.scene();
         if (limitsDialog != null && limitsDialog.isShowing()) return limitsDialog.scene();
+        if (tagsDialog != null && tagsDialog.isShowing()) return tagsDialog.scene();
+        if (promptDialog != null && promptDialog.isShowing())
+            return promptDialog.getDialogPane().getScene();
         if (aboutDialog != null && aboutDialog.isShowing())
             return aboutDialog.getDialogPane().getScene();
         if (settingsWindow.isShowing()) return settingsWindow.scene();
@@ -227,6 +243,8 @@ public final class MainWindow {
     public void closeDialogsForCapture() {
         if (currentDialog != null && currentDialog.isShowing()) currentDialog.cancel();
         if (limitsDialog != null && limitsDialog.isShowing()) limitsDialog.cancel();
+        if (tagsDialog != null && tagsDialog.isShowing()) tagsDialog.cancel();
+        if (promptDialog != null && promptDialog.isShowing()) promptDialog.close();
         if (aboutDialog != null && aboutDialog.isShowing()) aboutDialog.close();
     }
 
@@ -239,7 +257,9 @@ public final class MainWindow {
 
     /**
      * Drives the window from the capture hook, by name: {@code select-all}, {@code palette},
-     * {@code palette:<query>}, or a command id. Prints what a screenshot cannot show.
+     * {@code palette:<query>}, {@code sidebar:<filter>} (as {@link SidebarFilter#parse} reads it),
+     * {@code dialog-category:<name>} on an open Add dialog, or a command id. Prints what a
+     * screenshot cannot show.
      */
     public void runForCapture(String action) {
         if (action.equals("select-all")) {
@@ -256,6 +276,11 @@ public final class MainWindow {
             settingsWindow.searchForCapture(action.substring("settings:".length()));
         } else if (action.equals("dialog-add")) {
             if (currentDialog != null && currentDialog.isShowing()) currentDialog.confirm();
+        } else if (action.startsWith("dialog-category:")) {
+            if (currentDialog != null && currentDialog.isShowing())
+                currentDialog.selectCategoryForCapture(action.substring("dialog-category:".length()));
+        } else if (action.startsWith("sidebar:")) {
+            chooseFilter(SidebarFilter.parse(action.substring("sidebar:".length())));
         } else if (action.equals("select-first")) {
             table.getSelectionModel().clearAndSelect(0);
         } else if (action.startsWith("detail:")) {
@@ -280,6 +305,11 @@ public final class MainWindow {
             System.out.println("capture: dialog=" + currentDialog.title());
         if (limitsDialog != null && limitsDialog.isShowing())
             System.out.println("capture: dialog=" + limitsDialog.title());
+        if (tagsDialog != null && tagsDialog.isShowing()) System.out.println("capture: dialog=" + tagsDialog.title());
+        if (promptDialog != null && promptDialog.isShowing())
+            System.out.println("capture: dialog=" + promptDialog.getTitle());
+        if (sidebar.isVisible()) System.out.println("capture: sidebar=" + sidebar.summary());
+        System.out.println("capture: filter=" + sidebarFilter.format() + " shown=" + filtered.size());
         if (detailWanted) System.out.println("capture: detail=" + detail.summary());
         if (settingsWindow.isShowing())
             System.out.println("capture: settings=" + settingsWindow.visibleRowsForCapture());
@@ -551,12 +581,14 @@ public final class MainWindow {
                 origin,
                 settings.downloadDir(),
                 settings.addStartPaused(),
-                settings.addSequential());
+                settings.addSequential(),
+                labels.categories());
         currentDialog = dialog;
         Optional<AddRequest> request = dialog.showAndWait();
         currentDialog = null;
         table.requestFocus();
         if (request.isEmpty() || engine == null) return;
+        rememberLabels(request.get().labels());
         Engine e = engine;
         Thread.ofVirtual().name("engine-add").start(() -> {
             String outcome;
@@ -658,6 +690,7 @@ public final class MainWindow {
         TorrentDetail shown = detailSnapshot;
         Platform.runLater(() -> {
             rows.apply(snapshot);
+            refreshSidebar(snapshot);
             rates.setText(ratesText(current));
             if (detailWanted) {
                 if (shown != null && shown.general().id().equals(detailId)) detail.show(shown);
@@ -762,7 +795,11 @@ public final class MainWindow {
 
     /** Applies an action to every selected torrent on a worker; the status bar gets the tally. */
     private void onSelection(String verb, TorrentAction action) {
-        List<Torrent> selected = selectedTorrents();
+        onTorrents(verb, selectedTorrents(), action);
+    }
+
+    private void onTorrents(String verb, List<Torrent> targets, TorrentAction action) {
+        List<Torrent> selected = targets;
         if (selected.isEmpty() || engine == null) return;
         Engine e = engine;
         Thread.ofVirtual().name("engine-action").start(() -> {
@@ -847,6 +884,177 @@ public final class MainWindow {
                         (eng, t) -> eng.setLimits(t.id(), result.get().limits()));
             });
         });
+    }
+
+    // ---- categories and tags --------------------------------------------------------------------
+
+    /** FX thread. A category or tags typed somewhere new get into the store, so the sidebar lists them. */
+    private void rememberLabels(TorrentLabels l) {
+        try {
+            if (!l.category().isEmpty() && labels.category(l.category()).isEmpty())
+                labels.putCategory(new Category(l.category()));
+            labels.addTags(l.tags());
+        } catch (IOException e) {
+            setStatus("Could not write " + labels.dir() + ": " + e.getMessage());
+        }
+        refreshSidebar(rows.list().stream().map(TorrentRow::torrent).toList());
+    }
+
+    /** Files the selection under the category (empty for none), on a worker. */
+    private void setCategory(String name) {
+        rememberLabels(new TorrentLabels(name, List.of()));
+        String verb = name.isEmpty() ? "Category cleared on" : "Filed under " + name + ":";
+        onSelection(verb, (e, t) -> e.setCategory(t.id(), name));
+    }
+
+    /**
+     * Torrent → Set Category… from the palette: a choice of the categories, None, or a new one.
+     * Opened on the next pulse, as every modal here is: a nested event loop cannot start inside
+     * an animation or layout pass, and the capture hook runs commands from one.
+     */
+    private void chooseCategory() {
+        if (selectedTorrents().isEmpty()) return;
+        Platform.runLater(this::showCategoryChoice);
+    }
+
+    private void showCategoryChoice() {
+        if (selectedTorrents().isEmpty() || (promptDialog != null && promptDialog.isShowing())) return;
+        List<String> choices = new ArrayList<>();
+        choices.add(NONE_CHOICE);
+        for (Category c : labels.categories()) choices.add(c.name());
+        choices.add(NEW_CHOICE);
+        String current = selectedTorrents().get(0).category();
+        javafx.scene.control.ChoiceDialog<String> prompt =
+                new javafx.scene.control.ChoiceDialog<>(current.isEmpty() ? NONE_CHOICE : current, choices);
+        prompt.initOwner(stage);
+        Fonts.installUiFont(prompt.getDialogPane());
+        prompt.setTitle("Set Category");
+        prompt.setHeaderText("File the selection under");
+        prompt.setContentText("Category:");
+        promptDialog = prompt;
+        Optional<String> answer = prompt.showAndWait();
+        promptDialog = null;
+        if (answer.isEmpty()) return;
+        if (answer.get().equals(NEW_CHOICE)) newCategory();
+        else setCategory(answer.get().equals(NONE_CHOICE) ? "" : answer.get());
+    }
+
+    private static final String NONE_CHOICE = "None";
+    private static final String NEW_CHOICE = "New category…";
+
+    /** Asks for a name, makes the category, files the selection under it. */
+    private void newCategory() {
+        Platform.runLater(this::showNewCategoryPrompt);
+    }
+
+    private void showNewCategoryPrompt() {
+        if (promptDialog != null && promptDialog.isShowing()) return;
+        javafx.scene.control.TextInputDialog prompt = new javafx.scene.control.TextInputDialog();
+        prompt.initOwner(stage);
+        Fonts.installUiFont(prompt.getDialogPane());
+        prompt.setTitle("New Category");
+        prompt.setHeaderText("A name for the category; its save path can be set in Settings");
+        prompt.setContentText("Name:");
+        promptDialog = prompt;
+        Optional<String> name = prompt.showAndWait().map(String::trim).filter(n -> !n.isEmpty());
+        promptDialog = null;
+        name.ifPresent(this::setCategory);
+    }
+
+    /** Torrent → Edit Tags…: the dialog over the selection's tags, applied to each torrent's own. */
+    private void editTags() {
+        if (selectedTorrents().isEmpty()) return;
+        Platform.runLater(this::showTagsDialog);
+    }
+
+    private void showTagsDialog() {
+        List<Torrent> selected = selectedTorrents();
+        if (selected.isEmpty() || (tagsDialog != null && tagsDialog.isShowing())) return;
+        String subject = selected.size() == 1 ? selected.get(0).name() : selected.size() + " torrents";
+        TagsDialog dialog = new TagsDialog(
+                stage,
+                subject,
+                labels.tags(),
+                selected.stream().map(Torrent::tags).toList());
+        tagsDialog = dialog;
+        Optional<TagsDialog.Result> result = dialog.showAndWait();
+        tagsDialog = null;
+        table.requestFocus();
+        if (result.isEmpty()) return;
+        rememberLabels(new TorrentLabels("", result.get().add()));
+        onTorrents("Tags set on", selected, (e, t) -> {
+            List<String> tags = new ArrayList<>(e.tags(t.id()));
+            tags.removeAll(result.get().remove());
+            tags.addAll(result.get().add());
+            e.setTags(t.id(), tags);
+        });
+    }
+
+    /** The torrents carrying a category or a tag, as the rows have them now. */
+    private List<Torrent> carrying(SidebarFilter filter) {
+        return rows.list().stream()
+                .map(TorrentRow::torrent)
+                .filter(filter::matches)
+                .toList();
+    }
+
+    /** What the Settings page tells the window; the engine is told on a worker. */
+    private final class LabelsHost implements SettingsWindow.LabelsHost {
+        @Override
+        public void labelsChanged() {
+            refreshSidebar(rows.list().stream().map(TorrentRow::torrent).toList());
+        }
+
+        @Override
+        public void categoryDeleted(String name) {
+            onTorrents(
+                    "Category cleared on", carrying(SidebarFilter.category(name)), (e, t) -> e.setCategory(t.id(), ""));
+            labelsChanged();
+        }
+
+        @Override
+        public void tagDeleted(String name) {
+            onTorrents("Tag removed from", carrying(SidebarFilter.tag(name)), (e, t) -> {
+                List<String> tags = new ArrayList<>(e.tags(t.id()));
+                tags.remove(name);
+                e.setTags(t.id(), tags);
+            });
+            labelsChanged();
+        }
+    }
+
+    // ---- sidebar --------------------------------------------------------------------------------
+
+    /** FX thread. The sidebar's entries and counts from the store and this snapshot. */
+    private void refreshSidebar(List<Torrent> snapshot) {
+        sidebar.update(labels.categories().stream().map(Category::name).toList(), labels.tags(), snapshot);
+    }
+
+    /** The sidebar's choice changed by hand (or fell back to All): filter, and remember. */
+    private void onSidebarFilter(SidebarFilter filter) {
+        sidebarFilter = filter;
+        applyFilters();
+        settings.setSidebarFilter(filter.format());
+        settings.saveQuietly();
+    }
+
+    /** Chooses a filter from code: the stored one at start, the capture hook. */
+    private void chooseFilter(SidebarFilter filter) {
+        sidebar.select(filter);
+        onSidebarFilter(filter);
+    }
+
+    private void applyFilters() {
+        filtered.setPredicate(rowFilter(filter.getText(), sidebarFilter));
+    }
+
+    private void setSidebarVisible(boolean visible) {
+        sidebar.setVisible(visible);
+    }
+
+    private void focusSidebar() {
+        if (!sidebar.isVisible()) setSidebarVisible(true);
+        sidebar.focus();
     }
 
     private void copyToClipboard(String what, Function<Torrent, String> text) {
@@ -941,6 +1149,13 @@ public final class MainWindow {
                         this::toggleSequential),
                 new Command("limits", "Limits…", chord(KeyCode.L), null, selection, this::editLimits),
                 new Command(
+                        "set-category", "Set Category…", shiftChord(KeyCode.G), null, selection, this::chooseCategory),
+                new Command("edit-tags", "Edit Tags…", chord(KeyCode.T), null, selection, this::editTags),
+                new Command("manage-categories", "Manage Categories and Tags…", null, null, always, () -> {
+                    settingsWindow.show(stage);
+                    settingsWindow.selectPageForCapture("LABELS");
+                }),
+                new Command(
                         "copy-name",
                         "Copy Name",
                         chord(KeyCode.C),
@@ -1001,7 +1216,15 @@ public final class MainWindow {
                         null,
                         null,
                         always,
-                        () -> toolbar.setVisible(!toolbar.isVisible())));
+                        () -> toolbar.setVisible(!toolbar.isVisible())),
+                new Command(
+                        "toggle-sidebar",
+                        "Toggle Sidebar",
+                        shiftChord(KeyCode.B),
+                        null,
+                        always,
+                        () -> setSidebarVisible(!sidebar.isVisible())),
+                new Command("focus-sidebar", "Focus Sidebar", chord(KeyCode.B), null, always, this::focusSidebar));
     }
 
     /**
@@ -1093,12 +1316,17 @@ public final class MainWindow {
         paletteItem.setOnAction(e -> palette.show(commands));
         CheckMenuItem toolbarItem = new CheckMenuItem("Toolbar");
         toolbarItem.selectedProperty().bindBidirectional(toolbar.visibleProperty());
+        CheckMenuItem sidebarItem = new CheckMenuItem("Sidebar");
+        sidebarItem.setAccelerator(shiftChord(KeyCode.B));
+        sidebarItem.selectedProperty().bindBidirectional(sidebar.visibleProperty());
         Menu view = new Menu("View");
         view.getItems()
                 .addAll(
                         toolbarItem,
+                        sidebarItem,
                         new SeparatorMenuItem(),
                         command("filter").menuItem(),
+                        command("focus-sidebar").menuItem(),
                         command("select-all").menuItem(),
                         command("event-log").menuItem(),
                         paletteItem);
@@ -1130,12 +1358,46 @@ public final class MainWindow {
             items.add(command(id).menuItem());
         }
         items.add(new SeparatorMenuItem());
+        items.add(categoryMenu());
+        items.add(command("edit-tags").menuItem());
+        items.add(new SeparatorMenuItem());
         for (String id : List.of("copy-name", "copy-hash", "copy-magnet", "open-folder")) {
             items.add(command(id).menuItem());
         }
         items.add(new SeparatorMenuItem());
         for (String id : List.of("remove", "remove-data")) items.add(command(id).menuItem());
         return items;
+    }
+
+    /**
+     * Set Category as a submenu: the categories that exist, with the selection's current one
+     * checked, then None and New Category…. Rebuilt each time it opens, since the list changes.
+     */
+    private Menu categoryMenu() {
+        Menu menu = new Menu("Set Category");
+        menu.disableProperty().bind(Bindings.not(command("set-category").enabled()));
+        menu.setOnShowing(e -> {
+            List<Torrent> selected = selectedTorrents();
+            List<MenuItem> items = new ArrayList<>();
+            for (Category c : labels.categories()) {
+                CheckMenuItem item = new CheckMenuItem(c.name());
+                item.setSelected(!selected.isEmpty()
+                        && selected.stream().allMatch(t -> t.category().equals(c.name())));
+                item.setOnAction(a -> setCategory(c.name()));
+                items.add(item);
+            }
+            if (!items.isEmpty()) items.add(new SeparatorMenuItem());
+            MenuItem none = new MenuItem(NONE_CHOICE);
+            none.setOnAction(a -> setCategory(""));
+            MenuItem fresh = new MenuItem(NEW_CHOICE);
+            fresh.setOnAction(a -> newCategory());
+            items.add(none);
+            items.add(fresh);
+            menu.getItems().setAll(items);
+        });
+        // Never empty, or the submenu arrow has nothing to open and some platforms drop it.
+        menu.getItems().add(new MenuItem(NONE_CHOICE));
+        return menu;
     }
 
     private ContextMenu buildContextMenu() {
@@ -1201,7 +1463,24 @@ public final class MainWindow {
             setDetailVisible(Boolean.parseBoolean(settings.get(Settings.DETAIL_VISIBLE, "true")));
             split.getDividers().forEach(d -> d.positionProperty().addListener(o -> rememberDivider()));
         });
-        return new VBox(buildFilterBar(), split);
+        VBox listAndDetail = new VBox(buildFilterBar(), split);
+        // The sidebar runs the full height on the left of the filter bar, the list and the detail
+        // pane; hidden and unmanaged together, so View → Sidebar gives the width back to the list.
+        sidebar = new Sidebar(this::onSidebarFilter, () -> table.requestFocus());
+        sidebar.managedProperty().bind(sidebar.visibleProperty());
+        sidebar.setVisible(settings.sidebar());
+        sidebar.visibleProperty().addListener((o, was, now) -> {
+            settings.setSidebar(now);
+            settings.saveQuietly();
+        });
+        refreshSidebar(List.of());
+        sidebarFilter = SidebarFilter.parse(settings.sidebarFilter());
+        sidebar.select(sidebarFilter);
+        applyFilters();
+        BorderPane centreWithSidebar = new BorderPane(listAndDetail);
+        centreWithSidebar.setLeft(sidebar);
+        VBox.setVgrow(centreWithSidebar, Priority.ALWAYS);
+        return new VBox(centreWithSidebar);
     }
 
     /** An engine action on one torrent by id. */
@@ -1233,7 +1512,7 @@ public final class MainWindow {
         // the table is hidden (no torrents yet) that would be this box, so every keystroke on a
         // fresh launch would land in the filter. Ctrl+F reaches it; Tab does not need to.
         filter.setFocusTraversable(false);
-        filter.textProperty().addListener((o, was, text) -> filtered.setPredicate(nameFilter(text)));
+        filter.textProperty().addListener((o, was, text) -> applyFilters());
         filter.setOnKeyPressed(e -> {
             if (e.getCode() == KeyCode.ESCAPE) {
                 filter.clear();
@@ -1256,6 +1535,13 @@ public final class MainWindow {
         String needle = text == null ? "" : text.trim().toLowerCase(java.util.Locale.ROOT);
         if (needle.isEmpty()) return row -> true;
         return row -> row.torrent().name().toLowerCase(java.util.Locale.ROOT).contains(needle);
+    }
+
+    /** Both filters at once: the name box and the sidebar's choice. Package-private for tests. */
+    static java.util.function.Predicate<TorrentRow> rowFilter(String text, SidebarFilter sidebar) {
+        java.util.function.Predicate<TorrentRow> byName = nameFilter(text);
+        SidebarFilter f = sidebar == null ? SidebarFilter.ALL : sidebar;
+        return row -> byName.test(row) && f.matches(row.torrent());
     }
 
     private void focusFilter() {
@@ -1304,6 +1590,8 @@ public final class MainWindow {
                         column("added", "Added", 130, false, Torrent::added, Format::dateTime),
                         column("completed", "Completed", 130, false, Torrent::completed, Format::dateTime),
                         column("tracker", "Tracker", 160, false, Torrent::tracker, Format::host),
+                        column("category", "Category", 120, false, Torrent::category, s -> s),
+                        column("tags", "Tags", 160, false, t -> Format.tags(t.tags()), s -> s),
                         column("path", "Save path", 240, false, Torrent::savePath, s -> s)));
 
         ColumnMemory.apply(table, ColumnLayout.parse(settings.get(Settings.TABLE_COLUMNS, "")));

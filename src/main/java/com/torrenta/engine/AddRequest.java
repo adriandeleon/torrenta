@@ -14,6 +14,7 @@ import java.util.Map;
  *     already downloaded
  * @param stopCondition stop by itself once this is reached
  * @param filePriorities by file index; a file not in the map gets {@link Priority#NORMAL}
+ * @param labels the category and tags to file it under; {@link TorrentLabels#NONE} for none
  */
 public record AddRequest(
         Source source,
@@ -22,7 +23,12 @@ public record AddRequest(
         boolean sequential,
         boolean skipCheck,
         StopCondition stopCondition,
-        Map<Integer, Priority> filePriorities) {
+        Map<Integer, Priority> filePriorities,
+        TorrentLabels labels) {
+
+    public AddRequest {
+        if (labels == null) labels = TorrentLabels.NONE;
+    }
 
     public sealed interface Source permits TorrentFile, Magnet {}
 
@@ -47,8 +53,8 @@ public record AddRequest(
         }
     }
 
-    /** The dialog's defaults: start now, rarest first, check, no stop, original layout, all files. */
+    /** The dialog's defaults: start now, rarest first, check, no stop, all files, no labels. */
     public static AddRequest defaults(Source source, Path savePath) {
-        return new AddRequest(source, savePath, false, false, false, StopCondition.NONE, Map.of());
+        return new AddRequest(source, savePath, false, false, false, StopCondition.NONE, Map.of(), TorrentLabels.NONE);
     }
 }

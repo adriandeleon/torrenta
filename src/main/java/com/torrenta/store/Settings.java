@@ -47,6 +47,10 @@ public final class Settings {
     public static final String SYNC_LAST = "sync.lastEpochMs";
     /** Whether the icon toolbar under the menu bar shows; View → Toolbar flips it. */
     public static final String UI_TOOLBAR = "ui.toolbar";
+    /** Whether the sidebar of filters shows beside the list; View → Sidebar flips it. */
+    public static final String UI_SIDEBAR = "ui.sidebar";
+    /** The sidebar's chosen filter, as {@code ui.SidebarFilter} formats it; this machine's. */
+    public static final String UI_SIDEBAR_FILTER = "ui.sidebar.filter";
     /** The theme id ({@code editora-dark}, {@code nord-light}, …); the UI maps it and falls back. */
     public static final String THEME = "ui.theme";
 
@@ -321,6 +325,23 @@ public final class Settings {
 
     public void setToolbar(boolean shown) {
         properties.setProperty(UI_TOOLBAR, String.valueOf(shown));
+    }
+
+    public boolean sidebar() {
+        return readBoolean(UI_SIDEBAR, true);
+    }
+
+    public void setSidebar(boolean shown) {
+        properties.setProperty(UI_SIDEBAR, String.valueOf(shown));
+    }
+
+    /** The sidebar filter as written; empty when unset. The UI parses it and falls back to All. */
+    public String sidebarFilter() {
+        return properties.getProperty(UI_SIDEBAR_FILTER, "").trim();
+    }
+
+    public void setSidebarFilter(String filter) {
+        properties.setProperty(UI_SIDEBAR_FILTER, filter == null ? "" : filter);
     }
 
     public void setAddStartPaused(boolean on) {

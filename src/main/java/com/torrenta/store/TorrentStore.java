@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
@@ -20,6 +21,10 @@ import java.util.regex.Pattern;
  * <hash>.fastresume}, so a single corrupt file costs one torrent rather than the session, and so a
  * person can delete one by hand.
  *
+ * <p>Beside the blob a torrent may have a {@code <hash>.labels} sidecar: what the engine files it
+ * under (category, tags), which libtorrent's resume data has no room for. Also opaque bytes here;
+ * it goes when the torrent goes.
+ *
  * <p>Writes are atomic (temp file beside the target, then a move) and the class is synchronized:
  * the engine calls it from its alert thread while the FX side may be removing a torrent.
  */
@@ -29,6 +34,7 @@ public final class TorrentStore {
 
     public static final String FOLDER = "torrents";
     public static final String SUFFIX = ".fastresume";
+    public static final String LABELS_SUFFIX = ".labels";
 
     /** A v1 or v2 info-hash in hex; anything else never becomes a file name. */
     private static final Pattern ID = Pattern.compile("[0-9a-f]{40}|[0-9a-f]{64}");
@@ -44,9 +50,32 @@ public final class TorrentStore {
     }
 
     public synchronized void save(String id, byte[] data) throws IOException {
-        Path target = fileFor(id);
+        write(fileFor(id, SUFFIX), data);
+    }
+
+    /** Forgets the torrent: its blob and its labels. */
+    public synchronized void delete(String id) throws IOException {
+        Files.deleteIfExists(fileFor(id, SUFFIX));
+        Files.deleteIfExists(fileFor(id, LABELS_SUFFIX));
+    }
+
+    public synchronized void saveLabels(String id, byte[] data) throws IOException {
+        write(fileFor(id, LABELS_SUFFIX), data);
+    }
+
+    public synchronized void deleteLabels(String id) throws IOException {
+        Files.deleteIfExists(fileFor(id, LABELS_SUFFIX));
+    }
+
+    /** The torrent's labels sidecar, if it has one. */
+    public synchronized Optional<byte[]> loadLabels(String id) throws IOException {
+        Path file = fileFor(id, LABELS_SUFFIX);
+        return Files.isRegularFile(file) ? Optional.of(Files.readAllBytes(file)) : Optional.empty();
+    }
+
+    private void write(Path target, byte[] data) throws IOException {
         Files.createDirectories(dir);
-        Path tmp = Files.createTempFile(dir, id, ".part");
+        Path tmp = Files.createTempFile(dir, target.getFileName().toString(), ".part");
         try {
             Files.write(tmp, data);
             Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
@@ -55,12 +84,8 @@ public final class TorrentStore {
         }
     }
 
-    public synchronized void delete(String id) throws IOException {
-        Files.deleteIfExists(fileFor(id));
-    }
-
     public synchronized boolean contains(String id) {
-        return Files.isRegularFile(fileFor(id));
+        return Files.isRegularFile(fileFor(id, SUFFIX));
     }
 
     /**
@@ -85,8 +110,8 @@ public final class TorrentStore {
         return out;
     }
 
-    private Path fileFor(String id) {
+    private Path fileFor(String id, String suffix) {
         if (!ID.matcher(id).matches()) throw new IllegalArgumentException("not an info-hash: " + id);
-        return dir.resolve(id + SUFFIX);
+        return dir.resolve(id + suffix);
     }
 }
