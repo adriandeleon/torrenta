@@ -334,12 +334,16 @@ public final class LibtorrentEngine implements Engine {
         else s.remove(handle);
         emit(EngineEvent.info(id, name, deleteFiles ? "Removed " + name + " and its files" : "Removed " + name));
         // Forgotten before libtorrent confirms: a crash in between loses nothing worse than a
-        // torrent that comes back once, which beats one that cannot be removed.
-        removed.add(id);
-        try {
-            store.delete(id);
-        } catch (IOException e) {
-            throw new EngineException("Removed from the session, but its resume data stayed: " + e.getMessage(), e);
+        // torrent that comes back once, which beats one that cannot be removed. Marked and deleted
+        // under the store's lock, the same lock the alert thread's write takes around its check,
+        // so a write that already passed the check cannot land after this delete.
+        synchronized (store) {
+            removed.add(id);
+            try {
+                store.delete(id);
+            } catch (IOException e) {
+                throw new EngineException("Removed from the session, but its resume data stayed: " + e.getMessage(), e);
+            }
         }
     }
 
@@ -869,11 +873,15 @@ public final class LibtorrentEngine implements Engine {
 
         private void write(AddTorrentParams params) {
             String id = params.getInfoHashes().getBest().toHex();
-            if (removed.contains(id)) return;
-            try {
-                store.save(id, AddTorrentParams.writeResumeDataBuf(params));
-            } catch (IOException e) {
-                LOG.log(Level.WARNING, "Could not write resume data for " + id, e);
+            // Check and write under one lock: see remove(). Without it CI saw the remove test's
+            // blob come back, written by a save that had passed the check before the delete.
+            synchronized (store) {
+                if (removed.contains(id)) return;
+                try {
+                    store.save(id, AddTorrentParams.writeResumeDataBuf(params));
+                } catch (IOException e) {
+                    LOG.log(Level.WARNING, "Could not write resume data for " + id, e);
+                }
             }
         }
     }
