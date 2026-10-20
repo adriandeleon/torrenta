@@ -9,6 +9,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import javafx.geometry.Insets;
@@ -48,8 +49,10 @@ import javafx.util.StringConverter;
 import com.torrenta.AppInfo;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
+import com.torrenta.engine.WatchFolder;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.Settings;
+import com.torrenta.store.WatchFolderStore;
 import com.torrenta.sync.SyncEngine;
 
 /**
@@ -81,6 +84,7 @@ final class SettingsWindow {
     enum Category {
         GENERAL(Group.APPLICATION, "General"),
         ADDING(Group.APPLICATION, "Adding torrents"),
+        WATCH(Group.APPLICATION, "Watch folders"),
         SYNC(Group.APPLICATION, "Sync"),
         LABELS(Group.APPLICATION, "Categories and tags"),
         CONNECTION(Group.ENGINE, "Connection"),
@@ -168,6 +172,65 @@ final class SettingsWindow {
         this.labelStore = store;
         this.labelsHost = host;
         reloadLabels();
+    }
+
+    /** What the Watch folders page tells the window, on the FX thread. */
+    interface WatchHost {
+        /** The list changed; the watcher is to be restarted on it. */
+        void watchFoldersChanged();
+
+        /** The watcher's state, for the page's status line. */
+        String watchStatus();
+    }
+
+    private WatchFolderStore watchStore;
+    private WatchHost watchHost = new WatchHost() {
+        @Override
+        public void watchFoldersChanged() {}
+
+        @Override
+        public String watchStatus() {
+            return "";
+        }
+    };
+    private TableView<WatchFolder> watchTable;
+    private Label watchStatusLabel;
+    private WatchFolderDialog watchDialog;
+
+    /** The store the Watch folders page edits, and who to tell. */
+    void setWatchFolders(WatchFolderStore store, WatchHost host) {
+        this.watchStore = store;
+        this.watchHost = host;
+        reloadWatch();
+    }
+
+    /** FX thread: the page's status line, after the watcher moved. */
+    void refreshWatchStatus() {
+        if (watchStatusLabel != null) watchStatusLabel.setText(watchHost.watchStatus());
+    }
+
+    /** The open watch-folder dialog's scene, for a capture; null while none is open. */
+    Scene dialogScene() {
+        return watchDialog != null && watchDialog.isShowing() ? watchDialog.scene() : null;
+    }
+
+    /** The open dialog's title, for a capture; empty while none is open. */
+    String dialogTitle() {
+        return watchDialog != null && watchDialog.isShowing() ? watchDialog.title() : "";
+    }
+
+    /** Dismisses an open dialog, so the capture hook can exit outside its nested event loop. */
+    void closeDialogsForCapture() {
+        if (watchDialog != null && watchDialog.isShowing()) watchDialog.cancel();
+    }
+
+    /**
+     * Opens the Add Watch Folder dialog, on the next pulse: a nested event loop cannot start from
+     * inside the capture hook's animation.
+     */
+    void openWatchDialogForCapture() {
+        selectPageForCapture("WATCH");
+        javafx.application.Platform.runLater(this::addWatchFolder);
     }
 
     private final Settings settings;
@@ -676,6 +739,7 @@ final class SettingsWindow {
         switch (category) {
             case GENERAL -> buildGeneral(page);
             case ADDING -> buildAdding(page);
+            case WATCH -> buildWatch(page);
             case CONNECTION -> buildConnection(page);
             case PROTOCOL -> buildProtocol(page);
             case IP_FILTER -> buildIpFilter(page);
@@ -1028,6 +1092,132 @@ final class SettingsWindow {
         alert.initOwner(stage);
         Fonts.installUiFont(alert.getDialogPane());
         alert.showAndWait();
+    }
+
+    private void buildWatch(VBox page) {
+        VBox folders = section(page, "Watched folders");
+        watchTable = new TableView<>();
+        watchTable.setPrefHeight(190);
+        watchTable.setPlaceholder(new Label("No folders watched yet"));
+        watchTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        TableColumn<WatchFolder, String> folder = new TableColumn<>("Folder");
+        folder.setPrefWidth(200);
+        folder.setCellValueFactory(c ->
+                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().folder()));
+        TableColumn<WatchFolder, String> saveTo = new TableColumn<>("Save to");
+        saveTo.setPrefWidth(170);
+        saveTo.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                switch (c.getValue().saveTo()) {
+                    case DEFAULT -> "(the download folder)";
+                    case WATCH_FOLDER -> "(the watch folder)";
+                    case FOLDER -> c.getValue().savePath();
+                }));
+        TableColumn<WatchFolder, String> after = new TableColumn<>("After adding");
+        after.setPrefWidth(110);
+        after.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                switch (c.getValue().afterAdd()) {
+                    case DELETE -> "Delete";
+                    case RENAME -> "Rename";
+                }));
+        TableColumn<WatchFolder, String> category = new TableColumn<>("Category");
+        category.setPrefWidth(100);
+        category.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                c.getValue().category().isEmpty() ? "" : c.getValue().category()));
+        TableColumn<WatchFolder, String> paused = new TableColumn<>("Paused");
+        paused.setPrefWidth(60);
+        paused.setCellValueFactory(c ->
+                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().startPaused() ? "yes" : ""));
+        watchTable.getColumns().addAll(List.of(folder, saveTo, after, category, paused));
+        watchTable.setRowFactory(t -> {
+            javafx.scene.control.TableRow<WatchFolder> row = new javafx.scene.control.TableRow<>();
+            row.setOnMouseClicked(e -> {
+                if (e.getClickCount() == 2 && !row.isEmpty()) editWatchFolder();
+            });
+            return row;
+        });
+        Button add = new Button("Add…");
+        add.setOnAction(e -> addWatchFolder());
+        Button edit = new Button("Edit…");
+        edit.disableProperty()
+                .bind(watchTable.getSelectionModel().selectedItemProperty().isNull());
+        edit.setOnAction(e -> editWatchFolder());
+        Button remove = new Button("Remove");
+        remove.disableProperty()
+                .bind(watchTable.getSelectionModel().selectedItemProperty().isNull());
+        remove.setOnAction(e -> removeWatchFolder());
+        HBox buttons = new HBox(6, add, edit, remove);
+        buttons.setAlignment(Pos.CENTER_LEFT);
+        Label hint = new Label("A .torrent or .magnet file (one magnet link per line) dropped into a watched folder is"
+                + " added without a dialog, with the folder's choices, and then deleted or renamed .added."
+                + " Watched folders are this machine's (watch-folders.json beside the settings) and never sync.");
+        hint.setWrapText(true);
+        hint.getStyleClass().add("settings-row-description");
+        watchStatusLabel = new Label();
+        watchStatusLabel.setWrapText(true);
+        watchStatusLabel.getStyleClass().add("settings-row-description");
+        VBox box = new VBox(8, hint, watchTable, buttons, watchStatusLabel);
+        folders.getChildren().add(box);
+        rows.add(new Row(
+                Category.WATCH,
+                box,
+                "Watch folders | folder torrent magnet automatic add delete rename save path category paused status",
+                folders));
+    }
+
+    private void addWatchFolder() {
+        if (watchStore == null) return;
+        watchDialog = new WatchFolderDialog(stage, null, labelStore == null ? List.of() : labelStore.categories());
+        Optional<WatchFolder> made = watchDialog.showAndWait();
+        watchDialog = null;
+        if (made.isEmpty()) return;
+        List<WatchFolder> list = new ArrayList<>(watchStore.entries());
+        list.add(made.get());
+        saveWatchFolders(list, made.get());
+    }
+
+    private void editWatchFolder() {
+        WatchFolder selected = watchTable.getSelectionModel().getSelectedItem();
+        if (watchStore == null || selected == null) return;
+        watchDialog = new WatchFolderDialog(stage, selected, labelStore == null ? List.of() : labelStore.categories());
+        Optional<WatchFolder> edited = watchDialog.showAndWait();
+        watchDialog = null;
+        if (edited.isEmpty()) return;
+        List<WatchFolder> list = new ArrayList<>(watchStore.entries());
+        int at = list.indexOf(selected);
+        if (at < 0) list.add(edited.get());
+        else list.set(at, edited.get());
+        saveWatchFolders(list, edited.get());
+    }
+
+    private void removeWatchFolder() {
+        WatchFolder selected = watchTable.getSelectionModel().getSelectedItem();
+        if (watchStore == null || selected == null) return;
+        List<WatchFolder> list = new ArrayList<>(watchStore.entries());
+        list.remove(selected);
+        saveWatchFolders(list, null);
+    }
+
+    private void saveWatchFolders(List<WatchFolder> list, WatchFolder select) {
+        try {
+            watchStore.set(list);
+        } catch (IOException e) {
+            report("Could not save the watch folders: " + e.getMessage());
+            return;
+        }
+        reloadWatch();
+        if (select != null) watchTable.getSelectionModel().select(select);
+        watchHost.watchFoldersChanged();
+        refreshWatchStatus();
+    }
+
+    /** The store's list into the table; keeps the selection where it can. */
+    private void reloadWatch() {
+        if (watchStore == null || watchTable == null) return;
+        WatchFolder selected = watchTable.getSelectionModel().getSelectedItem();
+        watchTable.getItems().setAll(watchStore.entries());
+        if (selected != null && watchTable.getItems().contains(selected))
+            watchTable.getSelectionModel().select(selected);
+        refreshWatchStatus();
     }
 
     private void buildAdding(VBox page) {
@@ -1630,6 +1820,7 @@ final class SettingsWindow {
         loading = true;
         try {
             reloadLabels();
+            reloadWatch();
             theme.setValue(Theme.byId(settings.theme(), Theme.DEFAULT));
             downloadDir.setText(settings.downloadDir().toString());
             incompleteEnabled.setSelected(settings.incompleteEnabled());
