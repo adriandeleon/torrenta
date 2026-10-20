@@ -22,8 +22,9 @@ import java.util.regex.Pattern;
  * person can delete one by hand.
  *
  * <p>Beside the blob a torrent may have a {@code <hash>.labels} sidecar: what the engine files it
- * under (category, tags), which libtorrent's resume data has no room for. Also opaque bytes here;
- * it goes when the torrent goes.
+ * under (category, tags), which libtorrent's resume data has no room for, and a {@code
+ * <hash>.storage} sidecar: what the engine still owes the files (a move on completion, names to
+ * take back). Also opaque bytes here; both go when the torrent goes.
  *
  * <p>Writes are atomic (temp file beside the target, then a move) and the class is synchronized:
  * the engine calls it from its alert thread while the FX side may be removing a torrent.
@@ -35,6 +36,7 @@ public final class TorrentStore {
     public static final String FOLDER = "torrents";
     public static final String SUFFIX = ".fastresume";
     public static final String LABELS_SUFFIX = ".labels";
+    public static final String STORAGE_SUFFIX = ".storage";
 
     /** A v1 or v2 info-hash in hex; anything else never becomes a file name. */
     private static final Pattern ID = Pattern.compile("[0-9a-f]{40}|[0-9a-f]{64}");
@@ -53,10 +55,25 @@ public final class TorrentStore {
         write(fileFor(id, SUFFIX), data);
     }
 
-    /** Forgets the torrent: its blob and its labels. */
+    /** Forgets the torrent: its blob and its sidecars. */
     public synchronized void delete(String id) throws IOException {
         Files.deleteIfExists(fileFor(id, SUFFIX));
         Files.deleteIfExists(fileFor(id, LABELS_SUFFIX));
+        Files.deleteIfExists(fileFor(id, STORAGE_SUFFIX));
+    }
+
+    public synchronized void saveStorage(String id, byte[] data) throws IOException {
+        write(fileFor(id, STORAGE_SUFFIX), data);
+    }
+
+    public synchronized void deleteStorage(String id) throws IOException {
+        Files.deleteIfExists(fileFor(id, STORAGE_SUFFIX));
+    }
+
+    /** The torrent's storage sidecar, if it has one. */
+    public synchronized Optional<byte[]> loadStorage(String id) throws IOException {
+        Path file = fileFor(id, STORAGE_SUFFIX);
+        return Files.isRegularFile(file) ? Optional.of(Files.readAllBytes(file)) : Optional.empty();
     }
 
     public synchronized void saveLabels(String id, byte[] data) throws IOException {

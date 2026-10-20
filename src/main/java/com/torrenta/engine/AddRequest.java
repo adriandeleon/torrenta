@@ -15,6 +15,8 @@ import java.util.Map;
  * @param stopCondition stop by itself once this is reached
  * @param filePriorities by file index; a file not in the map gets {@link Priority#NORMAL}
  * @param labels the category and tags to file it under; {@link TorrentLabels#NONE} for none
+ * @param storage where the files start, how they are named and allocated; {@link Storage#DEFAULT}
+ *     for straight to the save path, sparse, no suffix
  */
 public record AddRequest(
         Source source,
@@ -24,10 +26,57 @@ public record AddRequest(
         boolean skipCheck,
         StopCondition stopCondition,
         Map<Integer, Priority> filePriorities,
-        TorrentLabels labels) {
+        TorrentLabels labels,
+        Storage storage) {
 
     public AddRequest {
         if (labels == null) labels = TorrentLabels.NONE;
+        if (storage == null) storage = Storage.DEFAULT;
+    }
+
+    /** Without storage choices: the files go straight to the save path. */
+    public AddRequest(
+            Source source,
+            Path savePath,
+            boolean startPaused,
+            boolean sequential,
+            boolean skipCheck,
+            StopCondition stopCondition,
+            Map<Integer, Priority> filePriorities,
+            TorrentLabels labels) {
+        this(
+                source,
+                savePath,
+                startPaused,
+                sequential,
+                skipCheck,
+                stopCondition,
+                filePriorities,
+                labels,
+                Storage.DEFAULT);
+    }
+
+    public AddRequest withStorage(Storage s) {
+        return new AddRequest(
+                source, savePath, startPaused, sequential, skipCheck, stopCondition, filePriorities, labels, s);
+    }
+
+    /**
+     * The storage choices, nested so the request did not grow three more positional arguments.
+     *
+     * @param incompletePath the folder to download into, to be moved to the save path once
+     *     complete; null for none (download straight to the save path)
+     * @param partSuffix incomplete files carry {@link TorrentStorage#SUFFIX} until each is done
+     * @param preallocate every file is allocated in full when the torrent starts, rather than
+     *     growing as pieces arrive
+     */
+    public record Storage(Path incompletePath, boolean partSuffix, boolean preallocate) {
+        public static final Storage DEFAULT = new Storage(null, false, false);
+
+        /** The storage for a plan: its incomplete folder if it has one. */
+        public static Storage of(DownloadPlan plan, boolean partSuffix, boolean preallocate) {
+            return new Storage(plan.incomplete().orElse(null), partSuffix, preallocate);
+        }
     }
 
     public sealed interface Source permits TorrentFile, Magnet {}
@@ -55,6 +104,15 @@ public record AddRequest(
 
     /** The dialog's defaults: start now, rarest first, check, no stop, all files, no labels. */
     public static AddRequest defaults(Source source, Path savePath) {
-        return new AddRequest(source, savePath, false, false, false, StopCondition.NONE, Map.of(), TorrentLabels.NONE);
+        return new AddRequest(
+                source,
+                savePath,
+                false,
+                false,
+                false,
+                StopCondition.NONE,
+                Map.of(),
+                TorrentLabels.NONE,
+                Storage.DEFAULT);
     }
 }
