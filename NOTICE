@@ -13,6 +13,12 @@ native libraries, which statically link:
   OpenSSL — https://www.openssl.org — Apache-2.0
 
 --------------------------------------------------------------------------------
+AtlantaFX — https://github.com/mkpaz/atlantafx
+Copyright mkpaz
+Licensed under MIT. Used as an unmodified dependency for the Nord and Cupertino
+control themes.
+
+--------------------------------------------------------------------------------
 Bundled font
 --------------------------------------------------------------------------------
 

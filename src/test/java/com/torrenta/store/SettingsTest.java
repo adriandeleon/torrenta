@@ -49,6 +49,22 @@ class SettingsTest {
     }
 
     @Test
+    void themeIsAStringTheUiInterprets(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        assertEquals("", settings.theme(), "unset: the UI picks its default");
+        settings.setTheme("nord-light");
+        settings.save();
+        Settings read = new Settings(file);
+        read.load();
+        assertEquals("nord-light", read.theme());
+        Files.writeString(file, Settings.THEME + "=  cupertino-dark \n");
+        read.load();
+        assertEquals("cupertino-dark", read.theme(), "trimmed");
+    }
+
+    @Test
     void booleansAreLenientAndResettable(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Files.writeString(
