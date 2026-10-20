@@ -22,19 +22,23 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
 import javafx.scene.control.Menu;
 import javafx.scene.control.MenuBar;
 import javafx.scene.control.MenuItem;
 import javafx.scene.control.SelectionMode;
+import javafx.scene.control.Separator;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.SplitPane;
 import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
+import javafx.scene.control.ToolBar;
 import javafx.scene.control.cell.ProgressBarTableCell;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
@@ -90,6 +94,7 @@ public final class MainWindow {
     private final TorrentRows rows = new TorrentRows();
     private final FilteredList<TorrentRow> filtered = new FilteredList<>(rows.list());
     private final TextField filter = new TextField();
+    private ToolBar toolbar;
     private final StackPane host = new StackPane();
     private final CommandPalette palette;
     private final EventLog log = new EventLog();
@@ -106,9 +111,11 @@ public final class MainWindow {
     private final MenuItem downloadUpdateItem = new MenuItem();
     private final MenuItem skipUpdateItem = new MenuItem();
     private final Label updateBadge = new Label();
+    private final Label altSpeedToggle = new Label();
     private ReleaseInfo availableUpdate;
     private SettingsSync sync;
     private final Label syncBadge = new Label("Sync ⚠");
+    private Alert aboutDialog;
     private SplitPane split;
     private volatile String detailId;
     private volatile boolean detailWanted;
@@ -133,7 +140,9 @@ public final class MainWindow {
         root.setCenter(buildCenter());
         root.setBottom(buildStatusBar());
         commands = buildCommands();
-        root.setTop(buildMenuBar());
+        // The toolbar first: the View menu's check item binds to its visibility.
+        ToolBar bar = buildToolbar();
+        root.setTop(new VBox(buildMenuBar(), bar));
         table.setContextMenu(buildContextMenu());
         palette = new CommandPalette(host, () -> table.requestFocus());
         logWindow = new LogWindow(stage, log);
@@ -200,6 +209,8 @@ public final class MainWindow {
     /** What to photograph: the open Add dialog if there is one, else the window. */
     public javafx.scene.Scene captureScene() {
         if (currentDialog != null && currentDialog.isShowing()) return currentDialog.scene();
+        if (aboutDialog != null && aboutDialog.isShowing())
+            return aboutDialog.getDialogPane().getScene();
         if (settingsWindow.isShowing()) return settingsWindow.scene();
         return stage.getScene();
     }
@@ -207,6 +218,7 @@ public final class MainWindow {
     /** Dismisses an open Add dialog, so the capture hook can exit outside its nested event loop. */
     public void closeDialogsForCapture() {
         if (currentDialog != null && currentDialog.isShowing()) currentDialog.cancel();
+        if (aboutDialog != null && aboutDialog.isShowing()) aboutDialog.close();
     }
 
     /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
@@ -297,6 +309,32 @@ public final class MainWindow {
             ipFilter.refresh(false, this::reportIpFilter);
         });
         poller.scheduleAtFixedRate(() -> ipFilter.refresh(false, this::reportIpFilter), 1, 1, TimeUnit.HOURS);
+        // The schedule is checked every minute; a change of state applies the other pair.
+        poller.scheduleAtFixedRate(this::refreshLimits, 0, 60, TimeUnit.SECONDS);
+    }
+
+    // ---- speed ----------------------------------------------------------------------------------
+
+    private void refreshLimits() {
+        Engine e = engine;
+        if (e == null) return;
+        try {
+            boolean alternative = e.refreshLimits(java.time.LocalDateTime.now());
+            Platform.runLater(() -> {
+                altSpeedToggle.setText("Alt speed: " + (alternative ? "on" : "off"));
+                altSpeedToggle.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("active"), alternative);
+            });
+        } catch (EngineException ex) {
+            Platform.runLater(() -> setStatus(ex.getMessage()));
+        }
+    }
+
+    private void toggleAlternativeSpeed() {
+        boolean on = !settings.engineSettings().speed().alternativeOn();
+        settings.set(Settings.SPEED_ALT_ON, String.valueOf(on));
+        settings.saveQuietly();
+        setStatus(on ? "Alternative speed limits on" : "Alternative speed limits off");
+        applyEngineSettings();
     }
 
     // ---- settings sync --------------------------------------------------------------------------
@@ -369,6 +407,7 @@ public final class MainWindow {
         Thread.ofVirtual().name("engine-settings").start(() -> {
             try {
                 e.applySettings(current);
+                refreshLimits();
             } catch (EngineException ex) {
                 Platform.runLater(() -> setStatus(ex.getMessage()));
             }
@@ -414,6 +453,16 @@ public final class MainWindow {
         updateBadge.setVisible(true);
         updateBadge.setManaged(true);
         if (!manual) setStatus(AppInfo.NAME + " " + availableUpdate.version() + " is available — see the Help menu");
+    }
+
+    /** Help → About: one panel at a time, brought back if it is already open. */
+    private void showAbout() {
+        if (aboutDialog != null && aboutDialog.isShowing()) {
+            aboutDialog.getDialogPane().getScene().getWindow().requestFocus();
+            return;
+        }
+        aboutDialog = AboutDialog.create(stage, settings.file(), opener, availableUpdate);
+        aboutDialog.show();
     }
 
     private void downloadUpdate() {
@@ -747,6 +796,16 @@ public final class MainWindow {
         BooleanBinding selection = Bindings.isNotEmpty(table.getSelectionModel().getSelectedItems());
         BooleanBinding always = Bindings.createBooleanBinding(() -> true);
         return List.of(
+                new Command("add-file", "Add Torrent File…", chord(KeyCode.O), null, always, this::addTorrentFile),
+                new Command("add-magnet", "Add Magnet Link…", chord(KeyCode.M), null, always, this::addMagnetLink),
+                // The chord is a scene accelerator, not a menu one: Ctrl+V in a text field must paste.
+                new Command(
+                        "add-clipboard",
+                        "Add from Clipboard",
+                        null,
+                        chord(KeyCode.V).getDisplayText(),
+                        always,
+                        this::addFromClipboard),
                 new Command("pause-resume", "Pause / Resume", null, "Space", selection, this::togglePause),
                 new Command(
                         "force-resume",
@@ -807,6 +866,7 @@ public final class MainWindow {
                 new Command("remove", "Remove…", null, "Delete", selection, () -> remove(false)),
                 new Command("remove-data", "Remove with Data…", null, "Shift+Delete", selection, () -> remove(true)),
                 new Command("check-updates", "Check for Updates", null, null, always, this::checkForUpdatesNow),
+                new Command("about", "About " + AppInfo.NAME, null, null, always, this::showAbout),
                 new Command(
                         "settings", "Settings…", chord(KeyCode.COMMA), null, always, () -> settingsWindow.show(stage)),
                 new Command(
@@ -822,7 +882,67 @@ public final class MainWindow {
                         null,
                         chord(KeyCode.A).getDisplayText(),
                         always,
-                        () -> table.getSelectionModel().selectAll()));
+                        () -> table.getSelectionModel().selectAll()),
+                new Command(
+                        "event-log",
+                        "Event Log",
+                        null,
+                        shiftChord(KeyCode.L).getDisplayText(),
+                        always,
+                        () -> logWindow.show()),
+                new Command(
+                        "toggle-toolbar",
+                        "Toggle Toolbar",
+                        null,
+                        null,
+                        always,
+                        () -> toolbar.setVisible(!toolbar.isVisible())));
+    }
+
+    /**
+     * The icon toolbar: the common actions, each a command the menus and the palette already have,
+     * with Editora's glyphs. Hidden and unmanaged together, so View → Toolbar gives the row back to
+     * the list; the choice is kept.
+     */
+    private ToolBar buildToolbar() {
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
+        Button paletteButton = Icons.toolbarButton(
+                Icons.palette(),
+                "Command Palette (" + shiftChord(KeyCode.P).getDisplayText() + ")",
+                () -> palette.show(commands));
+        toolbar = new ToolBar(
+                toolButton("add-file", Icons.open()),
+                toolButton("add-magnet", Icons.magnet()),
+                new Separator(),
+                toolButton("pause-resume", Icons.pause()),
+                toolButton("force-resume", Icons.run()),
+                toolButton("recheck", Icons.refresh()),
+                toolButton("remove", Icons.trash()),
+                new Separator(),
+                toolButton("filter", Icons.find()),
+                toolButton("event-log", Icons.history()),
+                toolButton("settings", Icons.settings()),
+                spacer,
+                paletteButton);
+        toolbar.getStyleClass().add("main-toolbar");
+        toolbar.setVisible(settings.toolbar());
+        toolbar.managedProperty().bind(toolbar.visibleProperty());
+        toolbar.visibleProperty().addListener((o, was, now) -> {
+            settings.setToolbar(now);
+            settings.saveQuietly();
+        });
+        return toolbar;
+    }
+
+    /** A toolbar button for a command: its label and chord as the name, its enabled state followed. */
+    private Button toolButton(String id, javafx.scene.Node icon) {
+        Command c = command(id);
+        String name = c.label().replace("…", "");
+        if (!c.hint().isEmpty()) name += " (" + c.hint() + ")";
+        Button b = Icons.toolbarButton(icon, name, c.run());
+        b.disableProperty().bind(Bindings.not(c.enabled()));
+        return b;
     }
 
     private Command command(String id) {
@@ -841,17 +961,9 @@ public final class MainWindow {
     }
 
     private MenuBar buildMenuBar() {
-        MenuItem addTorrent = new MenuItem("Add Torrent File…");
-        addTorrent.setAccelerator(chord(KeyCode.O));
-        addTorrent.setOnAction(e -> addTorrentFile());
-
-        MenuItem addMagnet = new MenuItem("Add Magnet Link…");
-        addMagnet.setAccelerator(chord(KeyCode.M));
-        addMagnet.setOnAction(e -> addMagnetLink());
-
-        MenuItem addClipboard = new MenuItem("Add from Clipboard");
-        addClipboard.setAccelerator(chord(KeyCode.V));
-        addClipboard.setOnAction(e -> addFromClipboard());
+        MenuItem addTorrent = command("add-file").menuItem();
+        MenuItem addMagnet = command("add-magnet").menuItem();
+        MenuItem addClipboard = command("add-clipboard").menuItem();
 
         MenuItem quit = new MenuItem("Quit");
         quit.setAccelerator(chord(KeyCode.Q));
@@ -874,12 +986,18 @@ public final class MainWindow {
         MenuItem paletteItem = new MenuItem("Command Palette…");
         paletteItem.setAccelerator(shiftChord(KeyCode.P));
         paletteItem.setOnAction(e -> palette.show(commands));
+        CheckMenuItem toolbarItem = new CheckMenuItem("Toolbar");
+        toolbarItem.selectedProperty().bindBidirectional(toolbar.visibleProperty());
         Menu view = new Menu("View");
         view.getItems()
-                .addAll(command("filter").menuItem(), command("select-all").menuItem(), paletteItem);
+                .addAll(
+                        toolbarItem,
+                        new SeparatorMenuItem(),
+                        command("filter").menuItem(),
+                        command("select-all").menuItem(),
+                        command("event-log").menuItem(),
+                        paletteItem);
 
-        MenuItem about = new MenuItem("About " + AppInfo.NAME);
-        about.setOnAction(e -> setStatus(AppInfo.NAME + " " + AppInfo.VERSION + " — " + AppInfo.COPYRIGHT));
         // The two update items exist from the start and show only once a release is known, so the
         // menu's shape does not change under a hand that has learned it.
         downloadUpdateItem.setVisible(false);
@@ -893,7 +1011,7 @@ public final class MainWindow {
                         downloadUpdateItem,
                         skipUpdateItem,
                         new SeparatorMenuItem(),
-                        about);
+                        command("about").menuItem());
 
         MenuBar bar = new MenuBar(file, torrent, view, help);
         bar.setUseSystemMenuBar(true);
@@ -1157,7 +1275,11 @@ public final class MainWindow {
             settingsWindow.show(stage);
             settingsWindow.selectPageForCapture("Sync");
         });
-        HBox bar = new HBox(12, status, spacer, updateBadge, syncBadge, errorBadge, rates);
+        // The alternative-speed toggle: a click flips the manual switch; the schedule shows too.
+        altSpeedToggle.getStyleClass().add("alt-speed");
+        altSpeedToggle.setText("Alt speed: off");
+        altSpeedToggle.setOnMouseClicked(e -> toggleAlternativeSpeed());
+        HBox bar = new HBox(12, status, spacer, altSpeedToggle, updateBadge, syncBadge, errorBadge, rates);
         bar.setPadding(new Insets(4, 10, 4, 10));
         bar.getStyleClass().add("status-bar");
         return bar;

@@ -115,7 +115,7 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Alternative limits, toggle, weekly schedule | ✓ | ✓ | 0.4 |
 | Queue: max active downloads, uploads, total; slow-torrent threshold does not count | ✓ | ✓ | 0.4 |
 | Global share limits with action: pause, remove, remove with data, super seed | ✓ | ✓ | 0.4 |
-| Rate limit applies to uTP and overhead options | ✓ | ✓ | 0.4 |
+| Rate limit counts protocol overhead (the uTP-only option no longer exists in libtorrent 2) | ✓ | ✓ | 0.4 |
 
 ### Organisation
 
@@ -233,7 +233,9 @@ Everything in Settings that the engine already knows how to do.
    `blocklist.txt` beside the settings), `.dat`/`.p2p`/CIDR/plain parsing, a local list file,
    manual bans with Ban Peer in the Peers tab; the count of ranges and of refused peers is on the
    settings page and in the status bar on each apply.
-5. **Speed**: global limits, alternative limits, schedule, overhead options; status-bar toggle.
+5. **Speed** — done: global limits, alternative limits, a weekly schedule checked every minute,
+   the overhead option, and the status-bar toggle. The uTP-only rate option is gone from
+   libtorrent 2.x and is not offered.
 6. **Queue and share limits**: active limits, slow threshold, queue positions, global and
    per-torrent ratio/time limits with their action; super seeding.
 7. **Per-torrent limits dialog**, set location, rename torrent and files, export `.torrent`.

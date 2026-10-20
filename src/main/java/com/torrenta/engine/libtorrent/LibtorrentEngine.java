@@ -721,7 +721,42 @@ public final class LibtorrentEngine implements Engine {
         pack.setInteger(settings_pack.int_types.out_enc_policy.swigValue(), policy.swigValue());
         pack.setInteger(settings_pack.int_types.in_enc_policy.swigValue(), policy.swigValue());
         pack.setInteger(settings_pack.int_types.allowed_enc_level.swigValue(), level.swigValue());
+
+        EngineSettings.Speed speed = s.speed();
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+        pack.downloadRateLimit(speed.effectiveDownloadBytes(now));
+        pack.uploadRateLimit(speed.effectiveUploadBytes(now));
+        pack.setBoolean(settings_pack.bool_types.rate_limit_ip_overhead.swigValue(), speed.countOverhead());
         return pack;
+    }
+
+    @Override
+    public boolean refreshLimits(java.time.LocalDateTime now) throws EngineException {
+        SessionManager s = session;
+        EngineSettings.Speed speed = engineSettings.speed();
+        boolean alternative = speed.alternativeActive(now);
+        if (s == null || !s.isRunning()) return alternative;
+        int down = speed.effectiveDownloadBytes(now);
+        int up = speed.effectiveUploadBytes(now);
+        SettingsPack current = s.settings();
+        if (current.downloadRateLimit() != down || current.uploadRateLimit() != up) {
+            SettingsPack pack = new SettingsPack();
+            pack.downloadRateLimit(down);
+            pack.uploadRateLimit(up);
+            s.applySettings(pack);
+            emit(EngineEvent.session(
+                    EngineEvent.Level.INFO,
+                    "Speed limits" + (alternative ? " (alternative)" : "") + ": ↓ "
+                            + (down == 0 ? "none" : down / 1024 + " KiB/s") + " ↑ "
+                            + (up == 0 ? "none" : up / 1024 + " KiB/s")));
+        }
+        return alternative;
+    }
+
+    /** The session's limits as libtorrent has them, bytes per second; for the test. */
+    int[] rateLimitsForTest() throws EngineException {
+        SettingsPack current = running().settings();
+        return new int[] {current.downloadRateLimit(), current.uploadRateLimit()};
     }
 
     @Override

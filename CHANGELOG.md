@@ -13,6 +13,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   and on a timer while the window is in front; "Sync now" too. "Create on GitHub" makes a private
   repository through the GitHub CLI; with two gh accounts, the one that can read the repository is
   remembered and used. This machine's folders, interface, clocks and proxy password never travel.
+- **An icon toolbar** under the menu bar, with Editora's glyphs: add a torrent file, add a magnet
+  link, pause/resume, force resume, recheck, remove, filter, event log, settings, and the command
+  palette at the right. Each button is one of the existing commands, so it greys out with them.
+  View → Toolbar hides it (`ui.toolbar`). The add actions, the event log and the toolbar toggle
+  are commands now, so the palette reaches them too.
+- **Help → About**, the panel Editora has: icon, name, version and tagline, the copyright, links to
+  the licence, the homepage, the releases and the settings file (opens its folder), the available
+  update when one is known, and a monospace block with the build, the engine, Java, JavaFX, the OS
+  and the config folder, with "Copy details". Also in the palette.
 
 ### Fixed
 
@@ -71,6 +80,9 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 - **Protocol settings**: DHT, peer exchange, local peer discovery, uTP, the encryption policy
   (require, prefer, off), anonymous mode, and default trackers added to every torrent, new and
   existing. Applied at start and live.
+- **Speed limits**: global download and upload caps, an alternative pair switched by hand from
+  the status bar or by a weekly schedule (overnight windows belong to the day they start on), and
+  counting protocol overhead in the limit.
 - **Inter as the interface font**, bundled, the same face Editora and Termina use.
 - **An IP filter**: a PeerGuardian or eMule blocklist by URL (plain or gzipped), downloaded on a
   schedule and kept beside the settings, a local list file, and manual bans — including Ban Peer

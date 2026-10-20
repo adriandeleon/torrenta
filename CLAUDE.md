@@ -164,6 +164,10 @@ release process with the names changed; Termina's README and memory hold the war
   proxy password). Automatic rounds run git with no prompt of any kind (`QuietGit`); a `gh` account
   that can read an https repository is pinned in the clone's config (`SyncAccount`, adl has two).
   `Settings.setOnSaved` is how a change reaches the service; its own saves set `applying` first.
+- **Speed limits are re-evaluated every minute** (`Engine.refreshLimits(now)`, from the window's
+  poller) and after any settings change; the pair in force is `Speed.alternativeActive(now)`,
+  a pure rule with the overnight case tested. Limits are KiB/s in settings and bytes/s in the
+  pack; 0 is "none" on both sides.
 - **The IP filter is replaced whole, never merged**: `set_ip_filter` takes a complete
   `ip_filter`, so the controller rebuilds it from cache + local file + bans every time. A filter
   set before `start()` is applied at start, so no peer slips in while the first download runs.
