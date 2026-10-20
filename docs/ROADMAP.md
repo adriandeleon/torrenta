@@ -155,7 +155,7 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Native packages: macOS `.dmg`/`.app`, Windows `.msi`, Linux `.deb`/`.rpm`/tarball; Homebrew and winget | ✓ | ✓ | 0.3 |
 | Update check against GitHub releases | ✓ | ✓ | 0.3 |
 | Settings window, live-applying, searchable | ✓ | ✓ | 0.4 |
-| Light and dark themes, UI font | ◐ | ✓ | 0.8 |
+| Light and dark themes, UI font | ✓ | ✓ | 0.8 |
 | Interface languages | ✓ | ✓ | 0.8 |
 | Control a remote daemon (Transmission RPC as a second `Engine`) | ✓ (remote GUI) | ✗ | 0.9 |
 | Serve a web UI / RPC of its own | ✓ | ✓ | later |

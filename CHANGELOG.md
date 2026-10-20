@@ -17,6 +17,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Themes**, in Settings → General → Appearance, applied at once: Editora Light and Dark (Caret &
+  Ink, as before), Nord Light and Dark, Cupertino Light and Dark. The last four are AtlantaFX's own,
+  now a dependency, as in Editora. Kept as `ui.theme` in the settings file.
+
 - **Torrents survive a restart.** Resume data is kept per torrent under `~/.torrenta/torrents/`,
   written when a torrent is added, when its metadata arrives, when it finishes, periodically and on
   quit, and loaded at start, so a complete torrent comes back seeding without a recheck and a magnet
