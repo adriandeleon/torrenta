@@ -159,6 +159,9 @@ public final class Settings {
 
     private static final String SHARE_SUFFIX = ".share";
 
+    /** {@code torrent.<info-hash>.pickFiles}: added before its file list, the files still to choose. */
+    private static final String PICK_FILES_SUFFIX = ".pickFiles";
+
     /** IP filter page. Bans are space-separated ranges or addresses. */
     public static final String IPFILTER_ENABLED = "ipfilter.enabled";
 
@@ -186,6 +189,9 @@ public final class Settings {
     public static final String ADD_START_PAUSED = "add.startPaused";
 
     public static final String ADD_SEQUENTIAL = "add.sequential";
+
+    /** Inputs are added with the defaults above and the Add dialog does not open. Off by default. */
+    public static final String ADD_WITHOUT_ASKING = "add.withoutAsking";
 
     private final Path file;
     private final Properties properties = new Properties();
@@ -391,6 +397,28 @@ public final class Settings {
 
     public void setAddStartPaused(boolean on) {
         properties.setProperty(ADD_START_PAUSED, String.valueOf(on));
+    }
+
+    public boolean addWithoutAsking() {
+        return readBoolean(ADD_WITHOUT_ASKING, false);
+    }
+
+    public void setAddWithoutAsking(boolean on) {
+        properties.setProperty(ADD_WITHOUT_ASKING, String.valueOf(on));
+    }
+
+    /**
+     * Whether a torrent was added from the Add dialog before its file list arrived, with its files
+     * still to be chosen. Not saved here.
+     */
+    public boolean filesToPick(String torrentId) {
+        return readBoolean(TORRENT_PREFIX + torrentId + PICK_FILES_SUFFIX, false);
+    }
+
+    public void setFilesToPick(String torrentId, boolean pending) {
+        String key = TORRENT_PREFIX + torrentId + PICK_FILES_SUFFIX;
+        if (pending) properties.setProperty(key, "true");
+        else properties.remove(key);
     }
 
     public boolean addSequential() {

@@ -6,6 +6,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -290,6 +291,14 @@ public final class MainWindow {
             settingsWindow.openWatchDialogForCapture();
         } else if (action.equals("dialog-add")) {
             if (currentDialog != null && currentDialog.isShowing()) currentDialog.confirm();
+        } else if (action.startsWith("dialog-press:")) {
+            if (currentDialog != null && currentDialog.isShowing())
+                currentDialog.pressForCapture(action.substring("dialog-press:".length()));
+        } else if (action.startsWith("dialog-key:")) {
+            if (currentDialog != null && currentDialog.isShowing())
+                currentDialog.keyForCapture(KeyCode.valueOf(action.substring("dialog-key:".length())));
+        } else if (action.equals("choose-files")) {
+            selectedTorrents().stream().findFirst().ifPresent(t -> chooseFiles(t.id()));
         } else if (action.startsWith("dialog-category:")) {
             if (currentDialog != null && currentDialog.isShowing())
                 currentDialog.selectCategoryForCapture(action.substring("dialog-category:".length()));
@@ -324,6 +333,7 @@ public final class MainWindow {
         if (logWindow.isShowing()) System.out.println("capture: log-window=showing");
         if (currentDialog != null && currentDialog.isShowing()) {
             System.out.println("capture: dialog=" + currentDialog.title());
+            System.out.println("capture: add-dialog=" + currentDialog.summaryForCapture());
             System.out.println("capture: dialog-hint=" + currentDialog.hint());
         }
         if (limitsDialog != null && limitsDialog.isShowing())
@@ -640,29 +650,46 @@ public final class MainWindow {
      * happen on a worker; the dialog opens on the FX thread when there is something to show.
      */
     public void addInput(String input) {
+        addInput(input, null);
+    }
+
+    /** {@code via} is for the dialog's header; null reads it off the input itself. */
+    private void addInput(String input, AddDialog.Via via) {
         if (engine == null) {
             pendingInputs.add(input);
             return;
         }
         String text = input.trim();
         Engine e = engine;
+        boolean withoutAsking = settings.addWithoutAsking();
+        AddDialog.Defaults defaults = AddDialog.Defaults.from(settings);
         Thread.ofVirtual().name("engine-inspect").start(() -> {
             try {
-                switch (Inputs.classify(text)) {
-                    case MAGNET -> Platform.runLater(() -> openDialog(new AddRequest.Magnet(text), null, text));
-                    case FILE -> {
-                        Path file = Path.of(text);
-                        if (!Files.isRegularFile(file)) throw new EngineException("No such file: " + text);
-                        byte[] bytes = Files.readAllBytes(file);
-                        TorrentPreview preview = e.inspect(bytes);
-                        Platform.runLater(() -> openDialog(new AddRequest.TorrentFile(bytes, text), preview, text));
-                    }
-                    case URL -> {
-                        byte[] bytes = new TorrentFetch().fetch(URI.create(text));
-                        TorrentPreview preview = e.inspect(bytes);
-                        Platform.runLater(() -> openDialog(new AddRequest.TorrentFile(bytes, text), preview, text));
-                    }
+                Inputs.Kind kind = Inputs.classify(text);
+                AddDialog.Via shownVia = via != null
+                        ? via
+                        : switch (kind) {
+                            case MAGNET -> AddDialog.Via.MAGNET;
+                            case FILE -> AddDialog.Via.FILE;
+                            case URL -> AddDialog.Via.URL;
+                        };
+                AddRequest.Source source =
+                        switch (kind) {
+                            case MAGNET -> new AddRequest.Magnet(text);
+                            case FILE -> {
+                                Path file = Path.of(text);
+                                if (!Files.isRegularFile(file)) throw new EngineException("No such file: " + text);
+                                yield new AddRequest.TorrentFile(Files.readAllBytes(file), text);
+                            }
+                            case URL -> new AddRequest.TorrentFile(new TorrentFetch().fetch(URI.create(text)), text);
+                        };
+                if (withoutAsking) {
+                    Torrent added = e.add(AddDialog.withoutAsking(source, defaults));
+                    Platform.runLater(() -> setStatus("Added " + added.name()));
+                    return;
                 }
+                TorrentPreview preview = source instanceof AddRequest.TorrentFile file ? e.inspect(file.bytes()) : null;
+                Platform.runLater(() -> openDialog(source, preview, shownVia));
             } catch (EngineException | IOException | RuntimeException ex) {
                 String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
                 Platform.runLater(() -> setStatus(message));
@@ -670,22 +697,221 @@ public final class MainWindow {
         });
     }
 
+    /**
+     * A magnet's metadata being fetched for the open dialog. The fetch starts on a worker and may
+     * land after the dialog has closed, so whichever comes second cancels it; both happen off the
+     * FX thread, since cancelling is an engine call.
+     */
+    private static final class FetchSlot {
+        private Engine.MetadataFetch fetch;
+        private boolean closed;
+
+        /** False, and the fetch cancelled, if the dialog closed first. */
+        synchronized boolean set(Engine.MetadataFetch f) {
+            if (closed) {
+                f.cancel();
+                return false;
+            }
+            fetch = f;
+            return true;
+        }
+
+        synchronized Engine.MetadataFetch get() {
+            return closed ? null : fetch;
+        }
+
+        /** Must come before the same magnet is added: the fetch holds its place in the session. */
+        synchronized void close() {
+            closed = true;
+            if (fetch != null) fetch.cancel();
+        }
+    }
+
+    /** The open dialog's fetch, for the poll thread to report peers to; null when there is none. */
+    private volatile FetchWatch fetchWatch;
+
+    private record FetchWatch(FetchSlot slot, AddDialog dialog) {}
+
+    /** FX thread. Dialogs that arrived while one was open, each opened when the one before closes. */
+    private final List<Runnable> queuedDialogs = new ArrayList<>();
+
     /** FX thread. Shows the dialog and, if confirmed, adds on a worker. */
-    private void openDialog(AddRequest.Source source, TorrentPreview preview, String origin) {
+    private void openDialog(AddRequest.Source source, TorrentPreview preview, AddDialog.Via via) {
+        if (currentDialog != null) {
+            // One dialog at a time: several files chosen at once open one after the other.
+            queuedDialogs.add(() -> openDialog(source, preview, via));
+            return;
+        }
         AddDialog dialog =
-                new AddDialog(stage, source, preview, origin, AddDialog.Defaults.from(settings), labels.categories());
+                new AddDialog(stage, source, preview, via, AddDialog.Defaults.from(settings), labels.categories());
+        FetchSlot slot = new FetchSlot();
+        if (preview == null && source instanceof AddRequest.Magnet magnet) startFetch(magnet, slot, dialog);
         currentDialog = dialog;
-        Optional<AddRequest> request = dialog.showAndWait();
+        Optional<AddDialog.Choice> choice = dialog.showAndWait();
         currentDialog = null;
+        fetchWatch = null;
         table.requestFocus();
-        if (request.isEmpty() || engine == null) return;
-        rememberLabels(request.get().labels());
+        if (!queuedDialogs.isEmpty()) Platform.runLater(queuedDialogs.remove(0));
         Engine e = engine;
+        if (choice.isEmpty() || e == null) {
+            Thread.ofVirtual().name("engine-fetch-cancel").start(slot::close);
+            return;
+        }
+        AddDialog.Choice c = choice.get();
+        AddRequest request = c.request();
+        rememberLabels(request.labels());
+        if (c.withoutAsking()) rememberAddDefaults(request);
         Thread.ofVirtual().name("engine-add").start(() -> {
+            slot.close();
             String outcome;
             try {
-                Torrent added = e.add(request.get());
+                Torrent added = e.add(request);
                 outcome = "Added " + added.name();
+                if (c.firstAndLastFirst()) {
+                    TorrentLimits limits = e.limits(added.id());
+                    e.setLimits(
+                            added.id(),
+                            new TorrentLimits(
+                                    limits.downloadLimit(),
+                                    limits.uploadLimit(),
+                                    limits.maxConnections(),
+                                    limits.maxUploads(),
+                                    true));
+                }
+                if (c.filesLater()) {
+                    outcome += " · its files can be chosen when the file list arrives";
+                    String id = added.id();
+                    Platform.runLater(() -> {
+                        settings.setFilesToPick(id, true);
+                        settings.saveQuietly();
+                    });
+                }
+            } catch (EngineException ex) {
+                outcome = ex.getMessage();
+            }
+            String text = outcome;
+            Platform.runLater(() -> setStatus(text));
+        });
+    }
+
+    /** Worker: asks the engine for the magnet's metadata and hands the dialog the files. */
+    private void startFetch(AddRequest.Magnet magnet, FetchSlot slot, AddDialog dialog) {
+        Engine e = engine;
+        Thread.ofVirtual().name("engine-fetch").start(() -> {
+            Engine.MetadataFetch fetch;
+            try {
+                fetch = e.fetchMetadata(magnet.uri());
+            } catch (EngineException ex) {
+                Platform.runLater(() -> dialog.fetchFailed(ex.getMessage()));
+                return;
+            }
+            if (!slot.set(fetch)) return;
+            fetchWatch = new FetchWatch(slot, dialog);
+            fetch.torrent().whenComplete((bytes, failure) -> {
+                if (failure != null) {
+                    if (!(failure instanceof java.util.concurrent.CancellationException)) {
+                        Platform.runLater(() -> dialog.fetchFailed(failure.getMessage()));
+                    }
+                    return;
+                }
+                // The alert thread: inspecting is a native call, so it moves to a worker.
+                Thread.ofVirtual().name("engine-inspect").start(() -> {
+                    try {
+                        TorrentPreview preview = e.inspect(bytes);
+                        AddRequest.TorrentFile file = new AddRequest.TorrentFile(bytes, magnet.uri());
+                        Platform.runLater(() -> dialog.showFiles(file, preview));
+                    } catch (EngineException ex) {
+                        Platform.runLater(() -> dialog.fetchFailed(ex.getMessage()));
+                    }
+                });
+            });
+        });
+    }
+
+    /** "Next time, add with these settings without asking": the dialog's choices become the defaults. */
+    private void rememberAddDefaults(AddRequest request) {
+        settings.setAddWithoutAsking(true);
+        settings.setAddStartPaused(request.startPaused());
+        settings.setAddSequential(request.sequential());
+        Optional<Path> categoryFolder =
+                labels.category(request.labels().category()).flatMap(Category::path);
+        AddDialog.folderToRemember(request.savePath(), settings.downloadDir(), categoryFolder)
+                .ifPresent(settings::downloadDir);
+        settings.saveQuietly();
+        log.add(EngineEvent.info(
+                null, null, "Torrents are added without asking from now on; Settings → Adding turns it off"));
+    }
+
+    /**
+     * Opens the dialog's file tree for a torrent already in the list, to choose its files and start
+     * it: the hook for a torrent added with "Add now, pick files when ready", which is marked with
+     * {@link Settings#filesToPick} until this has been done. Any thread.
+     */
+    public void chooseFiles(String id) {
+        Engine e = engine;
+        if (e == null) return;
+        Thread.ofVirtual().name("engine-detail").start(() -> {
+            try {
+                TorrentDetail d = e.detail(id);
+                if (d.files().isEmpty()) {
+                    Platform.runLater(() -> setStatus("The file list has not arrived yet"));
+                    return;
+                }
+                Torrent t = e.torrents().stream()
+                        .filter(x -> x.id().equals(id))
+                        .findFirst()
+                        .orElseThrow(() -> new EngineException("No such torrent: " + id));
+                List<TorrentPreview.FileEntry> files = d.files().stream()
+                        .map(f -> new TorrentPreview.FileEntry(f.index(), f.path(), f.size()))
+                        .toList();
+                TorrentPreview preview = new TorrentPreview(
+                        id,
+                        t.name(),
+                        files.stream().mapToLong(TorrentPreview.FileEntry::size).sum(),
+                        files,
+                        d.general().isPrivate(),
+                        d.trackers().stream().map(TorrentDetail.Tracker::url).toList(),
+                        "",
+                        "",
+                        0,
+                        false,
+                        false);
+                Map<Integer, com.torrenta.engine.Priority> own = new java.util.HashMap<>();
+                d.files().forEach(f -> own.put(f.index(), f.priority()));
+                Platform.runLater(() -> openChooser(id, preview, own));
+            } catch (EngineException ex) {
+                Platform.runLater(() -> setStatus(ex.getMessage()));
+            }
+        });
+    }
+
+    /** FX thread. The chooser for {@link #chooseFiles}; applies the priorities and starts it. */
+    private void openChooser(String id, TorrentPreview preview, Map<Integer, com.torrenta.engine.Priority> own) {
+        if (currentDialog != null) {
+            queuedDialogs.add(() -> openChooser(id, preview, own));
+            return;
+        }
+        AddDialog dialog = AddDialog.chooseFiles(stage, preview, own);
+        currentDialog = dialog;
+        Optional<AddDialog.Choice> choice = dialog.showAndWait();
+        currentDialog = null;
+        table.requestFocus();
+        if (!queuedDialogs.isEmpty()) Platform.runLater(queuedDialogs.remove(0));
+        Engine e = engine;
+        if (choice.isEmpty() || e == null) return;
+        AddRequest request = choice.get().request();
+        settings.setFilesToPick(id, false);
+        settings.saveQuietly();
+        Thread.ofVirtual().name("engine-choose").start(() -> {
+            String outcome;
+            try {
+                for (TorrentPreview.FileEntry f : preview.files()) {
+                    com.torrenta.engine.Priority p =
+                            request.filePriorities().getOrDefault(f.index(), com.torrenta.engine.Priority.NORMAL);
+                    if (p != own.get(f.index())) e.setFilePriority(id, f.index(), p);
+                }
+                if (!request.startPaused()) e.resume(id);
+                outcome = (request.startPaused() ? "Files chosen for " : "Started ") + preview.name();
             } catch (EngineException ex) {
                 outcome = ex.getMessage();
             }
@@ -735,7 +961,10 @@ public final class MainWindow {
 
     private void addFromClipboard() {
         if (currentDialog != null) return;
-        clipboardCandidate().ifPresentOrElse(this::addInput, () -> setStatus("Nothing to add on the clipboard"));
+        clipboardCandidate()
+                .ifPresentOrElse(
+                        text -> addInput(text, AddDialog.Via.CLIPBOARD),
+                        () -> setStatus("Nothing to add on the clipboard"));
     }
 
     private void onDragOver(DragEvent e) {
@@ -765,6 +994,12 @@ public final class MainWindow {
     }
 
     private void poll() {
+        FetchWatch watch = fetchWatch;
+        Engine.MetadataFetch fetch = watch == null ? null : watch.slot().get();
+        if (fetch != null) {
+            int peers = fetch.peers();
+            Platform.runLater(() -> watch.dialog().showFetching(peers));
+        }
         List<Torrent> snapshot = engine.torrents();
         Engine.Rates current = engine.rates();
         enforceShareLimits(snapshot);
