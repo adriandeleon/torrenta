@@ -90,3 +90,22 @@
     -fx-font-family: monospace;
     -fx-font-size: 0.9em;
 }
+
+/* The event log. Rows take a tint by level; the badge in the status bar is the error count. */
+.event-table .table-row-cell.event-warning {
+    -fx-background-color: -color-warning-muted;
+}
+
+.event-table .table-row-cell.event-error {
+    -fx-background-color: -color-danger-muted;
+}
+
+.event-bar {
+    -fx-background-color: -color-bg-subtle;
+    -fx-border-color: transparent transparent -color-border-default transparent;
+}
+
+.error-badge {
+    -fx-text-fill: -color-danger-fg;
+    -fx-cursor: hand;
+}

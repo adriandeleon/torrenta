@@ -23,7 +23,8 @@ Run Maven from the project root with a JDK 25.
 | Layer | What | Where |
 |---|---|---|
 | Entry | `--help`/`--version`, toolkit start, theme | `com.torrenta.App`, `com.torrenta.cli` |
-| UI | The window: menu bar, filter, torrent list, status bar, palette; `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
+| Events | `EngineEvent` (level, torrent, message), raised by the engine from libtorrent alerts and by its own start/stop/remove; `Engine.addListener` | `com.torrenta.engine` |
+| UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`; `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
 | Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
@@ -80,6 +81,11 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 - **"Paused" means paused by a person.** libtorrent's queue pauses auto-managed torrents too;
   `Torrent.paused` is `PAUSED && !AUTO_MANAGED`, and `pause()` clears `AUTO_MANAGED` first so the
   queue does not resume what the user stopped.
+- **Engine events arrive on libtorrent4j's alert thread.** `MainWindow` hops to the FX thread
+  before touching the log or the status bar; `EventLog.add` is FX-only. The j.u.l bridge takes
+  the hop as a parameter so tests run it inline.
+- **A removed torrent's alert carries only the hash.** `remove()` reads the name first and raises
+  the event itself; the `TORRENT_REMOVED` alert is not listened to.
 - **Rows are `TorrentRow` objects, never `Torrent` snapshots.** The list has an extractor on the
   row's torrent property, which is what makes the `SortedList` re-sort on an in-place update.
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
@@ -103,4 +109,5 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 Add dialogs (Ctrl+O / Ctrl+M only say so; inputs come from the command line), pause/resume/remove
 in the window (`Engine.remove` exists, nothing calls it yet), limits, a settings window, per-torrent
 detail, `-Pdist` with the native in the image.
-Engine alerts to a log window (0.2 PR 4) are next. First/last piece first waits for 0.4.
+0.2 is complete. Next is 0.3: the Add dialog, the detail pane, the native app image with the
+engine's native inside it, the update check. First/last piece first waits for 0.4.

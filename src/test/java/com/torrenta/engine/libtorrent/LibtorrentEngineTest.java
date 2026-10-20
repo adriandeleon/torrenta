@@ -5,8 +5,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 
+import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentState;
@@ -61,12 +63,17 @@ class LibtorrentEngineTest {
         }
         assertEquals(1, store.loadAll().size(), "stop() keeps it");
 
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
         try (LibtorrentEngine again = engine(dir, store)) {
+            again.addListener(events::add);
             again.start();
             List<Torrent> back = again.torrents();
             assertEquals(1, back.size());
             assertEquals(MAGNET_ID, back.get(0).id());
             assertEquals("Torrenta test", back.get(0).name(), "the magnet's name survives too");
+            await(
+                    "restored event, not an added one",
+                    () -> events.stream().anyMatch(e -> e.message().equals("Restored Torrenta test")));
         }
     }
 
@@ -156,6 +163,47 @@ class LibtorrentEngineTest {
 
             assertThrows(EngineException.class, () -> engine.pause("0000000000000000000000000000000000000000"));
         }
+    }
+
+    @Test
+    void eventsForTheLifeOfATorrent(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        Files.createDirectories(downloads);
+        Path payload = downloads.resolve("payload.bin");
+        Files.write(payload, new byte[64 * 1024]);
+        NativeLibrary.ensureAvailable();
+        Path torrentFile = dir.resolve("payload.torrent");
+        Files.write(
+                torrentFile,
+                new TorrentBuilder().path(payload.toFile()).generate().entry().bencode());
+
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.addListener(events::add);
+            engine.start();
+            await(
+                    "engine started event",
+                    () -> events.stream().anyMatch(e -> e.message().startsWith("Engine started")));
+
+            engine.add(MAGNET);
+            await(
+                    "added event names the magnet",
+                    () -> events.stream()
+                            .anyMatch(e -> e.level() == EngineEvent.Level.INFO
+                                    && e.message().equals("Added Torrenta test")));
+
+            Torrent real = engine.add(torrentFile.toString());
+            await(
+                    "checked event for the real torrent",
+                    () -> events.stream()
+                            .anyMatch(e -> real.id().equals(e.torrentId())
+                                    && e.message().equals("payload.bin checked")));
+
+            engine.remove(MAGNET_ID, false);
+            assertTrue(events.stream().anyMatch(e -> e.message().equals("Removed Torrenta test")));
+            assertTrue(events.stream().allMatch(e -> e.at() != null && e.torrent() != null));
+        }
+        assertTrue(events.stream().anyMatch(e -> e.message().equals("Engine stopped")));
     }
 
     @Test

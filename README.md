@@ -66,6 +66,7 @@ window (`download.dir` in the settings file already works).
 | `Ctrl+M` | Add a magnet link |
 | `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
 | `Ctrl+Shift+P` | Command palette: every command, found by typing part of its name |
+| `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
 | `Space` | Pause the selected torrents, or resume them if all are paused |
 | `Ctrl+Shift+U` | Force resume (ignore the queue) |
 | `Ctrl+Shift+R` / `Ctrl+Shift+A` | Force recheck / force reannounce |
@@ -77,7 +78,8 @@ window (`download.dir` in the settings file already works).
 | `Ctrl+Q` | Quit |
 
 Every action is in the Torrent menu, the list's right-click menu and the palette, and applies to
-the whole selection.
+the whole selection. The status bar shows the latest event; an error count appears there while
+there are errors, and a click on it opens the log.
 
 The list's columns (fifteen, from the header's ⋮ menu) keep their order, widths and visibility in
 `settings.properties`.

@@ -136,7 +136,7 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Email on finished | ✗ | ✓ | later |
 | Torrent creation: pieces size, private, trackers, web seeds, v1/v2/hybrid, start seeding | ✓ | ✓ | 0.7 |
 | RSS: feeds, refresh, articles; auto-download rules with regex, category, save path, episode filter | ✗ | ✓ | 0.7 |
-| Execution log with per-category filters; debug log window | ◐ | ✓ | 0.2 |
+| Event log with level filters, copy, clear; error count in the status bar | ◐ | ✓ | 0.2 |
 | Built-in tracker | ✗ | ✓ | no |
 
 ### Search
@@ -178,9 +178,13 @@ The point at which Torrenta can be left running.
    per-torrent limits dialog. Pause, resume, force resume, remove, remove with data, recheck,
    reannounce, sequential, copy name/hash/magnet, open folder. Context menu, menu bar, command
    palette. Multi-select.
-4. **Engine alerts.** A listener thread turns libtorrent alerts into events: added, finished, error,
-   metadata received, tracker error. Drives the status bar, the execution log window and later the
-   notifications.
+4. **Engine alerts** — done. libtorrent alerts become engine-neutral `EngineEvent`s: added,
+   metadata received, checked, finished, removed, torrent/file errors, tracker errors and
+   warnings, listen succeeded/failed, port mapping. They drive the status bar, the Event Log window
+   and later the notifications; the app's own warnings land in the same log.
+
+**0.2 is feature-complete** as planned; tagging it waits for 0.3's app image, since a release
+with nothing to download is not one.
 
 ### 0.3 — Add, inspect, install
 What a first public release needs.

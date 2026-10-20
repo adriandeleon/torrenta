@@ -100,5 +100,6 @@ final class DevCapture {
         System.out.println("capture: focus=" + scene.getFocusOwner());
         System.out.println("capture: engine=" + window.engineDescription());
         System.out.println("capture: status=" + window.statusText());
+        for (String line : window.eventLines()) System.out.println("capture: event=" + line);
     }
 }

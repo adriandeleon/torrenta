@@ -7,15 +7,18 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.torrenta.cli.CommandLine;
 import com.torrenta.engine.Engine;
+import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentState;
@@ -33,9 +36,17 @@ import org.libtorrent4j.Vectors;
 import org.libtorrent4j.alerts.AddTorrentAlert;
 import org.libtorrent4j.alerts.Alert;
 import org.libtorrent4j.alerts.AlertType;
+import org.libtorrent4j.alerts.FileErrorAlert;
+import org.libtorrent4j.alerts.ListenFailedAlert;
+import org.libtorrent4j.alerts.ListenSucceededAlert;
+import org.libtorrent4j.alerts.PortmapAlert;
+import org.libtorrent4j.alerts.PortmapErrorAlert;
 import org.libtorrent4j.alerts.SaveResumeDataAlert;
 import org.libtorrent4j.alerts.SaveResumeDataFailedAlert;
 import org.libtorrent4j.alerts.TorrentAlert;
+import org.libtorrent4j.alerts.TorrentErrorAlert;
+import org.libtorrent4j.alerts.TrackerErrorAlert;
+import org.libtorrent4j.alerts.TrackerWarningAlert;
 import org.libtorrent4j.swig.add_torrent_params;
 import org.libtorrent4j.swig.error_code;
 import org.libtorrent4j.swig.libtorrent;
@@ -74,6 +85,11 @@ public final class LibtorrentEngine implements Engine {
     /** Resume-data requests whose alert has not arrived yet; {@link #stop()} waits on this. */
     private final AtomicInteger pendingSaves = new AtomicInteger();
 
+    private final List<Consumer<EngineEvent>> listeners = new CopyOnWriteArrayList<>();
+
+    /** Ids re-added from the store at start, so their add alert reads "Restored", not "Added". */
+    private final java.util.Set<String> restoring = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     public LibtorrentEngine(Path downloadDir, TorrentStore store) {
         this.downloadDir = downloadDir;
         this.store = store;
@@ -100,6 +116,7 @@ public final class LibtorrentEngine implements Engine {
         }
         s.addListener(new Listener());
         session = s;
+        emit(EngineEvent.session(EngineEvent.Level.INFO, "Engine started: " + description()));
         restore(s);
 
         flusher = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -119,6 +136,7 @@ public final class LibtorrentEngine implements Engine {
             LOG.log(Level.WARNING, "Could not read the torrent store " + store.dir(), e);
             return;
         }
+        restoring.addAll(stored.keySet());
         for (Map.Entry<String, byte[]> entry : stored.entrySet()) {
             error_code ec = new error_code();
             add_torrent_params params = libtorrent.read_resume_data_ex(Vectors.bytes2byte_vector(entry.getValue()), ec);
@@ -176,8 +194,11 @@ public final class LibtorrentEngine implements Engine {
         SessionManager s = running();
         TorrentHandle handle = find(s, id);
         if (handle == null) throw new EngineException("No such torrent: " + id);
+        // Named here, before the handle dies: the removed alert carries only the hash.
+        String name = nameOf(handle);
         if (deleteFiles) s.remove(handle, SessionHandle.DELETE_FILES);
         else s.remove(handle);
+        emit(EngineEvent.info(id, name, deleteFiles ? "Removed " + name + " and its files" : "Removed " + name));
         // Forgotten before libtorrent confirms: a crash in between loses nothing worse than a
         // torrent that comes back once, which beats one that cannot be removed.
         try {
@@ -263,6 +284,26 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
+    public void addListener(Consumer<EngineEvent> listener) {
+        listeners.add(listener);
+    }
+
+    @Override
+    public void removeListener(Consumer<EngineEvent> listener) {
+        listeners.remove(listener);
+    }
+
+    private void emit(EngineEvent event) {
+        for (Consumer<EngineEvent> listener : listeners) {
+            try {
+                listener.accept(event);
+            } catch (RuntimeException e) {
+                LOG.log(Level.WARNING, "Event listener failed", e);
+            }
+        }
+    }
+
+    @Override
     public synchronized void stop() {
         if (session == null) return;
         if (flusher != null) flusher.shutdownNow();
@@ -283,6 +324,7 @@ public final class LibtorrentEngine implements Engine {
         }
         session.stop();
         session = null;
+        emit(EngineEvent.session(EngineEvent.Level.INFO, "Engine stopped"));
     }
 
     private void requestSave(TorrentHandle handle, boolean onlyIfModified) {
@@ -324,6 +366,14 @@ public final class LibtorrentEngine implements Engine {
     /** The best info-hash (v2 if the torrent has one, else v1) in hex: the id everywhere. */
     private static String id(TorrentHandle handle) {
         return handle.status().getInfoHashes().getBest().toHex();
+    }
+
+    /** The name, or the hash while there is none; empty for a handle that is already gone. */
+    private static String nameOf(TorrentHandle handle) {
+        if (!handle.isValid()) return "";
+        TorrentStatus status = handle.status(StatusQuery.FLAGS);
+        String name = status.name();
+        return name == null || name.isEmpty() ? status.getInfoHashes().getBest().toHex() : name;
     }
 
     /**
@@ -395,6 +445,15 @@ public final class LibtorrentEngine implements Engine {
             AlertType.ADD_TORRENT.swig(),
             AlertType.METADATA_RECEIVED.swig(),
             AlertType.TORRENT_FINISHED.swig(),
+            AlertType.TORRENT_CHECKED.swig(),
+            AlertType.TORRENT_ERROR.swig(),
+            AlertType.FILE_ERROR.swig(),
+            AlertType.TRACKER_ERROR.swig(),
+            AlertType.TRACKER_WARNING.swig(),
+            AlertType.LISTEN_SUCCEEDED.swig(),
+            AlertType.LISTEN_FAILED.swig(),
+            AlertType.PORTMAP.swig(),
+            AlertType.PORTMAP_ERROR.swig(),
             AlertType.SAVE_RESUME_DATA.swig(),
             AlertType.SAVE_RESUME_DATA_FAILED.swig(),
         };
@@ -409,7 +468,67 @@ public final class LibtorrentEngine implements Engine {
             try {
                 switch (alert.type()) {
                     case ADD_TORRENT -> onAdded((AddTorrentAlert) alert);
-                    case METADATA_RECEIVED, TORRENT_FINISHED -> requestSave(((TorrentAlert<?>) alert).handle(), false);
+                    case METADATA_RECEIVED -> {
+                        TorrentAlert<?> t = (TorrentAlert<?>) alert;
+                        requestSave(t.handle(), false);
+                        torrentEvent(t, EngineEvent.Level.INFO, "Metadata received for %s");
+                    }
+                    case TORRENT_FINISHED -> {
+                        TorrentAlert<?> t = (TorrentAlert<?>) alert;
+                        requestSave(t.handle(), false);
+                        torrentEvent(t, EngineEvent.Level.INFO, "%s finished");
+                    }
+                    case TORRENT_CHECKED -> torrentEvent((TorrentAlert<?>) alert, EngineEvent.Level.INFO, "%s checked");
+                    case TORRENT_ERROR -> {
+                        TorrentErrorAlert t = (TorrentErrorAlert) alert;
+                        torrentEvent(
+                                t,
+                                EngineEvent.Level.ERROR,
+                                "%s: " + t.error().getMessage()
+                                        + (t.filename().isEmpty() ? "" : " (" + t.filename() + ")"));
+                    }
+                    case FILE_ERROR -> {
+                        FileErrorAlert t = (FileErrorAlert) alert;
+                        torrentEvent(
+                                t, EngineEvent.Level.ERROR, "%s: " + t.error().getMessage() + " — " + t.filename());
+                    }
+                    case TRACKER_ERROR -> {
+                        TrackerErrorAlert t = (TrackerErrorAlert) alert;
+                        String reason = t.errorMessage().isEmpty() ? t.error().getMessage() : t.errorMessage();
+                        torrentEvent(t, EngineEvent.Level.WARNING, "%s: tracker " + t.trackerUrl() + " — " + reason);
+                    }
+                    case TRACKER_WARNING -> {
+                        TrackerWarningAlert t = (TrackerWarningAlert) alert;
+                        torrentEvent(
+                                t, EngineEvent.Level.WARNING, "%s: tracker " + t.trackerUrl() + " — " + t.message());
+                    }
+                    case LISTEN_SUCCEEDED -> {
+                        ListenSucceededAlert a = (ListenSucceededAlert) alert;
+                        emit(EngineEvent.session(
+                                EngineEvent.Level.INFO,
+                                "Listening on " + a.address() + ":" + a.port() + " (" + a.socketType() + ")"));
+                    }
+                    case LISTEN_FAILED -> {
+                        ListenFailedAlert a = (ListenFailedAlert) alert;
+                        emit(EngineEvent.session(
+                                EngineEvent.Level.ERROR,
+                                "Could not listen on " + a.listenInterface() + ":" + a.port() + " (" + a.socketType()
+                                        + "): " + a.error().getMessage()));
+                    }
+                    case PORTMAP -> {
+                        PortmapAlert a = (PortmapAlert) alert;
+                        emit(EngineEvent.session(
+                                EngineEvent.Level.INFO,
+                                "Port " + a.externalPort() + " mapped with " + a.mapTransport() + " (" + a.mapProtocol()
+                                        + ")"));
+                    }
+                    case PORTMAP_ERROR -> {
+                        PortmapErrorAlert a = (PortmapErrorAlert) alert;
+                        emit(EngineEvent.session(
+                                EngineEvent.Level.WARNING,
+                                "Port mapping with " + a.mapTransport() + " failed: "
+                                        + a.error().getMessage()));
+                    }
                     case SAVE_RESUME_DATA -> onSaved((SaveResumeDataAlert) alert);
                     case SAVE_RESUME_DATA_FAILED -> onSaveFailed((SaveResumeDataFailedAlert) alert);
                     default -> {}
@@ -425,8 +544,25 @@ public final class LibtorrentEngine implements Engine {
          * resume data replaces it when the metadata arrives.
          */
         private void onAdded(AddTorrentAlert alert) {
-            if (alert.error().isError()) return;
+            if (alert.error().isError()) {
+                String name = alert.params().getName();
+                emit(EngineEvent.error(
+                        null,
+                        name,
+                        "Could not add " + name + ": " + alert.error().getMessage()));
+                return;
+            }
             write(alert.params());
+            String id = alert.params().getInfoHashes().getBest().toHex();
+            torrentEvent(alert, EngineEvent.Level.INFO, restoring.remove(id) ? "Restored %s" : "Added %s");
+        }
+
+        /** {@code template} has one {@code %s}, the torrent's name. */
+        private void torrentEvent(TorrentAlert<?> alert, EngineEvent.Level level, String template) {
+            TorrentHandle handle = alert.handle();
+            if (!handle.isValid()) return;
+            String name = nameOf(handle);
+            emit(new EngineEvent(java.time.Instant.now(), level, id(handle), name, template.formatted(name)));
         }
 
         private void onSaved(SaveResumeDataAlert alert) {

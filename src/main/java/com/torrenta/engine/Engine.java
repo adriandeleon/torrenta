@@ -1,6 +1,7 @@
 package com.torrenta.engine;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * The BitTorrent engine, as the interface sees it.
@@ -56,6 +57,14 @@ public interface Engine extends AutoCloseable {
 
     /** Writes what is needed to bring the torrents back; also done on {@link #stop()}. */
     void flush();
+
+    /**
+     * Hears every {@link EngineEvent}, on an engine thread: the listener hands it to the FX thread
+     * itself. Added before or after {@link #start()}.
+     */
+    void addListener(Consumer<EngineEvent> listener);
+
+    void removeListener(Consumer<EngineEvent> listener);
 
     void stop();
 
