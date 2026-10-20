@@ -102,54 +102,104 @@
 }
 
 /*
- * The command palette. Anchored near the top rather than centred: it is read while looking at the
- * list underneath. Carried over from Termina.
+ * Looked-up colours Editora's chrome speaks in, defined on the root so every theme has them: the
+ * keyboard's periwinkle (a brand hue with no AtlantaFX role; ladder() picks a lighter one on a dark
+ * ground and a deep ink on a light one) and the selection wash of overlay rows.
  */
-.palette-backdrop {
-    -fx-background-color: rgba(0, 0, 0, 0.32);
+.root {
+    -state-key: ladder(-color-bg-default, #b0b6e0 0%, #b8bee5 10%, #cdd1f1 20%, #e3e6f9 30%, #ecedfb 49%, #3c4380 50%);
+    -state-sel: -color-accent-subtle;
 }
 
-.palette-card {
-    -fx-background-color: -color-bg-default;
-    -fx-background-radius: 10;
+/*
+ * The command palette, Editora's: one surface with no internal rules, anchored near the top rather
+ * than centred because it is read while looking at the list underneath.
+ */
+.palette-backdrop {
+    -fx-background-color: rgba(0, 0, 0, 0.18);
+}
+
+.command-palette {
+    -fx-background-color: -color-bg-overlay;
+    -fx-background-radius: 12;
     -fx-border-color: -color-border-default;
-    -fx-border-radius: 10;
-    -fx-padding: 10;
-    -fx-spacing: 8;
-    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.45), 24, 0.2, 0, 8);
+    -fx-border-width: 1;
+    -fx-border-radius: 12;
+    -fx-padding: 6;
+    /* The kit layers two shadows (a tight contact one and a wide ambient one); JavaFX takes one
+       dropshadow, so this is the wide one with a short offset; the 1px border carries the edge. */
+    -fx-effect: dropshadow(gaussian, rgba(27, 30, 42, 0.28), 44, 0.16, 0, 18);
     -fx-translate-y: 48;
 }
 
-.palette-input {
-    -fx-font-size: 1.1em;
-    -fx-background-color: -color-bg-subtle;
-    -fx-background-radius: 7;
+.command-palette .palette-input-row {
+    -fx-padding: 4 10 8 10;
 }
 
-.palette-list {
-    -fx-background-color: transparent;
-    -fx-border-color: transparent;
-}
-
-.palette-list .list-cell {
-    -fx-background-color: transparent;
-    -fx-padding: 4 8 4 8;
-}
-
-.palette-list .list-cell:filled:selected {
+/* The chord chip leading the input: chrome font, not monospace. */
+.command-palette .palette-prefix {
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -color-accent-fg;
     -fx-background-color: -color-accent-subtle;
-    -fx-background-radius: 6;
+    -fx-background-radius: 5;
+    -fx-padding: 2 7 2 7;
 }
 
-.palette-name {
+.command-palette .palette-input,
+.command-palette .palette-input:focused {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-border-width: 0;
+    -fx-padding: 4 2 4 2;
+    -fx-font-size: 13.5px;
+}
+
+.command-palette .palette-list {
+    -fx-border-width: 0;
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
+/* Rows: the kit marks the selected one with a tinted background AND a 2px accent bar down its
+   inside edge; the bar is what makes the selection readable at a glance. JavaFX has no inset
+   box-shadow, so the bar is a left border. */
+.command-palette .list-cell {
+    -fx-padding: 7 16 7 16;
+    -fx-font-size: 12.5px;
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+}
+
+.command-palette .list-view .list-cell:filled:selected,
+.command-palette .list-view:focused .list-cell:filled:selected {
+    -fx-background-color: -state-sel;
     -fx-text-fill: -color-fg-default;
+    -fx-border-color: transparent transparent transparent -color-accent-emphasis;
+    -fx-border-width: 0 0 0 2;
 }
 
-/* The shortcut is a reminder, not the point of the row. */
-.palette-chord {
+/* Title runs: plain text in the default ink, the query-matched characters in accent bold (the
+   kit's <mark>). Text nodes take -fx-fill, not -fx-text-fill. */
+.command-palette .list-cell .palette-cell-text {
+    -fx-fill: -color-fg-default;
+}
+
+.command-palette .list-cell .palette-match {
+    -fx-fill: -color-accent-fg;
+    -fx-font-weight: bold;
+}
+
+/* The chord on a row: periwinkle, the one reserved keyboard hue. */
+.command-palette .list-cell .keybinding {
+    -fx-text-fill: -state-key;
+}
+
+.command-palette .palette-hint {
     -fx-text-fill: -color-fg-muted;
-    -fx-font-family: monospace;
-    -fx-font-size: 0.9em;
+    -fx-font-size: 11px;
+    -fx-padding: 7 10 2 10;
 }
 
 /* The event log. Rows take a tint by level; the badge in the status bar is the error count. */

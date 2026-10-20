@@ -56,8 +56,32 @@ final class CommandMatcher {
         // too cheap to be worth approximating.
         int[][] memo = new int[q.length()][text.length()];
         for (int[] row : memo) java.util.Arrays.fill(row, Integer.MIN_VALUE);
-        int best = best(q, text, 0, 0, memo);
+        int best = best(q, text, 0, 0, memo, new int[q.length()][text.length()]);
         return best == Integer.MIN_VALUE ? NO_MATCH : best;
+    }
+
+    /**
+     * The label positions the best placement of {@code query} covers, in order: the characters a
+     * row emboldens. The same placement {@link #score} ranked by, so the highlight can never show
+     * different characters than the ranking reasoned about. Empty for a blank query or no match.
+     */
+    static java.util.List<Integer> positions(String query, String label) {
+        if (label == null || query == null || query.isBlank()) return java.util.List.of();
+        String q = query.toLowerCase(Locale.ROOT).replace(" ", "");
+        String text = label.toLowerCase(Locale.ROOT);
+        if (q.isEmpty() || q.length() > text.length() || text.length() != label.length()) return java.util.List.of();
+        int[][] memo = new int[q.length()][text.length()];
+        for (int[] row : memo) java.util.Arrays.fill(row, Integer.MIN_VALUE);
+        int[][] choice = new int[q.length()][text.length()];
+        if (best(q, text, 0, 0, memo, choice) == Integer.MIN_VALUE) return java.util.List.of();
+        java.util.List<Integer> out = new java.util.ArrayList<>();
+        int from = 0;
+        for (int i = 0; i < q.length(); i++) {
+            int at = choice[i][from];
+            out.add(at);
+            from = at + 1;
+        }
+        return out;
     }
 
     /**
@@ -65,7 +89,7 @@ final class CommandMatcher {
      *
      * @return {@link Integer#MIN_VALUE} when the rest of the query does not fit
      */
-    private static int best(String q, String text, int i, int from, int[][] memo) {
+    private static int best(String q, String text, int i, int from, int[][] memo, int[][] choice) {
         if (i == q.length()) return 0;
         if (from >= text.length()) return Integer.MIN_VALUE;
         if (memo[i][from] != Integer.MIN_VALUE) return memo[i][from];
@@ -91,8 +115,11 @@ final class CommandMatcher {
                 here -= Math.min(at, 10) * LEADING_PENALTY;
             }
 
-            int rest = best(q, text, i + 1, at + 1, memo);
-            if (rest != Integer.MIN_VALUE) result = Math.max(result, here + rest);
+            int rest = best(q, text, i + 1, at + 1, memo, choice);
+            if (rest != Integer.MIN_VALUE && here + rest > result) {
+                result = here + rest;
+                choice[i][from] = at;
+            }
         }
         memo[i][from] = result;
         return result;

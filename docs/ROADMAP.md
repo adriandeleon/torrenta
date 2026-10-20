@@ -269,23 +269,22 @@ See "Search design" below.
 
 Asked for by adl on 2026-10-20, each its own PR, taken from Editora so the family looks the same:
 
-1. **Themes, from Editora**: Editora Light and Dark, Cupertino Light and Dark, Nord Light and
-   Dark, switched live from Settings as Editora and Termina do (the stylesheets are AtlantaFX-derived
-   and already self-contained).
-2. **Icon toolbar with Editora's icons**: the common actions (add file, add magnet, pause, resume,
-   remove, settings) above the list, the same glyphs Editora draws, hideable from View.
-3. **About box, from Editora**: the same window layout and content — name, version, build time,
-   engine version, licence, links, and the update line.
-4. **Settings sync through a private GitHub repository**, as Editora's settings sync does: the
-   settings file and the IP-filter bans and default trackers as the synced set, a Git repo as the
-   store, optional, automatic and manual triggers, this machine wins on a same-key conflict, setup
-   by pasted URL plus "Create on GitHub"; the same `gh` account rule Editora learned
-   (the clone pins the account that can read the repo).
+1. ✓ **Themes, from Editora** (#18): Editora Light and Dark, Cupertino Light and Dark, Nord Light and
+   Dark, switched live from Settings → General → Appearance. AtlantaFX is a dependency (adl's call);
+   Nord and Cupertino are its own classes, the Editora pair stays authored in-house.
+2. ✓ **Icon toolbar with Editora's icons** (#19): add file, add magnet, pause/resume, force resume,
+   recheck, remove, filter, event log, settings, palette; the same glyphs Editora draws; View → Toolbar.
+3. ✓ **About box, from Editora** (#20): name, version, tagline, copyright, licence, homepage, releases,
+   settings file, the update line, the environment block with Copy details.
+4. ✓ **Settings sync through a private GitHub repository** (#22), as Editora's: the settings file
+   key by key (bans and default trackers are keys in it), a Git repo as the store, optional, automatic
+   and manual triggers, this machine wins on a same-key conflict, setup by pasted URL plus "Create on
+   GitHub"; the clone pins the `gh` account that can read the repo.
 5. **OS integration**: `.torrent` and `magnet:` handler, single instance with hand-off, tray or dock
    badge with rates.
 6. **Interface languages**, from Termina's `i18n` package, with the same six to start.
 
-The interface font (Inter, as Editora's) is already in.
+The interface font (Inter, as Editora's, #14) and the command palette's look (Editora's, #23) are in.
 
 ### 0.9 — Remote
 
