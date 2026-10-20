@@ -1,6 +1,6 @@
 # Torrenta
 
-A keyboard-first, cross-platform BitTorrent client. JDK 25 + JavaFX 26 + Maven, modular (JPMS,
+A keyboard-first, cross-platform BitTorrent client. JDK 25 + JavaFX 27 + Maven, modular (JPMS,
 module `com.torrenta`). Same author, layout and conventions as Termina and Editora.
 
 ## Commands
