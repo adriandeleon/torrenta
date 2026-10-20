@@ -20,7 +20,7 @@
         <maven.build.timestamp.format>yyyy-MM-dd HH:mm 'UTC'</maven.build.timestamp.format>
         <build.timestamp>${maven.build.timestamp}</build.timestamp>
 
-        <javafx.version>26.0.2</javafx.version>
+        <javafx.version>27</javafx.version>
         <atlantafx.version>3.0.0</atlantafx.version>
         <spotless.version>3.6.0</spotless.version>
         <palantir.version>2.92.0</palantir.version>
