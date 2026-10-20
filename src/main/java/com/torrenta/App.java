@@ -23,6 +23,7 @@ public final class App extends Application {
     private static final String LAUNCH_NAME = "torrenta";
 
     private Engine engine;
+    private MainWindow window;
 
     public static void main(String[] args) {
         // Parsed before anything else starts. --version is what somebody pastes into a bug report,
@@ -66,7 +67,7 @@ public final class App extends Application {
         Application.setUserAgentStylesheet(
                 Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
 
-        MainWindow window = new MainWindow(
+        window = new MainWindow(
                 stage, settings, configDir, uri -> getHostServices().showDocument(uri));
         window.show();
         cli.inputs().forEach(window::addInput);
@@ -102,6 +103,7 @@ public final class App extends Application {
 
     @Override
     public void stop() {
+        if (window != null) window.stopPolling();
         if (engine != null) engine.stop();
     }
 }

@@ -49,8 +49,15 @@ public final class Settings {
     public static final String UI_TOOLBAR = "ui.toolbar";
     /** Whether the sidebar of filters shows beside the list; View → Sidebar flips it. */
     public static final String UI_SIDEBAR = "ui.sidebar";
-    /** The sidebar's chosen filter, as {@code ui.SidebarFilter} formats it; this machine's. */
-    public static final String UI_SIDEBAR_FILTER = "ui.sidebar.filter";
+    /**
+     * The sidebar's choices, one key per section ({@code ui.sidebar.status}, {@code .category},
+     * {@code .tag}, {@code .tracker}), each as {@code ui.SidebarFilter} formats it; this machine's.
+     */
+    public static final String UI_SIDEBAR_PREFIX = "ui.sidebar.";
+    /** The sections the sidebar has folded, comma-separated axis names. */
+    public static final String UI_SIDEBAR_COLLAPSED = "ui.sidebar.collapsed";
+    /** The sections a choice or a fold can name. */
+    public static final java.util.List<String> SIDEBAR_AXES = java.util.List.of("status", "category", "tag", "tracker");
     /** The theme id ({@code editora-dark}, {@code nord-light}, …); the UI maps it and falls back. */
     public static final String THEME = "ui.theme";
 
@@ -335,13 +342,39 @@ public final class Settings {
         properties.setProperty(UI_SIDEBAR, String.valueOf(shown));
     }
 
-    /** The sidebar filter as written; empty when unset. The UI parses it and falls back to All. */
-    public String sidebarFilter() {
-        return properties.getProperty(UI_SIDEBAR_FILTER, "").trim();
+    /**
+     * The sidebar's choice on one axis as written; empty when unset. The UI parses it, on that
+     * axis, and falls back to All.
+     *
+     * @param axis one of {@link #SIDEBAR_AXES}
+     */
+    public String sidebarChoice(String axis) {
+        return properties.getProperty(UI_SIDEBAR_PREFIX + checkAxis(axis), "").trim();
     }
 
-    public void setSidebarFilter(String filter) {
-        properties.setProperty(UI_SIDEBAR_FILTER, filter == null ? "" : filter);
+    public void setSidebarChoice(String axis, String filter) {
+        properties.setProperty(UI_SIDEBAR_PREFIX + checkAxis(axis), filter == null ? "" : filter.trim());
+    }
+
+    /** The folded sections, each one of {@link #SIDEBAR_AXES}; anything else in the file is dropped. */
+    public java.util.Set<String> sidebarCollapsed() {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        for (String part : properties.getProperty(UI_SIDEBAR_COLLAPSED, "").split(",")) {
+            String axis = part.trim().toLowerCase(java.util.Locale.ROOT);
+            if (SIDEBAR_AXES.contains(axis)) out.add(axis);
+        }
+        return out;
+    }
+
+    public void setSidebarCollapsed(java.util.Collection<String> axes) {
+        java.util.List<String> kept = new java.util.ArrayList<>();
+        for (String axis : SIDEBAR_AXES) if (axes.contains(axis)) kept.add(axis);
+        properties.setProperty(UI_SIDEBAR_COLLAPSED, String.join(",", kept));
+    }
+
+    private static String checkAxis(String axis) {
+        if (!SIDEBAR_AXES.contains(axis)) throw new IllegalArgumentException("Not a sidebar axis: " + axis);
+        return axis;
     }
 
     public void setAddStartPaused(boolean on) {
