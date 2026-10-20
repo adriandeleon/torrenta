@@ -204,8 +204,9 @@ What a first public release needs.
 3. **Native app image and installers** — done: jlink plus jpackage, the native unpacked and
    placed beside the image as app content with `libtorrent4j.jni.path` set by the launcher;
    macOS `.app`/`.dmg`, Windows `.msi`, Linux `.deb`/`.rpm`; CI builds, starts and checks the
-   image on all three platforms. **Release workflow, JReleaser, Homebrew cask and winget** are the
-   next PR, from Termina's. No AOT cache training yet (Termina has it; a measured follow-up).
+   image on all three platforms. Release workflow, JReleaser, Homebrew cask and winget — done, from
+   Termina's; untested until the first dry run and tag. No AOT cache training yet (Termina has it;
+   a measured follow-up).
 4. **Update check** against GitHub releases, from Termina's `update` package.
 
 ### 0.4 — Network, bandwidth, queue

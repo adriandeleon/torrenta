@@ -1,0 +1,127 @@
+# JReleaser: publishes the GitHub release and updates the package managers.
+#
+# It does not build anything. The app images are produced by `-Pdist` on each platform in
+# release.yml — jlink and jpackage are host-specific and there is no cross-building — and JReleaser
+# is handed the finished installers.
+#
+# Homebrew and winget both need a token that can push to *another* repository, which the workflow's
+# default GITHUB_TOKEN cannot do. Both packagers are continueOnError, so a missing or expired token
+# costs the package-manager update and not the release itself. Carried over from Termina.
+
+project:
+  name: Torrenta
+  description: A keyboard-first BitTorrent client for macOS, Windows and Linux
+  longDescription: |
+    Torrenta is a cross-platform BitTorrent client built on JavaFX, with libtorrent as its engine.
+    An Add dialog for files, magnets and links, a live transfer list, a detail pane with files,
+    peers, trackers and pieces, a command palette, and an event log — all driven from the keyboard.
+  links:
+    homepage: https://github.com/adriandeleon/torrenta
+    documentation: https://github.com/adriandeleon/torrenta#readme
+    bugTracker: https://github.com/adriandeleon/torrenta/issues
+  authors:
+    - Adrian De Leon
+  license: MIT
+  inceptionYear: '2026'
+  # Read from the project rather than from the packager: tags set under winget: are not picked up.
+  tags:
+    - bittorrent
+    - torrent
+    - javafx
+    - cross-platform
+  # An application rather than a command-line tool: what makes brew produce a cask, not a formula.
+  stereotype: DESKTOP
+  languages:
+    java:
+      groupId: com.torrenta
+      artifactId: torrenta
+      version: '25'
+
+release:
+  github:
+    owner: adriandeleon
+    name: torrenta
+    # This repository is on master; JReleaser defaults to main and fails the publish outright.
+    branch: master
+    # A tag that carries a suffix (-rc1, -beta2) is published as a pre-release.
+    prerelease:
+      pattern: .*-.*
+    changelog:
+      formatted: ALWAYS
+      preset: conventional-commits
+      contributors:
+        enabled: false
+      # Install instructions ahead of the commit list.
+      contentTemplate: .github/release-notes.tpl
+
+checksum:
+  individual: false
+
+distributions:
+  # Split by what each packager can consume: a Homebrew cask accepts exactly one artifact, so
+  # macOS and Windows cannot share a distribution.
+  torrenta:
+    type: NATIVE_PACKAGE
+    artifacts:
+      - path: 'artifacts/Torrenta-{{projectVersion}}-macos-arm64.dmg'
+        platform: osx-aarch_64
+
+    brew:
+      active: RELEASE
+      # A token problem costs the tap, not the release.
+      continueOnError: true
+      cask:
+        enabled: true
+        name: torrenta
+        displayName: Torrenta
+        appName: Torrenta.app
+      repository:
+        active: RELEASE
+        owner: adriandeleon
+        name: homebrew-tap
+        branch: main
+        branchPush: main
+      extraProperties:
+        cask.caveats: |
+          Torrenta is not signed with an Apple Developer ID yet, so macOS refuses to open it the
+          first time. Allow it once under System Settings > Privacy & Security > Open Anyway.
+
+  torrenta-windows:
+    type: NATIVE_PACKAGE
+    executable:
+      name: Torrenta
+      windowsExtension: exe
+    artifacts:
+      - path: 'artifacts/Torrenta-{{projectVersion}}-windows-x64.msi'
+        platform: windows-x86_64
+
+    winget:
+      active: RELEASE
+      continueOnError: true
+      package:
+        identifier: AdrianDeLeon.Torrenta
+        name: Torrenta
+        version: '{{projectVersion}}'
+        url: https://github.com/adriandeleon/torrenta
+      publisher:
+        name: Adrian De Leon
+        url: https://github.com/adriandeleon
+        supportUrl: https://github.com/adriandeleon/torrenta/issues
+      moniker: torrenta
+      installer:
+        type: MSI
+        scope: USER
+        upgradeBehavior: INSTALL
+      # A fork of microsoft/winget-pkgs under this account; the pull request is opened from it.
+      repository:
+        active: RELEASE
+        owner: adriandeleon
+        name: winget-pkgs
+        branch: master
+        branchPush: 'torrenta-{{projectVersion}}'
+
+# Attached to the release, but not fed to any packager: Linux has no packager configured yet.
+files:
+  artifacts:
+    - path: 'artifacts/Torrenta-{{projectVersion}}-linux-x64.deb'
+    - path: 'artifacts/Torrenta-{{projectVersion}}-linux-x64.rpm'

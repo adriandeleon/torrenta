@@ -36,6 +36,9 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 - **A native app image and installers** (`-Pdist`): a self-contained Torrenta with its own
   runtime for macOS (`.app`, `.dmg`), Windows (`.msi`) and Linux (`.deb`, `.rpm`), with the
   engine's native library beside the image. CI builds and starts the image on all three platforms.
+- **A release pipeline**: a `v*` tag builds and smoke-tests the installers on all three
+  platforms and publishes a GitHub release with install notes, a changelog and checksums; a
+  Homebrew cask and a winget manifest follow when the token is present.
 - **An event log** (`Ctrl+Shift+L`): added, metadata received, checked, finished, removed, torrent
   and disk errors, tracker errors and warnings, listen ports, port mapping, engine start and stop,
   plus the app's own warnings. Filter by level, copy, clear. The status bar shows the latest event
