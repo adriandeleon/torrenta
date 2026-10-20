@@ -57,12 +57,14 @@ public final class App extends Application {
         // Before any stylesheet: CSS naming a font that is not yet registered does not wait for it,
         // it silently resolves to the system face.
         com.torrenta.ui.Fonts.load();
-        // Applied before any window is built, so the first frame is already themed.
-        Application.setUserAgentStylesheet(Theme.EDITORA_DARK.stylesheet());
 
         Path configDir = ConfigDir.resolve(cli.configDir());
         Settings settings = new Settings(configDir.resolve(Settings.FILE_NAME));
         settings.load();
+
+        // Applied before any window is built, so the first frame is already themed.
+        Application.setUserAgentStylesheet(
+                Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
 
         MainWindow window = new MainWindow(
                 stage, settings, configDir, uri -> getHostServices().showDocument(uri));

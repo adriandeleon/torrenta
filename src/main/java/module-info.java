@@ -1,6 +1,9 @@
 module com.torrenta {
     requires javafx.controls;
     requires javafx.graphics;
+    // The Nord and Cupertino control themes; the module opens its theme package, so the
+    // stylesheets resolve to URLs from here.
+    requires atlantafx.base;
 
     // The engine. An automatic module (no module-info, no Automatic-Module-Name), so the name is
     // derived from the jar file name — renaming or shading the jar silently breaks the build. The

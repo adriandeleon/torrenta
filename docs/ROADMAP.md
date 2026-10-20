@@ -155,7 +155,7 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Native packages: macOS `.dmg`/`.app`, Windows `.msi`, Linux `.deb`/`.rpm`/tarball; Homebrew and winget | ✓ | ✓ | 0.3 |
 | Update check against GitHub releases | ✓ | ✓ | 0.3 |
 | Settings window, live-applying, searchable | ✓ | ✓ | 0.4 |
-| Light and dark themes, UI font | ◐ | ✓ | 0.8 |
+| Light and dark themes, UI font | ✓ | ✓ | 0.8 |
 | Interface languages | ✓ | ✓ | 0.8 |
 | Control a remote daemon (Transmission RPC as a second `Engine`) | ✓ (remote GUI) | ✗ | 0.9 |
 | Serve a web UI / RPC of its own | ✓ | ✓ | later |
@@ -265,10 +265,25 @@ See "Search design" below.
 
 ### 0.8 — App polish
 
-1. **OS integration**: `.torrent` and `magnet:` handler, single instance with hand-off, tray or dock
+Asked for by adl on 2026-10-20, each its own PR, taken from Editora so the family looks the same:
+
+1. **Themes, from Editora**: Editora Light and Dark, Cupertino Light and Dark, Nord Light and
+   Dark, switched live from Settings as Editora and Termina do (the stylesheets are AtlantaFX-derived
+   and already self-contained).
+2. **Icon toolbar with Editora's icons**: the common actions (add file, add magnet, pause, resume,
+   remove, settings) above the list, the same glyphs Editora draws, hideable from View.
+3. **About box, from Editora**: the same window layout and content — name, version, build time,
+   engine version, licence, links, and the update line.
+4. **Settings sync through a private GitHub repository**, as Editora's settings sync does: the
+   settings file and the IP-filter bans and default trackers as the synced set, a Git repo as the
+   store, optional, automatic and manual triggers, this machine wins on a same-key conflict, setup
+   by pasted URL plus "Create on GitHub"; the same `gh` account rule Editora learned
+   (the clone pins the account that can read the repo).
+5. **OS integration**: `.torrent` and `magnet:` handler, single instance with hand-off, tray or dock
    badge with rates.
-2. **Light theme, UI font, Termina's theme switching.**
-3. **Interface languages**, from Termina's `i18n` package, with the same six to start.
+6. **Interface languages**, from Termina's `i18n` package, with the same six to start.
+
+The interface font (Inter, as Editora's) is already in.
 
 ### 0.9 — Remote
 

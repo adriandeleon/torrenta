@@ -35,6 +35,8 @@ public final class Settings {
     public static final String DETAIL_DIVIDER = "detail.divider";
     /** Ask GitHub for a newer release after startup, at most once a day. */
     public static final String UPDATE_CHECK = "updates.check";
+    /** The theme id ({@code editora-dark}, {@code nord-light}, …); the UI maps it and falls back. */
+    public static final String THEME = "ui.theme";
 
     public static final String LAST_UPDATE_CHECK = "updates.lastCheckEpochMs";
     /** The version the user chose to skip; a manual check still reports it. */
@@ -159,6 +161,15 @@ public final class Settings {
     public boolean updateCheck() {
         return !"false"
                 .equalsIgnoreCase(properties.getProperty(UPDATE_CHECK, "true").trim());
+    }
+
+    /** The theme id as written, trimmed; empty when unset. The UI decides what an unknown one means. */
+    public String theme() {
+        return properties.getProperty(THEME, "").trim();
+    }
+
+    public void setTheme(String id) {
+        properties.setProperty(THEME, id);
     }
 
     public void setUpdateCheck(boolean check) {

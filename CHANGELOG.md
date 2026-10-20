@@ -12,11 +12,21 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   update when one is known, and a monospace block with the build, the engine, Java, JavaFX, the OS
   and the config folder, with "Copy details". Also in the palette.
 
+### Fixed
+
+- **A JVM crash in the engine** (`SIGSEGV` in `libtorrent4j.so` while reading a torrent's detail,
+  seen once on CI): libtorrent4j's vector proxies hand out pointers that its finalizer frees. The
+  engine now keeps only handles, trackers and peers it owns.
+
 ### Changed
 
 - **JavaFX 27**, as Editora; was 26.0.2.
 
 ### Added
+
+- **Themes**, in Settings → General → Appearance, applied at once: Editora Light and Dark (Caret &
+  Ink, as before), Nord Light and Dark, Cupertino Light and Dark. The last four are AtlantaFX's own,
+  now a dependency, as in Editora. Kept as `ui.theme` in the settings file.
 
 - **Torrents survive a restart.** Resume data is kept per torrent under `~/.torrenta/torrents/`,
   written when a torrent is added, when its metadata arrives, when it finishes, periodically and on

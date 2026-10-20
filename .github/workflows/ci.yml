@@ -37,14 +37,22 @@ jobs:
       - name: Test
         run: ./mvnw -B --no-transfer-progress verify
         shell: bash
+        env:
+          # glibc fills freed memory with this byte, so a SWIG proxy used after its owner was
+          # finalized crashes here and now instead of once in a hundred runs (Linux only; the
+          # other allocators ignore it).
+          MALLOC_PERTURB_: '165'
 
       - name: Upload test reports
-        # Only the failures matter here, and only then.
+        # Only the failures matter here, and only then. A JVM crash leaves its report next to the
+        # pom, not under target.
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: surefire-${{ matrix.os }}
-          path: target/surefire-reports/
+          path: |
+            target/surefire-reports/
+            hs_err_pid*.log
           retention-days: 7
 
       # Starts the real window under a virtual display and checks it painted and the engine came
