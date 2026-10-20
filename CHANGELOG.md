@@ -22,6 +22,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   reannounce, sequential download, copy name/info-hash/magnet link, open the destination folder,
   remove and remove with data (confirmed). In the Torrent menu, the right-click menu, and a
   **command palette** on `Ctrl+Shift+P`.
+- **The Add dialog.** `.torrent` files (`Ctrl+O`, a drop, the command line), magnet links and
+  links to `.torrent` files (`Ctrl+M`, `Ctrl+V` from the clipboard, a drop, the command line) open
+  a dialog with the name and size, the save folder with its free space, start paused, sequential
+  download, skip hash check, a stop condition (after the metadata arrives, after the files are
+  checked), and for torrents with metadata a file tree with checkboxes and per-file priorities.
+  The status bar notices a magnet or torrent link on the clipboard when the window comes back.
 - **An event log** (`Ctrl+Shift+L`): added, metadata received, checked, finished, removed, torrent
   and disk errors, tracker errors and warnings, listen ports, port mapping, engine start and stop,
   plus the app's own warnings. Filter by level, copy, clear. The status bar shows the latest event

@@ -13,6 +13,9 @@ module com.torrenta {
     // Settings, the store and the engine log through j.u.l; nothing is lost without a handler.
     requires java.logging;
 
+    // Fetching a .torrent from a URL for the Add dialog.
+    requires java.net.http;
+
     // ImageIO, for the development screen capture only. Nothing else here touches AWT, and
     // App.main forces it headless before any AWT class can load.
     requires java.desktop;

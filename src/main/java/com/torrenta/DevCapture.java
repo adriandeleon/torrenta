@@ -82,7 +82,8 @@ final class DevCapture {
     }
 
     private static void capture(Stage stage, MainWindow window, File out) throws IOException {
-        Scene scene = stage.getScene();
+        // The Add dialog when one is open, so the dialog itself can be photographed.
+        Scene scene = window.captureScene();
         WritableImage shot = scene.snapshot(null);
         int w = (int) shot.getWidth();
         int h = (int) shot.getHeight();
@@ -101,5 +102,6 @@ final class DevCapture {
         System.out.println("capture: engine=" + window.engineDescription());
         System.out.println("capture: status=" + window.statusText());
         for (String line : window.eventLines()) System.out.println("capture: event=" + line);
+        if (scene != stage.getScene()) System.out.println("capture: scene=dialog");
     }
 }
