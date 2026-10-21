@@ -4,8 +4,8 @@ import java.util.Locale;
 import java.util.Optional;
 
 /**
- * How the window moves between its views: Ctrl+Tab and Ctrl+Shift+Tab cycle round, a place on the
- * strip reaches one, and a name from the capture hook is looked up by id. Pure, so the rule is
+ * How the window moves between its views: Ctrl+Tab and Ctrl+Shift+Tab cycle round, Ctrl+1..3 go
+ * straight to one by its place on the strip, and a name from the capture hook is looked up by id. Pure, so the rule is
  * tested without a scene.
  */
 public final class ViewSwitch {

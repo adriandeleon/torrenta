@@ -3,8 +3,9 @@ package com.torrenta.ui;
 import static com.torrenta.i18n.Messages.tr;
 
 /**
- * The views that share the window's centre, in the order the strip shows them and Ctrl+Tab walks
- * them. The id is the command that shows the view, and what the capture hook says.
+ * The views that share the window's centre, in the order the strip shows them, Ctrl+Tab walks
+ * them and the numerals reach them: Ctrl+1 is the first. The id is the command that shows the
+ * view, and what the capture hook says.
  */
 public enum View {
     TRANSFERS("transfers", "view.transfers"),
@@ -29,7 +30,7 @@ public enum View {
         return tr(key);
     }
 
-    /** The place on the strip: 1 for the first. */
+    /** The place on the strip and the numeral in the chord: 1 for the first. */
     public int number() {
         return ordinal() + 1;
     }

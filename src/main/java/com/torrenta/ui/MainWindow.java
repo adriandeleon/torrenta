@@ -350,8 +350,8 @@ public final class MainWindow {
         statusBar = buildStatusBar();
         root.setBottom(statusBar);
         commands = buildCommands();
-        // The strip is built with the centre, before the commands it names the chords of.
-        viewStrip.showChords(v -> command(v.id()).hint());
+        // The strip is built with the centre, before the chords it shows exist.
+        viewStrip.showChords(v -> viewChord(v).getDisplayText());
         paletteChord =
                 PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT).chord();
         // The toolbar first: the View menu's check item binds to its visibility.
@@ -420,6 +420,9 @@ public final class MainWindow {
         scene.getAccelerators().put(shiftChord(KeyCode.T), statsWindow::show);
         scene.getAccelerators().put(shiftChord(KeyCode.M), messagePopup::toggle);
         scene.getAccelerators().put(chord(KeyCode.V), this::addFromClipboard);
+        // Ctrl+1, 2, 3: each view by its place on the strip, beside the views' own chords
+        // (Esc, Ctrl+Shift+F, Ctrl+R), which the menus keep showing.
+        for (View v : View.values()) scene.getAccelerators().put(viewChord(v), () -> show(v));
         // Ctrl+Tab and Ctrl+Shift+Tab cycle the views. A filter, ahead of focus traversal, which
         // would otherwise take Ctrl+Tab out of the table; Control on every platform, since Cmd+Tab
         // is macOS's own application switcher and never reaches the window.
@@ -2667,6 +2670,11 @@ public final class MainWindow {
 
     private static KeyCombination shiftChord(KeyCode key) {
         return new KeyCodeCombination(key, KeyCombination.SHORTCUT_DOWN, KeyCombination.SHIFT_DOWN);
+    }
+
+    /** Shortcut and the view's place on the strip: Ctrl+1 for Transfers. */
+    private static KeyCombination viewChord(View v) {
+        return chord(KeyCode.valueOf("DIGIT" + v.number()));
     }
 
     /** Ctrl+Tab, or Ctrl+Shift+Tab: Control on macOS too, where Cmd+Tab belongs to the system. */
