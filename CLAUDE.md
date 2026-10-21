@@ -47,6 +47,7 @@ to try one on purpose).
 | Search | `search.SearchProvider` (name + blocking `search(query, category)` throwing `SearchException`), `SearchResult` (sealed `Link`: `Magnet`/`TorrentUrl`; the hash is read off a magnet; `identity()` is hash else link), `SearchCategory` (Newznab numbers), `ResultRanker` (pure: dedupe keeps the better-seeded copy, rank by seeds → query coverage → date → name), `SearchService` (virtual thread per provider, 20 s each, one request per 2 s per provider through a `Ticker`, session cache, `SearchOutcome` with per-provider failures), `TorznabEndpoint` (+ `problem(url)`, the dialog's rule), `TorznabProvider` (`t=caps`/`t=search`, StAX, no entities); `store.SearchProviderStore` (`search-providers.json`, never synced); `ui.SearchProviderDialog`, Settings → Search. Declarative: `Definition` (the file, parsed and validated with the key at fault in `DefinitionException`), `DeclarativeProvider` (the one generic provider: `url`, `extract`, pure), `JsonExtractor` (tree + JSON-pointer paths), `HtmlParser` + `HtmlNode` + `Selector` (the lenient parser and the small CSS subset, no jsoup), `SizeText`/`DateText`, `SearchHttp` (the shared GET); `store.DefinitionStore` (`search-providers/<id>.json`, `refresh()` by size+mtime, `installExamples()` from `search/examples/index.txt`); `search.disabled` in settings (synced); `docs/search-providers.md` is the format | `com.torrenta.search`, `store`, `ui` |
 | Search | `search.SearchProvider`/`SearchResult`/`SearchCategory`, `SearchService` (parallel providers, dedupe through `ResultRanker`, rate limit, session cache; `Progress` reports each provider as it answers, in arrival order, on the searching thread), `TorznabProvider` + `TorznabEndpoint`, `store.SearchProviderStore` (`search-providers.json`); `ui.SearchPane` (the tab: query, chips, status line, results table remembered as `search.columns`), `SearchRows` (in-place reconcile by identity), `SearchStatus` (the line), `SearchChips` (which providers are on), `SearchAdd` (result → `AddRequest.Source`) | `com.torrenta.search`, `store`, `ui` |
 | Update | `update.UpdateCheck` (pure: payload, version rules, due), `UpdateService` (GitHub, off the FX thread, `-Dtorrenta.updateEndpoint` for a capture) — Termina's, verbatim | `com.torrenta.update` |
+| Tray | Nux's and Modula's package, free of JavaFX: `TorrentaTray` (update + dispose), `Trays.create` picks `SniTray` (a StatusNotifierItem + `com.canonical.dbusmenu` on the session bus through dbus-java; Linux, no fallback) or `AwtTray` (Windows, macOS) and says why when neither; `TrayDisplay` (pure: what the arrow's colour means), `TrayIconRenderer` (the SVG mark's geometry in Java2D), `SniMenuModel` (pure: ids and properties); `ui.TrayStatus` (pure: snapshot + rates → display + line); `Settings.tray/closeToTray` (`ui.tray`, `ui.closeToTray`); `MainWindow.installTray/hideToTray/quit` | `com.torrenta.tray`, `ui` |
 | UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a vertical `SplitPane`, the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
@@ -281,6 +282,24 @@ release process with the names changed; Termina's README and memory hold the war
   HTML parser treats a `<link>` with no attributes as RSS's (content) and one with attributes as
   HTML's void element; `<x/>` is childless on every tag. Ancestor matching stops at the element a
   selector was asked of (jsoup's rule), so `row.select("table td")` finds nothing inside a row.
+- **The tray decides `java.awt.headless` in `App.main`, from the settings file, before launch.**
+  AWT stays headless (the macOS AppKit run-loop contention Termina and Editora met) except where
+  the tray is AWT's and wanted (`Trays.usesAwt`: Windows, macOS); Linux's tray is pure D-Bus plus
+  Java2D and runs headless, with no XEmbed fallback on purpose. So the switch applies on restart
+  on Windows and macOS, and `Trays.create` says "restart" rather than "unsupported" when it finds
+  AWT headless there. `Platform.setImplicitExit(false)` is set only once an icon really exists:
+  with no icon a hidden window is an unreachable process. Closing then hides (`hiddenToTray`, and
+  `onHidden` tears nothing down); `quit()` is the one way out, from File, the tray menu, or a close
+  with no tray; `App.stop` ends with `System.exit(0)` because both backends leave non-daemon threads
+  (the AWT event thread, D-Bus workers). The tray is pushed from the poll thread, only when
+  `TrayStatus` changed, since a repaint crosses the bus. Found against the live bus, in Nux:
+  `Properties.Get` returns the stored `Variant`, a dbus-java `Tuple` subclass must be generic
+  (`MenuPair`), and GNOME renders SNI menus but not SNI tooltips, hence the disabled status line as
+  the menu's first item. The capture prints `tray=` (`sni`, `awt`, or the reason), `trayLine=` and
+  `showing=`; `-Dtorrenta.captureAction=close-request` sends the window a real close request
+  (`close-window` is `stage.close()`, which skips the handler), so `showing=false` with `tray=sni`
+  is close-to-tray working. `busctl --user` can read the item (`org.kde.StatusNotifierItem-<pid>-1`:
+  `ToolTip`, `/MenuBar GetLayout`) and click its items (`Event isvu <id> clicked s "" 0`).
 
 ## Conventions (carried from Termina)
 

@@ -39,6 +39,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   articles are `rss/feeds.json` and `rss/articles/<id>.json` beside the settings, this machine's,
   never synced. The columns are remembered as `rss.columns`. The auto-download switch on the
   Settings page is there and off: the rules come next.
+- **A tray icon**, on by default under Settings → General → System tray: the application's own
+  arrow-in-a-tray mark, teal while something downloads, red while a torrent has an error, muted
+  otherwise, with the rates and a count of what the torrents are doing as its tooltip and as the
+  first line of its menu (Show Torrenta, Quit). Closing the window hides it behind the icon and
+  the torrents go on; Quit in the File menu or the tray menu ends the program. Both are switches,
+  and the second only applies once an icon has actually appeared: a window hidden with no icon to
+  bring it back is an unreachable program, so without a tray closing quits and the status bar says
+  why. Linux speaks StatusNotifierItem over D-Bus (KDE, GNOME with the AppIndicator extension,
+  X11 and Wayland alike); Windows and macOS use the system's own. As in Nux and Modula.
 - **Search providers from definition files**, the last step of the search milestone. A site
   without an API is `search-providers/<id>.json` in the config folder: where to search (a URL
   template with `{query}` and `{category}`, the category mapped through the file's own table;
