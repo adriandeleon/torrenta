@@ -410,6 +410,7 @@ final class SearchPane extends VBox {
                                 r -> r.published() == null ? -1L : r.published().getEpochSecond(),
                                 Format::dateTime),
                         column("provider", "Provider", 120, SearchResult::provider, s -> s)));
+        Headers.uppercase(t);
         // Seeds first by default; a click cycles the column, and no sort at all is the ranked order.
         seeds.setSortType(TableColumn.SortType.DESCENDING);
         t.getSortOrder().add(seeds);

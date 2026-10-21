@@ -102,6 +102,7 @@ final class DevCapture {
         // Read by the smoke test; a screenshot alone proves only that a window appeared.
         System.out.println("capture: " + out + " " + w + "x" + h);
         System.out.println("capture: title=" + stage.getTitle());
+        System.out.println("capture: style=" + stage.getStyle());
         System.out.println("capture: focus=" + scene.getFocusOwner());
         System.out.println("capture: engine=" + window.engineDescription());
         System.out.println("capture: javafx=" + System.getProperty("javafx.runtime.version", "?"));

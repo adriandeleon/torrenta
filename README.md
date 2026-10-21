@@ -143,7 +143,12 @@ is kept there as `torrent.<info-hash>.share` and goes with the torrent when it i
 caps and connection counts are libtorrent's and live in its resume data. The global queue and share
 limits are `queue.*` and `share.*`. The theme is there too, under General →
 Appearance: Editora Light and Dark (Caret & Ink, as Editora and Termina), Nord and Cupertino,
-light and dark, applied the moment one is picked (`ui.theme` in the file).
+light and dark, applied the moment one is picked (`ui.theme` in the file). Beside it, **Merge the
+menu bar into the title bar** (`ui.extendedWindow`, off by default, experimental) draws the window
+without a system title bar and puts the menus, the title and the window buttons on that one row,
+a row of space back for the list; the window keeps the platform's own buttons, drag, double-click
+and edge resize. It applies on restart, and is not offered on macOS, where the menu belongs to the
+system bar. The capture prints the style in force as `capture: style=`.
 
 **Settings sync.** Settings → Sync connects the settings file to a Git repository of yours (a
 private one on GitHub, say: "Create on GitHub" makes it through the `gh` CLI). Every computer that

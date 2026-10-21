@@ -223,6 +223,8 @@ final class DetailPane extends VBox {
             name.getStyleClass().add("dialog-label");
             Label value = new Label("—");
             value.getStyleClass().add("detail-value");
+            // The hash and the path: the working face, as Editora sets them.
+            if (i < 2) value.getStyleClass().add("mono");
             generalValues[i] = value;
             int column = i < 7 ? 0 : 2;
             int row = i < 7 ? i : i - 7;
@@ -274,6 +276,7 @@ final class DetailPane extends VBox {
             }
         });
         files.getColumns().addAll(List.of(name, size, progress, priority));
+        Headers.uppercase(files);
 
         MenuItem open = new MenuItem("Open File");
         open.setOnAction(e -> {
@@ -298,6 +301,7 @@ final class DetailPane extends VBox {
                         column("Up", 90, p -> Bytes.rate(p.upRate())),
                         column("Downloaded", 100, p -> Bytes.human(p.downloaded())),
                         column("Uploaded", 100, p -> Bytes.human(p.uploaded()))));
+        Headers.uppercase(peers);
         return peers;
     }
 

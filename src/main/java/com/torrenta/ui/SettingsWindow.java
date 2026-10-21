@@ -125,7 +125,8 @@ final class SettingsWindow {
                 Settings.ADD_SEQUENTIAL,
                 Settings.ADD_WITHOUT_ASKING,
                 Settings.UI_STATE_COLORS,
-                Settings.UI_DENSITY
+                Settings.UI_DENSITY,
+                Settings.UI_EXTENDED_WINDOW
             },
             concat(
                     concat(Settings.DOWNLOAD_KEYS, Settings.AUTOMATION_KEYS),
@@ -377,6 +378,7 @@ final class SettingsWindow {
     private CheckBox updateCheck;
     private CheckBox stateColors;
     private ChoiceBox<Density> density;
+    private CheckBox extendedWindow;
     private CheckBox addStartPaused;
     private CheckBox addSequential;
     private CheckBox addWithoutAsking;
@@ -931,6 +933,8 @@ final class SettingsWindow {
             settings.saveQuietly();
             // Global: every open window restyles, this one included.
             javafx.application.Application.setUserAgentStylesheet(now.stylesheet());
+            // The main window draws a few things from the theme itself (the window buttons).
+            onAppearanceChanged.run();
         });
         row(
                 Category.GENERAL,
@@ -971,6 +975,27 @@ final class SettingsWindow {
                         + " status and the progress bar. Off, the glyphs and sentences still say it.",
                 stateColors,
                 "state status colours colors glyph progress bar stalled seeding downloading error accessibility");
+        extendedWindow = new CheckBox();
+        extendedWindow.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setExtendedWindow(now);
+            settings.saveQuietly();
+            onAppearanceChanged.run();
+        });
+        // Not offered on macOS: the menu belongs to the system menu bar there, so the setting could
+        // only ever be a switch that does nothing. Disabled rather than hidden, so the note still
+        // explains why.
+        extendedWindow.setDisable(!ExtendedWindow.supportedOn(System.getProperty("os.name")));
+        row(
+                Category.GENERAL,
+                appearance,
+                "Merge the menu bar into the title bar",
+                "Experimental. Draws the window without a system title bar and puts the menus, the title"
+                        + " and the window buttons on that one row. Not on macOS, where the menu belongs"
+                        + " to the system bar. Applies after restarting Torrenta.",
+                extendedWindow,
+                "title bar titlebar menu bar menubar header extended window chrome decorations csd"
+                        + " compact row space");
 
         VBox downloads = section(page, "Downloads");
         downloadDir = new TextField();
@@ -2413,6 +2438,7 @@ final class SettingsWindow {
             updateCheck.setSelected(settings.updateCheck());
             stateColors.setSelected(settings.stateColors());
             density.setValue(Density.byId(settings.density(), Density.DEFAULT));
+            extendedWindow.setSelected(settings.extendedWindow());
             syncEnabled.setSelected(settings.syncEnabled());
             syncUrl.setText(settings.syncUrl());
             syncBranch.setText(settings.syncBranch().equals("main") ? "" : settings.syncBranch());

@@ -61,6 +61,7 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 
 import com.torrenta.AppInfo;
 import com.torrenta.automation.Automation;
@@ -202,6 +203,17 @@ public final class MainWindow {
         installExampleDefinitions();
         definitionStore.load();
         stage.setTitle(AppInfo.NAME);
+        // Before anything else touches the stage: initStyle throws once a stage has been shown, and
+        // the setting is read here, once, which is why it applies on restart.
+        if (ExtendedWindow.enabled(settings.extendedWindow(), System.getProperty("os.name"))) {
+            try {
+                stage.initStyle(StageStyle.EXTENDED);
+            } catch (RuntimeException e) {
+                // A window is not something a chrome preference gets to prevent: fall back to a
+                // decorated one if the platform rejects extended decorations despite the OS gate.
+                LOG.log(Level.WARNING, "Extended window unavailable; using a decorated window", e);
+            }
+        }
 
         BorderPane root = new BorderPane();
         root.setCenter(buildCenter());
@@ -209,7 +221,11 @@ public final class MainWindow {
         commands = buildCommands();
         // The toolbar first: the View menu's check item binds to its visibility.
         ToolBar bar = buildToolbar();
-        root.setTop(new VBox(buildMenuBar(), bar));
+        // An extended window has no system title bar, so the menu bar takes its place; asking the
+        // stage rather than re-reading the setting means the two can never disagree once built.
+        MenuBar menuBar = buildMenuBar();
+        root.setTop(new VBox(
+                stage.getStyle() == StageStyle.EXTENDED ? ExtendedWindow.header(menuBar, stage) : menuBar, bar));
         table.setContextMenu(buildContextMenu());
         palette =
                 new CommandPalette(host, this::focusList, shiftChord(KeyCode.P).getDisplayText());
@@ -1774,7 +1790,7 @@ public final class MainWindow {
                 toolButton("add-magnet", Icons.magnet()),
                 new Separator(),
                 toolButton("pause-resume", Icons.pause()),
-                toolButton("force-resume", Icons.run()),
+                toolButton("force-resume", Icons.forceRun()),
                 toolButton("recheck", Icons.refresh()),
                 toolButton("remove", Icons.trash()),
                 new Separator(),
@@ -2182,7 +2198,15 @@ public final class MainWindow {
             }
         });
         HBox.setHgrow(filter, Priority.ALWAYS);
-        HBox bar = new HBox(filter);
+        // The box the redesign draws: a lens, the field with no chrome of its own, and the chord as
+        // a key badge, read from the same chord the command and the menu use.
+        Label badge = new Label(chord(KeyCode.F).getDisplayText());
+        badge.getStyleClass().add("key-badge");
+        HBox box = new HBox(Icons.find(), filter, badge);
+        box.getStyleClass().add("filter-box");
+        box.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(box, Priority.ALWAYS);
+        HBox bar = new HBox(box);
         bar.setPadding(new Insets(6, 8, 6, 8));
         bar.getStyleClass().add("filter-bar");
         return bar;
@@ -2253,6 +2277,7 @@ public final class MainWindow {
                         column("tags", "Tags", 160, false, t -> Format.tags(t.tags()), s -> s),
                         column("path", "Save path", 240, false, Torrent::savePath, s -> s)));
 
+        Headers.uppercase(table);
         builtInLayout = ColumnLayout.format(ColumnMemory.capture(table));
         density = Density.byId(settings.density(), Density.DEFAULT);
         ColumnMemory.apply(table, ColumnLayout.parse(layoutFor(density)));
@@ -2318,6 +2343,21 @@ public final class MainWindow {
     private void applyAppearance() {
         applyStateColors();
         applyDensity(Density.byId(settings.density(), Density.DEFAULT));
+        applyWindowStyle();
+    }
+
+    /**
+     * The window buttons' scheme (a dark theme wants light glyphs, whatever the desktop says), and
+     * the one appearance setting that cannot change live: the window's style is fixed once shown,
+     * so a setting that disagrees with the window is said in the status bar instead.
+     */
+    private void applyWindowStyle() {
+        ExtendedWindow.matchButtonsToTheme(
+                stage, Theme.byId(settings.theme(), Theme.DEFAULT).isDark());
+        boolean wanted = ExtendedWindow.enabled(settings.extendedWindow(), System.getProperty("os.name"));
+        if (ExtendedWindow.restartNeeded(wanted, stage.getStyle() == StageStyle.EXTENDED)) {
+            setStatus("Restart Torrenta to apply the window style");
+        }
     }
 
     /**

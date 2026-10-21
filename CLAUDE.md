@@ -104,6 +104,15 @@ release process with the names changed; Termina's README and memory hold the war
 - **The id is `getInfoHashes().getBest().toHex()`**, not `infoHash()`: a v2-only torrent has an
   all-zero v1 hash, and two of them would collide.
 - **Alerts arrive on their own thread; tests `await`, bounded, never sleep-and-hope.**
+- **The menu bar in the title bar is `StageStyle.EXTENDED`** (`ui.ExtendedWindow`, Editora's, with
+  JavaFX 27's `HeaderBar`), never `UNDECORATED`: the platform keeps its buttons, drag, double-click
+  and edge resize. `initStyle` throws once a stage has been shown, so `MainWindow`'s constructor
+  reads `ui.extendedWindow` first and the setting applies on restart; the top of the window asks
+  `stage.getStyle()`, never the setting, so the two cannot disagree. The menu bar is
+  `HeaderDragType.NONE` (a header drags by default, and a menu that drags cannot open) and the title
+  `DRAGGABLE_SUBTREE` (`DRAGGABLE` misses the label's text node). The buttons' glyph colour follows
+  the desktop unless told: `matchButtonsToTheme` on every appearance change. macOS is gated out in
+  `supportedOn` (the menu belongs to the system bar there) and the row is disabled, not hidden.
 - **The interface font is Inter, bundled, loaded before any stylesheet** (`Fonts.load()` in
   `App.start`), and attached per scene and per dialog pane (`Fonts.installUiFont`), never in
   app.css: every window and dialog is its own scene, and a scene sheet survives a theme switch.
@@ -248,6 +257,14 @@ release process with the names changed; Termina's README and memory hold the war
   and a stalled torrent's snapshots are often equal while its clock moves. State colours are
   scoped under `.state-colors` on the scene root so the setting can turn them off. The redesign
   these come from is `docs/UI-REDESIGN.md`.
+- **The chrome's look is app.css over the theme, and a scene sheet always wins.** A scene
+  stylesheet outranks the user-agent stylesheet whatever the selector's specificity, which is why
+  app.css can restyle AtlantaFX's tables (no vertical lines, 28 px small-cap headers, faint row
+  rules) with short selectors. The base size is 13 px, set in `ui-font.css` per scene like the
+  family, not in the theme files. JavaFX CSS has no `text-transform` or `letter-spacing`:
+  `Headers.uppercase(table)` rewrites the column titles after the columns are in place. The
+  state colours have chip tints (`-torrenta-*-chip`), the selection, the sidebar's chosen row
+  and the toolbar glyph colour are `ladder()` tokens on `.root`, so every theme gets them.
 - **Row density swaps column layouts and must renew the cells.** Comfortable rows (two lines, the
   default) and compact rows each keep their own layout (`table.columns.comfortable`,
   `table.columns`); `applyDensity` saves the one being left and applies the other. `refresh()`
