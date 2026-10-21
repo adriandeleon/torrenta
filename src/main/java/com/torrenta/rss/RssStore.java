@@ -21,9 +21,10 @@ import com.fasterxml.jackson.core.JsonToken;
 
 /**
  * The reader's files under {@code rss/} in the config folder: {@code feeds.json}, the feed list,
- * and {@code articles/<feedId>.json}, one per feed, with the articles (read flags included), the
- * last answer's validators, the time of the last refresh and its error. Machine data, this
- * machine's, never synced: another machine has read other articles.
+ * {@code articles/<feedId>.json}, one per feed, with the articles (read and downloaded flags
+ * included), the last answer's validators, the time of the last refresh and its error, and
+ * {@code rules.json}, the auto-download rules with what they remember. Machine data, this
+ * machine's, never synced: another machine has read other articles and downloaded other episodes.
  *
  * <p>Written whole and atomically on every change, as the other stores are; a feed keeps at most
  * {@link #MAX_ARTICLES}, the oldest dropped. Synchronized: fetches write from their own threads
@@ -37,11 +38,13 @@ public final class RssStore {
     public static final String DIR = "rss";
     public static final String FEEDS_FILE = "feeds.json";
     public static final String ARTICLES_DIR = "articles";
+    public static final String RULES_FILE = "rules.json";
     public static final int MAX_ARTICLES = 500;
 
     private final Path dir;
     private final List<Feed> feeds = new ArrayList<>();
     private final Map<String, FeedState> states = new LinkedHashMap<>();
+    private final List<Rule> rules = new ArrayList<>();
 
     public RssStore(Path configDir) {
         this.dir = configDir.resolve(DIR);
@@ -51,10 +54,20 @@ public final class RssStore {
         return dir;
     }
 
-    /** Reads the feed list and every feed's articles; missing is empty, unreadable is empty and a log line. */
+    /** Reads the feed list, every feed's articles and the rules; missing is empty, unreadable is empty and a log line. */
     public synchronized void load() {
         feeds.clear();
         states.clear();
+        rules.clear();
+        Path rulesFile = dir.resolve(RULES_FILE);
+        if (Files.isRegularFile(rulesFile)) {
+            try {
+                rules.addAll(parseRules(Files.readString(rulesFile)));
+            } catch (IOException | RuntimeException e) {
+                LOG.log(Level.WARNING, "Could not read " + rulesFile + "; no rules", e);
+                rules.clear();
+            }
+        }
         Path file = dir.resolve(FEEDS_FILE);
         if (Files.isRegularFile(file)) {
             try {
@@ -113,6 +126,18 @@ public final class RssStore {
         states.put(feedId, kept);
         write(articlesFile(feedId), formatState(kept));
         return kept;
+    }
+
+    /** Every rule, in the file's order. */
+    public synchronized List<Rule> rules() {
+        return List.copyOf(rules);
+    }
+
+    /** Replaces the rules and writes them at once. */
+    public synchronized void setRules(List<Rule> list) throws IOException {
+        rules.clear();
+        rules.addAll(list);
+        write(dir.resolve(RULES_FILE), formatRules(rules));
     }
 
     private Path articlesFile(String feedId) {
@@ -227,6 +252,7 @@ public final class RssStore {
                     g.writeStringField("published", a.published().toString());
                 g.writeStringField("description", a.description());
                 g.writeBooleanField("read", a.read());
+                if (a.downloaded()) g.writeBooleanField("downloaded", true);
                 g.writeEndObject();
             } catch (IOException e) {
                 throw new IllegalStateException(e);
@@ -288,6 +314,7 @@ public final class RssStore {
         Instant published = null;
         String description = "";
         boolean read = false;
+        boolean downloaded = false;
         while (p.nextToken() == JsonToken.FIELD_NAME) {
             String field = p.currentName();
             JsonToken value = p.nextToken();
@@ -303,11 +330,153 @@ public final class RssStore {
                 }
             } else if (field.equals("read") && (value == JsonToken.VALUE_TRUE || value == JsonToken.VALUE_FALSE)) {
                 read = p.getBooleanValue();
+            } else if (field.equals("downloaded")
+                    && (value == JsonToken.VALUE_TRUE || value == JsonToken.VALUE_FALSE)) {
+                downloaded = p.getBooleanValue();
             } else {
                 p.skipChildren();
             }
         }
         if (guid.isBlank() && title.isBlank() && link.isBlank()) return null;
-        return new Article(feedId, guid, title, link, torrent, published, description, read);
+        return new Article(feedId, guid, title, link, torrent, published, description, read, downloaded);
+    }
+
+    /**
+     * {@code [{"name":"…","enabled":true,"mustContain":"…","mustNotContain":"…","useRegex":false,
+     * "episodeFilter":"…","smartEpisodeFilter":false,"feeds":[…],"ignoreDays":0,"addPaused":"default",
+     * "category":"…","savePath":"…","lastMatch":"…","previouslyMatched":[…]}, …]}, one rule per
+     * line; {@code lastMatch} is absent when the rule never matched.
+     */
+    public static String formatRules(Collection<Rule> list) {
+        StringBuilder sb = new StringBuilder("[");
+        int i = 0;
+        for (Rule r : list) {
+            StringWriter out = new StringWriter();
+            try (JsonGenerator g = JSON.createGenerator(out)) {
+                g.writeStartObject();
+                g.writeStringField("name", r.name());
+                g.writeBooleanField("enabled", r.enabled());
+                g.writeStringField("mustContain", r.mustContain());
+                g.writeStringField("mustNotContain", r.mustNotContain());
+                g.writeBooleanField("useRegex", r.useRegex());
+                g.writeStringField("episodeFilter", r.episodeFilter());
+                g.writeBooleanField("smartEpisodeFilter", r.smartEpisodeFilter());
+                g.writeArrayFieldStart("feeds");
+                for (String f : r.feeds()) g.writeString(f);
+                g.writeEndArray();
+                g.writeNumberField("ignoreDays", r.ignoreDays());
+                g.writeStringField("addPaused", r.addPaused().fileWord());
+                g.writeStringField("category", r.category());
+                g.writeStringField("savePath", r.savePath());
+                if (r.lastMatch() != null)
+                    g.writeStringField("lastMatch", r.lastMatch().toString());
+                g.writeArrayFieldStart("previouslyMatched");
+                for (String m : r.previouslyMatched()) g.writeString(m);
+                g.writeEndArray();
+                g.writeEndObject();
+            } catch (IOException e) {
+                throw new IllegalStateException(e);
+            }
+            sb.append(i++ == 0 ? "\n  " : ",\n  ").append(out);
+        }
+        if (!list.isEmpty()) sb.append('\n');
+        return sb.append("]\n").toString();
+    }
+
+    /** The inverse; a rule without a name is skipped, as is a second with the same name; unreadable throws. */
+    public static List<Rule> parseRules(String text) throws IOException {
+        List<Rule> out = new ArrayList<>();
+        java.util.Set<String> names = new java.util.HashSet<>();
+        try (JsonParser p = JSON.createParser(text == null ? "" : text)) {
+            if (p.nextToken() != JsonToken.START_ARRAY) throw new IOException("not a list of rules");
+            JsonToken entry;
+            while ((entry = p.nextToken()) != JsonToken.END_ARRAY) {
+                if (entry == null) throw new IOException("the list is cut short");
+                if (entry != JsonToken.START_OBJECT) {
+                    p.skipChildren();
+                    continue;
+                }
+                Rule r = parseRule(p);
+                if (!r.name().isEmpty() && names.add(r.name())) out.add(r);
+            }
+        } catch (RuntimeException e) {
+            throw new IOException("not a list of rules: " + e.getMessage(), e);
+        }
+        return out;
+    }
+
+    /** Positioned after a rule's {@code {}; returns past its {@code }}. */
+    private static Rule parseRule(JsonParser p) throws IOException {
+        String name = "";
+        boolean enabled = true;
+        String mustContain = "";
+        String mustNotContain = "";
+        boolean useRegex = false;
+        String episodeFilter = "";
+        boolean smart = false;
+        List<String> feeds = new ArrayList<>();
+        int ignoreDays = 0;
+        Rule.AddPaused addPaused = Rule.AddPaused.DEFAULT;
+        String category = "";
+        String savePath = "";
+        Instant lastMatch = null;
+        List<String> previouslyMatched = new ArrayList<>();
+        while (p.nextToken() == JsonToken.FIELD_NAME) {
+            String field = p.currentName();
+            JsonToken value = p.nextToken();
+            switch (value) {
+                case VALUE_STRING -> {
+                    switch (field) {
+                        case "name" -> name = p.getText();
+                        case "mustContain" -> mustContain = p.getText();
+                        case "mustNotContain" -> mustNotContain = p.getText();
+                        case "episodeFilter" -> episodeFilter = p.getText();
+                        case "addPaused" -> addPaused = Rule.AddPaused.parse(p.getText());
+                        case "category" -> category = p.getText();
+                        case "savePath" -> savePath = p.getText();
+                        case "lastMatch" -> lastMatch = FeedParser.parseDate(p.getText());
+                        default -> {}
+                    }
+                }
+                case VALUE_TRUE, VALUE_FALSE -> {
+                    switch (field) {
+                        case "enabled" -> enabled = p.getBooleanValue();
+                        case "useRegex" -> useRegex = p.getBooleanValue();
+                        case "smartEpisodeFilter" -> smart = p.getBooleanValue();
+                        default -> {}
+                    }
+                }
+                case VALUE_NUMBER_INT -> {
+                    if (field.equals("ignoreDays")) ignoreDays = p.getIntValue();
+                }
+                case START_ARRAY -> {
+                    List<String> into = field.equals("feeds")
+                            ? feeds
+                            : field.equals("previouslyMatched") ? previouslyMatched : null;
+                    JsonToken item;
+                    while ((item = p.nextToken()) != JsonToken.END_ARRAY) {
+                        if (item == null) throw new IOException("the list is cut short");
+                        if (item == JsonToken.VALUE_STRING && into != null) into.add(p.getText());
+                        else p.skipChildren();
+                    }
+                }
+                default -> p.skipChildren();
+            }
+        }
+        return new Rule(
+                name,
+                enabled,
+                mustContain,
+                mustNotContain,
+                useRegex,
+                episodeFilter,
+                smart,
+                feeds,
+                ignoreDays,
+                addPaused,
+                category,
+                savePath,
+                lastMatch,
+                previouslyMatched);
     }
 }

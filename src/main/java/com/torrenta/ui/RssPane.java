@@ -67,6 +67,12 @@ final class RssPane extends VBox {
         /** Enter, a double-click or the menu's Add: open the Add dialog for the article's torrent. */
         void add(Article article);
 
+        /** The menu's Download: add the torrent at once with the defaults and mark the article downloaded. */
+        void download(Article article);
+
+        /** The menu's Create rule from title: the rule dialog with the title's words filled in. */
+        void createRule(Article article);
+
         /** The article's page, in the browser. */
         void openLink(String url);
 
@@ -251,6 +257,27 @@ final class RssPane extends VBox {
 
         TableColumn<ArticleRow, String> title = column("title", "Title", 400, Article::displayTitle, s -> s);
         title.setComparator(String.CASE_INSENSITIVE_ORDER);
+        // A glyph before the title of an article whose torrent has been added.
+        title.setCellFactory(c -> new TableCell<>() {
+            private final Label glyph = new Label("⤓");
+
+            {
+                glyph.getStyleClass().add("rss-downloaded-glyph");
+            }
+
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setText(null);
+                    setGraphic(null);
+                    return;
+                }
+                setText(item);
+                ArticleRow row = getTableRow() == null ? null : getTableRow().getItem();
+                setGraphic(row != null && row.article().downloaded() ? glyph : null);
+            }
+        });
         t.getColumns()
                 .addAll(List.of(
                         title,
@@ -364,19 +391,28 @@ final class RssPane extends VBox {
 
     private ContextMenu buildArticleMenu(TableView<ArticleRow> t) {
         MenuItem add = new MenuItem("Add…");
+        MenuItem download = new MenuItem("Download");
         MenuItem open = new MenuItem("Open Link");
         MenuItem copy = new MenuItem("Copy Link");
+        MenuItem rule = new MenuItem("Create Rule from Title…");
         MenuItem toggle = new MenuItem("Mark Unread");
         MenuItem feedRead = new MenuItem("Mark Feed Read");
         add.setOnAction(e -> selected(t).ifPresent(this::addArticle));
+        download.setOnAction(e -> selected(t).ifPresent(this::downloadArticle));
         open.setOnAction(e -> selected(t).ifPresent(a -> host.openLink(a.link())));
         copy.setOnAction(e -> selected(t).ifPresent(a -> host.copy(RssAdd.copyText(a))));
+        rule.setOnAction(e -> selected(t).ifPresent(host::createRule));
         toggle.setOnAction(e -> toggleRead());
         feedRead.setOnAction(e -> markFeedRead());
-        ContextMenu menu = new ContextMenu(add, open, copy, new SeparatorMenuItem(), toggle, feedRead);
+        ContextMenu menu = new ContextMenu(
+                add, download, open, copy, new SeparatorMenuItem(), rule, new SeparatorMenuItem(), toggle, feedRead);
         menu.setOnShowing(e -> {
             Optional<Article> a = selected(t);
             add.setDisable(a.map(x -> !x.hasTorrent()).orElse(true));
+            download.setDisable(a.map(x -> !x.hasTorrent()).orElse(true));
+            download.setText(
+                    a.map(x -> x.downloaded() ? "Download Again" : "Download").orElse("Download"));
+            rule.setDisable(a.isEmpty());
             open.setDisable(a.map(x -> x.link().isEmpty()).orElse(true));
             copy.setDisable(a.map(x -> RssAdd.copyText(x).isEmpty()).orElse(true));
             copy.setText(a.map(RssAdd::copyLabel).orElse("Copy Link"));
@@ -552,6 +588,11 @@ final class RssPane extends VBox {
         else host.say("No torrent in this article" + (a.link().isEmpty() ? "" : "; its link is in the pane below"));
     }
 
+    private void downloadArticle(Article a) {
+        if (a.hasTorrent()) host.download(a);
+        else host.say("No torrent in this article" + (a.link().isEmpty() ? "" : "; its link is in the pane below"));
+    }
+
     private void toggleRead() {
         ArticleRow row = table.getSelectionModel().getSelectedItem();
         if (row == null) return;
@@ -689,7 +730,7 @@ final class RssPane extends VBox {
             String date =
                     a.published() == null ? "—" : Format.dateTime(a.published().getEpochSecond());
             out.add(a.displayTitle() + " | " + date + " | " + names.getOrDefault(a.feedId(), "") + " | "
-                    + (a.read() ? "read" : "unread") + " | "
+                    + (a.read() ? "read" : "unread") + (a.downloaded() ? " downloaded" : "") + " | "
                     + (!a.hasTorrent() ? "-" : a.isMagnet() ? "magnet" : "torrent") + (row == chosen ? " *" : ""));
         }
         return out;
@@ -725,6 +766,23 @@ final class RssPane extends VBox {
         };
         if (idle()) press.run();
         else whenIdle = press;
+    }
+
+    /**
+     * The context menu's Download or Create rule from title on the chosen article (the first row
+     * when none is chosen), once no feed is refreshing; for a capture.
+     */
+    void actOnArticleForCapture(boolean download) {
+        Runnable act = () -> {
+            if (table.getSelectionModel().isEmpty() && !table.getItems().isEmpty())
+                table.getSelectionModel().select(0);
+            selected(table).ifPresent(a -> {
+                if (download) downloadArticle(a);
+                else host.createRule(a);
+            });
+        };
+        if (idle()) act.run();
+        else whenIdle = act;
     }
 
     /** Opens the Add Feed dialog on the next pulse, with the URL typed in; for a capture. */
