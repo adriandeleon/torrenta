@@ -590,3 +590,98 @@
     -fx-background-insets: 0;
     -fx-padding: 0;
 }
+
+/* The status bar's text is clickable: its history is the message log. A warning or an error
+   colours the line, and the message log's copy of it, until the next line replaces it. */
+.status-bar .status-message {
+    -fx-cursor: hand;
+}
+
+.status-bar .status-message.status-warning,
+.message-log-text.message-log-warning {
+    -fx-text-fill: -color-warning-fg;
+}
+
+.status-bar .status-message.status-error,
+.message-log-text.message-log-error {
+    -fx-text-fill: -color-danger-fg;
+}
+
+/* The message log (MessageLogPopup): the status bar's history, newest first, a card above it in
+   the palette's chrome. The time stays muted; the colour marks the words that went wrong. */
+.message-log {
+    -fx-background-color: -color-bg-overlay;
+    -fx-background-radius: 12;
+    -fx-border-color: -color-border-default;
+    -fx-border-width: 1;
+    -fx-border-radius: 12;
+    -fx-padding: 8;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.28), 24, 0.2, 0, 6);
+}
+
+.message-log .message-log-header {
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -color-fg-default;
+    -fx-padding: 2 4 2 4;
+}
+
+.message-log .message-log-filter {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-border-width: 0 0 1 0;
+    -fx-border-color: -color-border-default;
+    -fx-padding: 4 6 6 6;
+}
+
+.message-log .message-log-list {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-border-width: 0;
+    -fx-padding: 0;
+}
+
+.message-log .message-log-list .list-cell {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-background-radius: 5;
+    -fx-padding: 3 6 3 6;
+}
+
+.message-log .message-log-list .list-cell:filled:selected,
+.message-log .message-log-list:focused .list-cell:filled:selected {
+    -fx-background-color: -state-sel;
+}
+
+.message-log .message-log-time {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 11px;
+}
+
+.message-log .message-log-text {
+    -fx-text-fill: -color-fg-default;
+}
+
+.message-log .message-log-empty {
+    -fx-text-fill: -color-fg-muted;
+}
+
+.message-log .message-log-footer {
+    -fx-padding: 6 4 0 4;
+}
+
+.message-log .message-log-hint {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 11px;
+}
+
+/* The debug log: monospace, because a stack trace's indentation is information. */
+.debug-log-text {
+    -fx-font-family: "JetBrains Mono", "monospace";
+    -fx-font-size: 11.5px;
+}
+
+.debug-log-file {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 11px;
+}

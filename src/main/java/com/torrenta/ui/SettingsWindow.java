@@ -232,6 +232,13 @@ final class SettingsWindow {
         this.testNotification = test;
     }
 
+    /** The General page's "Show debug log" button; the window that owns the log's window answers. */
+    private Runnable showDebugLog = () -> {};
+
+    void setOnShowDebugLog(Runnable show) {
+        this.showDebugLog = show;
+    }
+
     /** The store the Watch folders page edits, and who to tell. */
     void setWatchFolders(WatchFolderStore store, WatchHost host) {
         this.watchStore = store;
@@ -1113,6 +1120,18 @@ final class SettingsWindow {
                 "Ask GitHub for a newer release after startup, at most once a day. Help → Check for Updates asks regardless.",
                 updateCheck,
                 "release version github automatic");
+
+        VBox diagnostics = section(page, "Diagnostics");
+        Button debugLog = new Button("Show debug log");
+        debugLog.setOnAction(e -> showDebugLog.run());
+        row(
+                Category.GENERAL,
+                diagnostics,
+                "Debug log",
+                "Warnings, errors and crashes from this session, also written to " + DebugLog.FILE_NAME
+                        + " beside the settings. Copy it into a bug report.",
+                debugLog,
+                "debug log diagnostics errors warnings crash trace troubleshoot bug report session file");
     }
 
     /**

@@ -48,6 +48,9 @@ public final class App extends Application {
         // First statement before any AWT class can load: java.desktop is required for ImageIO,
         // and on macOS an initialised AWT contends with JavaFX for the AppKit run loop.
         System.setProperty("java.awt.headless", "true");
+        // Before the toolkit: a packaged app has no console, so whatever is logged or thrown from
+        // here on is kept for the Debug Log window and the session file.
+        com.torrenta.ui.DebugLog.install();
         launch(args);
     }
 
@@ -62,6 +65,7 @@ public final class App extends Application {
         Path configDir = ConfigDir.resolve(cli.configDir());
         Settings settings = new Settings(configDir.resolve(Settings.FILE_NAME));
         settings.load();
+        com.torrenta.ui.DebugLog.attachFile(configDir);
 
         // Applied before any window is built, so the first frame is already themed.
         Application.setUserAgentStylesheet(
