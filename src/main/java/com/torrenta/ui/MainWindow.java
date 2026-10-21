@@ -123,6 +123,13 @@ public final class MainWindow {
     private final TorrentRows rows = new TorrentRows();
     private final FilteredList<TorrentRow> filtered = new FilteredList<>(rows.list());
     private final TextField filter = new TextField();
+    /** The omnibox as a value: chips and text; the field and the chip row draw it. */
+    private Omnibox omnibox = Omnibox.EMPTY;
+
+    private final HBox chipRow = new HBox(4);
+    /** Set while the field's text is being written from the value, so the listener stays quiet. */
+    private boolean settingFilter;
+
     private ToolBar toolbar;
     private final StackPane host = new StackPane();
     private final CommandPalette palette;
@@ -293,6 +300,7 @@ public final class MainWindow {
                         .toExternalForm());
         Fonts.installUiFont(scene);
         scene.getAccelerators().put(chord(KeyCode.F), this::focusFilter);
+        scene.getAccelerators().put(chord(KeyCode.K), this::focusFilter);
         scene.getAccelerators().put(shiftChord(KeyCode.P), () -> palette.show(commands));
         scene.getAccelerators().put(shiftChord(KeyCode.L), logWindow::show);
         scene.getAccelerators().put(chord(KeyCode.V), this::addFromClipboard);
@@ -519,6 +527,19 @@ public final class MainWindow {
             for (String key : action.substring("sidebar-keys:".length()).split("\\+"))
                 sidebar.pressForCapture(
                         javafx.scene.input.KeyCode.valueOf(key.trim().toUpperCase(java.util.Locale.ROOT)));
+        } else if (action.startsWith("omnibox:")) {
+            // The action list is split on commas and trimmed, so a trailing space (what commits
+            // a chip) could not be passed; a tilde stands for one.
+            filter.requestFocus();
+            filter.setText(action.substring("omnibox:".length()).replace('~', ' '));
+        } else if (action.startsWith("omnibox-key:")) {
+            filter.requestFocus();
+            KeyCode code = KeyCode.valueOf(action.substring("omnibox-key:".length()));
+            filter.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false));
+        } else if (action.startsWith("table-key:")) {
+            table.requestFocus();
+            KeyCode code = KeyCode.valueOf(action.substring("table-key:".length()));
+            table.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false));
         } else if (action.equals("select-first")) {
             table.getSelectionModel().clearAndSelect(0);
         } else if (action.startsWith("detail:")) {
@@ -551,6 +572,8 @@ public final class MainWindow {
             System.out.println("capture: dialog=" + promptDialog.getTitle());
         if (sidebar.isVisible()) System.out.println("capture: sidebar=" + sidebar.summary());
         System.out.println("capture: filter=" + sidebarSelection.describe() + " shown=" + filtered.size());
+        System.out.println("capture: omnibox=" + omnibox.chips() + " text=\"" + filter.getText() + "\" mode="
+                + omnibox.mode() + " query=\"" + omnibox.query() + "\"");
         System.out.println("capture: focus-sidebar=" + sidebar.hasFocus() + " cursor=" + sidebar.cursorForCapture());
         for (TorrentRow row : table.getItems()) {
             Torrent t = row.torrent();
@@ -1738,7 +1761,7 @@ public final class MainWindow {
     }
 
     private void applyFilters() {
-        filtered.setPredicate(rowFilter(filter.getText(), sidebarSelection));
+        filtered.setPredicate(rowFilter(omnibox.query(), sidebarSelection));
     }
 
     private void setSidebarVisible(boolean visible) {
@@ -1883,15 +1906,15 @@ public final class MainWindow {
                 new Command("about", "About " + AppInfo.NAME, null, null, always, this::showAbout),
                 new Command(
                         "settings", "Settings…", chord(KeyCode.COMMA), null, always, () -> settingsWindow.show(stage)),
-                new Command("search", "Search…", chord(KeyCode.K), null, always, this::showSearch),
+                new Command("search", "Search…", shiftChord(KeyCode.F), null, always, this::showSearch),
                 new Command("rss", "RSS Feeds…", chord(KeyCode.R), null, always, this::showRss),
                 new Command("rss-run-rules", "Run RSS Rules Now", null, null, always, rss::runRulesNow),
                 new Command("transfers", "Show Transfers", null, "Esc", always, this::showTransfers),
                 new Command(
                         "filter",
-                        "Filter Torrents",
+                        "Filter, Run a Command or Add (Omnibox)",
                         null,
-                        chord(KeyCode.F).getDisplayText(),
+                        chord(KeyCode.K).getDisplayText(),
                         always,
                         this::focusFilter),
                 new Command(
@@ -1999,7 +2022,9 @@ public final class MainWindow {
 
     /** Space and Delete: on the table only, never as scene accelerators a text field could fire. */
     private void onTableKey(KeyEvent e) {
-        if (e.getCode() == KeyCode.SPACE) {
+        if (e.getCode() == KeyCode.ESCAPE) {
+            if (escapeOnList()) e.consume();
+        } else if (e.getCode() == KeyCode.SPACE) {
             command("pause-resume").run().run();
             e.consume();
         } else if (e.getCode() == KeyCode.DELETE || e.getCode() == KeyCode.BACK_SPACE) {
@@ -2419,7 +2444,7 @@ public final class MainWindow {
         }
     }
 
-    /** Ctrl+K: the Search tab in place of the transfers, the query field focused. */
+    /** Ctrl+Shift+F: the Search tab in place of the transfers, the query field focused. */
     private void showSearch() {
         // The folder is re-read when the tab opens, so a file dropped in is a chip at once.
         if (definitionStore.refresh()) {
@@ -2466,29 +2491,27 @@ public final class MainWindow {
         });
     }
 
+    /**
+     * The omnibox: one box that filters (words and {@code key:value} chips), runs a command after
+     * a {@code >}, and adds what is pasted into it. {@link Omnibox} holds the rules; this draws it.
+     */
     private HBox buildFilterBar() {
-        filter.setPromptText("Filter (Ctrl+F) — try state:seeding");
+        filter.setPromptText("Filter · > runs a command · paste a magnet");
         // Not traversable: the scene hands initial focus to the first traversable node, and while
         // the table is hidden (no torrents yet) that would be this box, so every keystroke on a
-        // fresh launch would land in the filter. Ctrl+F reaches it; Tab does not need to.
+        // fresh launch would land in the filter. Ctrl+K reaches it; Tab does not need to.
         filter.setFocusTraversable(false);
-        filter.textProperty().addListener((o, was, text) -> applyFilters());
-        filter.setOnKeyPressed(e -> {
-            if (e.getCode() == KeyCode.ESCAPE) {
-                filter.clear();
-                table.requestFocus();
-                e.consume();
-            } else if (e.getCode() == KeyCode.ENTER) {
-                table.requestFocus();
-                e.consume();
-            }
-        });
+        filter.textProperty().addListener((o, was, text) -> onOmniboxTyped(was, text));
+        filter.setOnKeyPressed(this::onOmniboxKey);
+        chipRow.setAlignment(Pos.CENTER_LEFT);
+        chipRow.setVisible(false);
+        chipRow.managedProperty().bind(chipRow.visibleProperty());
         HBox.setHgrow(filter, Priority.ALWAYS);
         // The box the redesign draws: a lens, the field with no chrome of its own, and the chord as
         // a key badge, read from the same chord the command and the menu use.
-        Label badge = new Label(chord(KeyCode.F).getDisplayText());
+        Label badge = new Label(chord(KeyCode.K).getDisplayText());
         badge.getStyleClass().add("key-badge");
-        HBox box = new HBox(Icons.find(), filter, badge);
+        HBox box = new HBox(Icons.find(), chipRow, filter, badge);
         box.getStyleClass().add("filter-box");
         box.setAlignment(Pos.CENTER_LEFT);
         HBox.setHgrow(box, Priority.ALWAYS);
@@ -2516,6 +2539,99 @@ public final class MainWindow {
     private void focusFilter() {
         filter.requestFocus();
         filter.selectAll();
+    }
+
+    /** Every keystroke in the field goes through the value; the field is then redrawn from it. */
+    private void onOmniboxTyped(String was, String text) {
+        if (settingFilter) return;
+        Omnibox next = omnibox.typed(text, java.time.Instant.now().getEpochSecond());
+        if (next.mode() == Omnibox.Mode.COMMAND) {
+            // The prefix typed: the palette is the command box, and takes what followed it.
+            setOmnibox(next.withText(""));
+            palette.show(commands, next.commandQuery());
+            return;
+        }
+        if (next.mode() == Omnibox.Mode.ADD && Omnibox.pasted(was, text)) {
+            setOmnibox(next.withText(""));
+            addInput(text.trim());
+            return;
+        }
+        setOmnibox(next);
+    }
+
+    private void onOmniboxKey(KeyEvent e) {
+        switch (e.getCode()) {
+            case BACK_SPACE -> {
+                if (filter.getText().isEmpty() && !omnibox.chips().isEmpty()) {
+                    setOmnibox(omnibox.backspaceOnEmpty());
+                    e.consume();
+                }
+            }
+            case ESCAPE -> {
+                // One layer: a box with something in it empties; an empty one gives the list back.
+                if (!omnibox.isEmpty()) setOmnibox(Omnibox.EMPTY);
+                else table.requestFocus();
+                e.consume();
+            }
+            case ENTER -> {
+                if (omnibox.mode() == Omnibox.Mode.ADD) {
+                    String input = filter.getText().trim();
+                    setOmnibox(omnibox.withText(""));
+                    addInput(input);
+                } else {
+                    // The matches are what the box was for: Enter hands them over, all selected,
+                    // so the next key (Space, Delete, Ctrl+T …) acts on every one of them.
+                    if (!omnibox.isEmpty()) table.getSelectionModel().selectAll();
+                    table.requestFocus();
+                }
+                e.consume();
+            }
+            default -> {}
+        }
+    }
+
+    /** The value changed: the field, the chips and the list follow it. */
+    private void setOmnibox(Omnibox next) {
+        omnibox = next;
+        if (!filter.getText().equals(next.text())) {
+            settingFilter = true;
+            try {
+                filter.setText(next.text());
+                filter.positionCaret(next.text().length());
+            } finally {
+                settingFilter = false;
+            }
+        }
+        List<FilterQuery.Chip> chips = next.chipViews(java.time.Instant.now().getEpochSecond());
+        chipRow.getChildren().clear();
+        for (int i = 0; i < chips.size(); i++) {
+            FilterQuery.Chip chip = chips.get(i);
+            Label label = new Label(chip.label());
+            label.getStyleClass().add("filter-chip");
+            if (!chip.valid()) label.getStyleClass().add("invalid");
+            label.setTooltip(new javafx.scene.control.Tooltip(chip.term() + (chip.valid() ? "" : " — not understood")));
+            int index = i;
+            label.setOnMouseClicked(e -> setOmnibox(omnibox.removeChip(index)));
+            chipRow.getChildren().add(label);
+        }
+        chipRow.setVisible(!chips.isEmpty());
+        applyFilters();
+    }
+
+    /** Escape on the list peels one layer: the filter first, then the selection. */
+    private boolean escapeOnList() {
+        return switch (Actions.escape(
+                !omnibox.isEmpty(), !table.getSelectionModel().isEmpty())) {
+            case CLEAR_FILTER -> {
+                setOmnibox(Omnibox.EMPTY);
+                yield true;
+            }
+            case CLEAR_SELECTION -> {
+                table.getSelectionModel().clearSelection();
+                yield true;
+            }
+            case NOTHING -> false;
+        };
     }
 
     private TableView<TorrentRow> buildTable() {

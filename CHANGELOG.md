@@ -7,6 +7,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Changed
 
+- **The filter box is an omnibox** (`Ctrl+K`, `Ctrl+F` still works): a `key:value` term becomes a
+  chip the moment the space after it is typed, one the box cannot read becomes a red chip saying
+  why, `Backspace` on an empty box hands the last chip back for editing and a click removes one;
+  `>` then a name runs a command through the palette; a pasted magnet, `.torrent` link or path
+  opens the Add dialog; `Enter` selects every match and returns to the list, so the next key acts
+  on all of them. `Esc` peels one layer at a time: the box, then the list's filter, then its
+  selection. The Search tab moved from `Ctrl+K` to `Ctrl+Shift+F`.
+
 - **A magnet added from the Add dialog starts with the peers its file-list fetch found**, both
   with "Add now, pick files when ready" and after the files arrived, instead of looking for the
   swarm again from nothing.
@@ -26,15 +34,6 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
-- **The menu bar can share the window's title bar.** Off by default, under Settings → General →
-  Appearance, experimental; it applies on restart, since a window's style is fixed once it has
-  been shown, and the status bar says so when the setting and the window disagree. With it on, the
-  window is drawn without a system title bar and the menus, the window title and the system
-  buttons share that one row: a full bar of vertical space back for the list. Minimise, maximise,
-  close, drag-to-move, double-click-to-maximise, edge resize and snapping all remain the
-  platform's own, so nothing about how the window behaves changes; only where the menus sit. The
-  window buttons follow the app theme, not the desktop's, so a dark theme on a light desktop does
-  not hide them. Not offered on macOS, where the menu belongs to the system menu bar.
 - **The Create Torrent dialog** (`Ctrl+N`, File → New Torrent…, the toolbar's page glyph), the
   third step of the RSS, creation and statistics milestone: a file or folder (browsed, typed or
   dropped on the dialog), hybrid, v1-only or v2-only, a piece size from 16 KiB to 32 MiB or
@@ -94,6 +93,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   articles are `rss/feeds.json` and `rss/articles/<id>.json` beside the settings, this machine's,
   never synced. The columns are remembered as `rss.columns`. The auto-download switch on the
   Settings page is there and off: the rules come next.
+- **The menu bar can share the window's title bar.** Off by default, under Settings → General →
+  Appearance, experimental; it applies on restart, since a window's style is fixed once it has
+  been shown, and the status bar says so when the setting and the window disagree. With it on, the
+  window is drawn without a system title bar and the menus, the window title and the system
+  buttons share that one row: a full bar of vertical space back for the list. Minimise, maximise,
+  close, drag-to-move, double-click-to-maximise, edge resize and snapping all remain the
+  platform's own, so nothing about how the window behaves changes; only where the menus sit. The
+  window buttons follow the app theme, not the desktop's, so a dark theme on a light desktop does
+  not hide them. Not offered on macOS, where the menu belongs to the system menu bar.
 - **Search providers from definition files**, the last step of the search milestone. A site
   without an API is `search-providers/<id>.json` in the config folder: where to search (a URL
   template with `{query}` and `{category}`, the category mapped through the file's own table;

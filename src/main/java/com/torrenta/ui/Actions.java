@@ -32,6 +32,23 @@ public final class Actions {
         return text;
     }
 
+    /** What Escape on the list does, one layer at a time. */
+    public enum Escape {
+        CLEAR_FILTER,
+        CLEAR_SELECTION,
+        NOTHING
+    }
+
+    /**
+     * Escape peels one layer: a filter in force goes first, then the selection, then nothing
+     * (the dialog and the omnibox handle their own Escape before the list sees one).
+     */
+    public static Escape escape(boolean filterActive, boolean hasSelection) {
+        if (filterActive) return Escape.CLEAR_FILTER;
+        if (hasSelection) return Escape.CLEAR_SELECTION;
+        return Escape.NOTHING;
+    }
+
     /** The confirmation for removal, worded by what it will do. */
     public static String removeQuestion(int count, boolean deleteFiles) {
         String what = count == 1 ? "this torrent" : "these " + count + " torrents";

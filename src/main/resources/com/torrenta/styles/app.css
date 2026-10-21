@@ -216,6 +216,21 @@
     -fx-stroke: -color-fg-muted;
 }
 
+/* The omnibox's chips: a committed term in the keyboard's periwinkle, an unreadable one in red. */
+.filter-chip {
+    -fx-background-color: -torrenta-up-chip;
+    -fx-background-radius: 5;
+    -fx-padding: 1 7 1 7;
+    -fx-font-size: 12px;
+    -fx-text-fill: -torrenta-up;
+    -fx-cursor: hand;
+}
+
+.filter-chip.invalid {
+    -fx-background-color: -torrenta-error-chip;
+    -fx-text-fill: -torrenta-error;
+}
+
 .key-badge {
     -fx-font-size: 11px;
     -fx-text-fill: -color-fg-muted;
