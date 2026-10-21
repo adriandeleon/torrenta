@@ -98,6 +98,13 @@ class FormatTest {
     }
 
     @Test
+    void queueColumnCountsFromOneAndDashesTheUnqueued() {
+        assertEquals("1", Format.queuePosition(0), "the status line says Queued #1 for position 0");
+        assertEquals("12", Format.queuePosition(11));
+        assertEquals("—", Format.queuePosition(-1), "a seed is outside libtorrent's queue");
+    }
+
+    @Test
     void tagsColumnIsCommaSeparated() {
         assertEquals("", Format.tags(List.of()));
         assertEquals("4k, hd", Format.tags(List.of("4k", "hd")));

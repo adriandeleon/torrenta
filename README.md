@@ -274,6 +274,8 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+Shift+R` / `Ctrl+Shift+A` | Force recheck / force reannounce |
 | `Ctrl+Shift+S` | Sequential download on or off |
 | `Ctrl+L` | Limits for the selection: download and upload caps, connections, upload slots, first and last pieces first, and a ratio or seeding-time limit of its own in place of the global one |
+| `Ctrl+Shift+Home` / `Ctrl+Shift+Up` / `Ctrl+Shift+Down` / `Ctrl+Shift+End` | Queue: move the selection to the top, up one, down one, to the bottom; the selected torrents keep their order among themselves (the Torrent and context menus hold them as a Queue submenu; the hidden Queue column shows the positions) |
+| `Ctrl+Shift+D` | Set Location: move the selection's files to another folder (typed or browsed, with the volume's free space); a file already at the destination is kept, never replaced, and a torrent still on its way through the incomplete folder gets the new destination instead of a move now. For a Transmission daemon the folder is a path on its machine |
 | `Ctrl+Shift+G` | Set the selection's category: one that exists, none, or a new one (the Torrent and context menus list them as a submenu) |
 | `Ctrl+T` | Edit the selection's tags: a checkbox per tag that exists, a field for new ones |
 | `Ctrl+C` / `Ctrl+Shift+H` / `Ctrl+Shift+C` | Copy name / info-hash / magnet link |
@@ -297,8 +299,8 @@ shows are remembered. The status bar's "Alt speed" switches the
 alternative speed limits by hand; the schedule in Settings switches them by the clock. The status bar shows the latest event; an error count appears there while
 there are errors, and a click on it opens the log.
 
-The list's columns (seventeen, from the header's ⋮ menu, Category and Tags among them) keep their
-order, widths and visibility in `settings.properties`.
+The list's columns (eighteen, from the header's ⋮ menu, Category, Tags and Queue among them) keep
+their order, widths and visibility in `settings.properties`.
 
 ## BitTorrent engine
 
@@ -391,8 +393,8 @@ scripts/render-icon.py            branding/torrenta-icon.svg → torrenta.png (P
   `torrent_info::rename_file`, and renaming through the handle after adding is confirmed by
   libtorrent's alerts yet a recheck never finds the files under their new names.
 - **A port test** in Settings → Connection: libtorrent has none, it needs an outside service.
-- **Queue moves, changing a torrent's location and renaming paths** for a Transmission daemon:
-  the RPC has them, the `Engine` interface does not yet.
+- **Renaming a torrent or its paths** for a Transmission daemon: the RPC has it, the `Engine`
+  interface does not yet.
 - **A first release.** The pipeline (JReleaser, Homebrew cask, winget) is in place and dry-run
   pending; the 1.0 criteria in [docs/ROADMAP.md](docs/ROADMAP.md) (a week of daily use on each
   platform, resume data proven across upgrades, signed installers) are what stands between the

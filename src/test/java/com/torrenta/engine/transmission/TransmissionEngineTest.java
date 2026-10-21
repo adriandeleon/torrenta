@@ -125,6 +125,8 @@ class TransmissionEngineTest {
         assertTrue(caps.has(Capability.SEQUENTIAL_DOWNLOAD), "RPC 18 has sequential download");
         assertTrue(caps.has(Capability.BLOCKLIST_URL));
         assertTrue(caps.has(Capability.LOCAL_FILES), "a daemon on this machine has the files here");
+        assertTrue(caps.has(Capability.QUEUE_ORDER), "queue-move-* is in every daemon's RPC");
+        assertTrue(caps.has(Capability.MOVE_STORAGE), "so is torrent-set-location");
         for (Capability missing : List.of(
                 Capability.CREATE_TORRENT,
                 Capability.METADATA_FETCH,
@@ -453,6 +455,42 @@ class TransmissionEngineTest {
     }
 
     // ---- per-torrent actions ----------------------------------------------------------------------
+
+    @Test
+    void queueMovesAndSetLocationAreTheirRpcMethods() throws Exception {
+        TransmissionEngine e = engine();
+        for (String m : List.of(
+                "queue-move-top", "queue-move-up", "queue-move-down", "queue-move-bottom", "torrent-set-location")) {
+            server.answer(m, StubRpcServer.success());
+        }
+        e.queueMove(PAYLOAD, Engine.QueueMove.TOP);
+        e.queueMove(PAYLOAD, Engine.QueueMove.UP);
+        e.queueMove(PAYLOAD, Engine.QueueMove.DOWN);
+        e.queueMove(PAYLOAD, Engine.QueueMove.BOTTOM);
+        for (String m : List.of("queue-move-top", "queue-move-up", "queue-move-down", "queue-move-bottom")) {
+            assertEquals(Map.of("ids", List.of(PAYLOAD)), server.last(m).arguments(), m);
+        }
+
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        e.addListener(events::add);
+        e.torrents();
+        e.moveStorage(PAYLOAD, " /srv/media/films ", true);
+        Map<String, Object> moved = server.last("torrent-set-location").arguments();
+        assertEquals(List.of(PAYLOAD), moved.get("ids"));
+        assertEquals("/srv/media/films", moved.get("location"), "a path on the daemon's machine, trimmed");
+        assertEquals(Boolean.TRUE, moved.get("move"));
+        assertEquals(
+                "Moving payload.bin to /srv/media/films",
+                events.get(events.size() - 1).message());
+
+        e.moveStorage(PAYLOAD, "/srv/media/films", false);
+        assertEquals(
+                Boolean.FALSE, server.last("torrent-set-location").arguments().get("move"));
+        assertEquals(
+                "Pointed payload.bin at /srv/media/films",
+                events.get(events.size() - 1).message());
+        assertThrows(EngineException.class, () -> e.moveStorage(PAYLOAD, "  ", true));
+    }
 
     @Test
     void actionsAreTheirRpcMethodsOnTheHash() throws Exception {

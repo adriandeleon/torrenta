@@ -62,6 +62,6 @@ public enum Density {
     private static final class DefaultLayouts {
         /** Name wide, then the numbers; progress and status live inside the name cell. */
         static final String COMFORTABLE = "name:480,size:80,down:96,up:96,eta:80,ratio:64,-progress,-state,-done,"
-                + "-seeds,-peers,-added,-completed,-tracker,-category,-tags,-path";
+                + "-seeds,-peers,-added,-completed,-tracker,-category,-tags,-path,-queue";
     }
 }

@@ -1801,6 +1801,112 @@ class LibtorrentEngineTest {
         assertTrue(statsStore.load().activeSeconds() >= saved.activeSeconds(), "the second stop wrote again");
     }
 
+    // ---- queue order and set location ---------------------------------------------------------------
+
+    /**
+     * Three torrents without their files, added paused, stand in the download queue in the order
+     * they were added; each move shifts the others, as the positions in the snapshots then show.
+     */
+    @Test
+    void queueMovesShiftTheOthers(@TempDir Path dir) throws Exception {
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            List<String> ids = new java.util.ArrayList<>();
+            for (String name : List.of("q1", "q2", "q3")) {
+                byte[] torrent = twoFileTorrent(dir.resolve("seed"), name);
+                ids.add(engine.add(new AddRequest(
+                                new AddRequest.TorrentFile(torrent, name + ".torrent"),
+                                dir.resolve("downloads"),
+                                true,
+                                false,
+                                false,
+                                AddRequest.StopCondition.NONE,
+                                Map.of(),
+                                TorrentLabels.NONE))
+                        .id());
+            }
+            await(
+                    "three in the queue, in add order",
+                    () -> positions(engine, ids).equals(List.of(0, 1, 2)));
+
+            engine.queueMove(ids.get(2), Engine.QueueMove.TOP);
+            await("q3 to the top", () -> positions(engine, ids).equals(List.of(1, 2, 0)));
+            engine.queueMove(ids.get(0), Engine.QueueMove.DOWN);
+            await("q1 one down, past q2", () -> positions(engine, ids).equals(List.of(2, 1, 0)));
+            engine.queueMove(ids.get(2), Engine.QueueMove.BOTTOM);
+            await("q3 to the bottom", () -> positions(engine, ids).equals(List.of(1, 0, 2)));
+            engine.queueMove(ids.get(2), Engine.QueueMove.UP);
+            await("q3 one up, past q1", () -> positions(engine, ids).equals(List.of(2, 0, 1)));
+            engine.queueMove(ids.get(1), Engine.QueueMove.UP);
+            await("the first cannot go higher", () -> positions(engine, ids).equals(List.of(2, 0, 1)));
+            assertThrows(EngineException.class, () -> engine.queueMove("ff".repeat(20), Engine.QueueMove.TOP));
+        }
+    }
+
+    /** The torrents' queue positions in the order of {@code ids}. */
+    private static List<Integer> positions(LibtorrentEngine engine, List<String> ids) {
+        Map<String, Integer> byId = new java.util.HashMap<>();
+        for (Torrent t : engine.torrents()) byId.put(t.id(), t.queuePosition());
+        return ids.stream().map(id -> byId.getOrDefault(id, -2)).toList();
+    }
+
+    /**
+     * Set Location on a seed: the files land in the new folder, the torrent seeds on from there
+     * without a recheck and the move is in the log; a second move into a folder that already holds
+     * the files keeps those and leaves the source where it was.
+     */
+    @Test
+    void setLocationMovesASeedsFilesAndNeverReplacesOnesAlreadyThere(@TempDir Path dir) throws Exception {
+        byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine engine = seeder(dir, torrent)) {
+            engine.addListener(events::add);
+            String id = engine.torrents().get(0).id();
+            assertEquals(-1, engine.torrents().get(0).queuePosition(), "a seed is outside the download queue");
+            Path moved = dir.resolve("moved");
+            int before = events.size();
+
+            engine.moveStorage(id, moved.toString(), true);
+            await(
+                    "the move is in the log",
+                    () -> events.stream().skip(before).anyMatch(e -> e.message().equals("Moved pair to " + moved)));
+            Torrent now = engine.torrents().get(0);
+            assertEquals(moved.toString(), now.savePath());
+            assertEquals(TorrentState.SEEDING, now.state(), "seeding on from the new folder");
+            assertEquals(1.0, now.progress(), 1e-9);
+            assertFalse(now.moving());
+            assertTrue(Files.isRegularFile(moved.resolve("pair").resolve("a.bin")));
+            assertTrue(Files.isRegularFile(moved.resolve("pair").resolve("sub").resolve("b.bin")));
+            assertFalse(Files.exists(dir.resolve("seed").resolve("pair").resolve("a.bin")), "moved, not copied");
+            assertTrue(
+                    events.stream().skip(before).noneMatch(e -> e.message().contains("checked")),
+                    "a plain move needs no recheck: " + events.subList(before, events.size()));
+            assertEquals(moved.toString(), engine.detail(id).general().savePath());
+
+            // The same files already at the next destination: kept as they are, the source left alone.
+            Path other = dir.resolve("other");
+            Files.createDirectories(other.resolve("pair").resolve("sub"));
+            Files.copy(
+                    moved.resolve("pair").resolve("a.bin"),
+                    other.resolve("pair").resolve("a.bin"));
+            Files.copy(
+                    moved.resolve("pair").resolve("sub").resolve("b.bin"),
+                    other.resolve("pair").resolve("sub").resolve("b.bin"));
+            java.nio.file.attribute.FileTime old = java.nio.file.attribute.FileTime.fromMillis(1_000_000_000_000L);
+            Files.setLastModifiedTime(other.resolve("pair").resolve("a.bin"), old);
+            engine.moveStorage(id, other.toString(), true);
+            await("moved again", () -> engine.torrents().get(0).savePath().equals(other.toString()));
+            assertEquals(old, Files.getLastModifiedTime(other.resolve("pair").resolve("a.bin")), "not replaced");
+            assertTrue(Files.isRegularFile(moved.resolve("pair").resolve("a.bin")), "the source stays");
+            await("seeding from the kept files", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+
+            // Where it already is: nothing to do, no error.
+            engine.moveStorage(id, other.toString(), true);
+            assertThrows(EngineException.class, () -> engine.moveStorage(id, "", true));
+            assertThrows(EngineException.class, () -> engine.moveStorage("ff".repeat(20), other.toString(), true));
+        }
+    }
+
     private static LibtorrentEngine engine(Path dir) {
         return engine(dir, new TorrentStore(dir.resolve("store")));
     }
