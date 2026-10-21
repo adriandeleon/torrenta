@@ -129,7 +129,9 @@ final class SettingsWindow {
                 Settings.ADD_SEQUENTIAL,
                 Settings.ADD_WITHOUT_ASKING,
                 Settings.UI_STATE_COLORS,
-                Settings.UI_DENSITY
+                Settings.UI_DENSITY,
+                Settings.UI_TRAY,
+                Settings.UI_CLOSE_TO_TRAY
             },
             concat(
                     concat(Settings.DOWNLOAD_KEYS, concat(Settings.AUTOMATION_KEYS, Settings.RSS_KEYS)),
@@ -145,6 +147,8 @@ final class SettingsWindow {
     private java.util.function.Consumer<Boolean> onIpFilterChanged = force -> {};
     /** Told after an appearance setting the main window draws from changed. */
     private Runnable onAppearanceChanged = () -> {};
+    /** Told after the tray switch changed; the main window brings the icon up or takes it down. */
+    private Runnable onTrayChanged = () -> {};
 
     private java.util.function.Supplier<String> ipFilterStatus = () -> "";
 
@@ -454,6 +458,8 @@ final class SettingsWindow {
     private CheckBox updateCheck;
     private CheckBox stateColors;
     private ChoiceBox<Density> density;
+    private CheckBox tray;
+    private CheckBox closeToTray;
     private CheckBox addStartPaused;
     private CheckBox addSequential;
     private CheckBox addWithoutAsking;
@@ -701,6 +707,10 @@ final class SettingsWindow {
 
     void setOnAppearanceChanged(Runnable handler) {
         onAppearanceChanged = handler;
+    }
+
+    void setOnTrayChanged(Runnable handler) {
+        onTrayChanged = handler;
     }
 
     void setOnIpFilterChanged(
@@ -1049,6 +1059,41 @@ final class SettingsWindow {
                         + " status and the progress bar. Off, the glyphs and sentences still say it.",
                 stateColors,
                 "state status colours colors glyph progress bar stalled seeding downloading error accessibility");
+
+        VBox trayBox = section(page, "System tray");
+        tray = new CheckBox();
+        tray.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setTray(now);
+            settings.saveQuietly();
+            onTrayChanged.run();
+        });
+        row(
+                Category.GENERAL,
+                trayBox,
+                "Show a tray icon",
+                "The arrow in the panel: teal while something downloads, red when a torrent has an error."
+                        + " Its tooltip and menu carry the rates. Where the desktop has a tray: KDE, GNOME with"
+                        + " the AppIndicator extension, Windows and the macOS menu bar; on Windows and macOS"
+                        + " it applies after restarting Torrenta.",
+                tray,
+                "tray icon panel notification area menu bar status item indicator appindicator dock");
+        closeToTray = new CheckBox();
+        closeToTray.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setCloseToTray(now);
+            settings.saveQuietly();
+        });
+        // Bound, never set: setDisable on a bound property throws.
+        closeToTray.disableProperty().bind(tray.selectedProperty().not());
+        row(
+                Category.GENERAL,
+                trayBox,
+                "Closing the window keeps Torrenta in the tray",
+                "The torrents go on; the tray icon's Show Torrenta brings the window back, its Quit ends"
+                        + " the program, as does Quit in the File menu. Without a tray, closing quits.",
+                closeToTray,
+                "close to tray hide minimize minimise background keep running quit exit window");
 
         VBox downloads = section(page, "Downloads");
         downloadDir = new TextField();
@@ -2834,6 +2879,8 @@ final class SettingsWindow {
             updateCheck.setSelected(settings.updateCheck());
             stateColors.setSelected(settings.stateColors());
             density.setValue(Density.byId(settings.density(), Density.DEFAULT));
+            tray.setSelected(settings.tray());
+            closeToTray.setSelected(settings.closeToTray());
             syncEnabled.setSelected(settings.syncEnabled());
             syncUrl.setText(settings.syncUrl());
             syncBranch.setText(settings.syncBranch().equals("main") ? "" : settings.syncBranch());
