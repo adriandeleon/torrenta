@@ -688,6 +688,17 @@
     -fx-stroke-width: 1.4;
 }
 
+/* The Files tab's folder and sheet before each name, in the sidebar's weight; the selected row's
+   ink while it is the one chosen. */
+.detail-pane .file-glyph .icon-line {
+    -fx-stroke: -color-fg-muted;
+    -fx-stroke-width: 1.4;
+}
+
+.detail-pane .tree-table-row-cell:selected .file-glyph .icon-line {
+    -fx-stroke: -color-fg-default;
+}
+
 .sidebar .tree-cell:filled:selected,
 .sidebar .tree-view:focused .tree-cell:filled:selected {
     -fx-background-color: transparent;

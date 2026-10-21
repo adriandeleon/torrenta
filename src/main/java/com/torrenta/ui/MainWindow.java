@@ -930,6 +930,11 @@ public final class MainWindow {
         } else if (action.startsWith("detail:")) {
             setDetailVisible(true);
             detail.selectTab(action.substring("detail:".length()));
+        } else if (action.startsWith("files-menu")) {
+            // files-menu or files-menu:<row>: the Files tab's context menu on that visible row.
+            int colon = action.indexOf(':');
+            setDetailVisible(true);
+            detail.showFilesMenuForCapture(colon < 0 ? 0 : Integer.parseInt(action.substring(colon + 1)));
         } else if (action.startsWith("menu:")) {
             // Open a menu of the bar by its title (menu:File); the PNG is then of the popup.
             String title = action.substring("menu:".length());
@@ -2261,6 +2266,13 @@ public final class MainWindow {
         opener.accept(Path.of(path).toUri().toString());
     }
 
+    /** The torrent the detail pane shows, or null with no single selection or none in the list. */
+    private Torrent detailTorrent() {
+        String id = detailId;
+        TorrentRow row = id == null ? null : rows.get(id);
+        return row == null ? null : row.torrent();
+    }
+
     private static KeyCombination chord(KeyCode key) {
         return new KeyCodeCombination(key, KeyCombination.SHORTCUT_DOWN);
     }
@@ -2708,12 +2720,15 @@ public final class MainWindow {
             if (id != null) onTorrent("status.prioritySet", id, (e, t) -> e.setFilePriority(t, index, priority));
         });
         detail.setOnOpenFile(row -> {
-            String id = detailId;
-            Torrent t = id == null
-                    ? null
-                    : rows.get(id) == null ? null : rows.get(id).torrent();
+            Torrent t = detailTorrent();
             if (t != null)
                 opener.accept(Path.of(t.savePath()).resolve(row.path()).toUri().toString());
+        });
+        detail.setOnOpenFolder(row -> {
+            Torrent t = detailTorrent();
+            if (t != null)
+                opener.accept(
+                        FileRows.folderOf(Path.of(t.savePath()), row).toUri().toString());
         });
         detail.setOnAddTrackers(urls -> {
             String id = detailId;

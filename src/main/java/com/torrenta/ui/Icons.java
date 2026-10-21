@@ -197,9 +197,14 @@ final class Icons {
         return line("M2.7 4.7h10.6M6 4.7V2.7h4v2M4 4.7l.7 8.6h6.6l.7-8.6");
     }
 
-    /** A folder beside a category in the sidebar. */
+    /** A folder beside a category in the sidebar, and beside a folder in the Files tab. */
     static Glyph folderSmall() {
         return line("M2 12.5V3.5h4.2l1.5 2h5.8v2M2 12.5l2.2-5h10.3l-2.2 5z", SMALL_SCALE);
+    }
+
+    /** A sheet with its corner turned, beside a file in the Files tab: the tab's own glyph, bare. */
+    static Glyph fileSmall() {
+        return line("M4.5 2.5h4.6l2.9 2.9v8.1h-7.5zM9.1 2.5v2.9h2.9", SMALL_SCALE);
     }
 
     static Glyph find() {

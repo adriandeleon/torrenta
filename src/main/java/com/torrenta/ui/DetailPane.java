@@ -23,6 +23,7 @@ import javafx.scene.control.TableCell;
 import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextInputDialog;
+import javafx.scene.control.TreeItem;
 import javafx.scene.control.TreeTableCell;
 import javafx.scene.control.TreeTableColumn;
 import javafx.scene.control.TreeTableView;
@@ -69,6 +70,7 @@ final class DetailPane extends VBox {
 
     private BiConsumer<Integer, com.torrenta.engine.Priority> onFilePriority = (i, p) -> {};
     private Consumer<FileRows.Row> onOpenFile = r -> {};
+    private Consumer<FileRows.Row> onOpenFolder = r -> {};
     private Consumer<List<String>> onAddTrackers = urls -> {};
     private Consumer<String> onRemoveTracker = url -> {};
     private Runnable onReannounce = () -> {};
@@ -104,6 +106,11 @@ final class DetailPane extends VBox {
 
     void setOnOpenFile(Consumer<FileRows.Row> handler) {
         onOpenFile = handler;
+    }
+
+    /** A folder row, or a file row whose containing folder is meant; see {@link FileRows#folderOf}. */
+    void setOnOpenFolder(Consumer<FileRows.Row> handler) {
+        onOpenFolder = handler;
     }
 
     void setOnAddTrackers(Consumer<List<String>> handler) {
@@ -289,6 +296,7 @@ final class DetailPane extends VBox {
         files.setColumnResizePolicy(TreeTableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         files.setPlaceholder(new Label(tr("detail.files.empty")));
         TreeTableColumn<FileRows.Row, String> name = treeColumn(tr("common.name"), 320, FileRows.Row::name);
+        name.setCellFactory(c -> new NameCell());
         TreeTableColumn<FileRows.Row, String> size = new TreeTableColumn<>(tr("common.size"));
         size.setPrefWidth(90);
         size.setCellValueFactory(p -> p.getValue().getValue().sizeProperty().map(n -> Bytes.human(n.longValue())));
@@ -326,14 +334,89 @@ final class DetailPane extends VBox {
         files.getColumns().addAll(List.of(name, size, progress, priority));
         Headers.uppercase(files);
 
-        MenuItem open = new MenuItem(tr("detail.files.openFile"));
-        open.setGraphic(Icons.open().at(Icons.MENU_SIZE));
-        open.setOnAction(e -> {
-            var item = files.getSelectionModel().getSelectedItem();
-            if (item != null && item.getValue().isFile()) onOpenFile.accept(item.getValue());
-        });
-        files.setContextMenu(new ContextMenu(open));
+        files.setContextMenu(buildFilesMenu());
         return files;
+    }
+
+    /**
+     * Open File and Open Containing Folder for a file, Open Folder for a folder: the menu decides
+     * as it opens, from the selected row, and shows nothing it cannot do.
+     */
+    private ContextMenu buildFilesMenu() {
+        MenuItem open = new MenuItem(tr("detail.files.openFile"));
+        open.setGraphic(Icons.files().at(Icons.MENU_SIZE));
+        open.setOnAction(e -> selectedFileRow().filter(FileRows.Row::isFile).ifPresent(onOpenFile));
+        MenuItem folder = new MenuItem(tr("detail.files.openFolder"));
+        folder.setGraphic(Icons.open().at(Icons.MENU_SIZE));
+        folder.setOnAction(e -> selectedFileRow().ifPresent(onOpenFolder));
+        ContextMenu menu = new ContextMenu(open, folder);
+        menu.setOnShowing(e -> {
+            boolean file = selectedFileRow().map(FileRows.Row::isFile).orElse(false);
+            open.setVisible(file);
+            folder.setText(tr(file ? "detail.files.openContainingFolder" : "detail.files.openFolder"));
+        });
+        return menu;
+    }
+
+    private Optional<FileRows.Row> selectedFileRow() {
+        var item = files.getSelectionModel().getSelectedItem();
+        return item == null ? Optional.empty() : Optional.ofNullable(item.getValue());
+    }
+
+    /**
+     * For the capture hook: selects the {@code n}th visible row of the Files tab and opens its
+     * menu. The hook's actions run before the first detail poll, so with no rows yet it waits for
+     * the tree to be rooted and acts then.
+     */
+    void showFilesMenuForCapture(int n) {
+        selectTab("files");
+        if (files.getRoot() == null) {
+            files.rootProperty().addListener(new javafx.beans.value.ChangeListener<>() {
+                @Override
+                public void changed(
+                        javafx.beans.value.ObservableValue<? extends TreeItem<FileRows.Row>> o,
+                        TreeItem<FileRows.Row> was,
+                        TreeItem<FileRows.Row> now) {
+                    if (now == null) return;
+                    files.rootProperty().removeListener(this);
+                    showFilesMenuForCapture(n);
+                }
+            });
+            return;
+        }
+        files.getSelectionModel().clearAndSelect(n);
+        files.getContextMenu().show(files, javafx.geometry.Side.BOTTOM, 0, 0);
+    }
+
+    /**
+     * The Name column's cell: a small folder or sheet before the name, one node of each kept per
+     * cell so a reused cell swaps rather than rebuilds. Long names cut in the middle so the
+     * extension stays, as the Add dialog's tree cuts them.
+     */
+    private static final class NameCell extends TreeTableCell<FileRows.Row, String> {
+        private final Icons.Glyph folder = Icons.folderSmall();
+        private final Icons.Glyph file = Icons.fileSmall();
+
+        NameCell() {
+            folder.getStyleClass().add("file-glyph");
+            file.getStyleClass().add("file-glyph");
+            setTextOverrun(javafx.scene.control.OverrunStyle.CENTER_ELLIPSIS);
+            setGraphicTextGap(6);
+        }
+
+        @Override
+        protected void updateItem(String item, boolean empty) {
+            super.updateItem(item, empty);
+            FileRows.Row row =
+                    empty || getTableRow() == null ? null : getTableRow().getItem();
+            if (row == null) {
+                setText(null);
+                setGraphic(null);
+                return;
+            }
+            setText(item);
+            setGraphic(row.isFile() ? file : folder);
+        }
     }
 
     private javafx.scene.Node buildPeers() {

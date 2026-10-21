@@ -24,7 +24,9 @@ for the others, `dialog-key:<KeyCode>` for a key in its file tree), `choose-file
 selected torrent, `select-first`, `message-log` / `message-log:<query>` (the status bar's history card; its visible
   lines are printed), `debug-log` (the Debug Log window; `-Dtorrenta.captureLogProbe=true` pushes a warning and an
   uncaught exception through the real path before the shot and prints what the log caught),
-  `detail:<tab>` to show the detail pane on a tab, `search` / `search:<query>` / `search-keys:<KEY+KEY>`
+  `detail:<tab>` to show the detail pane on a tab, `files-menu[:<row>]` for the Files tab's
+  context menu on that visible row (it waits for the rows, which arrive with the first detail poll),
+  `search` / `search:<query>` / `search-keys:<KEY+KEY>`
   for the Search tab (the keys go where the focus is, once the search has ended; a stand-in server is
   `java scripts/torznab-stub.java 9696 <search.xml> [caps.xml]`), `stats` for the Statistics window
   (the PNG is of it; `stats=` and `stats-graph=` lines after the shot), `detail:speed` for the Speed
