@@ -132,7 +132,9 @@ final class SettingsWindow {
                 Settings.UI_DENSITY,
                 Settings.UI_PALETTE_KEY,
                 Settings.UI_TRAY,
-                Settings.UI_CLOSE_TO_TRAY
+                Settings.UI_CLOSE_TO_TRAY,
+                Settings.OS_HANDLER,
+                Settings.OS_BADGE
             },
             concat(
                     concat(Settings.DOWNLOAD_KEYS, concat(Settings.AUTOMATION_KEYS, Settings.RSS_KEYS)),
@@ -150,6 +152,10 @@ final class SettingsWindow {
     private Runnable onAppearanceChanged = () -> {};
     /** Told after the tray switch changed; the main window brings the icon up or takes it down. */
     private Runnable onTrayChanged = () -> {};
+    /** Told after the handler switch changed; the main window (re)registers or unregisters. */
+    private Runnable onHandlerChanged = () -> {};
+    /** Told after the badge switch changed; the main window brings the badge up or clears it. */
+    private Runnable onBadgeChanged = () -> {};
 
     private java.util.function.Supplier<String> ipFilterStatus = () -> "";
 
@@ -469,6 +475,8 @@ final class SettingsWindow {
     private ChoiceBox<PaletteKey> paletteKey;
     private CheckBox tray;
     private CheckBox closeToTray;
+    private CheckBox osHandler;
+    private CheckBox osBadge;
     private CheckBox addStartPaused;
     private CheckBox addSequential;
     private CheckBox addWithoutAsking;
@@ -720,6 +728,14 @@ final class SettingsWindow {
 
     void setOnTrayChanged(Runnable handler) {
         onTrayChanged = handler;
+    }
+
+    void setOnHandlerChanged(Runnable handler) {
+        onHandlerChanged = handler;
+    }
+
+    void setOnBadgeChanged(Runnable handler) {
+        onBadgeChanged = handler;
     }
 
     void setOnIpFilterChanged(
@@ -1122,6 +1138,46 @@ final class SettingsWindow {
                         + " the program, as does Quit in the File menu. Without a tray, closing quits.",
                 closeToTray,
                 "close to tray hide minimize minimise background keep running quit exit window");
+
+        VBox desktop = section(page, "Operating system");
+        osHandler = new CheckBox();
+        osHandler.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setOsHandler(now);
+            settings.saveQuietly();
+            onHandlerChanged.run();
+        });
+        row(
+                Category.GENERAL,
+                desktop,
+                "Register as handler for .torrent files and magnet links",
+                "A double-clicked .torrent and a magnet link in the browser open here, in the running"
+                        + " Torrenta when there is one. On Linux this sets the desktop's default with xdg-mime"
+                        + " each time Torrenta starts; on Windows it writes the magnet: protocol and the"
+                        + " .torrent default under this user's registry key, and unticking removes them; on"
+                        + " macOS the app bundle declares both and Finder's Get Info → Open with chooses,"
+                        + " so this box only explains. The status bar says what happened.",
+                osHandler,
+                "handler default application open with torrent magnet protocol scheme mime xdg-mime"
+                        + " registry file association single instance");
+        osBadge = new CheckBox();
+        osBadge.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setOsBadge(now);
+            settings.saveQuietly();
+            onBadgeChanged.run();
+        });
+        row(
+                Category.GENERAL,
+                desktop,
+                "Show download activity on the dock icon",
+                "The macOS dock badge shows the download rate while something downloads; a Linux"
+                        + " launcher that honours Unity's badge (KDE, Dash to Dock) shows how many torrents"
+                        + " are downloading. Cleared when nothing does. Nothing on Windows, whose taskbar"
+                        + " badges only the kind of window Torrenta is not. On macOS it applies after"
+                        + " restarting Torrenta.",
+                osBadge,
+                "badge dock taskbar launcher count rate download activity unity overlay");
 
         VBox downloads = section(page, "Downloads");
         downloadDir = new TextField();
@@ -2922,6 +2978,8 @@ final class SettingsWindow {
             paletteKey.setValue(PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT));
             tray.setSelected(settings.tray());
             closeToTray.setSelected(settings.closeToTray());
+            osHandler.setSelected(settings.osHandler());
+            osBadge.setSelected(settings.osBadge());
             syncEnabled.setSelected(settings.syncEnabled());
             syncUrl.setText(settings.syncUrl());
             syncBranch.setText(settings.syncBranch().equals("main") ? "" : settings.syncBranch());

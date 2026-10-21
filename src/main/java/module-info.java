@@ -23,9 +23,10 @@ module com.torrenta {
     // The update check's release payload gets a real parser.
     requires com.fasterxml.jackson.core;
 
-    // Java2D for the tray icon and the development screen capture, and the AWT system tray on
-    // Windows and macOS. App.main forces AWT headless before any AWT class can load, except where
-    // that tray is wanted (tray.Trays.usesAwt).
+    // Java2D for the tray icon and the development screen capture, the AWT system tray on
+    // Windows and macOS, and on macOS the dock badge (Taskbar) and the open-file handlers
+    // (Desktop). App.main forces AWT headless before any AWT class can load, except where one of
+    // those is wanted (os.AwtUse).
     requires java.desktop;
 
     // The Linux tray backend: a StatusNotifierItem on the session bus. The transport and the
@@ -36,10 +37,15 @@ module com.torrenta {
 
     exports com.torrenta;
 
-    // dbus-java reflects over the exported StatusNotifierItem object and its structs.
+    // dbus-java reflects over the exported StatusNotifierItem object and its structs, and over
+    // the launcher badge's signal.
     exports com.torrenta.tray to
+            org.freedesktop.dbus;
+    exports com.torrenta.os to
             org.freedesktop.dbus;
 
     opens com.torrenta.tray to
+            org.freedesktop.dbus;
+    opens com.torrenta.os to
             org.freedesktop.dbus;
 }

@@ -95,6 +95,10 @@ public final class Settings {
     public static final String UI_PALETTE_KEY = "ui.paletteKey";
     /** Closing the window hides it behind the tray icon and keeps the torrents going; on by default. */
     public static final String UI_CLOSE_TO_TRAY = "ui.closeToTray";
+    /** Register as the handler for .torrent files and magnet links at start; on by default. This machine's. */
+    public static final String OS_HANDLER = "os.handler";
+    /** The dock or launcher badge with the download activity; on by default. This machine's. */
+    public static final String OS_BADGE = "os.badge";
 
     public static final String LAST_UPDATE_CHECK = "updates.lastCheckEpochMs";
     /** The version the user chose to skip; a manual check still reports it. */
@@ -493,6 +497,22 @@ public final class Settings {
 
     public void setCloseToTray(boolean on) {
         properties.setProperty(UI_CLOSE_TO_TRAY, String.valueOf(on));
+    }
+
+    public boolean osHandler() {
+        return readBoolean(OS_HANDLER, true);
+    }
+
+    public void setOsHandler(boolean on) {
+        properties.setProperty(OS_HANDLER, String.valueOf(on));
+    }
+
+    public boolean osBadge() {
+        return readBoolean(OS_BADGE, true);
+    }
+
+    public void setOsBadge(boolean on) {
+        properties.setProperty(OS_BADGE, String.valueOf(on));
     }
 
     public void setSidebar(boolean shown) {

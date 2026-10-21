@@ -79,6 +79,11 @@ import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.WatchFolders;
 import com.torrenta.net.TorrentFetch;
+import com.torrenta.os.Badge;
+import com.torrenta.os.BadgeState;
+import com.torrenta.os.Badges;
+import com.torrenta.os.Handlers;
+import com.torrenta.os.MacHandlers;
 import com.torrenta.rss.Article;
 import com.torrenta.rss.Feed;
 import com.torrenta.rss.FeedFetcher;
@@ -232,6 +237,19 @@ public final class MainWindow {
     /** Quit was asked for: a close request is not a close-to-tray, and teardown runs once. */
     private boolean quitting;
 
+    /** The dock or launcher badge once one has come up, else null; set on the FX thread, read by the poll. */
+    private volatile Badge badge;
+    /** Why there is no badge, once an attempt has said; empty before one and while there is one. */
+    private volatile String badgeReason = "";
+    /** What the badge was last given, so an equal snapshot costs nothing; poll thread. */
+    private volatile BadgeState badgeState = BadgeState.idle();
+    /** The single-instance lock's description, for the capture hook; set by App. */
+    private volatile String instanceDescription = "none";
+    /** What the last handler registration said, for the capture hook. */
+    private volatile String handlerOutcome = "";
+    /** Which desktop open handlers are installed (macOS), or why none. */
+    private volatile String openHandlers = "";
+
     private boolean shutDown;
 
     /**
@@ -287,6 +305,8 @@ public final class MainWindow {
         settingsWindow.setOnIpFilterChanged(this::refreshIpFilter, this::ipFilterStatusText);
         settingsWindow.setOnAppearanceChanged(this::applyAppearance);
         settingsWindow.setOnTrayChanged(this::applyTraySetting);
+        settingsWindow.setOnHandlerChanged(() -> applyHandlerSetting(true));
+        settingsWindow.setOnBadgeChanged(this::applyBadgeSetting);
         applyAppearance();
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
         settingsWindow.setSearchProviders(searchStore, searchPane::reloadProviders);
@@ -356,6 +376,149 @@ public final class MainWindow {
         stage.show();
         table.requestFocus();
         installTray();
+        installBadge();
+        installOpenHandlers();
+        applyHandlerSetting(false);
+    }
+
+    // ---- the desktop: badge, handlers, a second instance ----------------------------------------
+
+    /**
+     * Brings the badge up off the FX thread (D-Bus or AWT may block). Nothing happens when the
+     * setting is off or one is up; a second attempt that finds one up disposes its own.
+     */
+    private void installBadge() {
+        if (!settings.osBadge() || badge != null) return;
+        Thread.ofPlatform().daemon().name("badge-init").start(() -> {
+            String os = System.getProperty("os.name", "");
+            Badges.Attempt attempt = Badges.create(os, Handlers.desktopIdHere());
+            Platform.runLater(() -> {
+                if (attempt.badge().isEmpty()) {
+                    badgeReason = attempt.reason();
+                    LOG.info("No badge: " + attempt.reason());
+                    return;
+                }
+                Badge created = attempt.badge().get();
+                if (badge != null || !settings.osBadge()) {
+                    created.dispose();
+                    return;
+                }
+                badge = created;
+                badgeReason = "";
+                created.update(badgeState);
+                LOG.info("Badge up (" + created.backend() + ")");
+            });
+        });
+    }
+
+    /** FX thread, from the Settings page: the switch was flipped. */
+    private void applyBadgeSetting() {
+        if (settings.osBadge()) {
+            installBadge();
+            return;
+        }
+        Badge current = badge;
+        if (current == null) return;
+        badge = null;
+        current.dispose();
+    }
+
+    /** Poll thread: the badge, only when it changed since the last push. */
+    private void pushBadge(BadgeState next) {
+        if (next.equals(badgeState)) return;
+        badgeState = next;
+        Badge current = badge;
+        if (current != null) current.update(next);
+    }
+
+    /** Any thread, idempotent; from App.stop. */
+    public void disposeBadge() {
+        Badge current = badge;
+        badge = null;
+        if (current != null) current.dispose();
+    }
+
+    /**
+     * macOS hands a running application its files and links through AWT's Desktop handlers; on
+     * the other platforms they arrive as a second instance's command line instead. Off the FX
+     * thread: initialising AWT there, on macOS, is the AppKit contention the headless guard is for.
+     */
+    private void installOpenHandlers() {
+        if (Handlers.platform(System.getProperty("os.name", "")) != Handlers.Platform.MAC) {
+            openHandlers = "none (not macOS)";
+            return;
+        }
+        Thread.ofPlatform().daemon().name("open-handlers").start(() -> {
+            String installed =
+                    MacHandlers.install(inputs -> Platform.runLater(() -> openFromOutside(inputs, "the desktop")));
+            openHandlers = installed;
+            LOG.info("Desktop open handlers: " + installed);
+        });
+    }
+
+    /**
+     * (Re)registers as the handler when the setting is on, on a worker. At start it is quiet
+     * unless a command failed (a development run has nothing to register and says so only in the
+     * log); from the Settings page the status bar says what happened either way.
+     */
+    private void applyHandlerSetting(boolean fromSettings) {
+        boolean on = settings.osHandler();
+        if (!on && !fromSettings) return;
+        Thread.ofVirtual().name("handler-registration").start(() -> {
+            Handlers.Outcome outcome = Handlers.applyHere(on);
+            handlerOutcome = outcome.text();
+            if (!fromSettings && (outcome.ok() || outcome.skipped())) {
+                LOG.info("Handler registration: " + outcome.text());
+                return;
+            }
+            Platform.runLater(
+                    () -> setStatus(outcome.text(), outcome.ok() ? EngineEvent.Level.INFO : EngineEvent.Level.WARNING));
+        });
+    }
+
+    /**
+     * FX thread. What a second instance or the desktop handed over: the window comes to the front
+     * first (shown from the tray, un-minimised), then each input takes the usual add path, as a
+     * dropped file would, so the Adding settings apply.
+     */
+    public void openFromOutside(List<String> inputs, String origin) {
+        if (hiddenToTray) showFromTray();
+        else {
+            stage.setIconified(false);
+            stage.toFront();
+            stage.requestFocus();
+        }
+        String said = inputs.isEmpty()
+                ? "Brought to the front by " + origin
+                : "Received " + (inputs.size() == 1 ? "1 item" : inputs.size() + " items") + " from " + origin + ": "
+                        + String.join(", ", inputs);
+        log.add(EngineEvent.info(null, null, said));
+        setStatus(said);
+        inputs.forEach(this::addInput);
+    }
+
+    /** Set by App once the lock is held, for the capture hook. */
+    public void setInstanceDescription(String text) {
+        instanceDescription = text;
+    }
+
+    public String instanceDescription() {
+        return instanceDescription;
+    }
+
+    /** The badge backend that came up, or the reason none did, or "none"; for the capture hook. */
+    public String badgeDescription() {
+        Badge current = badge;
+        if (current != null) return current.backend() + (badgeState.active() ? " " + badgeState.text() : "");
+        return badgeReason.isEmpty() ? "none" : badgeReason;
+    }
+
+    public String handlerDescription() {
+        return handlerOutcome;
+    }
+
+    public String openHandlersDescription() {
+        return openHandlers;
     }
 
     // ---- tray -----------------------------------------------------------------------------------
@@ -1542,6 +1705,7 @@ public final class MainWindow {
         }
         TorrentDetail shown = detailSnapshot;
         pushTray(TrayStatus.of(snapshot, current));
+        pushBadge(BadgeState.of(snapshot, current.download()));
         Platform.runLater(() -> {
             rows.apply(snapshot, nowSeconds);
             refreshSidebar(snapshot);

@@ -140,6 +140,22 @@ class SettingsTest {
     }
 
     @Test
+    void theHandlerAndTheBadgeAreOnByDefaultAndRoundTrip(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        assertTrue(settings.osHandler(), "on by default: a double-clicked .torrent opens here");
+        assertTrue(settings.osBadge(), "on by default: the dock says what is downloading");
+        settings.setOsHandler(false);
+        settings.setOsBadge(false);
+        settings.save();
+        Settings read = new Settings(file);
+        read.load();
+        assertFalse(read.osHandler());
+        assertFalse(read.osBadge());
+    }
+
+    @Test
     void sidebarShowsUnlessTurnedOffAndItsFilterIsAStringTheUiParses(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Settings settings = new Settings(file);
