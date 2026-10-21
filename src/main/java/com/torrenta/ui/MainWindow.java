@@ -127,6 +127,11 @@ public final class MainWindow {
     private ToolBar toolbar;
     private final StackPane host = new StackPane();
     private final CommandPalette palette;
+    /** The chord that opens the palette, as {@code ui.paletteKey} says; see {@link #applyPaletteKey}. */
+    private KeyCombination paletteChord;
+
+    private Button paletteButton;
+    private MenuItem paletteItem;
     private final EventLog log = new EventLog();
     private final LogWindow logWindow;
     private final StatisticsWindow statsWindow;
@@ -262,12 +267,13 @@ public final class MainWindow {
         statusBar = buildStatusBar();
         root.setBottom(statusBar);
         commands = buildCommands();
+        paletteChord =
+                PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT).chord();
         // The toolbar first: the View menu's check item binds to its visibility.
         ToolBar bar = buildToolbar();
         root.setTop(new VBox(buildMenuBar(), bar));
         table.setContextMenu(buildContextMenu());
-        palette =
-                new CommandPalette(host, this::focusList, shiftChord(KeyCode.P).getDisplayText());
+        palette = new CommandPalette(host, this::focusList, paletteChord.getDisplayText());
         logWindow = new LogWindow(stage, log);
         statsWindow = new StatisticsWindow(stage, settings.statsWindowSeconds(), this::rememberStatsWindow);
         statsWindow.showingProperty().addListener((o, was, now) -> statsWanted = now);
@@ -316,7 +322,7 @@ public final class MainWindow {
                         .toExternalForm());
         Fonts.installUiFont(scene);
         scene.getAccelerators().put(chord(KeyCode.F), this::focusFilter);
-        scene.getAccelerators().put(shiftChord(KeyCode.P), () -> palette.show(commands));
+        scene.getAccelerators().put(paletteChord, () -> palette.show(commands));
         scene.getAccelerators().put(shiftChord(KeyCode.L), logWindow::show);
         scene.getAccelerators().put(shiftChord(KeyCode.T), statsWindow::show);
         scene.getAccelerators().put(shiftChord(KeyCode.M), messagePopup::toggle);
@@ -2162,10 +2168,8 @@ public final class MainWindow {
     private ToolBar buildToolbar() {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        Button paletteButton = Icons.toolbarButton(
-                Icons.palette(),
-                "Command Palette (" + shiftChord(KeyCode.P).getDisplayText() + ")",
-                () -> palette.show(commands));
+        paletteButton = Icons.toolbarButton(Icons.palette(), paletteButtonName(), () -> palette.show(commands));
+        // Settings alone at the right end, as Editora keeps it; the palette with the other views.
         toolbar = new ToolBar(
                 toolButton("create", Icons.newFile()),
                 toolButton("add-file", Icons.open()),
@@ -2180,9 +2184,9 @@ public final class MainWindow {
                 toolButton("search", Icons.search()),
                 toolButton("rss", Icons.rss()),
                 toolButton("event-log", Icons.history()),
-                toolButton("settings", Icons.settings()),
+                paletteButton,
                 spacer,
-                paletteButton);
+                toolButton("settings", Icons.settings()));
         toolbar.getStyleClass().add("main-toolbar");
         toolbar.setVisible(settings.toolbar());
         toolbar.managedProperty().bind(toolbar.visibleProperty());
@@ -2246,8 +2250,8 @@ public final class MainWindow {
         Menu torrent = new Menu("Torrent");
         torrent.getItems().addAll(torrentItems());
 
-        MenuItem paletteItem = new MenuItem("Command Palette…");
-        paletteItem.setAccelerator(shiftChord(KeyCode.P));
+        paletteItem = new MenuItem("Command Palette…");
+        paletteItem.setAccelerator(paletteChord);
         paletteItem.setOnAction(e -> palette.show(commands));
         CheckMenuItem toolbarItem = new CheckMenuItem("Toolbar");
         toolbarItem.selectedProperty().bindBidirectional(toolbar.visibleProperty());
@@ -2835,6 +2839,31 @@ public final class MainWindow {
     private void applyAppearance() {
         applyStateColors();
         applyDensity(Density.byId(settings.density(), Density.DEFAULT));
+        applyPaletteKey();
+    }
+
+    private String paletteButtonName() {
+        return "Command Palette (" + paletteChord.getDisplayText() + ")";
+    }
+
+    /**
+     * The palette's chord, re-read from the settings: the accelerator moves, and the menu item, the
+     * toolbar tooltip and the palette's chip say the new one. Before the scene exists (the
+     * constructor's first pass) there is no accelerator to move; the scene is built with the chord.
+     */
+    private void applyPaletteKey() {
+        KeyCombination wanted =
+                PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT).chord();
+        if (wanted.equals(paletteChord)) return;
+        Scene scene = host.getScene();
+        if (scene != null) {
+            scene.getAccelerators().remove(paletteChord);
+            scene.getAccelerators().put(wanted, () -> palette.show(commands));
+        }
+        paletteChord = wanted;
+        paletteItem.setAccelerator(wanted);
+        Icons.name(paletteButton, paletteButtonName());
+        palette.setOpenerChord(wanted.getDisplayText());
     }
 
     /**
