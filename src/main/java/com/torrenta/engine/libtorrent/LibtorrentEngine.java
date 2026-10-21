@@ -734,6 +734,11 @@ public final class LibtorrentEngine implements Engine {
         writeLabels(id, labelsOf(id).withTags(tags));
     }
 
+    @Override
+    public synchronized void rename(String id, String name) throws EngineException {
+        writeLabels(id, labelsOf(id).withName(name));
+    }
+
     /** The torrent's labels, none if it has none; an id the session lacks is an error. */
     private TorrentLabels labelsOf(String id) throws EngineException {
         handle(id);
@@ -1170,6 +1175,10 @@ public final class LibtorrentEngine implements Engine {
         else h.unsetFlags(Flags.SEQUENTIAL_DOWNLOAD);
     }
 
+    public synchronized void renameFile(String id, int index, String path) throws EngineException {
+        handle(id).renameFile(index, path);
+    }
+
     @Override
     public synchronized void setSuperSeeding(String id, boolean on) throws EngineException {
         TorrentHandle h = handle(id);
@@ -1214,8 +1223,7 @@ public final class LibtorrentEngine implements Engine {
             TorrentStatus status = h.status(StatusQuery.FLAGS);
             if (!status.isFinished()) {
                 writeStorage(id, owed.withDestination(target.toString()));
-                String name = status.name();
-                if (name == null || name.isEmpty()) name = id;
+                String name = displayName(id, status.name());
                 emit(EngineEvent.info(id, name, tr("engine.event.moveWhenComplete", name, target)));
                 return;
             }
@@ -2018,12 +2026,21 @@ public final class LibtorrentEngine implements Engine {
         return bestHash(handle.swig()).to_hex();
     }
 
-    /** The name, or the hash while there is none; empty for a handle that is already gone. */
-    private static String nameOf(TorrentHandle handle) {
+    /**
+     * The name a person gave it, else its own, else the hash while there is none; empty for a
+     * handle that is already gone.
+     */
+    private String nameOf(TorrentHandle handle) {
         if (!handle.isValid()) return "";
         TorrentStatus status = handle.status(StatusQuery.FLAGS);
-        String name = status.name();
-        return name == null || name.isEmpty() ? status.getInfoHashes().getBest().toHex() : name;
+        String id = status.getInfoHashes().getBest().toHex();
+        return displayName(id, status.name());
+    }
+
+    private String displayName(String id, String own) {
+        String given = labels.getOrDefault(id, TorrentLabels.NONE).name();
+        if (!given.isEmpty()) return given;
+        return own == null || own.isEmpty() ? id : own;
     }
 
     /**
@@ -2132,8 +2149,7 @@ public final class LibtorrentEngine implements Engine {
         TorrentStatus status = handle.status(StatusQuery.FLAGS);
         torrent_flags_t flags = status.flags();
         String id = status.getInfoHashes().getBest().toHex();
-        String name = status.name();
-        if (name == null || name.isEmpty()) name = id;
+        String name = displayName(id, status.name());
         String tracker = status.currentTracker();
         TorrentLabels l = labels.getOrDefault(id, TorrentLabels.NONE);
         ErrorCode error = status.errorCode();

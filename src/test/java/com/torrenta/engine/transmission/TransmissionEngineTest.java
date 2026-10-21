@@ -142,7 +142,8 @@ class TransmissionEngineTest {
                 Capability.SEED_MODE,
                 Capability.STOP_CONDITION,
                 Capability.SUPER_SEEDING,
-                Capability.EXPORT_TORRENT)) {
+                Capability.EXPORT_TORRENT,
+                Capability.RENAME_TORRENT)) {
             assertTrue(caps.lacks(missing), missing + " is not Transmission's");
         }
         assertThrows(EngineException.class, () -> e.create(null, null));
@@ -150,6 +151,7 @@ class TransmissionEngineTest {
         assertThrows(EngineException.class, () -> e.setIpFilter(List.of()));
         assertThrows(EngineException.class, () -> e.setSuperSeeding(MAGNET_ID, true));
         assertThrows(EngineException.class, () -> e.exportTorrent(MAGNET_ID));
+        assertThrows(EngineException.class, () -> e.rename(MAGNET_ID, "x"));
         e.stop();
         assertTrue(e.torrents().isEmpty(), "a stopped engine lists nothing");
     }

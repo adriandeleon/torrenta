@@ -467,6 +467,15 @@ public final class TransmissionEngine implements Engine {
         throw new EngineException(tr("engine.error.transmissionExport"));
     }
 
+    /**
+     * The daemon has no name apart from the files': its {@code torrent-rename-path} on the root
+     * renames the folder on disk, which is the Files tab's rename. The capability is missing.
+     */
+    @Override
+    public void rename(String id, String name) throws EngineException {
+        throw new EngineException(tr("engine.error.transmissionRename"));
+    }
+
     @Override
     public void queueMove(String id, QueueMove move) throws EngineException {
         action("queue-move-" + move.name().toLowerCase(Locale.ROOT), id);

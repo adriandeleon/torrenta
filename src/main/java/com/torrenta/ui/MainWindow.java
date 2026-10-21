@@ -1301,6 +1301,10 @@ public final class MainWindow {
                             parts.contains("CTRL"),
                             parts.contains("ALT"),
                             parts.contains("META")));
+        } else if (action.startsWith("rename:")) {
+            // rename:<name>: the selection's Rename dialog, filled and confirmed ("~" is a space).
+            renameForCapture = action.substring("rename:".length()).replace('~', ' ');
+            renameTorrent();
         } else if (action.startsWith("export-to:")) {
             // The selection exported into a folder, as Export does past its (native) chooser.
             export(exportTargets(selectedTorrents(), Path.of(action.substring("export-to:".length()))));
@@ -3078,6 +3082,55 @@ public final class MainWindow {
     }
 
     /**
+     * Torrent → Rename… (F2): the name the list, the log and run-on-event show; the files keep
+     * theirs (the Files tab renames those). Empty goes back to the torrent's own name. One torrent
+     * at a time, since one name for several says nothing.
+     */
+    private void renameTorrent() {
+        List<Torrent> selected = selectedTorrents();
+        if (selected.isEmpty() || engine == null || (promptDialog != null && promptDialog.isShowing())) return;
+        if (selected.size() > 1) {
+            setStatus(tr("status.rename.one"));
+            return;
+        }
+        Torrent t = selected.get(0);
+        // On the next pulse: a nested event loop cannot start inside an animation or layout pass.
+        Platform.runLater(() -> {
+            javafx.scene.control.TextInputDialog prompt = new javafx.scene.control.TextInputDialog(t.name());
+            prompt.initOwner(stage);
+            Fonts.installUiFont(prompt.getDialogPane());
+            prompt.setTitle(tr("window.rename.title"));
+            prompt.setHeaderText(tr("window.rename.header"));
+            prompt.getEditor().setPrefColumnCount(40);
+            String typed = renameForCapture;
+            renameForCapture = null;
+            if (typed != null) {
+                Platform.runLater(() -> {
+                    prompt.getEditor().setText(typed);
+                    ((javafx.scene.control.Button)
+                                    prompt.getDialogPane().lookupButton(javafx.scene.control.ButtonType.OK))
+                            .fire();
+                });
+            }
+            promptDialog = prompt;
+            prompt.showAndWait()
+                    .map(String::strip)
+                    .filter(name -> !name.equals(t.name()))
+                    .ifPresent(name -> renameTo(t, name));
+        });
+    }
+
+    /** What the capture hook types into the next Rename dialog before pressing OK. */
+    private String renameForCapture;
+
+    private void renameTo(Torrent t, String name) {
+        onTorrents(
+                name.isEmpty() ? tr("actions.verb.nameRestored") : tr("actions.verb.renamed", name),
+                List.of(t),
+                (e, x) -> e.rename(x.id(), name));
+    }
+
+    /**
      * Torrent → Export .torrent…: one torrent to a file chosen in a save dialog, several into a
      * folder under their own names, never over a file already there. The bytes come from the
      * engine on a worker and are written beside their final name, then moved into place.
@@ -3312,6 +3365,8 @@ public final class MainWindow {
                         null,
                         selection,
                         this::copyMagnetLinks),
+                // F2 is handled on the table, like Space and Delete: a text field takes it too.
+                new Command("rename", tr("command.rename"), null, "F2", gate("rename", selection), this::renameTorrent),
                 new Command(
                         "export-torrent",
                         tr("command.exportTorrent"),
@@ -3603,6 +3658,11 @@ public final class MainWindow {
         } else if (e.getCode() == KeyCode.SPACE) {
             command("pause-resume").run().run();
             e.consume();
+        } else if (e.getCode() == KeyCode.F2 && !e.isShortcutDown() && !e.isAltDown()) {
+            // Behind its capability, unlike Space: a daemon has no name of its own to give.
+            Command rename = command("rename");
+            if (rename.enabled().get()) rename.run().run();
+            e.consume();
         } else if (e.getCode() == KeyCode.DELETE || e.getCode() == KeyCode.BACK_SPACE) {
             command(e.isShiftDown() ? "remove-data" : "remove").run().run();
             e.consume();
@@ -3731,7 +3791,14 @@ public final class MainWindow {
     private List<MenuItem> torrentItems() {
         List<MenuItem> items = new ArrayList<>();
         for (String id : List.of(
-                "pause-resume", "force-resume", "recheck", "reannounce", "sequential", "super-seed", "limits")) {
+                "pause-resume",
+                "force-resume",
+                "recheck",
+                "reannounce",
+                "sequential",
+                "super-seed",
+                "limits",
+                "rename")) {
             items.add(menuItem(id));
         }
         items.add(queueMenu());

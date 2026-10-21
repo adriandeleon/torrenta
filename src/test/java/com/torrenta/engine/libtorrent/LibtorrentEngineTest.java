@@ -270,6 +270,30 @@ class LibtorrentEngineTest {
         }
     }
 
+    /** A torrent's given name is the engine's everywhere, and survives a restart; empty undoes it. */
+    @Test
+    void aRenamedTorrentKeepsItsNameAcrossARestart(@TempDir Path dir) throws Exception {
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine engine = engine(dir, store)) {
+            engine.start();
+            engine.add(MAGNET);
+            engine.rename(MAGNET_ID, "My test");
+            assertEquals("My test", engine.torrents().get(0).name());
+        }
+        try (LibtorrentEngine again = engine(dir, store)) {
+            again.addListener(events::add);
+            again.start();
+            assertEquals("My test", again.torrents().get(0).name());
+            await(
+                    "the log uses it",
+                    () -> events.stream().anyMatch(e -> e.message().equals("Restored My test")));
+            again.rename(MAGNET_ID, "");
+            assertEquals("Torrenta test", again.torrents().get(0).name(), "its own name back");
+            assertTrue(store.loadLabels(MAGNET_ID).isEmpty(), "nothing left to keep");
+        }
+    }
+
     @Test
     void eventsForTheLifeOfATorrent(@TempDir Path dir) throws Exception {
         Path downloads = dir.resolve("downloads");

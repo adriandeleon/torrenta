@@ -152,6 +152,13 @@ public interface Engine extends AutoCloseable {
      */
     byte[] exportTorrent(String id) throws EngineException;
 
+    /**
+     * Shows the torrent under another name, everywhere the engine names it (the list, events,
+     * run-on-event). The files keep theirs; empty goes back to the torrent's own name. Needs
+     * {@link Capability#RENAME_TORRENT}.
+     */
+    void rename(String id, String name) throws EngineException;
+
     /** A magnet link for the torrent, with its trackers, as the engine would build it. */
     String magnetLink(String id) throws EngineException;
 
@@ -319,7 +326,9 @@ public interface Engine extends AutoCloseable {
         /** Super seeding a complete torrent, from the menu or as a share limit's action. */
         SUPER_SEEDING,
         /** The torrent as a {@code .torrent} file, its info dictionary as it was loaded. */
-        EXPORT_TORRENT;
+        EXPORT_TORRENT,
+        /** A name of the person's own for a torrent, the files keeping theirs (Rename…, F2). */
+        RENAME_TORRENT;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

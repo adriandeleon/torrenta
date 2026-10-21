@@ -137,6 +137,7 @@ final class Icons {
             case "copy-name" -> copy();
             case "copy-hash" -> hash();
             case "copy-magnet" -> magnet();
+            case "rename" -> rename();
             case "export-torrent" -> exportFile();
             case "open-folder" -> open();
             case "remove" -> trash();
@@ -210,6 +211,11 @@ final class Icons {
     /** Super seeding: an arrow up out of a seed's dot, fanning to three. */
     static Glyph superSeed() {
         return line("M8 13.5a1.5 1.5 0 1 0 0-3a1.5 1.5 0 1 0 0 3M8 10.5V4M8 4L4 7.5M8 4l4 3.5M5.5 2.5L8 4l2.5-1.5");
+    }
+
+    /** Rename: a text cursor beside a line of text. */
+    static Glyph rename() {
+        return line("M2.5 8h6.5M2.5 5h4M11.5 3v10M10 3h3M10 13h3");
     }
 
     /** Export .torrent: a page with an arrow leaving it. */
