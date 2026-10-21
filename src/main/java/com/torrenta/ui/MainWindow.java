@@ -139,6 +139,7 @@ public final class MainWindow {
             new java.util.EnumMap<>(Density.class);
     private List<Command> commands = List.of();
     private AddDialog currentDialog;
+    private CreateDialog createDialog;
     private LimitsDialog limitsDialog;
     private TagsDialog tagsDialog;
     /** A choice or text prompt of the category commands, while one is up. */
@@ -317,6 +318,7 @@ public final class MainWindow {
     /** What to photograph: the open Add dialog if there is one, else a window of ours, else the window. */
     public javafx.scene.Scene captureScene() {
         if (currentDialog != null && currentDialog.isShowing()) return currentDialog.scene();
+        if (createDialog != null && createDialog.isShowing()) return createDialog.scene();
         if (limitsDialog != null && limitsDialog.isShowing()) return limitsDialog.scene();
         if (tagsDialog != null && tagsDialog.isShowing()) return tagsDialog.scene();
         if (promptDialog != null && promptDialog.isShowing())
@@ -333,6 +335,7 @@ public final class MainWindow {
     /** Dismisses an open Add dialog, so the capture hook can exit outside its nested event loop. */
     public void closeDialogsForCapture() {
         if (currentDialog != null && currentDialog.isShowing()) currentDialog.cancel();
+        if (createDialog != null && createDialog.isShowing()) createDialog.close();
         if (limitsDialog != null && limitsDialog.isShowing()) limitsDialog.cancel();
         if (tagsDialog != null && tagsDialog.isShowing()) tagsDialog.cancel();
         if (promptDialog != null && promptDialog.isShowing()) promptDialog.close();
@@ -347,6 +350,10 @@ public final class MainWindow {
      */
     public List<String> lateLinesForCapture() {
         List<String> out = new ArrayList<>();
+        if (createDialog != null && createDialog.isShowing()) {
+            out.add("dialog=" + createDialog.title());
+            out.addAll(createDialog.linesForCapture());
+        }
         if (!settingsWindow.ruleMatchesForCapture().isEmpty()) {
             out.add("dialog=" + settingsWindow.dialogTitle());
             out.add("rule-matches=" + settingsWindow.ruleMatchesForCapture());
@@ -456,6 +463,24 @@ public final class MainWindow {
                             action.substring("search-keys:".length()).split("\\+"))
                     .map(key -> KeyCode.valueOf(key.trim().toUpperCase(java.util.Locale.ROOT)))
                     .toList());
+        } else if (action.startsWith("create")) {
+            // create, create:<path> (the dialog with the source filled in), create-run:<path> (and
+            // created into a temporary file with seeding on, the Save As chooser skipped).
+            int colon = action.indexOf(':');
+            createTorrent();
+            if (createDialog != null && colon > 0) {
+                Path path = Path.of(action.substring(colon + 1));
+                createDialog.setSource(path);
+                if (action.startsWith("create-run:")) {
+                    try {
+                        Path target =
+                                Files.createTempDirectory("torrenta-create").resolve(CreateText.fileName(path));
+                        createDialog.createForCapture(target);
+                    } catch (IOException e) {
+                        System.err.println("capture: no temporary folder: " + e.getMessage());
+                    }
+                }
+            }
         } else if (action.equals("dialog-add")) {
             if (currentDialog != null && currentDialog.isShowing()) currentDialog.confirm();
         } else if (action.startsWith("dialog-press:")) {
@@ -1206,6 +1231,17 @@ public final class MainWindow {
         });
     }
 
+    /** Opens the Create Torrent dialog, or brings the open one to the front; one at a time. */
+    private void createTorrent() {
+        Engine e = engine;
+        if (e == null) {
+            setStatus("The engine is still starting");
+            return;
+        }
+        if (createDialog == null || !createDialog.isShowing()) createDialog = new CreateDialog(stage, e, settings);
+        createDialog.show();
+    }
+
     private void addTorrentFile() {
         FileChooser chooser = new FileChooser();
         chooser.setTitle("Add Torrent File");
@@ -1749,6 +1785,7 @@ public final class MainWindow {
         BooleanBinding selection = Bindings.isNotEmpty(table.getSelectionModel().getSelectedItems());
         BooleanBinding always = Bindings.createBooleanBinding(() -> true);
         List<Command> all = new ArrayList<>(List.of(
+                new Command("create", "New Torrent…", chord(KeyCode.N), null, always, this::createTorrent),
                 new Command("add-file", "Add Torrent File…", chord(KeyCode.O), null, always, this::addTorrentFile),
                 new Command("add-magnet", "Add Magnet Link…", chord(KeyCode.M), null, always, this::addMagnetLink),
                 // The chord is a scene accelerator, not a menu one: Ctrl+V in a text field must paste.
@@ -1904,6 +1941,7 @@ public final class MainWindow {
                 "Command Palette (" + shiftChord(KeyCode.P).getDisplayText() + ")",
                 () -> palette.show(commands));
         toolbar = new ToolBar(
+                toolButton("create", Icons.newFile()),
                 toolButton("add-file", Icons.open()),
                 toolButton("add-magnet", Icons.magnet()),
                 new Separator(),
@@ -1966,6 +2004,8 @@ public final class MainWindow {
         Menu file = new Menu("File");
         file.getItems()
                 .addAll(
+                        command("create").menuItem(),
+                        new SeparatorMenuItem(),
                         addTorrent,
                         addMagnet,
                         addClipboard,

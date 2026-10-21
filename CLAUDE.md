@@ -38,6 +38,7 @@ to try one on purpose).
 | Entry | `--help`/`--version`, toolkit start, theme | `com.torrenta.App`, `com.torrenta.cli` |
 | Events | `EngineEvent` (level, torrent, message), raised by the engine from libtorrent alerts and by its own start/stop/remove; `Engine.addListener` | `com.torrenta.engine` |
 | Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Engine.fetchMetadata` (a magnet's file list while the dialog is open), `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL); `ui.AddDialog` (rules as statics), `FileTree` (wanted + priority ladder), `FreeSpace` (disk bar and sentence) | `com.torrenta.engine`, `com.torrenta.net`, `ui` |
+| Create | `CreateRequest` (path, `Format` v1/v2/hybrid, piece size or 0, private, tracker tiers, web seeds, comment, `source` tag, align, seed), `CreatedTorrent` (bytes, engine id, both hashes, counts, magnet, the seeding torrent or the add's problem), `PieceSize` (the automatic rule: ~1,500 pieces, 16 KiB … 16 MiB; `count` packed or aligned), `Engine.create(request, CreateProgress)` blocking on the caller's worker, cancellable at the next piece; `libtorrent.PieceHasher` (v1 pieces and v2 piece layers in Java, bit for bit libtorrent's); `ui.CreateDialog` (modeless, sizes the source live, Save as…, atomic write), `CreateText` (tier parser, summary, outcome) | `com.torrenta.engine`, `.libtorrent`, `ui` |
 | Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags; JSON for the `<hash>.labels` sidecar), `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `ui.FilterQuery` (the filter box's `key:value` language → predicate + chips), `Sidebar` (a tree: All, Categories, Tags; Status and Tracker sections later), `TagsDialog` | `com.torrenta.engine`, `store`, `ui` |
 | Detail | `TorrentDetail` (general, files, peers, trackers, pieces) from `Engine.detail(id)`; `setFilePriority`, `addTrackers`, `removeTracker`; `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
 | Engine settings | `EngineSettings` (engine-neutral record; `listenInterfaces()` is the tested string), `Settings.engineSettings()` clamps the `connection.*` and `proxy.*` keys, `LibtorrentEngine.toPack` maps onto `settings_pack`; applied at start (`SessionParams`) and live (`applySettings`) | `com.torrenta.engine`, `store`, `.libtorrent` |
@@ -244,6 +245,22 @@ release process with the names changed; Termina's README and memory hold the war
 - **"Add now, pick files when ready"** adds with stop-after-metadata and marks
   `torrent.<hash>.pickFiles` in the settings; `MainWindow.chooseFiles(id)` opens the dialog's
   tree for a torrent in the list and clears the mark. Nothing shows the mark on the row yet.
+- **libtorrent's mmap disk I/O takes the JVM's SIGSEGV handler.** Once a file of
+  `mmap_file_size_cutoff` pieces (40 by default) is mapped, libtorrent installs a SIGSEGV/SIGBUS
+  guard of its own in place of the JVM's (`sigaction`, no chaining); a fault that is not its own,
+  such as the JVM's next safepoint poll, is reset to the default action and the process dies: exit
+  139, no `hs_err` file, "Segmentation fault" from the shell, any time after a big file was
+  touched, typically at a GC. `toPack` sets the cutoff to `Integer.MAX_VALUE`, so the same disk
+  I/O reads with `pread` and never installs it; `aFileBigEnoughToMapIsSeededWithout…` is the
+  shape that died (a 2 MiB file in 16 KiB pieces polled while a thread drives GC). The same guard
+  sits under `set_piece_hashes`, which the session settings do not reach, which is why
+  `Engine.create` hashes in Java (`PieceHasher`) and only lists, lays out and writes through
+  `create_torrent`; libtorrent4j's `TorrentBuilder` is for tests on files under the cutoff only
+  (`theJavaHasherMatchesLibtorrentsOwnBitForBit` compares the two). A cancel stops at the next
+  piece. `create_torrent`'s and `file_storage`'s constants are SWIG objects (`CreateFlags`
+  holder). There is no setter for the info dictionary's `source` key: it is put into the `entry`
+  by hand before bencoding, which is why the hashes are read off the final bytes with `load`. A
+  duplicate seed add hands back the torrent already in the list, silently.
 - **A removed torrent's alert carries only the hash.** `remove()` reads the name first and raises
   the event itself; the `TORRENT_REMOVED` alert is not listened to.
 - **A row's state is computed, not stored**: `RowState.of(torrent, quietSeconds)` and

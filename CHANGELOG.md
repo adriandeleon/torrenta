@@ -13,12 +13,37 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Fixed
 
+- **A crash, any time after a file of 40 pieces or more was checked, downloaded or seeded** (exit
+  139, no error file, "Segmentation fault" from the shell, usually at a garbage collection):
+  libtorrent's memory-mapped disk I/O installs a SIGSEGV/SIGBUS handler of its own in place of
+  the JVM's once it maps a file, and the JVM's next safepoint poll died under it. The engine now
+  sets libtorrent's mmap cutoff above every file, so the same disk I/O reads with `pread` and
+  installs nothing. Found while making the torrent creator, whose hashing met the same handler;
+  a test seeds a 2 MiB file while a thread drives the collector.
 - **A crash at quit with a torrent in the list** (exit 139, no error file, every few runs): the
   window's poll could still be reading the torrents while the engine deleted the native session
   under it. Every engine call now finishes before the session goes, and a later one is refused.
 
 ### Added
 
+- **The Create Torrent dialog** (`Ctrl+N`, File → New Torrent…, the toolbar's page glyph), the
+  third step of the RSS, creation and statistics milestone: a file or folder (browsed, typed or
+  dropped on the dialog), hybrid, v1-only or v2-only, a piece size from 16 KiB to 32 MiB or
+  Automatic (about 1,500 pieces, qBittorrent's rule), private, "Start seeding after creation",
+  "Align files to piece boundaries" (always on for v2 and hybrid, libtorrent's canonical layout),
+  trackers one per line with a blank line between tiers (pre-filled from the last creation, else
+  the Protocol page's default trackers), web seeds, a comment and a private tracker's source tag.
+  The header sizes the source on a worker and shows the piece count for the size chosen, live.
+  Create… asks where to save (the folder is remembered as `create.lastDir`, this machine's),
+  hashes on a worker with a progress bar and a Cancel, writes the file beside its name and moves
+  it into place, and shows the v1 and v2 info-hashes and the magnet link with Copy buttons; the
+  dialog stays open so they can be copied. Seeding adds the torrent through the usual add path
+  with the source's parent as the save path and the hash check skipped, so it seeds at once.
+  `Engine.create` is the engine's side: libtorrent lists and lays out the files and writes the
+  torrent, the pieces are hashed in Java (v1 pieces and v2 piece layers, bit for bit what
+  libtorrent produces, which the tests check) so Cancel stops at the next piece, the `source`
+  key is written into the info dictionary by hand (libtorrent has no setter), and the hashes are
+  read off the final bytes.
 - **RSS auto-download rules**, the second step of the RSS milestone, qBittorrent's shape. A rule
   (Settings → RSS → Rules; Add…, Edit…, Remove, Duplicate) names the articles it wants: words the
   title must and must not contain (every word of a phrase, `|` between alternatives,
