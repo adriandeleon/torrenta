@@ -391,12 +391,16 @@ class TransmissionEngineTest {
         assertNull(args.get("labels"));
         assertEquals(Boolean.FALSE, args.get("paused"));
 
+        // A drive path is sent as it is on every platform: on Windows Path.of normalises it to
+        // single backslashes, elsewhere it is one odd name; either way it is the Path's own text.
+        Path drive = Path.of("C:\\dl\\tv");
         Map<String, Object> explicit = TransmissionEngine.addArguments(
-                AddRequest.defaults(new AddRequest.Magnet(magnet), Path.of("C:\\\\dl\\\\tv")),
-                localDefault,
-                e.capabilities());
-        assertEquals("C:\\\\dl\\\\tv", explicit.get("download-dir"), "a Windows drive path is left alone");
-        assertEquals("/srv/dl", TransmissionEngine.remotePath(Path.of("/srv/dl")));
+                AddRequest.defaults(new AddRequest.Magnet(magnet), drive), localDefault, e.capabilities());
+        assertEquals(drive.toString(), explicit.get("download-dir"), "a Windows drive path is left alone");
+        assertEquals(
+                "/srv/dl",
+                TransmissionEngine.remotePath(Path.of("/srv/dl")),
+                "a POSIX path, with forward slashes on every platform");
         assertEquals("sub/dir", TransmissionEngine.remotePath(Path.of("sub", "dir")));
 
         Map<String, Object> noSequential = TransmissionEngine.addArguments(
