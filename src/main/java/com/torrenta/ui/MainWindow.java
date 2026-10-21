@@ -185,6 +185,7 @@ public final class MainWindow {
     private final SettingsWindow settingsWindow;
     private final IpFilterController ipFilter;
     private final MenuItem downloadUpdateItem = new MenuItem();
+    private MenuBar menuBar;
     private final MenuItem skipUpdateItem = new MenuItem();
     private final Label updateBadge = new Label();
     private final Label altSpeedToggle = new Label();
@@ -492,7 +493,37 @@ public final class MainWindow {
         if (settingsWindow.dialogScene() != null) return settingsWindow.dialogScene();
         if (settingsWindow.isShowing()) return settingsWindow.scene();
         if (logWindow.isShowing()) return logWindow.scene();
+        javafx.stage.PopupWindow popup = shownPopup();
+        if (popup != null) return popup.getScene();
         return stage.getScene();
+    }
+
+    /** The menu or context menu open now, or null: a popup is its own window, so its own scene. */
+    private static javafx.stage.PopupWindow shownPopup() {
+        for (javafx.stage.Window w : javafx.stage.Window.getWindows()) {
+            if (w instanceof ContextMenu c && c.isShowing()) return c;
+        }
+        return null;
+    }
+
+    /**
+     * The open menu's items for the capture hook, top to bottom: the text, {@code [icon]} when
+     * one is set, {@code ---} for a separator, {@code >} before a submenu.
+     */
+    public List<String> menuLines() {
+        if (!(shownPopup() instanceof ContextMenu menu)) return List.of();
+        List<String> lines = new ArrayList<>();
+        for (MenuItem item : menu.getItems()) {
+            if (item instanceof SeparatorMenuItem) {
+                lines.add("---");
+                continue;
+            }
+            if (!item.isVisible()) continue;
+            String line = (item instanceof Menu ? "> " : "") + item.getText();
+            if (item.getGraphic() != null) line += " [icon]";
+            lines.add(line);
+        }
+        return lines;
     }
 
     /** Dismisses an open Add dialog, so the capture hook can exit outside its nested event loop. */
@@ -687,6 +718,17 @@ public final class MainWindow {
         } else if (action.startsWith("detail:")) {
             setDetailVisible(true);
             detail.selectTab(action.substring("detail:".length()));
+        } else if (action.startsWith("menu:")) {
+            // Open a menu of the bar by its title (menu:File); the PNG is then of the popup.
+            String title = action.substring("menu:".length());
+            menuBar.getMenus().stream()
+                    .filter(m -> m.getText().equalsIgnoreCase(title))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("no menu " + title))
+                    .show();
+        } else if (action.equals("context-menu")) {
+            // The list's context menu, as a right-click on it would open it.
+            table.getContextMenu().show(table, javafx.geometry.Side.BOTTOM, 0, 0);
         } else if (action.equals("palette")) {
             palette.show(commands);
         } else if (action.startsWith("palette:")) {
@@ -2163,6 +2205,18 @@ public final class MainWindow {
         return commands.stream().filter(c -> c.id().equals(id)).findFirst().orElseThrow();
     }
 
+    /** A menu item for a command, with the command's glyph beside it (see {@link Icons#forCommand}). */
+    private MenuItem menuItem(String id) {
+        MenuItem item = command(id).menuItem();
+        item.setGraphic(menuIcon(Icons.forCommand(id)));
+        return item;
+    }
+
+    /** A glyph at the menus' size, or null for none. */
+    private static javafx.scene.Node menuIcon(Icons.Glyph glyph) {
+        return glyph == null ? null : glyph.at(Icons.MENU_SIZE);
+    }
+
     /** Space and Delete: on the table only, never as scene accelerators a text field could fire. */
     private void onTableKey(KeyEvent e) {
         if (e.getCode() == KeyCode.ESCAPE) {
@@ -2177,27 +2231,28 @@ public final class MainWindow {
     }
 
     private MenuBar buildMenuBar() {
-        MenuItem addTorrent = command("add-file").menuItem();
-        MenuItem addMagnet = command("add-magnet").menuItem();
-        MenuItem addClipboard = command("add-clipboard").menuItem();
+        MenuItem addTorrent = menuItem("add-file");
+        MenuItem addMagnet = menuItem("add-magnet");
+        MenuItem addClipboard = menuItem("add-clipboard");
 
         MenuItem quit = new MenuItem("Quit");
+        quit.setGraphic(menuIcon(Icons.power()));
         quit.setAccelerator(chord(KeyCode.Q));
         quit.setOnAction(e -> quit());
 
         Menu file = new Menu("File");
         file.getItems()
                 .addAll(
-                        command("create").menuItem(),
+                        menuItem("create"),
                         new SeparatorMenuItem(),
                         addTorrent,
                         addMagnet,
                         addClipboard,
                         new SeparatorMenuItem(),
-                        command("search").menuItem(),
-                        command("rss").menuItem(),
-                        command("rss-run-rules").menuItem(),
-                        command("settings").menuItem(),
+                        menuItem("search"),
+                        menuItem("rss"),
+                        menuItem("rss-run-rules"),
+                        menuItem("settings"),
                         new SeparatorMenuItem(),
                         quit);
 
@@ -2205,15 +2260,19 @@ public final class MainWindow {
         torrent.getItems().addAll(torrentItems());
 
         MenuItem paletteItem = new MenuItem("Command Palette…");
+        paletteItem.setGraphic(menuIcon(Icons.palette()));
         paletteItem.setAccelerator(shiftChord(KeyCode.P));
         paletteItem.setOnAction(e -> palette.show(commands));
         CheckMenuItem toolbarItem = new CheckMenuItem("Toolbar");
+        toolbarItem.setGraphic(menuIcon(Icons.toolbar()));
         toolbarItem.selectedProperty().bindBidirectional(toolbar.visibleProperty());
         CheckMenuItem sidebarItem = new CheckMenuItem("Sidebar");
+        sidebarItem.setGraphic(menuIcon(Icons.sidebar()));
         sidebarItem.setAccelerator(shiftChord(KeyCode.B));
         sidebarItem.selectedProperty().bindBidirectional(sidebar.visibleProperty());
         for (Density d : Density.values()) {
             javafx.scene.control.RadioMenuItem item = new javafx.scene.control.RadioMenuItem(d + " Rows");
+            item.setGraphic(menuIcon(d == Density.COMFORTABLE ? Icons.rowsComfortable() : Icons.rowsCompact()));
             item.setToggleGroup(densityGroup);
             item.setSelected(d == density);
             item.setOnAction(e -> chooseDensity(d));
@@ -2228,30 +2287,33 @@ public final class MainWindow {
                         densityItems.get(Density.COMFORTABLE),
                         densityItems.get(Density.COMPACT),
                         new SeparatorMenuItem(),
-                        command("filter").menuItem(),
-                        command("transfers").menuItem(),
-                        command("focus-sidebar").menuItem(),
-                        command("select-all").menuItem(),
-                        command("event-log").menuItem(),
+                        menuItem("filter"),
+                        menuItem("transfers"),
+                        menuItem("focus-sidebar"),
+                        menuItem("select-all"),
+                        menuItem("event-log"),
                         paletteItem);
 
         // The two update items exist from the start and show only once a release is known, so the
         // menu's shape does not change under a hand that has learned it.
         downloadUpdateItem.setVisible(false);
+        downloadUpdateItem.setGraphic(menuIcon(Icons.download()));
         downloadUpdateItem.setOnAction(e -> downloadUpdate());
         skipUpdateItem.setVisible(false);
+        skipUpdateItem.setGraphic(menuIcon(Icons.skip()));
         skipUpdateItem.setOnAction(e -> skipUpdate());
         Menu help = new Menu("Help");
         help.getItems()
                 .addAll(
-                        command("check-updates").menuItem(),
+                        menuItem("check-updates"),
                         downloadUpdateItem,
                         skipUpdateItem,
                         new SeparatorMenuItem(),
-                        command("about").menuItem());
+                        menuItem("about"));
 
         MenuBar bar = new MenuBar(file, torrent, view, help);
         bar.setUseSystemMenuBar(true);
+        menuBar = bar;
         return bar;
     }
 
@@ -2259,17 +2321,17 @@ public final class MainWindow {
     private List<MenuItem> torrentItems() {
         List<MenuItem> items = new ArrayList<>();
         for (String id : List.of("pause-resume", "force-resume", "recheck", "reannounce", "sequential", "limits")) {
-            items.add(command(id).menuItem());
+            items.add(menuItem(id));
         }
         items.add(new SeparatorMenuItem());
         items.add(categoryMenu());
-        items.add(command("edit-tags").menuItem());
+        items.add(menuItem("edit-tags"));
         items.add(new SeparatorMenuItem());
         for (String id : List.of("copy-name", "copy-hash", "copy-magnet", "open-folder")) {
-            items.add(command(id).menuItem());
+            items.add(menuItem(id));
         }
         items.add(new SeparatorMenuItem());
-        for (String id : List.of("remove", "remove-data")) items.add(command(id).menuItem());
+        for (String id : List.of("remove", "remove-data")) items.add(menuItem(id));
         return items;
     }
 
@@ -2279,6 +2341,7 @@ public final class MainWindow {
      */
     private Menu categoryMenu() {
         Menu menu = new Menu("Set Category");
+        menu.setGraphic(menuIcon(Icons.forCommand("set-category")));
         menu.disableProperty().bind(Bindings.not(command("set-category").enabled()));
         menu.setOnShowing(e -> {
             List<Torrent> selected = selectedTorrents();

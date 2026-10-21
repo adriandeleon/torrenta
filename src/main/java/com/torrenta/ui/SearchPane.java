@@ -448,8 +448,11 @@ final class SearchPane extends VBox {
 
     private ContextMenu buildContextMenu(TableView<SearchRow> t) {
         MenuItem add = new MenuItem("Add…");
+        add.setGraphic(Icons.plus().at(Icons.MENU_SIZE));
         MenuItem copy = new MenuItem("Copy Link");
+        copy.setGraphic(Icons.copy().at(Icons.MENU_SIZE));
         MenuItem detail = new MenuItem("Open Detail Page");
+        detail.setGraphic(Icons.external().at(Icons.MENU_SIZE));
         add.setOnAction(e -> selected(t).ifPresent(host::add));
         copy.setOnAction(e -> selected(t).ifPresent(r -> host.copy(r.link().value())));
         detail.setOnAction(e -> selected(t).ifPresent(r -> host.openDetail(r.detailUrl())));

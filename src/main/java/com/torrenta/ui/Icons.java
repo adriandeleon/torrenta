@@ -18,9 +18,33 @@ import javafx.scene.shape.SVGPath;
  * moving between families needs its CSS moved too (see app.css). The toolbar is all line glyphs,
  * as the redesign draws it; the Material ones that used to sit among them were redrawn.
  *
- * <p>Each call returns a fresh node: a JavaFX node can only have one parent.
+ * <p>Each call returns a fresh node: a JavaFX node can only have one parent. A glyph is 17px as
+ * made, the toolbar's size; {@link Glyph#at} resizes it for a menu item or a tab (16px, beside
+ * 13px text), and {@link #forCommand} is the rule for which command shows which glyph.
  */
 final class Icons {
+
+    /** A glyph: a Group holding one scaled SVGPath, which knows its own box so it can be resized. */
+    static final class Glyph extends Group {
+        private final SVGPath path;
+        private final double box;
+
+        private Glyph(SVGPath path, double box) {
+            super(path);
+            this.path = path;
+            this.box = box;
+        }
+
+        /** This glyph at {@code px} tall (its box scaled to it); returns itself for chaining. */
+        Glyph at(double px) {
+            path.setScaleX(px / box);
+            path.setScaleY(px / box);
+            return this;
+        }
+    }
+
+    /** A glyph beside a menu item or in a tab: 16px, a hair under the toolbar's. */
+    static final double MENU_SIZE = 16;
 
     /** Every toolbar glyph is 17px tall, the redesign's size: a 16-unit kit box scaled up a hair. */
     private static final double LINE_SCALE = 17.0 / 16.0;
@@ -60,108 +84,270 @@ final class Icons {
     }
 
     /** A UI Kit line glyph (16-unit box, stroked not filled); see {@code .icon-line} in app.css. */
-    static Node line(String content) {
+    static Glyph line(String content) {
         return line(content, LINE_SCALE);
     }
 
-    private static Node line(String content, double scale) {
+    private static Glyph line(String content, double scale) {
         SVGPath svg = new SVGPath();
         svg.setContent(content);
         svg.getStyleClass().add("icon-line");
         svg.setScaleX(scale);
         svg.setScaleY(scale);
-        return new Group(svg);
+        return new Glyph(svg, 16);
     }
 
     /** A Material 24dp glyph (filled); see {@code .toolbar-icon} in app.css. */
-    static Node of(String content) {
+    static Glyph of(String content) {
         SVGPath svg = new SVGPath();
         svg.setContent(content);
         svg.getStyleClass().add("toolbar-icon");
         svg.setScaleX(ICON_SCALE);
         svg.setScaleY(ICON_SCALE);
-        return new Group(svg);
+        return new Glyph(svg, 24);
+    }
+
+    /**
+     * The glyph a command shows beside its name in the menus, or null for a command that has none
+     * (the Show: filters, the toggles the palette alone lists). The toolbar's commands show the
+     * toolbar's glyph, so the two cannot disagree.
+     */
+    static Glyph forCommand(String id) {
+        return switch (id) {
+            case "add-file" -> open();
+            case "add-magnet" -> magnet();
+            case "add-clipboard" -> clipboard();
+            case "pause-resume" -> pause();
+            case "force-resume" -> forceRun();
+            case "recheck" -> refresh();
+            case "reannounce" -> broadcast();
+            case "sequential" -> sequential();
+            case "limits" -> gauge();
+            case "set-category" -> open();
+            case "edit-tags" -> tag();
+            case "manage-categories" -> tag();
+            case "copy-name" -> copy();
+            case "copy-hash" -> hash();
+            case "copy-magnet" -> magnet();
+            case "open-folder" -> open();
+            case "remove" -> trash();
+            case "remove-data" -> trashData();
+            case "check-updates" -> download();
+            case "about" -> info();
+            case "settings" -> settings();
+            case "search" -> search();
+            case "transfers" -> transfers();
+            case "filter" -> find();
+            case "select-all" -> selectAll();
+            case "event-log" -> history();
+            case "toggle-toolbar" -> toolbar();
+            case "toggle-sidebar", "focus-sidebar" -> sidebar();
+            default -> null;
+        };
     }
 
     // ---- glyphs; the paths are Editora's, by the same name --------------------------------------
 
     /** A page with a plus, Editora's new-file glyph, for "New Torrent". */
-    static Node newFile() {
+    static Glyph newFile() {
         return line("M4.5 2.5h4.6l2.9 2.9v8.1h-7.5zM9.1 2.5v2.9h2.9M8.25 8.2v3.2M6.65 9.8h3.2");
     }
 
+    /** RSS: the dot and two arcs, in the kit's line style. */
+    static Glyph rss() {
+        return line("M3 4a9 9 0 0 1 9 9M3 8a5 5 0 0 1 5 5M3 12.2a0.8 0.8 0 1 0 1.6 0a0.8 0.8 0 1 0 -1.6 0");
+    }
+
     /** Open: a folder, for "Add Torrent File". */
-    static Node open() {
+    static Glyph open() {
         return line("M2 12.5V3.5h4.2l1.5 2h5.8v2M2 12.5l2.2-5h10.3l-2.2 5z");
     }
 
     /** A horseshoe magnet, drawn in the kit's line style, for "Add Magnet Link". */
-    static Node magnet() {
+    static Glyph magnet() {
         return line("M4.2 2.5v5.6a3.8 3.8 0 0 0 7.6 0V2.5M6.8 2.5v5.6a1.2 1.2 0 0 0 2.4 0V2.5"
                 + "M4.2 2.5h2.6M9.2 2.5h2.6M4.2 5.1h2.6M9.2 5.1h2.6");
     }
 
     /** Two bars, in the kit's line style, to pair with {@link #run}. */
-    static Node pause() {
+    static Glyph pause() {
         return line("M5.6 3.4v9.2M10.4 3.4v9.2");
     }
 
     /** Run: a play triangle. */
-    static Node run() {
+    static Glyph run() {
         return line("M5.2 3.4v9.2l7.4-4.6z");
     }
 
     /** Force resume: the play triangle against a bar, which it ignores (the queue). */
-    static Node forceRun() {
+    static Glyph forceRun() {
         return line("M3.4 3.4v9.2l6.2-4.6zM12.6 3.4v9.2");
     }
 
     /** Recheck: an open arc with an arrowhead, in the line style like the rest of the row. */
-    static Node refresh() {
+    static Glyph refresh() {
         return line("M13.3 8A5.3 5.3 0 1 1 11.8 4.2M13.3 2.7V6H10");
     }
 
     /** Remove: a lid over an outlined bin, in the line style. */
-    static Node trash() {
+    static Glyph trash() {
         return line("M2.7 4.7h10.6M6 4.7V2.7h4v2M4 4.7l.7 8.6h6.6l.7-8.6");
     }
 
     /** A folder beside a category in the sidebar. */
-    static Node folderSmall() {
+    static Glyph folderSmall() {
         return line("M2 12.5V3.5h4.2l1.5 2h5.8v2M2 12.5l2.2-5h10.3l-2.2 5z", SMALL_SCALE);
     }
 
-    static Node find() {
+    static Glyph find() {
         return line("M2.5999999999999996 7.0a4.4 4.4 0 1 0 8.8 0a4.4 4.4 0 1 0 -8.8 0M10.4 10.4L14 14");
     }
 
     /**
      * Search: the kit's magnifier over three result lines, so it is not the filter's plain lens.
      */
-    static Node search() {
+    static Glyph search() {
         return line("M8.2 6.2a3.6 3.6 0 1 0 7.2 0a3.6 3.6 0 1 0 -7.2 0M10.3 8.9L13.9 12.5"
                 + "M1.5 3.5H6M1.5 6.5H5.5M1.5 9.5H7.5M1.5 12.5H9");
     }
 
-    /** RSS: the dot and two arcs, in the kit's line style. */
-    static Node rss() {
-        return line("M3 4a9 9 0 0 1 9 9M3 8a5 5 0 0 1 5 5M3 12.2a0.8 0.8 0 1 0 1.6 0a0.8 0.8 0 1 0 -1.6 0");
-    }
-
     /** A clock face, for the event log, in the line style. */
-    static Node history() {
+    static Glyph history() {
         return line("M2.8 8a5.2 5.2 0 1 0 10.4 0a5.2 5.2 0 1 0-10.4 0M8 5.2v2.9l2 1.3");
     }
 
-    static Node settings() {
+    static Glyph settings() {
         return line("M6.16 3.57L6.63 1.54L9.37 1.54L9.84 3.57L11.59 2.46L13.54 4.41L12.43 6.16L14.46 6.63L14.46 "
                 + "9.37L12.43 9.84L13.54 11.59L11.59 13.54L9.84 12.43L9.37 14.46L6.63 14.46L6.16 12.43L4.41 "
                 + "13.54L2.46 11.59L3.57 9.84L1.54 9.37L1.54 6.63L3.57 6.16L2.46 4.41L4.41 2.46Z"
                 + "M5.5 8a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0");
     }
 
-    static Node palette() {
+    static Glyph palette() {
         return line("M 1.75 4.25 H 14.25 V 11.75 H 1.75 Z M 4.25 6.75 H 4.5 M 7 6.75 H 7.25"
                 + " M 9.75 6.75 H 10 M 12 6.75 H 12.25 M 5 9.25 H 11");
+    }
+
+    // ---- glyphs for the menus and the detail tabs ------------------------------------------------
+
+    /** A clipboard, for "Add from Clipboard" (Editora's paste). */
+    static Glyph clipboard() {
+        return line("M5 3h6a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 5 3z"
+                + "M7 1.6h2a1 1 0 0 1 1 1v.8a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1v-.8a1 1 0 0 1 1-1z");
+    }
+
+    /** A power mark, for Quit. */
+    static Glyph power() {
+        return line("M8 2.5v5.5M4.66 4.52a5.2 5.2 0 1 0 6.68 0");
+    }
+
+    /** A dot broadcasting two arcs each way: a tracker, and the reannounce to it. */
+    static Glyph broadcast() {
+        return line("M7.2 8a.8.8 0 1 0 1.6 0a.8.8 0 1 0-1.6 0"
+                + "M5.2 10.8a4 4 0 0 1 0-5.6M10.8 5.2a4 4 0 0 1 0 5.6"
+                + "M3.1 12.9a7 7 0 0 1 0-9.8M12.9 3.1a7 7 0 0 1 0 9.8");
+    }
+
+    /** Three lines in order with an arrow down them: sequential download. */
+    static Glyph sequential() {
+        return line("M2.5 4h6M2.5 8h6M2.5 12h6M12 3.5v9M9.8 10.3l2.2 2.2 2.2-2.2");
+    }
+
+    /** A gauge with its needle, for Limits. */
+    static Glyph gauge() {
+        return line("M2.8 11.5a5.2 5.2 0 1 1 10.4 0M8 11.5l2.8-3.4");
+    }
+
+    /** A tag with its hole, for tags. */
+    static Glyph tag() {
+        return line("M2.5 2.5h5.5l5.5 5.5-5.5 5.5-5.5-5.5zM5.4 5.4l.1.1");
+    }
+
+    /** Two sheets, one over the other: Copy (Editora's). */
+    static Glyph copy() {
+        return line(
+                "M7 5.5h5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 7 5.5z"
+                        + "M3 10.5V3.6A1.1 1.1 0 0 1 4.1 2.5H11");
+    }
+
+    /** A hash sign, for the info-hash. */
+    static Glyph hash() {
+        return line("M6 2.5l-1.5 11M11.5 2.5L10 13.5M3 6h10.5M2.5 10H13");
+    }
+
+    /** The bin with the files' lines in it: Remove with Data. */
+    static Glyph trashData() {
+        return line("M2.7 4.7h10.6M6 4.7V2.7h4v2M4 4.7l.7 8.6h6.6l.7-8.6M6.6 7.2l.3 4M9.4 7.2l-.3 4");
+    }
+
+    /** An arrow down into a tray: an update to fetch. */
+    static Glyph download() {
+        return line("M8 2.5v8M5.3 7.8L8 10.5l2.7-2.7M2.5 11v2.5h11V11");
+    }
+
+    /** A play mark against a bar: skip. */
+    static Glyph skip() {
+        return line("M3.5 3.5l6 4.5-6 4.5zM12.5 3.5v9");
+    }
+
+    /** A ring with an i in it: About, and the General tab. */
+    static Glyph info() {
+        return line("M2.8 8a5.2 5.2 0 1 0 10.4 0a5.2 5.2 0 1 0-10.4 0M8 7.3v3.7M7.95 5.2h.1");
+    }
+
+    /** Arrows up and down: the transfers. */
+    static Glyph transfers() {
+        return line("M5.5 13V3.5M2.8 6.2l2.7-2.7 2.7 2.7M10.5 3v9.5M7.8 9.8l2.7 2.7 2.7-2.7");
+    }
+
+    /** A frame drawn by its corners: Select All. */
+    static Glyph selectAll() {
+        return line("M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3");
+    }
+
+    /** A window with a band across its top: the toolbar. */
+    static Glyph toolbar() {
+        return line("M2 3.5h12v9H2zM2 6.5h12");
+    }
+
+    /** A window with a band down its left: the sidebar. */
+    static Glyph sidebar() {
+        return line("M2 3.5h12v9H2zM5.5 3.5v9");
+    }
+
+    /** Two tall rows: comfortable density. */
+    static Glyph rowsComfortable() {
+        return line("M2 3h12v4H2zM2 9h12v4H2z");
+    }
+
+    /** Three lines close together: compact density. */
+    static Glyph rowsCompact() {
+        return line("M2 4h12M2 8h12M2 12h12");
+    }
+
+    /** A sheet with its corner turned and lines on it: the Files tab. */
+    static Glyph files() {
+        return line("M4.5 2.5h4.6l2.9 2.9v8.1h-7.5zM9.1 2.5v2.9h2.9M6.5 9h3M6.5 11h3");
+    }
+
+    /** Two people: the Peers tab. */
+    static Glyph peers() {
+        return line("M4 5.5a2 2 0 1 0 4 0a2 2 0 1 0-4 0M1.8 13.2c0-2.4 1.9-3.9 4.2-3.9s4.2 1.5 4.2 3.9"
+                + "M10.3 3.7a2 2 0 0 1 0 3.6M11.6 9.6c1.6.5 2.6 1.8 2.6 3.6");
+    }
+
+    /** Four squares: the Pieces tab. */
+    static Glyph pieces() {
+        return line("M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z");
+    }
+
+    /** A plus, for Add. */
+    static Glyph plus() {
+        return line("M8 3v10M3 8h10");
+    }
+
+    /** A box with an arrow out of its corner: a page to open elsewhere. */
+    static Glyph external() {
+        return line("M7 3.5H3.5v9h9V9M9.5 3.5h3v3M12.5 3.5L7.5 8.5");
     }
 }

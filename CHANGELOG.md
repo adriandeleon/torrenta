@@ -34,6 +34,11 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Icons in the menus and on the detail tabs.** Every item of the File, Torrent, View and Help
+  menus and of the list's right-click menu shows its glyph before its name, the same line glyph
+  the toolbar uses for the same command (`Icons.forCommand` is the one rule), at 16 px; the
+  detail pane's General, Files, Peers, Trackers and Pieces tabs carry one each, and so do the
+  Files tab's and the Search results' right-click menus.
 - **The Create Torrent dialog** (`Ctrl+N`, File → New Torrent…, the toolbar's page glyph), the
   third step of the RSS, creation and statistics milestone: a file or folder (browsed, typed or
   dropped on the dialog), hybrid, v1-only or v2-only, a piece size from 16 KiB to 32 MiB or
