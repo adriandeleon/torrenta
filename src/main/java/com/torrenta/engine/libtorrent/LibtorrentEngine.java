@@ -15,6 +15,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -22,6 +23,7 @@ import java.util.logging.Logger;
 import com.torrenta.AppInfo;
 import com.torrenta.cli.CommandLine;
 import com.torrenta.engine.AddRequest;
+import com.torrenta.engine.Connectivity;
 import com.torrenta.engine.CreateRequest;
 import com.torrenta.engine.CreatedTorrent;
 import com.torrenta.engine.Engine;
@@ -73,6 +75,7 @@ import org.libtorrent4j.alerts.FileCompletedAlert;
 import org.libtorrent4j.alerts.FileErrorAlert;
 import org.libtorrent4j.alerts.FileRenameFailedAlert;
 import org.libtorrent4j.alerts.FileRenamedAlert;
+import org.libtorrent4j.alerts.IncomingConnectionAlert;
 import org.libtorrent4j.alerts.ListenFailedAlert;
 import org.libtorrent4j.alerts.ListenSucceededAlert;
 import org.libtorrent4j.alerts.PeerConnectAlert;
@@ -81,6 +84,7 @@ import org.libtorrent4j.alerts.PortmapErrorAlert;
 import org.libtorrent4j.alerts.SaveResumeDataAlert;
 import org.libtorrent4j.alerts.SaveResumeDataFailedAlert;
 import org.libtorrent4j.alerts.SessionStatsAlert;
+import org.libtorrent4j.alerts.SocketType;
 import org.libtorrent4j.alerts.StorageMovedAlert;
 import org.libtorrent4j.alerts.StorageMovedFailedAlert;
 import org.libtorrent4j.alerts.TorrentAlert;
@@ -189,6 +193,8 @@ public final class LibtorrentEngine implements Engine {
 
     /** The connection settings in force; the session starts with them and takes changes live. */
     private volatile EngineSettings engineSettings;
+    /** Kept by the alert thread from listen, port-map, incoming-connection and DHT alerts. */
+    private final AtomicReference<Connectivity> connectivity = new AtomicReference<>(Connectivity.NONE);
 
     /** The filter in force, kept so a start after a set applies it; empty means none. */
     private volatile List<IpRange> ipFilter = List.of();
@@ -288,6 +294,7 @@ public final class LibtorrentEngine implements Engine {
         }
         SessionManager s;
         try {
+            connectivity.set(Connectivity.NONE.dht(engineSettings.protocol().dht()));
             s = new SessionManager();
             s.start(new SessionParams(toPack(engineSettings)));
         } catch (LinkageError e) {
@@ -1469,6 +1476,12 @@ public final class LibtorrentEngine implements Engine {
      * thread: libtorrent4j asks the session for its counters once a second and the listener keeps
      * the values. A counter the library has no metric for is {@link SessionStats#UNKNOWN}.
      */
+    /** Read off the alert thread's copy: never the session, so no lock. */
+    @Override
+    public Connectivity connectivity() {
+        return connectivity.get();
+    }
+
     @Override
     public SessionStats stats() {
         int[] idx = counterIndex;
@@ -1553,6 +1566,7 @@ public final class LibtorrentEngine implements Engine {
     @Override
     public synchronized void applySettings(EngineSettings settings) throws EngineException {
         engineSettings = settings;
+        connectivity.updateAndGet(c -> c.dht(settings.protocol().dht()));
         SessionManager s = session;
         if (s == null || !s.isRunning()) return;
         s.applySettings(toPack(settings));
@@ -1784,6 +1798,7 @@ public final class LibtorrentEngine implements Engine {
         }
         session.stop();
         session = null;
+        connectivity.set(Connectivity.NONE);
         emit(EngineEvent.session(EngineEvent.Level.INFO, "Engine stopped"));
     }
 
@@ -2069,6 +2084,8 @@ public final class LibtorrentEngine implements Engine {
             AlertType.LISTEN_FAILED.swig(),
             AlertType.PORTMAP.swig(),
             AlertType.PORTMAP_ERROR.swig(),
+            AlertType.INCOMING_CONNECTION.swig(),
+            AlertType.DHT_BOOTSTRAP.swig(),
             AlertType.PEER_BLOCKED.swig(),
             AlertType.PEER_CONNECT.swig(),
             AlertType.STORAGE_MOVED.swig(),
@@ -2208,12 +2225,17 @@ public final class LibtorrentEngine implements Engine {
                     }
                     case LISTEN_SUCCEEDED -> {
                         ListenSucceededAlert a = (ListenSucceededAlert) alert;
+                        // Peers connect over TCP or uTP on the same port; TCP's answer stands for both.
+                        if (a.socketType() == SocketType.TCP)
+                            connectivity.updateAndGet(c -> c.listened(a.port(), true));
                         emit(EngineEvent.session(
                                 EngineEvent.Level.INFO,
                                 "Listening on " + a.address() + ":" + a.port() + " (" + a.socketType() + ")"));
                     }
                     case LISTEN_FAILED -> {
                         ListenFailedAlert a = (ListenFailedAlert) alert;
+                        if (a.socketType() == SocketType.TCP)
+                            connectivity.updateAndGet(c -> c.listened(a.port() > 0 ? a.port() : c.port(), false));
                         emit(EngineEvent.session(
                                 EngineEvent.Level.ERROR,
                                 "Could not listen on " + a.listenInterface() + ":" + a.port() + " (" + a.socketType()
@@ -2221,6 +2243,7 @@ public final class LibtorrentEngine implements Engine {
                     }
                     case PORTMAP -> {
                         PortmapAlert a = (PortmapAlert) alert;
+                        connectivity.updateAndGet(c -> c.mapped(true));
                         emit(EngineEvent.session(
                                 EngineEvent.Level.INFO,
                                 "Port " + a.externalPort() + " mapped with " + a.mapTransport() + " (" + a.mapProtocol()
@@ -2228,11 +2251,21 @@ public final class LibtorrentEngine implements Engine {
                     }
                     case PORTMAP_ERROR -> {
                         PortmapErrorAlert a = (PortmapErrorAlert) alert;
+                        connectivity.updateAndGet(c -> c.mapped(false));
                         emit(EngineEvent.session(
                                 EngineEvent.Level.WARNING,
                                 "Port mapping with " + a.mapTransport() + " failed: "
                                         + a.error().getMessage()));
                     }
+                    // The proof the port is reachable: a peer found it. Not logged, there are many.
+                    case INCOMING_CONNECTION -> {
+                        String from = ((IncomingConnectionAlert) alert)
+                                .endpoint()
+                                .address()
+                                .toString();
+                        connectivity.updateAndGet(c -> c.connectedFrom(from));
+                    }
+                    case DHT_BOOTSTRAP -> connectivity.updateAndGet(Connectivity::bootstrapped);
                     // Counted, not logged: a busy blocklist refuses peers by the hundred.
                     case PEER_BLOCKED -> blockedPeers.incrementAndGet();
                     case PEER_CONNECT -> onPeerConnected((PeerConnectAlert) alert);

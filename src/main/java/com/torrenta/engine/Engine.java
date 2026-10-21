@@ -143,6 +143,16 @@ public interface Engine extends AutoCloseable {
      */
     SessionStats stats();
 
+    /**
+     * The listen port, its mapping, whether a peer from outside has reached it, and the DHT's
+     * state, as of the last alerts: cheap, no engine round trip, so the status bar asks every
+     * second. {@link Connectivity#NONE} before {@link #start()}, and from an engine that cannot
+     * say (a daemon): the status bar then leaves the port and the DHT out.
+     */
+    default Connectivity connectivity() {
+        return Connectivity.NONE;
+    }
+
     /** Writes what is needed to bring the torrents back; also done on {@link #stop()}. */
     void flush();
 
