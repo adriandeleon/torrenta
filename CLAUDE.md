@@ -26,7 +26,8 @@ selected torrent, `select-first`,
   open dialog's title and the log window's state are printed, and when a dialog is open the PNG is
   of the dialog.
 
-Run Maven from the project root with a JDK 25.
+Run Maven from the project root with a JDK 25; the enforcer plugin refuses any other (`-Denforcer.skip`
+to try one on purpose).
 
 ## Architecture
 
@@ -40,6 +41,8 @@ Run Maven from the project root with a JDK 25.
 | Engine settings | `EngineSettings` (engine-neutral record; `listenInterfaces()` is the tested string), `Settings.engineSettings()` clamps the `connection.*` and `proxy.*` keys, `LibtorrentEngine.toPack` maps onto `settings_pack`; applied at start (`SessionParams`) and live (`applySettings`) | `com.torrenta.engine`, `store`, `.libtorrent` |
 | IP filter | `IpRange` (literals only, never resolves), `Blocklist` (pure parser for .p2p/.dat/CIDR/plain), `net.BlocklistFetch` (gzip by magic), `ui.IpFilterController` (cache, schedule, bans → `Engine.setIpFilter`), `peer_blocked` alerts counted | `com.torrenta.engine`, `net`, `ui` |
 | Watch folders | `WatchFolder` (entry + pure rules: destination, request, names, `.magnet` lines, magnet id, `Growth`), `WatchFolders` (the service: `configure`, `start`, `stop`, `poll`), `store.WatchFolderStore` (`watch-folders.json`), `ui.WatchFolderDialog`, Settings → Watch folders | `com.torrenta.engine`, `store`, `ui` |
+| Automation | `automation.EventCommand` (pure: `tokens` splits like a shell, `substitute` fills qBittorrent's `%N %L %G %F %R %D %C %Z %T %I %J %K %%` per token, `subject` from a `Torrent` + `TorrentDetail`), `Automation` (the service: `plan` is the rule, `handle(event)` runs on a virtual thread, `Subprocess` with a 10-min ceiling, outcomes back as events), `Notifier` + `Notifiers.forPlatform` (`notify-send` / `osascript` / `toast.ps1` through PowerShell, text as arguments), `AutomationSettings` from `Settings.automation()`; `EngineEvent.Kind` says which events count | `com.torrenta.automation` |
+| Search | `search.SearchProvider` (name + blocking `search(query, category)` throwing `SearchException`), `SearchResult` (sealed `Link`: `Magnet`/`TorrentUrl`; the hash is read off a magnet; `identity()` is hash else link), `SearchCategory` (Newznab numbers), `ResultRanker` (pure: dedupe keeps the better-seeded copy, rank by seeds → query coverage → date → name), `SearchService` (virtual thread per provider, 20 s each, one request per 2 s per provider through a `Ticker`, session cache, `SearchOutcome` with per-provider failures), `TorznabEndpoint` (+ `problem(url)`, the dialog's rule), `TorznabProvider` (`t=caps`/`t=search`, StAX, no entities); `store.SearchProviderStore` (`search-providers.json`, never synced); `ui.SearchProviderDialog`, Settings → Search | `com.torrenta.search`, `store`, `ui` |
 | Update | `update.UpdateCheck` (pure: payload, version rules, due), `UpdateService` (GitHub, off the FX thread, `-Dtorrenta.updateEndpoint` for a capture) — Termina's, verbatim | `com.torrenta.update` |
 | UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a vertical `SplitPane`, the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
@@ -150,6 +153,13 @@ release process with the names changed; Termina's README and memory hold the war
 - **`settings_pack` enum constants are SWIG objects**, like every other libtorrent4j constant:
   `toPack` runs only after the native has loaded. Keys are set by `swigValue()` through the pack's
   generic `setBoolean`/`setInteger`/`setString`; the typed setters cover only a few.
+- **Every public engine method that reaches the session is `synchronized`, like `stop()`.**
+  `SessionManager.stop()` deletes the native session; a poll, a flush or an action in flight on
+  another thread then reads freed memory, which corrupted the heap and killed the JVM at quit
+  (exit 139, no hs_err) every few runs. The lock makes a call in flight finish first and a later
+  one find no session. The alert thread never takes it (the listener uses the alert's own handle),
+  so `stop()` waiting for resume-data alerts cannot deadlock; keep it that way. The test
+  `stopWaitsForACallInFlightAndRefusesTheNext` hammers the race under `MALLOC_PERTURB_`.
 - **A SWIG vector element is a pointer into the vector, and the vector's finalizer frees it.**
   `torrent_handle_vector.get(i)`, `announce_entry_vector.get(i)`, `peer_info_vector.get(i)` (and
   libtorrent4j's own `SessionHandle.torrents()`, `TorrentHandle.trackers()`/`peerInfo()`, which are
@@ -160,6 +170,17 @@ release process with the names changed; Termina's README and memory hold the war
   holds every vector with `Reference.reachabilityFence` until the copies are made. Anything that
   points into a parent (`status.pieces()`, `info.files()`) is used while the parent is fenced. CI
   runs the Linux tests with `MALLOC_PERTURB_` so a slip crashes every time, not once in a hundred.
+- **Run-on-event is driven by `EngineEvent.Kind`, not by parsing messages.** The engine tags
+  `ADDED` (never a torrent restored at start: `restoring.remove(id)` decides), `FINISHED`
+  (`torrent_finished_alert`, which also fires after a check that finds every piece), `ERROR`
+  (torrent, file and tracker errors; the tracker's is level WARNING); `SEEDING_DONE` is raised by
+  the window's share-limit poll, which hands the snapshot along because a REMOVE has already taken
+  the torrent out of the session. `Automation.handle` is called on the alert thread and returns at
+  once; the command runs on a virtual thread with no shell (`ProcessBuilder` on the substituted
+  tokens), stdin from the null device, output capped. `TorrentBuilder` makes hybrids, so the id
+  (`getBest()`, the v2 hash cut to 20 bytes) is neither `%I` nor `%J`; `TorrentDetail.General`
+  carries both full hashes. Notifier scripts never see the text inline: `osascript` reads
+  `argv`, `toast.ps1` its parameters.
 - **Watch folders are a thread of the window, not of the engine** (`engine.WatchFolders`, owned by
   `MainWindow`, started in `engineReady`, stopped on hide, restarted by the Settings page): one
   `WatchService` thread plus a poll every minute as the safety net, every engine call on the
@@ -236,7 +257,15 @@ release process with the names changed; Termina's README and memory hold the war
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
   write under `~/.torrenta`. `LibtorrentEngineTest` starts a real session on purpose: it is the one
   test that proves the native loads on each CI platform.
-- **Palantir 2.92 does not run on JDK 27.** Build with a JDK 25.
+- **Palantir 2.92 does not run on JDK 27.** Build with a JDK 25. The enforcer rule in the pom says so
+  at `validate`, so `mvn javafx:run` under the sdkman default of 27 stops with the reason instead of
+  running a mix the project never tests (one such run crashed at quit).
+- **A Torznab answer is parsed as a stream with entities and DTDs off** (`TorznabProvider.factory`):
+  it comes from the network. `torznab:attr` is matched by local name, since not every server
+  declares the namespace the same way; `peers` is seeders plus leechers, so leechers is the
+  difference when none is given outright. The capture hook's `settings-search-add[:<url>]`,
+  `settings-search-dialog-test:<url>` (Test pressed in the dialog) and `settings-search-test`
+  (the page's Test on the first row) drive the page; a stub serving the caps fixture is enough.
 
 ## Conventions (carried from Termina)
 

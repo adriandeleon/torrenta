@@ -434,6 +434,9 @@ class LibtorrentEngineTest {
             assertFalse(g.isPrivate());
             assertTrue(g.activeSeconds() < 600, "seconds, not milliseconds: " + g.activeSeconds());
             assertTrue(g.seedingSeconds() <= g.activeSeconds());
+            assertEquals(40, g.infoHashV1().length(), "the v1 hash, hex: " + g.infoHashV1());
+            assertTrue(
+                    g.infoHashV2().isEmpty() || g.infoHashV2().length() == 64, "the full v2 hash: " + g.infoHashV2());
 
             assertEquals(2, detail.files().size(), "padding files hidden");
             TorrentDetail.FileStatus a = detail.files().get(0);
@@ -664,6 +667,63 @@ class LibtorrentEngineTest {
         System.gc();
         System.runFinalization();
         for (int i = 0; i < 64; i++) new org.libtorrent4j.swig.torrent_handle_vector().reserve(1024);
+    }
+
+    @Test
+    void stopWaitsForACallInFlightAndRefusesTheNext(@TempDir Path dir) throws Exception {
+        // The window polls the engine from its own thread every second, actions run on virtual
+        // threads, the flusher on another. A quit that deleted the native session under a call in
+        // flight read freed memory. stop() now waits for the call in flight and later calls find
+        // no session. Four threads hammer the engine through three start/stop rounds: no call may
+        // throw anything but EngineException, every thread must end, and the stopped engine must
+        // answer empty. (The window of the old race was too narrow for this to crash the old code
+        // on a quiet machine; the test guards the contract, not the crash.)
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "race");
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        java.util.concurrent.atomic.AtomicReference<Throwable> unexpected =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        for (int round = 0; round < 3; round++) {
+            LibtorrentEngine engine = engine(dir, store);
+            engine.start();
+            String id = round == 0 ? engine.add(downloadsTorrent(dir, torrent)).id() : null;
+            await("the torrent is back", () -> !engine.torrents().isEmpty());
+            String tid = id != null ? id : engine.torrents().get(0).id();
+            java.util.concurrent.atomic.AtomicBoolean on = new java.util.concurrent.atomic.AtomicBoolean(true);
+            java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+            List<Thread> hammers = new java.util.ArrayList<>();
+            for (int n = 0; n < 4; n++) {
+                Thread h = new Thread(
+                        () -> {
+                            while (on.get()) {
+                                try {
+                                    engine.torrents();
+                                    engine.rates();
+                                    engine.detail(tid);
+                                    engine.flush();
+                                    calls.incrementAndGet();
+                                } catch (EngineException e) {
+                                    // the engine stopped under the call: the right answer
+                                } catch (Throwable e) {
+                                    unexpected.set(e);
+                                    return;
+                                }
+                            }
+                        },
+                        "hammer-" + n);
+                h.start();
+                hammers.add(h);
+            }
+            await("hammering", () -> calls.get() > 20);
+            engine.stop();
+            Thread.sleep(200);
+            on.set(false);
+            for (Thread h : hammers) h.join(5_000);
+            for (Thread h : hammers) assertFalse(h.isAlive(), h.getName() + " ended");
+            assertEquals(null, unexpected.get(), String.valueOf(unexpected.get()));
+            assertEquals(List.of(), engine.torrents(), "a stopped engine has nothing");
+            assertThrows(EngineException.class, () -> engine.detail(tid));
+        }
     }
 
     @Test

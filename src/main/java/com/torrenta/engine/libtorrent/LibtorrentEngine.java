@@ -133,6 +133,17 @@ public final class LibtorrentEngine implements Engine {
     private static final long PERIODIC_FLUSH_SECONDS = 120;
     private static final long STOP_FLUSH_TIMEOUT_MS = 5000;
 
+    /*
+     * Every public method that reaches the session is synchronized, and so is stop(): a call in
+     * flight on the window's poll thread (or the flusher, the watcher, a virtual thread running an
+     * action) finishes before stop() deletes the native session, and a call that arrives after it
+     * finds no session and says so. Without that, SessionManager.stop() frees the libtorrent
+     * session under a handle the poll was reading, which corrupts memory and killed the JVM at
+     * quit, with no error file, every few runs. The alert thread never takes this lock (the
+     * listener uses only the alert's own handle), so waiting for resume-data alerts inside stop()
+     * cannot deadlock.
+     */
+
     /** Read at every use: the Settings window changes it while the session runs. */
     private final java.util.function.Supplier<Path> downloadDir;
 
@@ -344,7 +355,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public Torrent add(String input) throws EngineException {
+    public synchronized Torrent add(String input) throws EngineException {
         AddRequest.Source source;
         if (CommandLine.isMagnet(input)) {
             source = new AddRequest.Magnet(input);
@@ -361,7 +372,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public Torrent add(AddRequest request) throws EngineException {
+    public synchronized Torrent add(AddRequest request) throws EngineException {
         SessionManager s = running();
         AddTorrentParams params;
         TorrentInfo info = null;
@@ -582,22 +593,22 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public String category(String id) throws EngineException {
+    public synchronized String category(String id) throws EngineException {
         return labelsOf(id).category();
     }
 
     @Override
-    public void setCategory(String id, String category) throws EngineException {
+    public synchronized void setCategory(String id, String category) throws EngineException {
         writeLabels(id, labelsOf(id).withCategory(category));
     }
 
     @Override
-    public List<String> tags(String id) throws EngineException {
+    public synchronized List<String> tags(String id) throws EngineException {
         return labelsOf(id).tags();
     }
 
     @Override
-    public void setTags(String id, List<String> tags) throws EngineException {
+    public synchronized void setTags(String id, List<String> tags) throws EngineException {
         writeLabels(id, labelsOf(id).withTags(tags));
     }
 
@@ -657,7 +668,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public MetadataFetch fetchMetadata(String magnet) throws EngineException {
+    public synchronized MetadataFetch fetchMetadata(String magnet) throws EngineException {
         SessionManager s = running();
         AddTorrentParams params;
         try {
@@ -816,7 +827,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public void remove(String id, boolean deleteFiles) throws EngineException {
+    public synchronized void remove(String id, boolean deleteFiles) throws EngineException {
         SessionManager s = running();
         TorrentHandle handle = find(s, id);
         if (handle == null) throw new EngineException("No such torrent: " + id);
@@ -845,7 +856,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public void pause(String id) throws EngineException {
+    public synchronized void pause(String id) throws EngineException {
         TorrentHandle h = handle(id);
         // Out of the queue's hands first: an auto-managed torrent that is paused gets resumed by
         // the queue at its next pass, which is not what "pause" means to a person.
@@ -854,38 +865,38 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public void resume(String id) throws EngineException {
+    public synchronized void resume(String id) throws EngineException {
         TorrentHandle h = handle(id);
         h.setFlags(Flags.AUTO_MANAGED);
         h.resume();
     }
 
     @Override
-    public void forceResume(String id) throws EngineException {
+    public synchronized void forceResume(String id) throws EngineException {
         TorrentHandle h = handle(id);
         h.unsetFlags(Flags.AUTO_MANAGED);
         h.resume();
     }
 
     @Override
-    public void recheck(String id) throws EngineException {
+    public synchronized void recheck(String id) throws EngineException {
         handle(id).forceRecheck();
     }
 
     @Override
-    public void reannounce(String id) throws EngineException {
+    public synchronized void reannounce(String id) throws EngineException {
         handle(id).forceReannounce();
     }
 
     @Override
-    public void setSequential(String id, boolean sequential) throws EngineException {
+    public synchronized void setSequential(String id, boolean sequential) throws EngineException {
         TorrentHandle h = handle(id);
         if (sequential) h.setFlags(Flags.SEQUENTIAL_DOWNLOAD);
         else h.unsetFlags(Flags.SEQUENTIAL_DOWNLOAD);
     }
 
     @Override
-    public TorrentLimits limits(String id) throws EngineException {
+    public synchronized TorrentLimits limits(String id) throws EngineException {
         TorrentHandle h = handle(id);
         torrent_handle raw = h.swig();
         return new TorrentLimits(
@@ -897,7 +908,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public void setLimits(String id, TorrentLimits limits) throws EngineException {
+    public synchronized void setLimits(String id, TorrentLimits limits) throws EngineException {
         TorrentHandle h = handle(id);
         torrent_handle raw = h.swig();
         // 0 is "none" on both sides for the rates; the counts take -1 for "no limit of its own".
@@ -964,12 +975,12 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public String magnetLink(String id) throws EngineException {
+    public synchronized String magnetLink(String id) throws EngineException {
         return handle(id).makeMagnetUri();
     }
 
     @Override
-    public TorrentDetail detail(String id) throws EngineException {
+    public synchronized TorrentDetail detail(String id) throws EngineException {
         TorrentHandle h = handle(id);
         TorrentStatus status = h.status(StatusQuery.ALL);
 
@@ -1025,7 +1036,13 @@ public final class LibtorrentEngine implements Engine {
                 status.seedingDuration() / 1000,
                 status.nextAnnounce() / 1000,
                 status.numConnections(),
-                status.currentTracker() == null ? "" : status.currentTracker());
+                status.currentTracker() == null ? "" : status.currentTracker(),
+                status.getInfoHashes().swig().has_v1()
+                        ? status.getInfoHashes().swig().getV1().to_hex()
+                        : "",
+                status.getInfoHashes().swig().has_v2()
+                        ? status.getInfoHashes().swig().getV2().to_hex()
+                        : "");
         // The bitfield and the file storage point into these two; keep them until the end.
         Reference.reachabilityFence(status);
         Reference.reachabilityFence(info);
@@ -1087,12 +1104,12 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public void setFilePriority(String id, int fileIndex, Priority priority) throws EngineException {
+    public synchronized void setFilePriority(String id, int fileIndex, Priority priority) throws EngineException {
         handle(id).filePriority(fileIndex, toLibtorrent(priority));
     }
 
     @Override
-    public void addTrackers(String id, List<String> urls) throws EngineException {
+    public synchronized void addTrackers(String id, List<String> urls) throws EngineException {
         TorrentHandle h = handle(id);
         List<AnnounceEntry> existing = trackers(h);
         int tier = existing.stream().mapToInt(AnnounceEntry::tier).max().orElse(-1) + 1;
@@ -1128,7 +1145,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public void removeTracker(String id, String url) throws EngineException {
+    public synchronized void removeTracker(String id, String url) throws EngineException {
         TorrentHandle h = handle(id);
         List<AnnounceEntry> kept = new ArrayList<>();
         for (AnnounceEntry e : trackers(h)) {
@@ -1154,7 +1171,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public List<Torrent> torrents() {
+    public synchronized List<Torrent> torrents() {
         SessionManager s = session;
         if (s == null || !s.isRunning()) return List.of();
         List<Torrent> out = new ArrayList<>();
@@ -1163,7 +1180,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public Rates rates() {
+    public synchronized Rates rates() {
         SessionManager s = session;
         if (s == null || !s.isRunning()) return Rates.ZERO;
         return new Rates(s.downloadRate(), s.uploadRate());
@@ -1171,14 +1188,14 @@ public final class LibtorrentEngine implements Engine {
 
     /** Asks every torrent for fresh resume data, if it changed. Answers land through the alert. */
     @Override
-    public void flush() {
+    public synchronized void flush() {
         SessionManager s = session;
         if (s == null || !s.isRunning()) return;
         for (TorrentHandle handle : handles(s)) requestSave(handle, true);
     }
 
     @Override
-    public void applySettings(EngineSettings settings) throws EngineException {
+    public synchronized void applySettings(EngineSettings settings) throws EngineException {
         engineSettings = settings;
         SessionManager s = session;
         if (s == null || !s.isRunning()) return;
@@ -1298,7 +1315,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public boolean refreshLimits(java.time.LocalDateTime now) throws EngineException {
+    public synchronized boolean refreshLimits(java.time.LocalDateTime now) throws EngineException {
         SessionManager s = session;
         EngineSettings.Speed speed = engineSettings.speed();
         boolean alternative = speed.alternativeActive(now);
@@ -1327,7 +1344,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public void setIpFilter(List<IpRange> ranges) throws EngineException {
+    public synchronized void setIpFilter(List<IpRange> ranges) throws EngineException {
         ipFilter = List.copyOf(ranges);
         SessionManager s = session;
         if (s == null || !s.isRunning()) return;
@@ -1338,7 +1355,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public long blockedPeers() {
+    public synchronized long blockedPeers() {
         return blockedPeers.get();
     }
 
@@ -1652,7 +1669,7 @@ public final class LibtorrentEngine implements Engine {
                     case TORRENT_FINISHED -> {
                         TorrentAlert<?> t = (TorrentAlert<?>) alert;
                         requestSave(t.handle(), false);
-                        torrentEvent(t, EngineEvent.Level.INFO, "%s finished");
+                        torrentEvent(t, EngineEvent.Level.INFO, EngineEvent.Kind.FINISHED, "%s finished");
                         if (t.handle().isValid()) {
                             // Names first, then the move: both are disk jobs, done in this order.
                             applySuffixes(id(t.handle()), t.handle());
@@ -1699,6 +1716,7 @@ public final class LibtorrentEngine implements Engine {
                         torrentEvent(
                                 t,
                                 EngineEvent.Level.ERROR,
+                                EngineEvent.Kind.ERROR,
                                 "%s: " + t.error().getMessage()
                                         + (t.filename().isEmpty() ? "" : " (" + t.filename() + ")"));
                     }
@@ -1723,13 +1741,20 @@ public final class LibtorrentEngine implements Engine {
                     case FILE_ERROR -> {
                         FileErrorAlert t = (FileErrorAlert) alert;
                         torrentEvent(
-                                t, EngineEvent.Level.ERROR, "%s: " + t.error().getMessage() + " — " + t.filename());
+                                t,
+                                EngineEvent.Level.ERROR,
+                                EngineEvent.Kind.ERROR,
+                                "%s: " + t.error().getMessage() + " — " + t.filename());
                     }
                     case TRACKER_ERROR -> {
                         TrackerErrorAlert t = (TrackerErrorAlert) alert;
                         String reason = t.errorMessage().isEmpty() ? t.error().getMessage() : t.errorMessage();
                         onTracker(t, true);
-                        torrentEvent(t, EngineEvent.Level.WARNING, "%s: tracker " + t.trackerUrl() + " — " + reason);
+                        torrentEvent(
+                                t,
+                                EngineEvent.Level.WARNING,
+                                EngineEvent.Kind.ERROR,
+                                "%s: tracker " + t.trackerUrl() + " — " + reason);
                     }
                     case TRACKER_WARNING -> {
                         TrackerWarningAlert t = (TrackerWarningAlert) alert;
@@ -1803,7 +1828,9 @@ public final class LibtorrentEngine implements Engine {
             // them: ask for it now, and it replaces the blob shortly after.
             requestSave(alert.handle(), false);
             String id = alert.params().getInfoHashes().getBest().toHex();
-            torrentEvent(alert, EngineEvent.Level.INFO, restoring.remove(id) ? "Restored %s" : "Added %s");
+            // A torrent restored at start is not new to the person; nothing runs on it.
+            if (restoring.remove(id)) torrentEvent(alert, EngineEvent.Level.INFO, "Restored %s");
+            else torrentEvent(alert, EngineEvent.Level.INFO, EngineEvent.Kind.ADDED, "Added %s");
         }
 
         /**
@@ -1827,13 +1854,18 @@ public final class LibtorrentEngine implements Engine {
 
         /** {@code template} has one {@code %s}, the torrent's name. */
         private void torrentEvent(TorrentAlert<?> alert, EngineEvent.Level level, String template) {
+            torrentEvent(alert, level, EngineEvent.Kind.OTHER, template);
+        }
+
+        private void torrentEvent(
+                TorrentAlert<?> alert, EngineEvent.Level level, EngineEvent.Kind kind, String template) {
             TorrentHandle handle = alert.handle();
             if (!handle.isValid() || fetchOf(handle.swig()) != null) return;
             String id = id(handle);
             // A torrent being torn down reads an all-zero hash; an ended fetch is not the person's.
             if (id.chars().allMatch(c -> c == '0') || endedFetches.contains(id)) return;
             String name = nameOf(handle);
-            emit(new EngineEvent(java.time.Instant.now(), level, id, name, template.formatted(name)));
+            emit(EngineEvent.of(kind, level, id, name, template.formatted(name)));
         }
 
         private void onSaved(SaveResumeDataAlert alert) {

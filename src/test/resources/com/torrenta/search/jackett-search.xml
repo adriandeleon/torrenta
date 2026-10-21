@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="1.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <atom:link href="http://localhost:9117/" rel="self" type="application/rss+xml" />
+    <title>Jackett</title>
+    <description>Jackett</description>
+    <link>http://localhost:9117/</link>
+    <language>en-US</language>
+    <category>search</category>
+    <item>
+      <title>ubuntu-24.04.1-desktop-amd64.iso</title>
+      <guid>https://example-indexer.test/torrent/123</guid>
+      <jackettindexer id="exampleindexer">Example Indexer</jackettindexer>
+      <type>public</type>
+      <comments>https://example-indexer.test/torrent/123</comments>
+      <pubDate>Fri, 30 Aug 2024 10:11:12 +0000</pubDate>
+      <size>6114656256</size>
+      <description>Ubuntu Desktop 24.04.1 LTS</description>
+      <link>http://localhost:9117/dl/exampleindexer/?jackett_apikey=abc&amp;path=Q2ZESjhub3Rfa2V5&amp;file=ubuntu-24.04.1-desktop-amd64.iso</link>
+      <category>4000</category>
+      <category>100001</category>
+      <enclosure url="http://localhost:9117/dl/exampleindexer/?jackett_apikey=abc&amp;path=Q2ZESjhub3Rfa2V5&amp;file=ubuntu-24.04.1-desktop-amd64.iso" length="6114656256" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="4000" />
+      <torznab:attr name="category" value="100001" />
+      <torznab:attr name="seeders" value="1532" />
+      <torznab:attr name="peers" value="1601" />
+      <torznab:attr name="infohash" value="2AA4F5A7E209E54B32803D43670971C4C8CAAA05" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:2AA4F5A7E209E54B32803D43670971C4C8CAAA05&amp;dn=ubuntu-24.04.1-desktop-amd64.iso&amp;tr=https%3A%2F%2Ftorrent.ubuntu.com%2Fannounce" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Ubuntu Server 24.04 LTS</title>
+      <guid>magnet:?xt=urn:btih:4e3d2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e&amp;dn=ubuntu-24.04-live-server-amd64.iso</guid>
+      <jackettindexer id="magnetonly">Magnet Only</jackettindexer>
+      <type>public</type>
+      <pubDate>Thu, 25 Apr 2024 15:00:00 +0000</pubDate>
+      <link>magnet:?xt=urn:btih:4e3d2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e&amp;dn=ubuntu-24.04-live-server-amd64.iso</link>
+      <category>4000</category>
+      <torznab:attr name="category" value="4000" />
+      <torznab:attr name="seeders" value="87" />
+      <torznab:attr name="peers" value="90" />
+      <torznab:attr name="size" value="2754981888" />
+    </item>
+    <item>
+      <title>No link at all</title>
+      <guid>nothing-useful</guid>
+      <pubDate>not a date</pubDate>
+      <torznab:attr name="seeders" value="1" />
+    </item>
+  </channel>
+</rss>

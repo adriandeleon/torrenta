@@ -247,6 +247,7 @@ Everything in Settings that the engine already knows how to do.
    files, export `.torrent` are still to come.
 
 ### 0.5 — Organisation and automation
+**0.5 is feature-complete.**
 
 1. ✓ **Categories and tags** with sidebar filters and automatic torrent management.
 2. ✓ **Sidebar** status and tracker filters, counts, remembered selection.
@@ -258,13 +259,19 @@ Everything in Settings that the engine already knows how to do.
 4. ✓ **Watch folders.** A `WatchService` thread plus a poll every minute as the safety net; a
    file is read once its size has held for two looks; the add is the engine's own path, with no
    dialog. The list is `watch-folders.json`, this machine's, never synced.
-5. **Run on event** (added, finished, seeding done) with placeholders; desktop notifications.
+5. ✓ **Run on event and desktop notifications** (Settings → Automation). One command line per
+   event (added, finished, seeding done) with qBittorrent's placeholders, split like a shell
+   would and substituted per argument, run with no shell, output and exit code in the Event Log,
+   killed after ten minutes; the lines are this machine's and never sync. Notifications per event
+   (finished on by default, plus errors) through `notify-send`, `osascript` or a PowerShell toast
+   of ours, each a short program with the text as arguments; said once in the log when the
+   machine has none. The seeding-done event is the share-limit action, raised by the window.
 
 ### 0.6 — Search
 See "Search design" below.
 
-1. **Provider API and Torznab client**, with a provider settings page: add an indexer by URL and API
-   key, test it.
+1. ✓ **Provider API and Torznab client**, with a provider settings page: add an indexer by URL and API
+   key, test it. (`search.SearchProvider`, `TorznabProvider`, `SearchService`, Settings → Search.)
 2. **Search tab**: query, category, provider selection; results merged and deduplicated by
    info-hash; sort; add to the Add dialog.
 3. **Declarative providers**: a definition file format for sites without an API, loaded from the

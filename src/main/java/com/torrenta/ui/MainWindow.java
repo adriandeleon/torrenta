@@ -60,6 +60,8 @@ import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
 import com.torrenta.AppInfo;
+import com.torrenta.automation.Automation;
+import com.torrenta.automation.Notifiers;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
 import com.torrenta.engine.Engine;
@@ -75,6 +77,7 @@ import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.WatchFolders;
 import com.torrenta.net.TorrentFetch;
 import com.torrenta.store.LabelStore;
+import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
 import com.torrenta.update.ReleaseInfo;
@@ -127,7 +130,11 @@ public final class MainWindow {
 
     private final LabelStore labels;
     private final WatchFolderStore watchStore;
+    private final SearchProviderStore searchStore;
     private WatchFolders watcher;
+    /** Runs the person's commands and shows notifications; made with the engine in {@link #listenTo}. */
+    private volatile Automation automation;
+
     private Sidebar sidebar;
     private SidebarSelection sidebarSelection = SidebarSelection.ALL;
     private String lastClipboardOffer = "";
@@ -169,6 +176,8 @@ public final class MainWindow {
         labels.load();
         this.watchStore = new WatchFolderStore(configDir);
         watchStore.load();
+        this.searchStore = new SearchProviderStore(configDir);
+        searchStore.load();
         stage.setTitle(AppInfo.NAME);
 
         BorderPane root = new BorderPane();
@@ -189,6 +198,12 @@ public final class MainWindow {
         settingsWindow.setOnAppearanceChanged(this::applyAppearance);
         applyAppearance();
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
+        // The Search tab (next) will reread the list from here; until then there is nothing to tell.
+        settingsWindow.setSearchProviders(searchStore, () -> {});
+        settingsWindow.setOnTestNotification(() -> {
+            Automation a = automation;
+            if (a != null) a.testNotification();
+        });
         sync = new SettingsSync(settings, configDir, new SyncHost());
         settingsWindow.setSync(sync);
         sync.addListener(() -> {
@@ -247,7 +262,7 @@ public final class MainWindow {
         return engineDescription;
     }
 
-    /** What to photograph: the open Add dialog if there is one, else the window. */
+    /** What to photograph: the open Add dialog if there is one, else a window of ours, else the window. */
     public javafx.scene.Scene captureScene() {
         if (currentDialog != null && currentDialog.isShowing()) return currentDialog.scene();
         if (limitsDialog != null && limitsDialog.isShowing()) return limitsDialog.scene();
@@ -258,6 +273,7 @@ public final class MainWindow {
             return aboutDialog.getDialogPane().getScene();
         if (settingsWindow.dialogScene() != null) return settingsWindow.dialogScene();
         if (settingsWindow.isShowing()) return settingsWindow.scene();
+        if (logWindow.isShowing()) return logWindow.scene();
         return stage.getScene();
     }
 
@@ -279,14 +295,17 @@ public final class MainWindow {
     }
 
     /**
-     * Drives the window from the capture hook, by name: {@code select-all}, {@code palette},
+     * Drives the window from the capture hook, by name: {@code close-window} (the quit path a
+     * person takes, where the hook itself exits through Platform.exit), {@code select-all}, {@code palette},
      * {@code palette:<query>}, {@code sidebar:<filter>} (as {@link SidebarFilter#parse} reads it),
      * {@code sidebar-keys:<KEY+KEY+…>} (focus the sidebar and press them),
      * {@code dialog-category:<name>} on an open Add dialog, or a command id. Prints what a
      * screenshot cannot show.
      */
     public void runForCapture(String action) {
-        if (action.equals("select-all")) {
+        if (action.equals("close-window")) {
+            stage.close();
+        } else if (action.equals("select-all")) {
             table.getSelectionModel().selectAll();
         } else if (action.equals("event-log")) {
             logWindow.show();
@@ -301,6 +320,17 @@ public final class MainWindow {
         } else if (action.equals("settings-watch-add")) {
             settingsWindow.show(stage);
             settingsWindow.openWatchDialogForCapture();
+        } else if (action.startsWith("settings-search-add")) {
+            // settings-search-add, settings-search-add:<url>, settings-search-test:<url> (Test pressed)
+            settingsWindow.show(stage);
+            int colon = action.indexOf(':');
+            settingsWindow.openSearchDialogForCapture(colon < 0 ? "" : action.substring(colon + 1), false);
+        } else if (action.startsWith("settings-search-dialog-test:")) {
+            settingsWindow.show(stage);
+            settingsWindow.openSearchDialogForCapture(action.substring("settings-search-dialog-test:".length()), true);
+        } else if (action.equals("settings-search-test")) {
+            settingsWindow.show(stage);
+            settingsWindow.testSearchProviderForCapture();
         } else if (action.equals("dialog-add")) {
             if (currentDialog != null && currentDialog.isShowing()) currentDialog.confirm();
         } else if (action.startsWith("dialog-press:")) {
@@ -366,6 +396,8 @@ public final class MainWindow {
             System.out.println("capture: settings=" + settingsWindow.visibleRowsForCapture());
         if (!settingsWindow.dialogTitle().isEmpty())
             System.out.println("capture: dialog=" + settingsWindow.dialogTitle());
+        if (!settingsWindow.searchStatus().isEmpty())
+            System.out.println("capture: search=" + settingsWindow.searchStatus());
         if (watcher != null) System.out.println("capture: watch=" + watchStatusText());
     }
 
@@ -375,10 +407,26 @@ public final class MainWindow {
      * the engine's alert thread; the log and the status bar are FX-owned, hence the hop.
      */
     public void listenTo(Engine engine) {
-        engine.addListener(event -> Platform.runLater(() -> {
+        automation = new Automation(engine, settings::automation, Notifiers.forPlatform(), this::reportFromWorker);
+        engine.addListener(event -> {
+            // The automation decides on the alert thread and does its work on threads of its own.
+            automation.handle(event);
+            Platform.runLater(() -> {
+                log.add(event);
+                setStatus(event.message());
+            });
+        });
+    }
+
+    /**
+     * Any thread: an event from a worker of the window's own (the automation) into the log. A
+     * command's output lines go to the log only; the status bar keeps the line that says it ran.
+     */
+    private void reportFromWorker(EngineEvent event) {
+        Platform.runLater(() -> {
             log.add(event);
-            setStatus(event.message());
-        }));
+            if (!event.message().startsWith(Automation.OUTPUT_PREFIX)) setStatus(event.message());
+        });
     }
 
     /** FX thread. The engine has started; flush what was queued and begin polling. */
@@ -1075,8 +1123,13 @@ public final class MainWindow {
             }
             String message = text;
             boolean removed = due.get() == ShareLimit.Action.REMOVE;
+            EngineEvent event =
+                    EngineEvent.of(EngineEvent.Kind.SEEDING_DONE, EngineEvent.Level.INFO, t.id(), t.name(), message);
+            // The snapshot goes along: a removed torrent cannot be looked up for the placeholders.
+            Automation a = automation;
+            if (a != null) a.handle(event, t);
             Platform.runLater(() -> {
-                log.add(EngineEvent.info(t.id(), t.name(), message));
+                log.add(event);
                 setStatus(message);
                 if (removed) forgetOverride(t.id());
             });
@@ -1126,7 +1179,15 @@ public final class MainWindow {
      * torrents, and the sidebar would take that for the choices' entries having gone.
      */
     public void stopPolling() {
-        if (poller != null) poller.shutdownNow();
+        if (poller == null) return;
+        poller.shutdownNow();
+        // A poll in flight finishes before the engine is stopped behind it; the engine's own lock
+        // guards that too, this just keeps the quit orderly.
+        try {
+            poller.awaitTermination(3, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     // ---- commands -------------------------------------------------------------------------------
@@ -1549,6 +1610,14 @@ public final class MainWindow {
                 new Command("about", "About " + AppInfo.NAME, null, null, always, this::showAbout),
                 new Command(
                         "settings", "Settings…", chord(KeyCode.COMMA), null, always, () -> settingsWindow.show(stage)),
+                // Opens the provider list until the Search tab exists; the chord is the tab's.
+                new Command(
+                        "search",
+                        "Search…",
+                        chord(KeyCode.K),
+                        null,
+                        always,
+                        () -> settingsWindow.showSearchProviders(stage)),
                 new Command(
                         "filter",
                         "Filter Torrents",
@@ -1683,6 +1752,7 @@ public final class MainWindow {
                         addMagnet,
                         addClipboard,
                         new SeparatorMenuItem(),
+                        command("search").menuItem(),
                         command("settings").menuItem(),
                         new SeparatorMenuItem(),
                         quit);
