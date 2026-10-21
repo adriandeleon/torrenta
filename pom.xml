@@ -40,6 +40,12 @@
              x86_64 only. -->
         <libtorrent4j.version>2.1.0-39</libtorrent4j.version>
 
+        <!-- The Linux tray: a StatusNotifierItem over D-Bus (GNOME dropped the legacy AWT tray in
+             3.26; Windows and macOS keep the AWT one). Both are proper JPMS modules; dbus-java logs
+             through slf4j, routed into j.u.l so a tray failure is not swallowed by the no-op binding. -->
+        <dbus.version>5.1.1</dbus.version>
+        <slf4j.version>2.0.17</slf4j.version>
+
         <!-- jpackage wants .icns on macOS, .ico on Windows, .png on Linux; the os-* profiles pick. -->
         <jpackage.icon>${project.basedir}/branding/torrenta.png</jpackage.icon>
         <jpackage.imageName>Torrenta</jpackage.imageName>
@@ -86,6 +92,22 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-core</artifactId>
             <version>${jackson.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.github.hypfvieh</groupId>
+            <artifactId>dbus-java-core</artifactId>
+            <version>${dbus.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.github.hypfvieh</groupId>
+            <artifactId>dbus-java-transport-native-unixsocket</artifactId>
+            <version>${dbus.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-jdk14</artifactId>
+            <version>${slf4j.version}</version>
         </dependency>
 
         <dependency>

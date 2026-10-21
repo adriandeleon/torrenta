@@ -95,6 +95,8 @@ import com.torrenta.store.LabelStore;
 import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
+import com.torrenta.tray.TorrentaTray;
+import com.torrenta.tray.Trays;
 import com.torrenta.update.ReleaseInfo;
 import com.torrenta.update.UpdateCheck;
 import com.torrenta.update.UpdateService;
@@ -135,6 +137,13 @@ public final class MainWindow {
     /** The rates of every torrent that has been selected, by id, for the Speed tab; gone with the torrent. */
     private final java.util.concurrent.ConcurrentMap<String, SpeedHistory> torrentHistories =
             new java.util.concurrent.ConcurrentHashMap<>();
+    /** What the status bar has said; the popup over it shows the history. */
+    private final MessageLog messages = new MessageLog();
+
+    private HBox statusBar;
+    private final MessageLogPopup messagePopup;
+    /** Built on first use: most sessions never open it. */
+    private DebugLogWindow debugLogWindow;
 
     private final Label errorBadge = new Label();
     private TableView<TorrentRow> table;
@@ -207,6 +216,19 @@ public final class MainWindow {
 
     private ScheduledExecutorService poller;
 
+    /** The tray icon once one has come up, else null; set on the FX thread, read by the poll. */
+    private volatile TorrentaTray tray;
+    /** Why there is no tray, once an attempt has said; empty before one and while there is one. */
+    private volatile String trayReason = "";
+    /** What the tray was last given, so an equal snapshot costs no round trip; poll thread. */
+    private volatile TrayStatus trayStatus = TrayStatus.starting();
+    /** The window is hidden behind the tray icon, not closed: {@code onHidden} tears nothing down. */
+    private boolean hiddenToTray;
+    /** Quit was asked for: a close request is not a close-to-tray, and teardown runs once. */
+    private boolean quitting;
+
+    private boolean shutDown;
+
     /**
      * @param opener opens a URI with the desktop (a folder, later a web page); the application's
      *     host services, which only the {@code Application} can hand out
@@ -237,7 +259,8 @@ public final class MainWindow {
 
         BorderPane root = new BorderPane();
         root.setCenter(buildCenter());
-        root.setBottom(buildStatusBar());
+        statusBar = buildStatusBar();
+        root.setBottom(statusBar);
         commands = buildCommands();
         // The toolbar first: the View menu's check item binds to its visibility.
         ToolBar bar = buildToolbar();
@@ -250,11 +273,14 @@ public final class MainWindow {
         statsWindow.showingProperty().addListener((o, was, now) -> statsWanted = now);
         detail.setSpeedWindow(settings.statsWindowSeconds());
         detail.setOnSpeedWindowChanged(this::rememberStatsWindow);
+        messagePopup = new MessageLogPopup(host, statusBar, messages, this::focusList);
         settingsWindow = new SettingsWindow(settings);
+        settingsWindow.setOnShowDebugLog(this::showDebugLog);
         settingsWindow.setOnEngineSettingsChanged(this::applyEngineSettings);
         settingsWindow.setLabels(labels, new LabelsHost());
         settingsWindow.setOnIpFilterChanged(this::refreshIpFilter, this::ipFilterStatusText);
         settingsWindow.setOnAppearanceChanged(this::applyAppearance);
+        settingsWindow.setOnTrayChanged(this::applyTraySetting);
         applyAppearance();
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
         settingsWindow.setSearchProviders(searchStore, searchPane::reloadProviders);
@@ -293,6 +319,7 @@ public final class MainWindow {
         scene.getAccelerators().put(shiftChord(KeyCode.P), () -> palette.show(commands));
         scene.getAccelerators().put(shiftChord(KeyCode.L), logWindow::show);
         scene.getAccelerators().put(shiftChord(KeyCode.T), statsWindow::show);
+        scene.getAccelerators().put(shiftChord(KeyCode.M), messagePopup::toggle);
         scene.getAccelerators().put(chord(KeyCode.V), this::addFromClipboard);
         scene.setOnDragOver(this::onDragOver);
         scene.setOnDragDropped(this::onDragDropped);
@@ -302,13 +329,18 @@ public final class MainWindow {
             if (now) offerClipboard();
         });
         stage.setScene(scene);
+        // The live setting, not one captured at startup: the checkbox can change while the window
+        // is open. Conditional on a tray having actually appeared, not on the preference alone:
+        // hiding a window that leaves no icon behind is how a program becomes unreachable.
+        stage.setOnCloseRequest(e -> {
+            if (!quitting && tray != null && settings.closeToTray()) {
+                e.consume();
+                hideToTray();
+            }
+        });
         stage.setOnHidden(e -> {
-            rememberDivider();
-            stopPolling();
-            stopWatching();
-            rss.stop();
-            updates.shutdown();
-            sync.shutdown();
+            if (hiddenToTray) return;
+            shutdown();
         });
         setStatus("Starting the engine…");
         rates.setText(ratesText(Engine.Rates.ZERO));
@@ -317,6 +349,124 @@ public final class MainWindow {
     public void show() {
         stage.show();
         table.requestFocus();
+        installTray();
+    }
+
+    // ---- tray -----------------------------------------------------------------------------------
+
+    /**
+     * Brings the tray up off the FX thread, because both backends can block on D-Bus or AWT
+     * initialisation and neither is worth a stalled first frame. Nothing happens when the setting
+     * is off or an icon is already up; a second attempt that finds one up disposes its own.
+     */
+    private void installTray() {
+        if (!settings.tray() || tray != null) return;
+        Thread.ofPlatform().daemon().name("tray-init").start(() -> {
+            Trays.Attempt attempt =
+                    Trays.create(() -> Platform.runLater(this::showFromTray), () -> Platform.runLater(this::quit));
+            Platform.runLater(() -> {
+                if (attempt.tray().isEmpty()) {
+                    trayReason = attempt.reason();
+                    // Silence here is the bug a person actually hits: the setting is on, the box
+                    // says so, and closing still quits, because no tray ever appeared.
+                    setStatus("No tray icon (" + attempt.reason() + "); closing the window quits " + AppInfo.NAME);
+                    return;
+                }
+                TorrentaTray created = attempt.tray().get();
+                if (tray != null || !settings.tray()) {
+                    created.dispose();
+                    return;
+                }
+                tray = created;
+                trayReason = "";
+                // Without this, hiding the last window ends the JavaFX runtime, which calls
+                // App.stop, which ends the process: closing to the tray would quit no matter what
+                // the close handler did. Set only once a tray really exists, for the reason above.
+                Platform.setImplicitExit(false);
+                created.update(trayStatus.display(), trayStatus.line());
+                LOG.info("Tray icon up (" + created.backend() + ")");
+            });
+        });
+    }
+
+    /** FX thread, from the Settings page: the switch was flipped, bring the icon up or take it down. */
+    private void applyTraySetting() {
+        if (settings.tray()) {
+            installTray();
+            return;
+        }
+        TorrentaTray current = tray;
+        if (current == null) return;
+        tray = null;
+        current.dispose();
+        Platform.setImplicitExit(true);
+        // A window hidden behind an icon that has just gone would be unreachable.
+        if (hiddenToTray) showFromTray();
+    }
+
+    /** Poll thread: the icon and its line, only when they changed since the last push. */
+    private void pushTray(TrayStatus next) {
+        if (next.equals(trayStatus)) return;
+        trayStatus = next;
+        TorrentaTray current = tray;
+        if (current != null) current.update(next.display(), next.line());
+    }
+
+    private void hideToTray() {
+        rememberDivider();
+        hiddenToTray = true;
+        stage.hide();
+    }
+
+    private void showFromTray() {
+        hiddenToTray = false;
+        stage.show();
+        stage.setIconified(false);
+        stage.toFront();
+        table.requestFocus();
+    }
+
+    /**
+     * Ends the program: from the File menu, the tray menu, or a close with no tray to close to.
+     * Platform.exit is needed outright once implicit exit is off; before that it is harmless.
+     */
+    private void quit() {
+        quitting = true;
+        hiddenToTray = false;
+        if (stage.isShowing()) stage.close(); // onHidden tears down
+        else shutdown();
+        Platform.exit();
+    }
+
+    /** Once: what the window owns, before the engine is stopped behind it. */
+    private void shutdown() {
+        if (shutDown) return;
+        shutDown = true;
+        rememberDivider();
+        stopPolling();
+        stopWatching();
+        rss.stop();
+        updates.shutdown();
+        sync.shutdown();
+    }
+
+    /** Any thread, idempotent; from App.stop, after the engine. */
+    public void disposeTray() {
+        TorrentaTray current = tray;
+        tray = null;
+        if (current != null) current.dispose();
+    }
+
+    /** The backend that came up, or the reason none did, or "none"; read by the development capture. */
+    public String trayDescription() {
+        TorrentaTray current = tray;
+        if (current != null) return current.backend();
+        return trayReason.isEmpty() ? "none" : trayReason;
+    }
+
+    /** The icon's line as last pushed; read by the development capture. */
+    public String trayLine() {
+        return trayStatus.line();
     }
 
     /** The status bar's text; read by the development capture. */
@@ -344,6 +494,7 @@ public final class MainWindow {
         if (settingsWindow.isShowing()) return settingsWindow.scene();
         if (statsWindow.isShowing()) return statsWindow.scene();
         if (logWindow.isShowing()) return logWindow.scene();
+        if (debugLogWindow != null && debugLogWindow.isShowing()) return debugLogWindow.scene();
         return stage.getScene();
     }
 
@@ -401,12 +552,22 @@ public final class MainWindow {
     public void runForCapture(String action) {
         if (action.equals("close-window")) {
             stage.close();
+        } else if (action.equals("close-request")) {
+            // What the title bar's button sends: the close-to-tray rule runs, stage.close() skips it.
+            stage.fireEvent(new javafx.stage.WindowEvent(stage, javafx.stage.WindowEvent.WINDOW_CLOSE_REQUEST));
         } else if (action.equals("select-all")) {
             table.getSelectionModel().selectAll();
         } else if (action.equals("event-log")) {
             logWindow.show();
         } else if (action.equals("stats")) {
             statsWindow.show();
+        } else if (action.equals("message-log")) {
+            messagePopup.show();
+        } else if (action.startsWith("message-log:")) {
+            messagePopup.show();
+            messagePopup.setFilterForCapture(action.substring("message-log:".length()));
+        } else if (action.equals("debug-log")) {
+            showDebugLog();
         } else if (action.equals("settings")) {
             settingsWindow.show(stage);
         } else if (action.startsWith("settings-page:")) {
@@ -546,6 +707,8 @@ public final class MainWindow {
                 + table.getSelectionModel().getSelectedItems().size());
         if (palette.isShowing()) System.out.println("capture: palette=" + palette.visibleCommands());
         if (logWindow.isShowing()) System.out.println("capture: log-window=showing");
+        if (messagePopup.isShowing()) System.out.println("capture: message-log=" + messagePopup.visibleLines());
+        if (debugLogWindow != null && debugLogWindow.isShowing()) System.out.println("capture: debug-log=showing");
         if (currentDialog != null && currentDialog.isShowing()) {
             System.out.println("capture: dialog=" + currentDialog.title());
             System.out.println("capture: add-dialog=" + currentDialog.summaryForCapture());
@@ -609,7 +772,7 @@ public final class MainWindow {
             automation.handle(event);
             Platform.runLater(() -> {
                 log.add(event);
-                setStatus(event.message());
+                setStatus(event.message(), event.level());
             });
         });
     }
@@ -621,7 +784,7 @@ public final class MainWindow {
     private void reportFromWorker(EngineEvent event) {
         Platform.runLater(() -> {
             log.add(event);
-            if (!event.message().startsWith(Automation.OUTPUT_PREFIX)) setStatus(event.message());
+            if (!event.message().startsWith(Automation.OUTPUT_PREFIX)) setStatus(event.message(), event.level());
         });
     }
 
@@ -679,7 +842,7 @@ public final class MainWindow {
         public void report(EngineEvent event) {
             Platform.runLater(() -> {
                 log.add(event);
-                setStatus(event.message());
+                setStatus(event.message(), event.level());
             });
         }
 
@@ -737,7 +900,7 @@ public final class MainWindow {
                 altSpeedToggle.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("active"), alternative);
             });
         } catch (EngineException ex) {
-            Platform.runLater(() -> setStatus(ex.getMessage()));
+            Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
         }
     }
 
@@ -823,7 +986,7 @@ public final class MainWindow {
                 e.applySettings(current);
                 refreshLimits();
             } catch (EngineException ex) {
-                Platform.runLater(() -> setStatus(ex.getMessage()));
+                Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
             }
         });
     }
@@ -847,7 +1010,7 @@ public final class MainWindow {
         settings.saveQuietly();
         updates.check(AppInfo.VERSION, outcome -> {
             onUpdateOutcome(outcome, true);
-            if (outcome.error() != null) setStatus("Update check failed: " + outcome.error());
+            if (outcome.error() != null) setStatus("Update check failed: " + outcome.error(), EngineEvent.Level.ERROR);
             else if (outcome.available())
                 setStatus(AppInfo.NAME + " " + outcome.latest().version() + " is available — see the Help menu");
             else setStatus(AppInfo.NAME + " " + AppInfo.VERSION + " is up to date");
@@ -904,7 +1067,7 @@ public final class MainWindow {
 
     /** FX thread. The engine could not start; the window stays up so the message can be read. */
     public void engineFailed(EngineException failure) {
-        setStatus(failure.getMessage());
+        setStatus(failure.getMessage(), EngineEvent.Level.ERROR);
     }
 
     /**
@@ -1214,7 +1377,7 @@ public final class MainWindow {
                 d.files().forEach(f -> own.put(f.index(), f.priority()));
                 Platform.runLater(() -> openChooser(id, preview, own));
             } catch (EngineException ex) {
-                Platform.runLater(() -> setStatus(ex.getMessage()));
+                Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
             }
         });
     }
@@ -1372,6 +1535,7 @@ public final class MainWindow {
             }
         }
         TorrentDetail shown = detailSnapshot;
+        pushTray(TrayStatus.of(snapshot, current));
         Platform.runLater(() -> {
             rows.apply(snapshot, nowSeconds);
             refreshSidebar(snapshot);
@@ -1573,7 +1737,7 @@ public final class MainWindow {
             try {
                 current = e.limits(first.id());
             } catch (EngineException ex) {
-                Platform.runLater(() -> setStatus(ex.getMessage()));
+                Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
                 return;
             }
             Platform.runLater(() -> {
@@ -1954,6 +2118,14 @@ public final class MainWindow {
                         always,
                         () -> statsWindow.show()),
                 new Command(
+                        "message-log",
+                        "Messages",
+                        null,
+                        shiftChord(KeyCode.M).getDisplayText(),
+                        always,
+                        () -> messagePopup.toggle()),
+                new Command("debug-log", "Debug Log", null, null, always, this::showDebugLog),
+                new Command(
                         "toggle-toolbar",
                         "Toggle Toolbar",
                         null,
@@ -2053,7 +2225,7 @@ public final class MainWindow {
 
         MenuItem quit = new MenuItem("Quit");
         quit.setAccelerator(chord(KeyCode.Q));
-        quit.setOnAction(e -> stage.close());
+        quit.setOnAction(e -> quit());
 
         Menu file = new Menu("File");
         file.getItems()
@@ -2104,6 +2276,8 @@ public final class MainWindow {
                         command("select-all").menuItem(),
                         command("event-log").menuItem(),
                         command("statistics").menuItem(),
+                        command("message-log").menuItem(),
+                        command("debug-log").menuItem(),
                         paletteItem);
 
         // The two update items exist from the start and show only once a release is known, so the
@@ -2908,6 +3082,9 @@ public final class MainWindow {
         altSpeedToggle.getStyleClass().add("alt-speed");
         altSpeedToggle.setText("Alt speed: off");
         altSpeedToggle.setOnMouseClicked(e -> toggleAlternativeSpeed());
+        // The status text is the door to its own history: a click shows what scrolled past.
+        status.getStyleClass().add("status-message");
+        status.setOnMouseClicked(e -> messagePopup.toggle());
         HBox bar = new HBox(12, status, spacer, altSpeedToggle, updateBadge, syncBadge, errorBadge, rates);
         bar.setPadding(new Insets(4, 10, 4, 10));
         bar.getStyleClass().add("status-bar");
@@ -2919,6 +3096,25 @@ public final class MainWindow {
     }
 
     private void setStatus(String text) {
+        setStatus(text, EngineEvent.Level.INFO);
+    }
+
+    /**
+     * The status bar says {@code text}, coloured by {@code level}, and the message log keeps it.
+     * One line replaces the next, so an error that lands while nobody is looking is still in the
+     * log, in red, when the status bar is clicked.
+     */
+    private void setStatus(String text, EngineEvent.Level level) {
         status.setText(text);
+        status.getStyleClass().removeAll("status-warning", "status-error");
+        if (level == EngineEvent.Level.ERROR) status.getStyleClass().add("status-error");
+        else if (level == EngineEvent.Level.WARNING) status.getStyleClass().add("status-warning");
+        messages.add(text, level, java.time.Instant.now());
+    }
+
+    /** The debug log's window, built the first time it is asked for. */
+    private void showDebugLog() {
+        if (debugLogWindow == null) debugLogWindow = new DebugLogWindow(stage);
+        debugLogWindow.show();
     }
 }

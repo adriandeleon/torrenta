@@ -23,9 +23,23 @@ module com.torrenta {
     // The update check's release payload gets a real parser.
     requires com.fasterxml.jackson.core;
 
-    // ImageIO, for the development screen capture only. Nothing else here touches AWT, and
-    // App.main forces it headless before any AWT class can load.
+    // Java2D for the tray icon and the development screen capture, and the AWT system tray on
+    // Windows and macOS. App.main forces AWT headless before any AWT class can load, except where
+    // that tray is wanted (tray.Trays.usesAwt).
     requires java.desktop;
 
+    // The Linux tray backend: a StatusNotifierItem on the session bus. The transport and the
+    // slf4j->JUL bridge are service providers, required explicitly so jlink includes them.
+    requires org.freedesktop.dbus;
+    requires org.freedesktop.dbus.transport.jre;
+    requires org.slf4j.jul;
+
     exports com.torrenta;
+
+    // dbus-java reflects over the exported StatusNotifierItem object and its structs.
+    exports com.torrenta.tray to
+            org.freedesktop.dbus;
+
+    opens com.torrenta.tray to
+            org.freedesktop.dbus;
 }

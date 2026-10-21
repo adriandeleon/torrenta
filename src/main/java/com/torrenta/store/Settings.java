@@ -86,6 +86,10 @@ public final class Settings {
     public static final String UI_STATE_COLORS = "ui.stateColors";
     /** The theme id ({@code editora-dark}, {@code nord-light}, …); the UI maps it and falls back. */
     public static final String THEME = "ui.theme";
+    /** A tray (menu-bar) icon with the rates and a menu; on by default, where the desktop has one. */
+    public static final String UI_TRAY = "ui.tray";
+    /** Closing the window hides it behind the tray icon and keeps the torrents going; on by default. */
+    public static final String UI_CLOSE_TO_TRAY = "ui.closeToTray";
 
     public static final String LAST_UPDATE_CHECK = "updates.lastCheckEpochMs";
     /** The version the user chose to skip; a manual check still reports it. */
@@ -459,6 +463,22 @@ public final class Settings {
 
     public boolean sidebar() {
         return readBoolean(UI_SIDEBAR, true);
+    }
+
+    public boolean tray() {
+        return readBoolean(UI_TRAY, true);
+    }
+
+    public void setTray(boolean on) {
+        properties.setProperty(UI_TRAY, String.valueOf(on));
+    }
+
+    public boolean closeToTray() {
+        return readBoolean(UI_CLOSE_TO_TRAY, true);
+    }
+
+    public void setCloseToTray(boolean on) {
+        properties.setProperty(UI_CLOSE_TO_TRAY, String.valueOf(on));
     }
 
     public void setSidebar(boolean shown) {

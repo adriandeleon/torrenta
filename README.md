@@ -14,7 +14,7 @@
 
 A keyboard-first, cross-platform BitTorrent client built on JavaFX.
 
-Status: **early**. A themed window with a menu bar, an icon toolbar, a torrent list, a status bar and an event log,
+Status: **early**. A themed window with a menu bar, an icon toolbar, a torrent list, a status bar that keeps its history, an event log, a debug log,
 on a real engine: libtorrent, through [libtorrent4j](https://github.com/aldenml/libtorrent4j).
 Torrents arrive from a file, a magnet link, a URL, a drop or the clipboard through an Add dialog
 (file selection and priorities, save path with what the torrent leaves free, category, tags, stop
@@ -238,6 +238,7 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces, Speed (the selected torrent's graph, the same windows as the Statistics window's) |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
 | `Ctrl+Shift+T` | Statistics: this session's and all-time downloaded, uploaded, share ratio and active time, bytes with overhead and wasted, peers and DHT nodes, disk reads, writes and buffers, torrents by state, refreshed every second; under them the session speed graph (download and upload over the last minute, ten minutes, hour or day, the rate now and the peak in the legend) |
+| `Ctrl+Shift+M` | Messages: what the status bar has said this session, newest first (a click on the status bar does the same) |
 | `Space` | Pause the selected torrents, or resume them if all are paused |
 | `Ctrl+Shift+U` | Force resume (ignore the queue) |
 | `Ctrl+Shift+R` / `Ctrl+Shift+A` | Force recheck / force reannounce |

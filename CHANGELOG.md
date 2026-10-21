@@ -39,6 +39,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 - **A Speed tab in the detail pane**: the selected torrent's download and upload graph, the
   same windows, kept for every torrent that has been selected while it is in the list; nothing
   more is asked of the engine, the rates come with the snapshot the list already gets.
+- **The status bar keeps what it said.** A click on the status text, `Ctrl+Shift+M` or View →
+  Messages shows this session's status lines newest first, each with its time, warnings and
+  errors in colour; a filter box leads the list, Copy takes the selected lines or all of them,
+  Esc closes. The line a torrent finishing replaced is no longer gone. Editora's message log.
+- **A debug log for bug reports.** View → Debug Log (also Settings → General → Diagnostics)
+  shows every warning and error the application logged this session and every uncaught
+  exception, with its stack trace, in a window with Copy; the same lines are written to
+  `torrenta-session.log` beside the settings, truncated each run, so a crash leaves its story
+  behind. A packaged app has no console; this is where its stderr went. Termina's.
 - **The Create Torrent dialog** (`Ctrl+N`, File → New Torrent…, the toolbar's page glyph), the
   third step of the RSS, creation and statistics milestone: a file or folder (browsed, typed or
   dropped on the dialog), hybrid, v1-only or v2-only, a piece size from 16 KiB to 32 MiB or
@@ -98,6 +107,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   articles are `rss/feeds.json` and `rss/articles/<id>.json` beside the settings, this machine's,
   never synced. The columns are remembered as `rss.columns`. The auto-download switch on the
   Settings page is there and off: the rules come next.
+- **A tray icon**, on by default under Settings → General → System tray: the application's own
+  arrow-in-a-tray mark, teal while something downloads, red while a torrent has an error, muted
+  otherwise, with the rates and a count of what the torrents are doing as its tooltip and as the
+  first line of its menu (Show Torrenta, Quit). Closing the window hides it behind the icon and
+  the torrents go on; Quit in the File menu or the tray menu ends the program. Both are switches,
+  and the second only applies once an icon has actually appeared: a window hidden with no icon to
+  bring it back is an unreachable program, so without a tray closing quits and the status bar says
+  why. Linux speaks StatusNotifierItem over D-Bus (KDE, GNOME with the AppIndicator extension,
+  X11 and Wayland alike); Windows and macOS use the system's own. As in Nux and Modula.
 - **Search providers from definition files**, the last step of the search milestone. A site
   without an API is `search-providers/<id>.json` in the config folder: where to search (a URL
   template with `{query}` and `{category}`, the category mapped through the file's own table;

@@ -14,6 +14,7 @@ import com.torrenta.store.ConfigDir;
 import com.torrenta.store.Settings;
 import com.torrenta.store.StatsStore;
 import com.torrenta.store.TorrentStore;
+import com.torrenta.tray.Trays;
 import com.torrenta.ui.MainWindow;
 import com.torrenta.ui.Theme;
 
@@ -46,9 +47,17 @@ public final class App extends Application {
             System.exit(0);
         }
 
-        // First statement before any AWT class can load: java.desktop is required for ImageIO,
-        // and on macOS an initialised AWT contends with JavaFX for the AppKit run loop.
-        System.setProperty("java.awt.headless", "true");
+        // Before any AWT class can load: java.desktop is required for Java2D, and on macOS an
+        // initialised AWT contends with JavaFX for the AppKit run loop, so AWT stays headless
+        // except where the tray icon is AWT's (Windows, macOS) and wanted. Linux's tray is D-Bus
+        // and needs no AWT. The setting is read here, once, which is why it applies on restart.
+        Settings early = new Settings(ConfigDir.resolve(cli.configDir()).resolve(Settings.FILE_NAME));
+        early.load();
+        boolean awtTray = Trays.usesAwt(early.tray(), System.getProperty("os.name"));
+        System.setProperty("java.awt.headless", String.valueOf(!awtTray));
+        // Before the toolkit: a packaged app has no console, so whatever is logged or thrown from
+        // here on is kept for the Debug Log window and the session file.
+        com.torrenta.ui.DebugLog.install();
         launch(args);
     }
 
@@ -63,6 +72,7 @@ public final class App extends Application {
         Path configDir = ConfigDir.resolve(cli.configDir());
         Settings settings = new Settings(configDir.resolve(Settings.FILE_NAME));
         settings.load();
+        com.torrenta.ui.DebugLog.attachFile(configDir);
 
         // Applied before any window is built, so the first frame is already themed.
         Application.setUserAgentStylesheet(
@@ -107,5 +117,10 @@ public final class App extends Application {
     public void stop() {
         if (window != null) window.stopPolling();
         if (engine != null) engine.stop();
+        if (window != null) window.disposeTray();
+        // Both tray backends leave non-daemon threads behind (the AWT event thread, D-Bus workers),
+        // so a quit JVM would otherwise stay alive with no window. The engine has stopped and
+        // written its last resume data by here; nothing else needs an orderly end.
+        System.exit(0);
     }
 }

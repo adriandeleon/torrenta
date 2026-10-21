@@ -19,7 +19,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   window actions first: `select-all`, `palette`, `palette:<query>`, or a command id such as
   `pause-resume`, `dialog-add` to press Add on an open Add dialog (`dialog-press:now|wait|paused`
 for the others, `dialog-key:<KeyCode>` for a key in its file tree), `choose-files` for the
-selected torrent, `select-first`,
+selected torrent, `select-first`, `message-log` / `message-log:<query>` (the status bar's history card; its visible
+  lines are printed), `debug-log` (the Debug Log window; `-Dtorrenta.captureLogProbe=true` pushes a warning and an
+  uncaught exception through the real path before the shot and prints what the log caught),
   `detail:<tab>` to show the detail pane on a tab, `search` / `search:<query>` / `search-keys:<KEY+KEY>`
   for the Search tab (the keys go where the focus is, once the search has ended; a stand-in server is
   `java scripts/torznab-stub.java 9696 <search.xml> [caps.xml]`), `stats` for the Statistics window
@@ -52,7 +54,8 @@ to try one on purpose).
 | RSS rules | `rss.Rule` (the record; `recordMatch` caps the memory at 1000), `EpisodeFilter` (qBittorrent's `1x2;1x3-5;2x1-` parsed with the term at fault; `find` reads `S01E02`/`1x02`/`Season 1 Episode 2` off a title), `RuleMatcher` (compiled once per rule: feed, phrases or regex, episode filter, age, smart memory; `problem(rule)` is the dialog's rule), `RuleEngine` (`apply`: first enabled rule wins, one copy of an episode per batch; `record`: the memory after the adds that went through; the log lines), `RssService.setDownloader`/`runRulesNow`/`markDownloaded`, `Article.downloaded`; `RssStore` `rules.json`; `ui.RuleDialog` (live Matches on a 250 ms pause, matched on a virtual thread), `RuleAdd` (rule → `AddRequest`), `RuleText` (create-rule-from-title and the table's words) | `com.torrenta.rss`, `ui` |
 | Statistics | `engine.SessionStats` (the record; `UNKNOWN` = -1 for a counter the library lacks), `Engine.stats()` (from the last `session_stats` alert, no session round trip), `store.StatsStore` (`stats.properties`: all-time down/up/active, pure `encode`/`decode`, atomic save), `ui.SpeedHistory` (ring buffers: a second for 10 min, a minute for 24 h), `SpeedPlot` (the pure point mapping and the binary ceiling ladder), `SpeedGraph` (the canvas, theme colours through zero-sized swatches), `StatsText` (the rows), `StatisticsWindow` (`Ctrl+Shift+T`), the detail pane's Speed tab | `com.torrenta.engine`, `store`, `ui` |
 | Update | `update.UpdateCheck` (pure: payload, version rules, due), `UpdateService` (GitHub, off the FX thread, `-Dtorrenta.updateEndpoint` for a capture) — Termina's, verbatim | `com.torrenta.update` |
-| UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a vertical `SplitPane`, the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
+| Tray | Nux's and Modula's package, free of JavaFX: `TorrentaTray` (update + dispose), `Trays.create` picks `SniTray` (a StatusNotifierItem + `com.canonical.dbusmenu` on the session bus through dbus-java; Linux, no fallback) or `AwtTray` (Windows, macOS) and says why when neither; `TrayDisplay` (pure: what the arrow's colour means), `TrayIconRenderer` (the SVG mark's geometry in Java2D), `SniMenuModel` (pure: ids and properties); `ui.TrayStatus` (pure: snapshot + rates → display + line); `Settings.tray/closeToTray` (`ui.tray`, `ui.closeToTray`); `MainWindow.installTray/hideToTray/quit` | `com.torrenta.tray`, `ui` |
+| UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `MessageLog` + `MessageLogPopup` (the status bar's history: every `setStatus` with its level, a card over the bar in the palette's chrome, Editora's), `DebugLog` + `DebugLogWindow` (Termina's: j.u.l WARNING and above from every logger plus uncaught exceptions, mirrored to `torrenta-session.log`; View → Debug Log and Settings → General → Diagnostics), `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a vertical `SplitPane`, the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
 | Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
@@ -322,6 +325,24 @@ release process with the names changed; Termina's README and memory hold the war
   HTML parser treats a `<link>` with no attributes as RSS's (content) and one with attributes as
   HTML's void element; `<x/>` is childless on every tag. Ancestor matching stops at the element a
   selector was asked of (jsoup's rule), so `row.select("table td")` finds nothing inside a row.
+- **The tray decides `java.awt.headless` in `App.main`, from the settings file, before launch.**
+  AWT stays headless (the macOS AppKit run-loop contention Termina and Editora met) except where
+  the tray is AWT's and wanted (`Trays.usesAwt`: Windows, macOS); Linux's tray is pure D-Bus plus
+  Java2D and runs headless, with no XEmbed fallback on purpose. So the switch applies on restart
+  on Windows and macOS, and `Trays.create` says "restart" rather than "unsupported" when it finds
+  AWT headless there. `Platform.setImplicitExit(false)` is set only once an icon really exists:
+  with no icon a hidden window is an unreachable process. Closing then hides (`hiddenToTray`, and
+  `onHidden` tears nothing down); `quit()` is the one way out, from File, the tray menu, or a close
+  with no tray; `App.stop` ends with `System.exit(0)` because both backends leave non-daemon threads
+  (the AWT event thread, D-Bus workers). The tray is pushed from the poll thread, only when
+  `TrayStatus` changed, since a repaint crosses the bus. Found against the live bus, in Nux:
+  `Properties.Get` returns the stored `Variant`, a dbus-java `Tuple` subclass must be generic
+  (`MenuPair`), and GNOME renders SNI menus but not SNI tooltips, hence the disabled status line as
+  the menu's first item. The capture prints `tray=` (`sni`, `awt`, or the reason), `trayLine=` and
+  `showing=`; `-Dtorrenta.captureAction=close-request` sends the window a real close request
+  (`close-window` is `stage.close()`, which skips the handler), so `showing=false` with `tray=sni`
+  is close-to-tray working. `busctl --user` can read the item (`org.kde.StatusNotifierItem-<pid>-1`:
+  `ToolTip`, `/MenuBar GetLayout`) and click its items (`Event isvu <id> clicked s "" 0`).
 
 ## Conventions (carried from Termina)
 
