@@ -8,6 +8,7 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
+import javafx.application.Platform;
 import javafx.beans.property.ReadOnlyObjectWrapper;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
@@ -157,6 +158,10 @@ final class DetailPane extends VBox {
     private BiConsumer<Integer, com.torrenta.engine.Priority> onFilePriority = (i, p) -> {};
     private Consumer<FileRows.Row> onOpenFile = r -> {};
     private Consumer<FileRows.Row> onOpenFolder = r -> {};
+    private BiConsumer<FileRows.Row, String> onRename = (r, name) -> {};
+    /** What the capture hook types into the next file Rename dialog before pressing OK. */
+    private String renameForCapture;
+
     private Consumer<List<String>> onAddTrackers = urls -> {};
     private Consumer<String> onRemoveTracker = url -> {};
     private Runnable onReannounce = () -> {};
@@ -233,6 +238,11 @@ final class DetailPane extends VBox {
     /** A folder row, or a file row whose containing folder is meant; see {@link FileRows#folderOf}. */
     void setOnOpenFolder(Consumer<FileRows.Row> handler) {
         onOpenFolder = handler;
+    }
+
+    /** A file or folder row and its new name (the last segment only); the engine says if it will not do. */
+    void setOnRename(BiConsumer<FileRows.Row, String> handler) {
+        onRename = handler;
     }
 
     void setOnAddTrackers(Consumer<List<String>> handler) {
@@ -875,10 +885,18 @@ final class DetailPane extends VBox {
         Headers.uppercase(files);
 
         files.setContextMenu(buildFilesMenu());
-        // Nothing the menu could do (no row chosen, or the files are not on this machine): no menu,
-        // rather than an empty one.
+        // No row chosen: no menu, rather than an empty one. Rename works on every engine, so there
+        // is always something for a row, even with the files on another machine.
         files.addEventFilter(javafx.scene.input.ContextMenuEvent.CONTEXT_MENU_REQUESTED, e -> {
-            if (!localFiles || selectedFileRow().isEmpty()) e.consume();
+            if (selectedFileRow().isEmpty()) e.consume();
+        });
+        // F2 here, not as an accelerator: a context menu's would be the whole window's, and F2 on
+        // the list renames the torrent.
+        files.addEventHandler(javafx.scene.input.KeyEvent.KEY_PRESSED, e -> {
+            if (e.getCode() == javafx.scene.input.KeyCode.F2 && !e.isShortcutDown() && !e.isAltDown()) {
+                selectedFileRow().ifPresent(this::askRename);
+                e.consume();
+            }
         });
         return files;
     }
@@ -894,14 +912,72 @@ final class DetailPane extends VBox {
         MenuItem folder = new MenuItem(tr("detail.files.openFolder"));
         folder.setGraphic(Icons.open().at(Icons.MENU_SIZE));
         folder.setOnAction(e -> selectedFileRow().ifPresent(onOpenFolder));
-        ContextMenu menu = new ContextMenu(open, folder);
+        MenuItem rename = new MenuItem(tr("detail.files.rename"));
+        rename.setGraphic(Icons.rename().at(Icons.MENU_SIZE));
+        rename.setOnAction(e -> selectedFileRow().ifPresent(this::askRename));
+        javafx.scene.control.SeparatorMenuItem gap = new javafx.scene.control.SeparatorMenuItem();
+        ContextMenu menu = new ContextMenu(open, folder, gap, rename);
         menu.setOnShowing(e -> {
             boolean file = selectedFileRow().map(FileRows.Row::isFile).orElse(false);
             open.setVisible(file && localFiles);
             folder.setVisible(localFiles);
+            gap.setVisible(localFiles);
             folder.setText(tr(file ? "detail.files.openContainingFolder" : "detail.files.openFolder"));
         });
         return menu;
+    }
+
+    /**
+     * The new name of a file or folder, its own name to start from with the part before the
+     * extension selected, as a file manager does. On the next pulse, since a nested event loop
+     * cannot start inside an animation or layout pass.
+     */
+    private void askRename(FileRows.Row row) {
+        Platform.runLater(() -> {
+            TextInputDialog prompt = new TextInputDialog(row.name());
+            prompt.initOwner(getScene() == null ? null : getScene().getWindow());
+            Fonts.installUiFont(prompt.getDialogPane());
+            prompt.setTitle(tr(row.isFile() ? "detail.files.renameFile" : "detail.files.renameFolder"));
+            prompt.setHeaderText(row.path());
+            prompt.getEditor().setPrefColumnCount(40);
+            int dot = row.isFile() ? row.name().lastIndexOf('.') : -1;
+            prompt.setOnShown(e ->
+                    prompt.getEditor().selectRange(0, dot > 0 ? dot : row.name().length()));
+            String typed = renameForCapture;
+            renameForCapture = null;
+            if (typed != null) {
+                Platform.runLater(() -> {
+                    prompt.getEditor().setText(typed);
+                    ((Button) prompt.getDialogPane().lookupButton(javafx.scene.control.ButtonType.OK)).fire();
+                });
+            }
+            prompt.showAndWait()
+                    .map(String::strip)
+                    .filter(name -> !name.equals(row.name()))
+                    .ifPresent(name -> onRename.accept(row, name));
+        });
+    }
+
+    /** For the capture hook: the {@code n}th visible row of the Files tab renamed to {@code name}. */
+    void renameFileForCapture(int n, String name) {
+        selectTab("files");
+        if (files.getRoot() == null) {
+            files.rootProperty().addListener(new javafx.beans.value.ChangeListener<>() {
+                @Override
+                public void changed(
+                        javafx.beans.value.ObservableValue<? extends TreeItem<FileRows.Row>> o,
+                        TreeItem<FileRows.Row> was,
+                        TreeItem<FileRows.Row> now) {
+                    if (now == null) return;
+                    files.rootProperty().removeListener(this);
+                    renameFileForCapture(n, name);
+                }
+            });
+            return;
+        }
+        files.getSelectionModel().clearAndSelect(n);
+        renameForCapture = name;
+        selectedFileRow().ifPresent(this::askRename);
     }
 
     private Optional<FileRows.Row> selectedFileRow() {

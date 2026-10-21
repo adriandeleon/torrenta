@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
@@ -31,6 +32,7 @@ import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.EngineSettings;
+import com.torrenta.engine.FileRenames;
 import com.torrenta.engine.IpRange;
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.SessionStats;
@@ -607,6 +609,39 @@ public final class TransmissionEngine implements Engine {
             }
         }
         set(id, f);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>{@code torrent-rename-path}: the daemon renames on disk and in its own record, so the
+     * name survives its restart, and the next poll reads it. The rule is libtorrent's, checked here
+     * against the names the daemon has; renaming the root folder renames the torrent there too.
+     */
+    @Override
+    public void renamePath(String id, String path, String name) throws EngineException {
+        checkRunning();
+        Map<Integer, String> names = fileNames(get(id, List.of("files")));
+        if (names.isEmpty()) throw new EngineException(tr("engine.error.renameNoMetadata"));
+        Optional<String> problem = FileRenames.problem(names, path, name);
+        if (problem.isPresent()) throw new EngineException(problem.get());
+        String torrentName = nameOf(id);
+        Map<String, Object> args = new LinkedHashMap<>();
+        args.put("ids", List.of(id));
+        args.put("path", path);
+        args.put("name", name.strip());
+        rpc.call("torrent-rename-path", args);
+        emit(EngineEvent.info(id, torrentName, tr("engine.event.pathRenamed", torrentName, path, name.strip())));
+    }
+
+    /** The {@code files} field as each file's path by index, forward slashes. Pure. */
+    static Map<Integer, String> fileNames(Map<String, Object> t) {
+        Map<Integer, String> out = new java.util.TreeMap<>();
+        List<Object> files = Json.list(t, "files");
+        for (int i = 0; i < files.size(); i++) {
+            out.put(i, Json.str(Json.obj(files.get(i)), "name", "").replace('\\', '/'));
+        }
+        return out;
     }
 
     @Override

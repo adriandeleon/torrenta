@@ -95,6 +95,19 @@ class AddDialogTest {
                 new AddRequest.Storage(incomplete, true, true),
                 AddDialog.withoutAsking(source, via).storage(),
                 "the storage plan applies without the dialog too");
+        AddDialog.Defaults flat = new AddDialog.Defaults(
+                data,
+                false,
+                false,
+                false,
+                incomplete,
+                false,
+                false,
+                com.torrenta.engine.FileRenames.Layout.NO_SUBFOLDER);
+        assertEquals(
+                com.torrenta.engine.FileRenames.Layout.NO_SUBFOLDER,
+                AddDialog.withoutAsking(source, flat).storage().layout(),
+                "and the content layout");
     }
 
     @Test

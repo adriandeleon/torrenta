@@ -1318,6 +1318,11 @@ public final class MainWindow {
             showDetail();
             detail.pressRemedyForCapture(
                     action.equals("remedy") ? null : Diagnosis.Remedy.valueOf(action.substring("remedy:".length())));
+        } else if (action.startsWith("files-rename:")) {
+            // files-rename:<row>:<name>: that visible row of the Files tab renamed ("~" is a space).
+            String[] parts = action.substring("files-rename:".length()).split(":", 2);
+            showDetail();
+            detail.renameFileForCapture(Integer.parseInt(parts[0]), parts[1].replace('~', ' '));
         } else if (action.startsWith("files-menu")) {
             // files-menu or files-menu:<row>: the Files tab's context menu on that visible row.
             int colon = action.indexOf(':');
@@ -3926,6 +3931,10 @@ public final class MainWindow {
                         .toString();
                 Platform.runLater(() -> opener.accept(uri));
             });
+        });
+        detail.setOnRename((row, name) -> {
+            String id = detailId;
+            if (id != null) onTorrent("status.fileRenamed", id, (e, t) -> e.renamePath(t, row.path(), name));
         });
         detail.setOnAddTrackers(urls -> {
             String id = detailId;

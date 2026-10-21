@@ -71,9 +71,24 @@ public record AddRequest(
      * @param partSuffix incomplete files carry {@link TorrentStorage#SUFFIX} until each is done
      * @param preallocate every file is allocated in full when the torrent starts, rather than
      *     growing as pieces arrive
+     * @param layout how the files sit under the save path; needs the file list, so a magnet
+     *     added before its metadata keeps the torrent's own
      */
-    public record Storage(Path incompletePath, boolean partSuffix, boolean preallocate) {
+    public record Storage(Path incompletePath, boolean partSuffix, boolean preallocate, FileRenames.Layout layout) {
         public static final Storage DEFAULT = new Storage(null, false, false);
+
+        public Storage {
+            if (layout == null) layout = FileRenames.Layout.ORIGINAL;
+        }
+
+        /** The torrent's own layout. */
+        public Storage(Path incompletePath, boolean partSuffix, boolean preallocate) {
+            this(incompletePath, partSuffix, preallocate, FileRenames.Layout.ORIGINAL);
+        }
+
+        public Storage withLayout(FileRenames.Layout l) {
+            return new Storage(incompletePath, partSuffix, preallocate, l);
+        }
 
         /** The storage for a plan: its incomplete folder if it has one. */
         public static Storage of(DownloadPlan plan, boolean partSuffix, boolean preallocate) {

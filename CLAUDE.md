@@ -35,7 +35,7 @@ selected torrent, `select-first`, `message-log` / `message-log:<query>` (the sta
   every capture prints `status-bar=`), `remedy` / `remedy:<NAME>` to press the diagnosis card's first remedy or a named one (`SKIP_FILE`
   …), waiting for a card that offers it (prints `remedy-pressed=`),
   `export-to:<folder>` for Export .torrent past its native chooser, `rename:<name>` (`~` for a
-  space) to fill and confirm the Rename dialog,
+  space) to fill and confirm the Rename dialog, `files-rename:<row>:<name>` for a Files-tab row,
   `files-menu[:<row>]` for the Files tab's context menu on that visible row (it waits for the
   rows, which arrive with the first detail poll; on the Files tab a `file=` line per row shown
   names its `FileKind`, the glyph's rule by extension), `welcome-clipboard:<text>` (the welcome's
@@ -167,9 +167,22 @@ release process with the names changed; Termina's README and memory hold the war
   a test that wants "file 1" must read the index off the preview. `totalSize()` counts padding;
   the preview sums the real files.
 - **`add_torrent` checks the files at once, paused or not, and a `force_recheck` issued during that
-  check is dropped.** Renames through the handle are confirmed by `file_renamed_alert` but a
-  recheck afterwards still did not find the files under the new names in 2.1.0-39. That is why the
-  "no root folder" layout is not in the Add dialog; see the roadmap before trying again.
+  check is dropped.** So the content layout is never renames through the handle after the add: it
+  is `renamed_files` in the add parameters (`FileRenames.layout`), which the add's own check
+  already looks under. Needs the file list: a magnet added before its metadata keeps its own.
+- **libtorrent 2.1.0-39 keeps file renames badly, so the engine keeps them itself.** Measured: a
+  `rename_file` through the handle renames on disk and a recheck in the same session finds the
+  file, but `torrent_file()` keeps showing the old name, and the resume data writes the new one
+  relative to the root folder while reading it back relative to the save path, so a restart lost
+  the file (33 %, re-downloading). `TorrentStorage.renamed` (the `.storage` sidecar) holds every
+  renamed file's full path; `restoreNames` puts them all back before the add, `detail()` shows
+  them, and the `.part` suffix goes on and off the recorded name (`onDisk`), never the original.
+  `Engine.renamePath` does a file or a folder (`FileRenames.plan`/`problem`, tested); the
+  `file_renamed_alert` handler removes the folders a rename emptied, never the save path. A
+  name given back as the original is no longer a rename, and an empty record drops the sidecar.
+  Transmission renames through `torrent-rename-path` (checked by the same `FileRenames.problem`
+  first), so the Files tab's Rename is on both engines; the layout on add is
+  `Capability.CONTENT_LAYOUT`, libtorrent's only, and the hidden choice falls back to the torrent's own.
 - **Test compilation patches the module**, so a test that needs a JDK module the main code does
   not (`jdk.httpserver`, for the fetch test's local server) gets `--add-modules` and `--add-reads`
   in the compiler plugin's test execution. At run time the tests are on the classpath.

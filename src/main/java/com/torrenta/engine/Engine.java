@@ -167,6 +167,13 @@ public interface Engine extends AutoCloseable {
 
     void setFilePriority(String id, int fileIndex, Priority priority) throws EngineException;
 
+    /**
+     * Renames a file, or a folder (every file under it), inside the torrent and on disk: {@code
+     * path} as the detail's file list has it, {@code name} the new last segment. Kept across a
+     * restart; fails with the reason in the interface language when the name will not do.
+     */
+    void renamePath(String id, String path, String name) throws EngineException;
+
     /** Adds trackers the torrent does not have yet, on the tier after its last. */
     void addTrackers(String id, List<String> urls) throws EngineException;
 
@@ -328,7 +335,9 @@ public interface Engine extends AutoCloseable {
         /** The torrent as a {@code .torrent} file, its info dictionary as it was loaded. */
         EXPORT_TORRENT,
         /** A name of the person's own for a torrent, the files keeping theirs (Rename…, F2). */
-        RENAME_TORRENT;
+        RENAME_TORRENT,
+        /** The content layout on add: in a folder of its own, or without the torrent's root folder. */
+        CONTENT_LAYOUT;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

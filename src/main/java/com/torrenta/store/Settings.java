@@ -251,6 +251,7 @@ public final class Settings {
     public static final String ADD_START_PAUSED = "add.startPaused";
 
     public static final String ADD_SEQUENTIAL = "add.sequential";
+    public static final String ADD_CONTENT_LAYOUT = "add.contentLayout";
 
     /** Inputs are added with the defaults above and the Add dialog does not open. Off by default. */
     public static final String ADD_WITHOUT_ASKING = "add.withoutAsking";
@@ -716,6 +717,15 @@ public final class Settings {
 
     public void setAddSequential(boolean on) {
         properties.setProperty(ADD_SEQUENTIAL, String.valueOf(on));
+    }
+
+    /** How a new torrent's files sit under the save path; the torrent's own unless set. */
+    public com.torrenta.engine.FileRenames.Layout addContentLayout() {
+        return com.torrenta.engine.FileRenames.Layout.byName(properties.getProperty(ADD_CONTENT_LAYOUT));
+    }
+
+    public void setAddContentLayout(com.torrenta.engine.FileRenames.Layout layout) {
+        properties.setProperty(ADD_CONTENT_LAYOUT, layout.name());
     }
 
     public boolean ipFilterEnabled() {
