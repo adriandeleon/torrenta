@@ -2637,7 +2637,7 @@ public final class MainWindow {
                 new Command("switch-profile", tr("command.switchProfile"), null, null, always, this::chooseProfile),
                 new Command(
                         "retry-engine", tr("command.retryEngine"), null, null, engineDown, () -> startEngine(profile)),
-                                new Command("search", tr("command.search"), shiftChord(KeyCode.F), null, always, this::showSearch),
+                new Command("search", tr("command.search"), shiftChord(KeyCode.F), null, always, this::showSearch),
                 new Command("rss", tr("command.rss"), chord(KeyCode.R), null, always, this::showRss),
                 new Command("rss-run-rules", tr("command.rssRunRules"), null, null, always, rss::runRulesNow),
                 new Command("transfers", tr("command.transfers"), null, "Esc", always, this::showTransfers),

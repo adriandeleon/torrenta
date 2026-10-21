@@ -524,6 +524,8 @@ public final class Settings {
         } else {
             properties.setProperty(ENGINE_PROFILE, id.trim());
         }
+    }
+
     public boolean extendedWindow() {
         return readBoolean(UI_EXTENDED_WINDOW, false);
     }
