@@ -153,6 +153,7 @@ final class SettingsWindow {
                 Settings.ADD_WITHOUT_ASKING,
                 Settings.UI_STATE_COLORS,
                 Settings.UI_DENSITY,
+                Settings.UI_EXTENDED_WINDOW,
                 Settings.UI_PALETTE_KEY,
                 Settings.UI_TRAY,
                 Settings.UI_CLOSE_TO_TRAY,
@@ -499,6 +500,7 @@ final class SettingsWindow {
     private CheckBox updateCheck;
     private CheckBox stateColors;
     private ChoiceBox<Density> density;
+    private CheckBox extendedWindow;
     private ChoiceBox<PaletteKey> paletteKey;
     private CheckBox tray;
     private CheckBox closeToTray;
@@ -1165,6 +1167,8 @@ final class SettingsWindow {
             settings.saveQuietly();
             // Global: every open window restyles, this one included.
             javafx.application.Application.setUserAgentStylesheet(now.stylesheet());
+            // The main window draws a few things from the theme itself (the window buttons).
+            onAppearanceChanged.run();
         });
         row(
                 Category.GENERAL,
@@ -1202,6 +1206,24 @@ final class SettingsWindow {
                 tr("settings.general.stateColors.desc"),
                 stateColors,
                 tr("settings.general.stateColors.keywords"));
+        extendedWindow = new CheckBox();
+        extendedWindow.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setExtendedWindow(now);
+            settings.saveQuietly();
+            onAppearanceChanged.run();
+        });
+        // Not offered on macOS: the menu belongs to the system menu bar there, so the setting could
+        // only ever be a switch that does nothing. Disabled rather than hidden, so the note still
+        // explains why.
+        extendedWindow.setDisable(!ExtendedWindow.supportedOn(System.getProperty("os.name")));
+        row(
+                Category.GENERAL,
+                appearance,
+                tr("settings.general.extendedWindow"),
+                tr("settings.general.extendedWindow.desc"),
+                extendedWindow,
+                tr("settings.general.extendedWindow.keywords"));
 
         VBox keyboard = section(page, tr("settings.general.keyboard"));
         paletteKey = new ChoiceBox<>();
@@ -3333,6 +3355,7 @@ final class SettingsWindow {
             updateCheck.setSelected(settings.updateCheck());
             stateColors.setSelected(settings.stateColors());
             density.setValue(Density.byId(settings.density(), Density.DEFAULT));
+            extendedWindow.setSelected(settings.extendedWindow());
             paletteKey.setValue(PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT));
             tray.setSelected(settings.tray());
             closeToTray.setSelected(settings.closeToTray());

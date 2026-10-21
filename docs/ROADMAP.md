@@ -273,7 +273,7 @@ Everything in Settings that the engine already knows how to do.
 1. ✓ **Provider API and Torznab client**, with a provider settings page: add an indexer by URL and API
    key, test it. (`search.SearchProvider`, `TorznabProvider`, `SearchService`, Settings → Search.)
 2. ✓ **Search tab**: query, category, provider selection; results merged and deduplicated by
-   info-hash; sort; add to the Add dialog. (`ui.SearchPane`, `Ctrl+K`; `SearchService.Progress`
+   info-hash; sort; add to the Add dialog. (`ui.SearchPane`, `Ctrl+Shift+F`; `SearchService.Progress`
    streams each provider's answer in.)
 3. ✓ **Declarative providers**: a definition file format for sites without an API, loaded from the
    config dir; a handful of definitions for public, non-infringing indexes shipped as examples.
@@ -367,7 +367,7 @@ so that the app itself ships no site-specific code:
    non-infringing indexes (Internet Archive, academic and Linux-distribution trackers). Definitions
    are data, so a site change is a file edit rather than a release.
 
-Search is a tab beside the transfer list: a query field (Ctrl+K), category and provider chips, a
+Search is a tab beside the transfer list: a query field (Ctrl+Shift+F), category and provider chips, a
 results table (name, size, seeds, leechers, date, provider), Enter opens the Add dialog with the
 result pre-filled. Searches are rate-limited per provider and cached for the session.
 

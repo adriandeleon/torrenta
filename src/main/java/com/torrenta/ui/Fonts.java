@@ -16,9 +16,16 @@ import javafx.scene.text.Font;
 public final class Fonts {
 
     public static final String UI = "Inter";
+    /** For hashes, paths and addresses; the {@code mono} style class in ui-font.css names it. */
+    public static final String MONO = "JetBrains Mono";
 
     private static final String[] FILES = {
-        "inter/Inter-Regular.ttf", "inter/Inter-Bold.ttf", "inter/Inter-Italic.ttf", "inter/Inter-BoldItalic.ttf",
+        "inter/Inter-Regular.ttf",
+        "inter/Inter-Bold.ttf",
+        "inter/Inter-Italic.ttf",
+        "inter/Inter-BoldItalic.ttf",
+        "jetbrains-mono/JetBrainsMono-Regular.ttf",
+        "jetbrains-mono/JetBrainsMono-Bold.ttf",
     };
 
     private static final String SHEET = "/com/torrenta/styles/ui-font.css";

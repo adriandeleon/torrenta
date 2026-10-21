@@ -108,6 +108,7 @@ final class DevCapture {
         // Read by the smoke test; a screenshot alone proves only that a window appeared.
         System.out.println("capture: " + out + " " + w + "x" + h);
         System.out.println("capture: title=" + stage.getTitle());
+        System.out.println("capture: style=" + stage.getStyle());
         System.out.println("capture: focus=" + scene.getFocusOwner());
         System.out.println("capture: engine=" + window.engineDescription());
         // The profile the engine was built from (never its password) and what it cannot do.
@@ -119,6 +120,7 @@ final class DevCapture {
         if (!window.availableUpdateVersion().isEmpty())
             System.out.println("capture: update=" + window.availableUpdateVersion());
         if (scene != stage.getScene()) System.out.println("capture: scene=dialog");
+        for (String line : window.menuLines()) System.out.println("capture: menu=" + line);
         // The backend that came up ("sni", "awt") or the reason none did, and the icon's line.
         System.out.println("capture: tray=" + window.trayDescription());
         System.out.println("capture: trayLine=" + window.trayLine());

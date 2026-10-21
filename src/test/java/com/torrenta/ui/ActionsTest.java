@@ -71,4 +71,12 @@ class ActionsTest {
                 "Remove these 2 torrents and delete the downloaded files? This cannot be undone.",
                 Actions.removeQuestion(2, true));
     }
+
+    @Test
+    void escapePeelsOneLayerAtATime() {
+        assertEquals(Actions.Escape.CLEAR_FILTER, Actions.escape(true, true));
+        assertEquals(Actions.Escape.CLEAR_FILTER, Actions.escape(true, false));
+        assertEquals(Actions.Escape.CLEAR_SELECTION, Actions.escape(false, true));
+        assertEquals(Actions.Escape.NOTHING, Actions.escape(false, false));
+    }
 }

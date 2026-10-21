@@ -79,7 +79,7 @@ worker with a progress bar and a Cancel, writes the file whole, and shows the v1
 info-hashes and the magnet link with Copy buttons. "Start seeding after creation" adds it to the
 list at once, trusted as complete, seeded from the folder the source is in.
 
-Search (`Ctrl+K`) goes through a Torznab server of yours, Prowlarr or Jackett (Settings → Search):
+Search (`Ctrl+Shift+F`) goes through a Torznab server of yours, Prowlarr or Jackett (Settings → Search):
 add it by URL and API key, press Test, and the Search tab asks every enabled one at once, each
 answer landing in the results as it arrives with a line per provider saying how many it found or
 why it could not answer; the same torrent from two servers is shown once, the better-seeded copy
@@ -222,7 +222,12 @@ Appearance: Editora Light and Dark (Caret & Ink, as Editora and Termina), Nord a
 light and dark, applied the moment one is picked (`ui.theme` in the file). Settings → General →
 Language picks the interface language: System (the operating system's, English when that is not
 one of them), English, Deutsch, Español, Français, Italiano or Português, in force after a restart
-(`ui.language`, a preference, so it syncs).
+(`ui.language`, a preference, so it syncs). Beside it, **Merge the
+menu bar into the title bar** (`ui.extendedWindow`, off by default, experimental) draws the window
+without a system title bar and puts the menus, the title and the window buttons on that one row,
+a row of space back for the list; the window keeps the platform's own buttons, drag, double-click
+and edge resize. It applies on restart, and is not offered on macOS, where the menu belongs to the
+system bar. The capture prints the style in force as `capture: style=`.
 
 **Settings sync.** Settings → Sync connects the settings file to a Git repository of yours (a
 private one on GitHub, say: "Create on GitHub" makes it through the `gh` CLI). Every computer that
@@ -254,10 +259,10 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+O` (`Cmd+O` on macOS) | Add `.torrent` files, through the Add dialog |
 | `Ctrl+M` | Add a magnet link or a link to a `.torrent` (the clipboard's, if it holds one) |
 | `Ctrl+V` | Add whatever magnet or torrent link is on the clipboard; the status bar says when there is one |
-| `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
+| `Ctrl+K` (or `Ctrl+F`) | The omnibox. Words filter the list by name as you type; a `key:value` term (`state:seeding`, `cat:Films`, `ratio<1`, `size>4g`, `added<7d`, `tracker:host`, `hash:7a3f`, `-tag:keep`) becomes a chip when you type the space after it, a term it cannot read becomes a red chip saying why, `Backspace` on an empty box hands the last chip back for editing, a click on a chip removes it. `>` and then a name runs a command (the palette opens with what you typed). A pasted magnet, `.torrent` link or path opens the Add dialog. `Enter` selects every match and returns to the list, so the next key acts on all of them; `Esc` empties the box, or returns to the list when it is empty |
 | `Ctrl+B` / `Ctrl+Shift+B` | Focus the sidebar (All, then Status, Categories, Tags and Trackers, every entry with a count; arrows walk every section, `Space` makes the entry the section's choice, `Enter` chooses and returns to the list, `Esc` returns without choosing; `Left`/`Right` fold a section) / show or hide it |
 | `Alt+X` (`M-x`, as in Editora; Settings → General → Keyboard can make it `Ctrl+Shift+P`) | Command palette: every command, found by typing part of its name |
-| `Ctrl+K` | Search: the Search tab in place of the transfers, with the query focused. A category chip row and a provider chip row (`Tab` walks them, `Space` toggles), `Enter` asks every chosen provider at once and the results land as each answers; `Down` enters the results, `Enter` or a double-click opens the Add dialog for one, `Ctrl+C` copies its link, the context menu opens its detail page; `Esc` returns to the transfers |
+| `Ctrl+Shift+F` | Search: the Search tab in place of the transfers, with the query focused. A category chip row and a provider chip row (`Tab` walks them, `Space` toggles), `Enter` asks every chosen provider at once and the results land as each answers; `Down` enters the results, `Enter` or a double-click opens the Add dialog for one, `Ctrl+C` copies its link, the context menu opens its detail page; `Esc` returns to the transfers |
 | `Ctrl+R` | RSS: the RSS tab in place of the transfers. Arrows walk the feeds and the articles (`Left`/`Right` between them, `Down` from the filter box into the articles), `Enter` or a double-click on an article with a torrent opens the Add dialog for it, `M` toggles read, `Shift+M` marks the feed read, `N` or `Ctrl+N` adds a feed, `F5` refreshes it (`Shift+F5` every feed), `Delete` in the feed list removes one after a confirm, `Ctrl+C` copies the torrent or the page link; the context menus mirror the keys and add Download (at once, with the defaults) and Create rule from title…; `Esc` returns to the transfers |
 | `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Categories and tags (names, save paths, delete), Watch folders, Automation (a command per event with placeholders, desktop notifications), Search (Torznab providers), RSS (the refresh interval, the feeds, the auto-download switch and rules), Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
 | `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces, Speed (the selected torrent's graph, the same windows as the Statistics window's) |

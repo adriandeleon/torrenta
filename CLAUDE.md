@@ -17,7 +17,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `TORRENTA_CAPTURE=/tmp/shot.png ./mvnw javafx:run`) renders the real window, writes a PNG, prints
   `capture:` lines (title, focus, engine, status bar) and exits. `-Dtorrenta.captureAction=` runs
   window actions first: `select-all`, `palette`, `palette:<query>`, or a command id such as
-  `pause-resume`, `dialog-add` to press Add on an open Add dialog (`dialog-press:now|wait|paused`
+  `pause-resume`, `menu:<File|Torrent|View|Help>` or `context-menu` (opens that menu; the PNG is
+  then of the popup and `menu=` lines list its items, `[icon]` after those with a glyph),
+  `dialog-add` to press Add on an open Add dialog (`dialog-press:now|wait|paused`
 for the others, `dialog-key:<KeyCode>` for a key in its file tree), `choose-files` for the
 selected torrent, `select-first`, `message-log` / `message-log:<query>` (the status bar's history card; its visible
   lines are printed), `debug-log` (the Debug Log window; `-Dtorrenta.captureLogProbe=true` pushes a warning and an
@@ -115,13 +117,22 @@ release process with the names changed; Termina's README and memory hold the war
 - **The id is `getInfoHashes().getBest().toHex()`**, not `infoHash()`: a v2-only torrent has an
   all-zero v1 hash, and two of them would collide.
 - **Alerts arrive on their own thread; tests `await`, bounded, never sleep-and-hope.**
+- **The menu bar in the title bar is `StageStyle.EXTENDED`** (`ui.ExtendedWindow`, Editora's, with
+  JavaFX 27's `HeaderBar`), never `UNDECORATED`: the platform keeps its buttons, drag, double-click
+  and edge resize. `initStyle` throws once a stage has been shown, so `MainWindow`'s constructor
+  reads `ui.extendedWindow` first and the setting applies on restart; the top of the window asks
+  `stage.getStyle()`, never the setting, so the two cannot disagree. The menu bar is
+  `HeaderDragType.NONE` (a header drags by default, and a menu that drags cannot open) and the title
+  `DRAGGABLE_SUBTREE` (`DRAGGABLE` misses the label's text node). The buttons' glyph colour follows
+  the desktop unless told: `matchButtonsToTheme` on every appearance change. macOS is gated out in
+  `supportedOn` (the menu belongs to the system bar there) and the row is disabled, not hidden.
 - **The interface font is Inter, bundled, loaded before any stylesheet** (`Fonts.load()` in
   `App.start`), and attached per scene and per dialog pane (`Fonts.installUiFont`), never in
   app.css: every window and dialog is its own scene, and a scene sheet survives a theme switch.
   A new Stage or Dialog without the call shows the system face.
 - **Nothing in the chrome may be focus-traversable** (Termina's rule holds here). The filter box
   took initial focus on a fresh launch because the table is hidden until the first torrent, so it
-  was the first traversable node. It is `setFocusTraversable(false)`; Ctrl+F reaches it.
+  was the first traversable node. It is `setFocusTraversable(false)`; Ctrl+K (and Ctrl+F) reach it.
 - **Space and Delete are handled on the table, never as scene accelerators.** An accelerator fires
   on any unconsumed key press, and a text field does not consume Space — so a space typed into the
   filter would pause the selection. `Command.hint` carries the key's name for the menus.
@@ -302,6 +313,14 @@ release process with the names changed; Termina's README and memory hold the war
   sees `engine == null` and fails plainly.
 - **A removed torrent's alert carries only the hash.** `remove()` reads the name first and raises
   the event itself; the `TORRENT_REMOVED` alert is not listened to.
+- **The omnibox is a value, `ui.Omnibox`, and the field is drawn from it.** Every keystroke goes
+  `omnibox.typed(text, now)` → `setOmnibox`, which rewrites the field under a `settingFilter`
+  guard, redraws the chips and re-applies the filter; the rules (a term chips on the space after
+  it, Backspace on empty hands it back, `>` means a command, a magnet means an add, Enter selects
+  the matches) are tested there, not in the window. Escape on the list is `Actions.escape`: the
+  filter first, then the selection. The capture hook takes `omnibox:<text>` (`~` for a space, since
+  the action list is trimmed), `omnibox-key:<KeyCode>` and `table-key:<KeyCode>`, and prints an
+  `omnibox=` line. Ctrl+K is the omnibox's; the Search tab moved to Ctrl+Shift+F.
 - **A row's state is computed, not stored**: `RowState.of(torrent, quietSeconds)` and
   `StatusLine.of(…)` are pure; `TorrentRow` keeps only the stall clock, set *before* its torrent
   property fires so every cell of a tick reads the same number. The row's `st-*` pseudo-class
@@ -309,6 +328,14 @@ release process with the names changed; Termina's README and memory hold the war
   and a stalled torrent's snapshots are often equal while its clock moves. State colours are
   scoped under `.state-colors` on the scene root so the setting can turn them off. The redesign
   these come from is `docs/UI-REDESIGN.md`.
+- **The chrome's look is app.css over the theme, and a scene sheet always wins.** A scene
+  stylesheet outranks the user-agent stylesheet whatever the selector's specificity, which is why
+  app.css can restyle AtlantaFX's tables (no vertical lines, 28 px small-cap headers, faint row
+  rules) with short selectors. The base size is 13 px, set in `ui-font.css` per scene like the
+  family, not in the theme files. JavaFX CSS has no `text-transform` or `letter-spacing`:
+  `Headers.uppercase(table)` rewrites the column titles after the columns are in place. The
+  state colours have chip tints (`-torrenta-*-chip`), the selection, the sidebar's chosen row
+  and the toolbar glyph colour are `ladder()` tokens on `.root`, so every theme gets them.
 - **Row density swaps column layouts and must renew the cells.** Comfortable rows (two lines, the
   default) and compact rows each keep their own layout (`table.columns.comfortable`,
   `table.columns`); `applyDensity` saves the one being left and applies the other. `refresh()`
@@ -316,6 +343,11 @@ release process with the names changed; Termina's README and memory hold the war
   row: re-setting each column's cell factory makes new ones. The Name column's value is a
   `RowView` (name, sentence, progress), not the name, so the comfortable cell redraws when its
   second line changes.
+- **Every glyph is `Icons.Glyph`, a Group that knows its box**: made at the toolbar's 17 px,
+  `at(Icons.MENU_SIZE)` for a menu item or a tab. `Icons.forCommand(id)` is the rule for which
+  command shows which glyph; `MainWindow.menuItem(id)` applies it, so a command added to a menu
+  through `command(id).menuItem()` directly would be the one item without an icon (`IconsTest`
+  lists the menus' ids). macOS's system menu bar takes only `ImageView` graphics, so it shows none.
 - **Rows are `TorrentRow` objects, never `Torrent` snapshots.** The list has an extractor on the
   row's torrent property, which is what makes the `SortedList` re-sort on an in-place update.
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never

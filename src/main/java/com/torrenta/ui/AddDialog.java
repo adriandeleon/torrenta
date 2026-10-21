@@ -105,6 +105,11 @@ final class AddDialog {
     private final Label title = new Label();
     private final Label summary = new Label();
     private final TextField savePath = new TextField();
+
+    {
+        savePath.getStyleClass().add("mono-field");
+    }
+
     private final DiskBar diskBar = new DiskBar();
     /** One label per line: the disk sentence, then where the files start if not here. */
     private final VBox diskText = new VBox(1);

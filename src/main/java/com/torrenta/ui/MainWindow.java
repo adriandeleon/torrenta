@@ -62,6 +62,7 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 
 import com.torrenta.AppInfo;
 import com.torrenta.automation.Automation;
@@ -134,6 +135,13 @@ public final class MainWindow {
     private final TorrentRows rows = new TorrentRows();
     private final FilteredList<TorrentRow> filtered = new FilteredList<>(rows.list());
     private final TextField filter = new TextField();
+    /** The omnibox as a value: chips and text; the field and the chip row draw it. */
+    private Omnibox omnibox = Omnibox.EMPTY;
+
+    private final HBox chipRow = new HBox(4);
+    /** Set while the field's text is being written from the value, so the listener stays quiet. */
+    private boolean settingFilter;
+
     private ToolBar toolbar;
     private final StackPane host = new StackPane();
     private final CommandPalette palette;
@@ -208,6 +216,7 @@ public final class MainWindow {
     private final SettingsWindow settingsWindow;
     private final IpFilterController ipFilter;
     private final MenuItem downloadUpdateItem = new MenuItem();
+    private MenuBar menuBar;
     private final MenuItem skipUpdateItem = new MenuItem();
     private final Label updateBadge = new Label();
     private final Label altSpeedToggle = new Label();
@@ -314,6 +323,17 @@ public final class MainWindow {
                 r -> Thread.ofVirtual().name("rss-fetch").start(r),
                 Platform::runLater);
         stage.setTitle(AppInfo.NAME);
+        // Before anything else touches the stage: initStyle throws once a stage has been shown, and
+        // the setting is read here, once, which is why it applies on restart.
+        if (ExtendedWindow.enabled(settings.extendedWindow(), System.getProperty("os.name"))) {
+            try {
+                stage.initStyle(StageStyle.EXTENDED);
+            } catch (RuntimeException e) {
+                // A window is not something a chrome preference gets to prevent: fall back to a
+                // decorated one if the platform rejects extended decorations despite the OS gate.
+                LOG.log(Level.WARNING, "Extended window unavailable; using a decorated window", e);
+            }
+        }
 
         BorderPane root = new BorderPane();
         root.setCenter(buildCenter());
@@ -324,7 +344,11 @@ public final class MainWindow {
                 PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT).chord();
         // The toolbar first: the View menu's check item binds to its visibility.
         ToolBar bar = buildToolbar();
-        root.setTop(new VBox(buildMenuBar(), bar));
+        // An extended window has no system title bar, so the menu bar takes its place; asking the
+        // stage rather than re-reading the setting means the two can never disagree once built.
+        MenuBar menuBar = buildMenuBar();
+        root.setTop(new VBox(
+                stage.getStyle() == StageStyle.EXTENDED ? ExtendedWindow.header(menuBar, stage) : menuBar, bar));
         table.setContextMenu(buildContextMenu());
         palette = new CommandPalette(host, this::focusList, paletteChord.getDisplayText());
         logWindow = new LogWindow(stage, log);
@@ -378,6 +402,7 @@ public final class MainWindow {
                         .toExternalForm());
         Fonts.installUiFont(scene);
         scene.getAccelerators().put(chord(KeyCode.F), this::focusFilter);
+        scene.getAccelerators().put(chord(KeyCode.K), this::focusFilter);
         scene.getAccelerators().put(paletteChord, () -> palette.show(CapabilityRules.commands(commands, capabilities)));
         scene.getAccelerators().put(shiftChord(KeyCode.L), logWindow::show);
         scene.getAccelerators().put(shiftChord(KeyCode.T), statsWindow::show);
@@ -698,8 +723,38 @@ public final class MainWindow {
         if (settingsWindow.isShowing()) return settingsWindow.scene();
         if (statsWindow.isShowing()) return statsWindow.scene();
         if (logWindow.isShowing()) return logWindow.scene();
+        javafx.stage.PopupWindow popup = shownPopup();
+        if (popup != null) return popup.getScene();
         if (debugLogWindow != null && debugLogWindow.isShowing()) return debugLogWindow.scene();
         return stage.getScene();
+    }
+
+    /** The menu or context menu open now, or null: a popup is its own window, so its own scene. */
+    private static javafx.stage.PopupWindow shownPopup() {
+        for (javafx.stage.Window w : javafx.stage.Window.getWindows()) {
+            if (w instanceof ContextMenu c && c.isShowing()) return c;
+        }
+        return null;
+    }
+
+    /**
+     * The open menu's items for the capture hook, top to bottom: the text, {@code [icon]} when
+     * one is set, {@code ---} for a separator, {@code >} before a submenu.
+     */
+    public List<String> menuLines() {
+        if (!(shownPopup() instanceof ContextMenu menu)) return List.of();
+        List<String> lines = new ArrayList<>();
+        for (MenuItem item : menu.getItems()) {
+            if (item instanceof SeparatorMenuItem) {
+                lines.add("---");
+                continue;
+            }
+            if (!item.isVisible()) continue;
+            String line = (item instanceof Menu ? "> " : "") + item.getText();
+            if (item.getGraphic() != null) line += " [icon]";
+            lines.add(line);
+        }
+        return lines;
     }
 
     /** Dismisses an open Add dialog, so the capture hook can exit outside its nested event loop. */
@@ -907,11 +962,35 @@ public final class MainWindow {
             for (String key : action.substring("sidebar-keys:".length()).split("\\+"))
                 sidebar.pressForCapture(
                         javafx.scene.input.KeyCode.valueOf(key.trim().toUpperCase(java.util.Locale.ROOT)));
+        } else if (action.startsWith("omnibox:")) {
+            // The action list is split on commas and trimmed, so a trailing space (what commits
+            // a chip) could not be passed; a tilde stands for one.
+            filter.requestFocus();
+            filter.setText(action.substring("omnibox:".length()).replace('~', ' '));
+        } else if (action.startsWith("omnibox-key:")) {
+            filter.requestFocus();
+            KeyCode code = KeyCode.valueOf(action.substring("omnibox-key:".length()));
+            filter.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false));
+        } else if (action.startsWith("table-key:")) {
+            table.requestFocus();
+            KeyCode code = KeyCode.valueOf(action.substring("table-key:".length()));
+            table.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false));
         } else if (action.equals("select-first")) {
             table.getSelectionModel().clearAndSelect(0);
         } else if (action.startsWith("detail:")) {
             setDetailVisible(true);
             detail.selectTab(action.substring("detail:".length()));
+        } else if (action.startsWith("menu:")) {
+            // Open a menu of the bar by its title (menu:File); the PNG is then of the popup.
+            String title = action.substring("menu:".length());
+            menuBar.getMenus().stream()
+                    .filter(m -> m.getText().equalsIgnoreCase(title))
+                    .findFirst()
+                    .orElseThrow(() -> new IllegalArgumentException("no menu " + title))
+                    .show();
+        } else if (action.equals("context-menu")) {
+            // The list's context menu, as a right-click on it would open it.
+            table.getContextMenu().show(table, javafx.geometry.Side.BOTTOM, 0, 0);
         } else if (action.equals("palette")) {
             palette.show(CapabilityRules.commands(commands, capabilities));
         } else if (action.startsWith("palette:")) {
@@ -941,6 +1020,8 @@ public final class MainWindow {
             System.out.println("capture: dialog=" + promptDialog.getTitle());
         if (sidebar.isVisible()) System.out.println("capture: sidebar=" + sidebar.summary());
         System.out.println("capture: filter=" + sidebarSelection.describe() + " shown=" + filtered.size());
+        System.out.println("capture: omnibox=" + omnibox.chips() + " text=\"" + filter.getText() + "\" mode="
+                + omnibox.mode() + " query=\"" + omnibox.query() + "\"");
         System.out.println("capture: focus-sidebar=" + sidebar.hasFocus() + " cursor=" + sidebar.cursorForCapture());
         for (TorrentRow row : table.getItems()) {
             Torrent t = row.torrent();
@@ -2390,7 +2471,7 @@ public final class MainWindow {
     }
 
     private void applyFilters() {
-        filtered.setPredicate(rowFilter(filter.getText(), sidebarSelection));
+        filtered.setPredicate(rowFilter(omnibox.query(), sidebarSelection));
     }
 
     private void setSidebarVisible(boolean visible) {
@@ -2556,7 +2637,7 @@ public final class MainWindow {
                 new Command("switch-profile", tr("command.switchProfile"), null, null, always, this::chooseProfile),
                 new Command(
                         "retry-engine", tr("command.retryEngine"), null, null, engineDown, () -> startEngine(profile)),
-                new Command("search", tr("command.search"), chord(KeyCode.K), null, always, this::showSearch),
+                                new Command("search", tr("command.search"), shiftChord(KeyCode.F), null, always, this::showSearch),
                 new Command("rss", tr("command.rss"), chord(KeyCode.R), null, always, this::showRss),
                 new Command("rss-run-rules", tr("command.rssRunRules"), null, null, always, rss::runRulesNow),
                 new Command("transfers", tr("command.transfers"), null, "Esc", always, this::showTransfers),
@@ -2564,7 +2645,7 @@ public final class MainWindow {
                         "filter",
                         tr("command.filter"),
                         null,
-                        chord(KeyCode.F).getDisplayText(),
+                        chord(KeyCode.K).getDisplayText(),
                         always,
                         this::focusFilter),
                 new Command(
@@ -2658,7 +2739,7 @@ public final class MainWindow {
                 toolButton("add-magnet", Icons.magnet()),
                 new Separator(),
                 toolButton("pause-resume", Icons.pause()),
-                toolButton("force-resume", Icons.run()),
+                toolButton("force-resume", Icons.forceRun()),
                 toolButton("recheck", Icons.refresh()),
                 toolButton("remove", Icons.trash()),
                 new Separator(),
@@ -2694,11 +2775,20 @@ public final class MainWindow {
         return commands.stream().filter(c -> c.id().equals(id)).findFirst().orElseThrow();
     }
 
-    /** A menu item for a command, remembered so a missing capability can hide every copy of it. */
+    /**
+     * A menu item for a command, with the command's glyph beside it (see {@link Icons#forCommand}),
+     * remembered so a missing capability can hide every copy of it.
+     */
     private MenuItem menuItem(String id) {
         MenuItem item = command(id).menuItem();
+        item.setGraphic(menuIcon(Icons.forCommand(id)));
         commandItems.computeIfAbsent(id, k -> new ArrayList<>()).add(item);
         return item;
+    }
+
+    /** A glyph at the menus' size, or null for none. */
+    private static javafx.scene.Node menuIcon(Icons.Glyph glyph) {
+        return glyph == null ? null : glyph.at(Icons.MENU_SIZE);
     }
 
     /**
@@ -2743,7 +2833,9 @@ public final class MainWindow {
 
     /** Space and Delete: on the table only, never as scene accelerators a text field could fire. */
     private void onTableKey(KeyEvent e) {
-        if (e.getCode() == KeyCode.SPACE) {
+        if (e.getCode() == KeyCode.ESCAPE) {
+            if (escapeOnList()) e.consume();
+        } else if (e.getCode() == KeyCode.SPACE) {
             command("pause-resume").run().run();
             e.consume();
         } else if (e.getCode() == KeyCode.DELETE || e.getCode() == KeyCode.BACK_SPACE) {
@@ -2758,6 +2850,7 @@ public final class MainWindow {
         MenuItem addClipboard = menuItem("add-clipboard");
 
         MenuItem quit = new MenuItem(tr("menu.file.quit"));
+        quit.setGraphic(menuIcon(Icons.power()));
         quit.setAccelerator(chord(KeyCode.Q));
         quit.setOnAction(e -> quit());
 
@@ -2782,16 +2875,20 @@ public final class MainWindow {
         torrent.getItems().addAll(torrentItems());
 
         paletteItem = new MenuItem(tr("menu.view.commandPalette"));
+        paletteItem.setGraphic(menuIcon(Icons.palette()));
         paletteItem.setAccelerator(paletteChord);
         paletteItem.setOnAction(e -> palette.show(CapabilityRules.commands(commands, capabilities)));
         CheckMenuItem toolbarItem = new CheckMenuItem(tr("menu.view.toolbar"));
+        toolbarItem.setGraphic(menuIcon(Icons.toolbar()));
         toolbarItem.selectedProperty().bindBidirectional(toolbar.visibleProperty());
         CheckMenuItem sidebarItem = new CheckMenuItem(tr("menu.view.sidebar"));
+        sidebarItem.setGraphic(menuIcon(Icons.sidebar()));
         sidebarItem.setAccelerator(shiftChord(KeyCode.B));
         sidebarItem.selectedProperty().bindBidirectional(sidebar.visibleProperty());
         for (Density d : Density.values()) {
             javafx.scene.control.RadioMenuItem item =
                     new javafx.scene.control.RadioMenuItem(tr("menu.view.densityRows", d.toString()));
+            item.setGraphic(menuIcon(d == Density.COMFORTABLE ? Icons.rowsComfortable() : Icons.rowsCompact()));
             item.setToggleGroup(densityGroup);
             item.setSelected(d == density);
             item.setOnAction(e -> chooseDensity(d));
@@ -2819,8 +2916,10 @@ public final class MainWindow {
         // The two update items exist from the start and show only once a release is known, so the
         // menu's shape does not change under a hand that has learned it.
         downloadUpdateItem.setVisible(false);
+        downloadUpdateItem.setGraphic(menuIcon(Icons.download()));
         downloadUpdateItem.setOnAction(e -> downloadUpdate());
         skipUpdateItem.setVisible(false);
+        skipUpdateItem.setGraphic(menuIcon(Icons.skip()));
         skipUpdateItem.setOnAction(e -> skipUpdate());
         Menu help = new Menu(tr("menu.help"));
         help.getItems()
@@ -2833,6 +2932,7 @@ public final class MainWindow {
 
         MenuBar bar = new MenuBar(file, torrent, view, help);
         bar.setUseSystemMenuBar(true);
+        menuBar = bar;
         return bar;
     }
 
@@ -2860,6 +2960,7 @@ public final class MainWindow {
      */
     private Menu categoryMenu() {
         Menu menu = new Menu(tr("menu.torrent.setCategory"));
+        menu.setGraphic(menuIcon(Icons.forCommand("set-category")));
         menu.disableProperty().bind(Bindings.not(command("set-category").enabled()));
         menu.setOnShowing(e -> {
             List<Torrent> selected = selectedTorrents();
@@ -3169,7 +3270,7 @@ public final class MainWindow {
         }
     }
 
-    /** Ctrl+K: the Search tab in place of the transfers, the query field focused. */
+    /** Ctrl+Shift+F: the Search tab in place of the transfers, the query field focused. */
     private void showSearch() {
         // The folder is re-read when the tab opens, so a file dropped in is a chip at once.
         if (definitionStore.refresh()) {
@@ -3217,25 +3318,31 @@ public final class MainWindow {
         });
     }
 
+    /**
+     * The omnibox: one box that filters (words and {@code key:value} chips), runs a command after
+     * a {@code >}, and adds what is pasted into it. {@link Omnibox} holds the rules; this draws it.
+     */
     private HBox buildFilterBar() {
         filter.setPromptText(tr("window.filter.prompt"));
         // Not traversable: the scene hands initial focus to the first traversable node, and while
         // the table is hidden (no torrents yet) that would be this box, so every keystroke on a
-        // fresh launch would land in the filter. Ctrl+F reaches it; Tab does not need to.
+        // fresh launch would land in the filter. Ctrl+K reaches it; Tab does not need to.
         filter.setFocusTraversable(false);
-        filter.textProperty().addListener((o, was, text) -> applyFilters());
-        filter.setOnKeyPressed(e -> {
-            if (e.getCode() == KeyCode.ESCAPE) {
-                filter.clear();
-                table.requestFocus();
-                e.consume();
-            } else if (e.getCode() == KeyCode.ENTER) {
-                table.requestFocus();
-                e.consume();
-            }
-        });
+        filter.textProperty().addListener((o, was, text) -> onOmniboxTyped(was, text));
+        filter.setOnKeyPressed(this::onOmniboxKey);
+        chipRow.setAlignment(Pos.CENTER_LEFT);
+        chipRow.setVisible(false);
+        chipRow.managedProperty().bind(chipRow.visibleProperty());
         HBox.setHgrow(filter, Priority.ALWAYS);
-        HBox bar = new HBox(filter);
+        // The box the redesign draws: a lens, the field with no chrome of its own, and the chord as
+        // a key badge, read from the same chord the command and the menu use.
+        Label badge = new Label(chord(KeyCode.K).getDisplayText());
+        badge.getStyleClass().add("key-badge");
+        HBox box = new HBox(Icons.find(), chipRow, filter, badge);
+        box.getStyleClass().add("filter-box");
+        box.setAlignment(Pos.CENTER_LEFT);
+        HBox.setHgrow(box, Priority.ALWAYS);
+        HBox bar = new HBox(box);
         bar.setPadding(new Insets(6, 8, 6, 8));
         bar.getStyleClass().add("filter-bar");
         return bar;
@@ -3259,6 +3366,100 @@ public final class MainWindow {
     private void focusFilter() {
         filter.requestFocus();
         filter.selectAll();
+    }
+
+    /** Every keystroke in the field goes through the value; the field is then redrawn from it. */
+    private void onOmniboxTyped(String was, String text) {
+        if (settingFilter) return;
+        Omnibox next = omnibox.typed(text, java.time.Instant.now().getEpochSecond());
+        if (next.mode() == Omnibox.Mode.COMMAND) {
+            // The prefix typed: the palette is the command box, and takes what followed it.
+            setOmnibox(next.withText(""));
+            palette.show(commands, next.commandQuery());
+            return;
+        }
+        if (next.mode() == Omnibox.Mode.ADD && Omnibox.pasted(was, text)) {
+            setOmnibox(next.withText(""));
+            addInput(text.trim());
+            return;
+        }
+        setOmnibox(next);
+    }
+
+    private void onOmniboxKey(KeyEvent e) {
+        switch (e.getCode()) {
+            case BACK_SPACE -> {
+                if (filter.getText().isEmpty() && !omnibox.chips().isEmpty()) {
+                    setOmnibox(omnibox.backspaceOnEmpty());
+                    e.consume();
+                }
+            }
+            case ESCAPE -> {
+                // One layer: a box with something in it empties; an empty one gives the list back.
+                if (!omnibox.isEmpty()) setOmnibox(Omnibox.EMPTY);
+                else table.requestFocus();
+                e.consume();
+            }
+            case ENTER -> {
+                if (omnibox.mode() == Omnibox.Mode.ADD) {
+                    String input = filter.getText().trim();
+                    setOmnibox(omnibox.withText(""));
+                    addInput(input);
+                } else {
+                    // The matches are what the box was for: Enter hands them over, all selected,
+                    // so the next key (Space, Delete, Ctrl+T …) acts on every one of them.
+                    if (!omnibox.isEmpty()) table.getSelectionModel().selectAll();
+                    table.requestFocus();
+                }
+                e.consume();
+            }
+            default -> {}
+        }
+    }
+
+    /** The value changed: the field, the chips and the list follow it. */
+    private void setOmnibox(Omnibox next) {
+        omnibox = next;
+        if (!filter.getText().equals(next.text())) {
+            settingFilter = true;
+            try {
+                filter.setText(next.text());
+                filter.positionCaret(next.text().length());
+            } finally {
+                settingFilter = false;
+            }
+        }
+        List<FilterQuery.Chip> chips = next.chipViews(java.time.Instant.now().getEpochSecond());
+        chipRow.getChildren().clear();
+        for (int i = 0; i < chips.size(); i++) {
+            FilterQuery.Chip chip = chips.get(i);
+            Label label = new Label(chip.label());
+            label.getStyleClass().add("filter-chip");
+            if (!chip.valid()) label.getStyleClass().add("invalid");
+            label.setTooltip(new javafx.scene.control.Tooltip(
+                    chip.valid() ? chip.term() : tr("omnibox.chip.notUnderstood", chip.term())));
+            int index = i;
+            label.setOnMouseClicked(e -> setOmnibox(omnibox.removeChip(index)));
+            chipRow.getChildren().add(label);
+        }
+        chipRow.setVisible(!chips.isEmpty());
+        applyFilters();
+    }
+
+    /** Escape on the list peels one layer: the filter first, then the selection. */
+    private boolean escapeOnList() {
+        return switch (Actions.escape(
+                !omnibox.isEmpty(), !table.getSelectionModel().isEmpty())) {
+            case CLEAR_FILTER -> {
+                setOmnibox(Omnibox.EMPTY);
+                yield true;
+            }
+            case CLEAR_SELECTION -> {
+                table.getSelectionModel().clearSelection();
+                yield true;
+            }
+            case NOTHING -> false;
+        };
     }
 
     private TableView<TorrentRow> buildTable() {
@@ -3306,6 +3507,7 @@ public final class MainWindow {
                         column("tags", tr("column.tags"), 160, false, t -> Format.tags(t.tags()), s -> s),
                         column("path", tr("column.path"), 240, false, Torrent::savePath, s -> s)));
 
+        Headers.uppercase(table);
         builtInLayout = ColumnLayout.format(ColumnMemory.capture(table));
         density = Density.byId(settings.density(), Density.DEFAULT);
         ColumnMemory.apply(table, ColumnLayout.parse(layoutFor(density)));
@@ -3371,7 +3573,22 @@ public final class MainWindow {
     private void applyAppearance() {
         applyStateColors();
         applyDensity(Density.byId(settings.density(), Density.DEFAULT));
+        applyWindowStyle();
         applyPaletteKey();
+    }
+
+    /**
+     * The window buttons' scheme (a dark theme wants light glyphs, whatever the desktop says), and
+     * the one appearance setting that cannot change live: the window's style is fixed once shown,
+     * so a setting that disagrees with the window is said in the status bar instead.
+     */
+    private void applyWindowStyle() {
+        ExtendedWindow.matchButtonsToTheme(
+                stage, Theme.byId(settings.theme(), Theme.DEFAULT).isDark());
+        boolean wanted = ExtendedWindow.enabled(settings.extendedWindow(), System.getProperty("os.name"));
+        if (ExtendedWindow.restartNeeded(wanted, stage.getStyle() == StageStyle.EXTENDED)) {
+            setStatus(tr("status.restartWindowStyle"));
+        }
     }
 
     private String paletteButtonName() {

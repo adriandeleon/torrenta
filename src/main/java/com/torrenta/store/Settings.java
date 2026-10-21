@@ -92,6 +92,12 @@ public final class Settings {
     public static final String UI_STATE_COLORS = "ui.stateColors";
     /** The theme id ({@code editora-dark}, {@code nord-light}, …); the UI maps it and falls back. */
     public static final String THEME = "ui.theme";
+    /**
+     * The menu bar drawn in the window's own title bar ({@code StageStyle.EXTENDED}); off by default,
+     * read once when the window is built, so it applies on restart. {@code ui.ExtendedWindow} says
+     * where it is allowed.
+     */
+    public static final String UI_EXTENDED_WINDOW = "ui.extendedWindow";
     /** A tray (menu-bar) icon with the rates and a menu; on by default, where the desktop has one. */
     public static final String UI_TRAY = "ui.tray";
     /**
@@ -518,6 +524,12 @@ public final class Settings {
         } else {
             properties.setProperty(ENGINE_PROFILE, id.trim());
         }
+    public boolean extendedWindow() {
+        return readBoolean(UI_EXTENDED_WINDOW, false);
+    }
+
+    public void setExtendedWindow(boolean on) {
+        properties.setProperty(UI_EXTENDED_WINDOW, String.valueOf(on));
     }
 
     public boolean tray() {

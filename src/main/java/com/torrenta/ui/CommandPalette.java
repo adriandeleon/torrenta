@@ -126,11 +126,17 @@ final class CommandPalette {
             hide();
             return;
         }
+        show(commands, "");
+    }
+
+    /** Opens with a query already in it: the omnibox hands over what was typed after its {@code >}. */
+    void show(List<Command> commands, String initialQuery) {
         this.commands = commands.stream().filter(c -> c.enabled().get()).toList();
-        query.setText("");
-        refilter("");
-        host.getChildren().addAll(backdrop, card);
+        if (!isShowing()) host.getChildren().addAll(backdrop, card);
+        query.setText(initialQuery == null ? "" : initialQuery);
+        refilter(query.getText());
         query.requestFocus();
+        query.positionCaret(query.getText().length());
     }
 
     void hide() {
