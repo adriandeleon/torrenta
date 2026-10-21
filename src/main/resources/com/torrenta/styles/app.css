@@ -930,6 +930,7 @@
 .debug-log-file {
     -fx-text-fill: -color-fg-muted;
     -fx-font-size: 11px;
+}
 
 /* An article whose torrent has been added, by a rule or by Download: the glyph before its title. */
 .rss-downloaded-glyph {

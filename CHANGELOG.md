@@ -21,6 +21,9 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Fixed
 
+- **Every style after the debug log's in the stylesheet was ignored** (the RSS rule dialog's among
+  them, with a CSS warning at every start): a merge had dropped a closing brace.
+
 - **A crash, any time after a file of 40 pieces or more was checked, downloaded or seeded** (exit
   139, no error file, "Segmentation fault" from the shell, usually at a garbage collection):
   libtorrent's memory-mapped disk I/O installs a SIGSEGV/SIGBUS handler of its own in place of
