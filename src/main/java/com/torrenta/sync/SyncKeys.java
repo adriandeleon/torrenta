@@ -23,9 +23,10 @@ public final class SyncKeys {
      * {@code torrent.<hash>.*} describes a torrent of this machine, which another has not got;
      * {@code ui.sidebar.*} is what the sidebar has chosen and folded (whether it shows,
      * {@code ui.sidebar} without the dot, travels); {@code automation.*} names programs on this
-     * machine (the {@code notify.*} switches travel).
+     * machine (the {@code notify.*} switches travel); {@code create.*} is the Create Torrent
+     * dialog's last folder and trackers, this machine's.
      */
-    static final List<String> LOCAL_PREFIXES = List.of("sync.", "torrent.", "ui.sidebar.", "automation.");
+    static final List<String> LOCAL_PREFIXES = List.of("sync.", "torrent.", "ui.sidebar.", "automation.", "create.");
 
     static final List<String> LOCAL_KEYS = List.of(
             "download.dir",

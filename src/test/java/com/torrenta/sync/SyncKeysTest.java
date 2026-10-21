@@ -37,6 +37,8 @@ class SyncKeysTest {
         assertFalse(SyncKeys.isSynced("automation.onAdded"));
         assertTrue(SyncKeys.isSynced("notify.finished"), "but whether to notify travels");
         assertTrue(SyncKeys.isSynced("notify.error"));
+        assertFalse(SyncKeys.isSynced("create.lastDir"), "a folder of this machine");
+        assertFalse(SyncKeys.isSynced("create.defaultTrackers"));
         assertFalse(SyncKeys.isSynced(""));
         assertFalse(SyncKeys.isSynced(null));
     }

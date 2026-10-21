@@ -32,6 +32,15 @@ public interface Engine extends AutoCloseable {
     TorrentPreview inspect(byte[] torrent) throws EngineException;
 
     /**
+     * Makes a {@code .torrent} of a file or folder: hashes every piece, reporting each to
+     * {@code progress}, and adds the result for seeding when the request asks. Blocks for as long
+     * as the hashing takes (the caller's worker thread; never the FX thread), unlike the other
+     * calls, and does not hold the engine's lock while it hashes, so polls go on. Fails when the
+     * path cannot be read, or when {@code progress} asked to stop, which it does at the next piece.
+     */
+    CreatedTorrent create(CreateRequest request, CreateProgress progress) throws EngineException;
+
+    /**
      * Starts fetching a magnet's metadata without adding it, so the Add dialog can show the files
      * while it is open. The magnet joins the swarm writing nothing, is in no snapshot and no
      * store, and leaves once the metadata is in or the fetch is cancelled. Fails if the magnet is
@@ -144,6 +153,19 @@ public interface Engine extends AutoCloseable {
     @Override
     default void close() {
         stop();
+    }
+
+    /** Hears the hashing of {@link #create}, on the hashing thread. */
+    @FunctionalInterface
+    interface CreateProgress {
+        /**
+         * {@code done} of {@code total} pieces hashed; the last call is {@code total} of
+         * {@code total}. Returns whether to go on: false stops the hashing at this piece and
+         * the creation fails as cancelled.
+         */
+        boolean hashed(int done, int total);
+
+        CreateProgress NONE = (done, total) -> true;
     }
 
     /** A magnet's metadata on its way, from {@link #fetchMetadata}. */

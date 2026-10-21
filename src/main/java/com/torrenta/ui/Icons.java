@@ -78,6 +78,11 @@ final class Icons {
 
     // ---- glyphs; the paths are Editora's, by the same name --------------------------------------
 
+    /** A page with a plus, Editora's new-file glyph, for "New Torrent". */
+    static Node newFile() {
+        return line("M4.5 2.5h4.6l2.9 2.9v8.1h-7.5zM9.1 2.5v2.9h2.9M8.25 8.2v3.2M6.65 9.8h3.2");
+    }
+
     /** Open: a folder, for "Add Torrent File". */
     static Node open() {
         return line("M2 12.5V3.5h4.2l1.5 2h5.8v2M2 12.5l2.2-5h10.3l-2.2 5z");
