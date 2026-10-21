@@ -756,10 +756,19 @@ public final class MainWindow {
             return closed ? null : fetch;
         }
 
-        /** Must come before the same magnet is added: the fetch holds its place in the session. */
+        /** Cancelled: the dialog closed without adding. */
         synchronized void close() {
+            Engine.MetadataFetch f = take();
+            if (f != null) f.cancel();
+        }
+
+        /**
+         * Added: the fetch, for {@link Engine#add(AddRequest, Engine.MetadataFetch)} to end and
+         * take the peers from; null if there was none. A fetch that starts later is cancelled.
+         */
+        synchronized Engine.MetadataFetch take() {
             closed = true;
-            if (fetch != null) fetch.cancel();
+            return fetch;
         }
     }
 
@@ -798,10 +807,10 @@ public final class MainWindow {
         rememberLabels(request.labels());
         if (c.withoutAsking()) rememberAddDefaults(request);
         Thread.ofVirtual().name("engine-add").start(() -> {
-            slot.close();
+            Engine.MetadataFetch fetch = slot.take();
             String outcome;
             try {
-                Torrent added = e.add(request);
+                Torrent added = fetch == null ? e.add(request) : e.add(request, fetch);
                 outcome = "Added " + added.name();
                 if (c.firstAndLastFirst()) {
                     TorrentLimits limits = e.limits(added.id());

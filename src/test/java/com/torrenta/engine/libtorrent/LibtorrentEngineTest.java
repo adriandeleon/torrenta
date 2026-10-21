@@ -8,6 +8,7 @@ import java.util.Random;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import com.torrenta.engine.AddRequest;
+import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Priority;
@@ -310,6 +311,99 @@ class LibtorrentEngineTest {
     }
 
     @Test
+    void addingAfterTheFileListArrivedStartsWithThePeersTheFetchFound(@TempDir Path dir) throws Exception {
+        Path seeds = dir.resolve("seeds");
+        byte[] torrent = twoFileTorrent(seeds, "pair");
+        int seedPort = freePort();
+        try (LibtorrentEngine seeder = new LibtorrentEngine(
+                        () -> seeds, new TorrentStore(dir.resolve("seed-store")), isolated(seedPort));
+                LibtorrentEngine engine = new LibtorrentEngine(
+                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(freePort()));
+                LibtorrentEngine control = new LibtorrentEngine(
+                        () -> dir.resolve("control"),
+                        new TorrentStore(dir.resolve("control-store")),
+                        isolated(freePort()))) {
+            seeder.start();
+            Torrent seeded = seeder.add(AddRequest.defaults(new AddRequest.TorrentFile(torrent, "pair"), seeds));
+            await("seeding", () -> seeder.torrents().get(0).state() == TorrentState.SEEDING);
+            // No DHT, no local discovery, an unreachable tracker: the fetch meets the seeder only
+            // because it is told to, and nothing else can tell the torrent where the seeder is.
+            String magnet = seeder.magnetLink(seeded.id());
+
+            engine.start();
+            Engine.MetadataFetch fetch = engine.fetchMetadata(magnet);
+            engine.connectFetchForTest(fetch, seedPort);
+            byte[] fetched = fetch.torrent().get(30, java.util.concurrent.TimeUnit.SECONDS);
+
+            // Once the metadata is in, the fetch is upload-only and the seed drops it at once; the
+            // torrent still knows where the seed is, and downloads all of it from there.
+            Torrent added = engine.add(
+                    AddRequest.defaults(new AddRequest.TorrentFile(fetched, magnet), dir.resolve("downloads")), fetch);
+            await(
+                    "downloaded from the peer the fetch had",
+                    () -> engine.torrents().get(0).progress() >= 1.0);
+            assertEquals(added.id(), engine.torrents().get(0).id());
+
+            control.start();
+            control.add(AddRequest.defaults(new AddRequest.TorrentFile(fetched, magnet), dir.resolve("control")));
+            long until = System.currentTimeMillis() + 3000;
+            while (System.currentTimeMillis() < until) {
+                assertEquals(0.0, control.torrents().get(0).progress(), "without the fetch it finds no one");
+                Thread.sleep(100);
+            }
+        }
+    }
+
+    @Test
+    void addingNowStartsWithThePeersTheFetchFound(@TempDir Path dir) throws Exception {
+        int otherPort = freePort();
+        try (LibtorrentEngine other = new LibtorrentEngine(
+                        () -> dir.resolve("other"), new TorrentStore(dir.resolve("other-store")), isolated(otherPort));
+                LibtorrentEngine engine = new LibtorrentEngine(
+                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(freePort()))) {
+            // Another peer after the same magnet, without its metadata either: the fetch stays a
+            // fetch, as it is when the person presses Add now.
+            other.start();
+            other.add(MAGNET);
+            engine.start();
+            Engine.MetadataFetch fetch = engine.fetchMetadata(MAGNET);
+            engine.connectFetchForTest(fetch, otherPort);
+            await("the fetch is connected", () -> fetch.peers() > 0);
+
+            AddRequest now = new AddRequest(
+                    new AddRequest.Magnet(MAGNET),
+                    dir.resolve("downloads"),
+                    false,
+                    false,
+                    false,
+                    AddRequest.StopCondition.METADATA_RECEIVED,
+                    Map.of(),
+                    TorrentLabels.NONE);
+            Torrent added = engine.add(now, fetch);
+            assertEquals(MAGNET_ID, added.id());
+            assertTrue(fetch.torrent().isCompletedExceptionally(), "the fetch is over");
+            await("the torrent dials the peer the fetch had", () -> engine.dialledPeersForTest(MAGNET_ID) > 0);
+            assertEquals(1, engine.torrents().size());
+        }
+    }
+
+    @Test
+    void aFetchOfAnotherTorrentIsEndedAndLendsNothing(@TempDir Path dir) throws Exception {
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            Engine.MetadataFetch fetch =
+                    engine.fetchMetadata("magnet:?xt=urn:btih:89abcdef0123456789abcdef0123456789abcdef");
+            Torrent added =
+                    engine.add(AddRequest.defaults(new AddRequest.Magnet(MAGNET), dir.resolve("downloads")), fetch);
+            assertEquals(MAGNET_ID, added.id());
+            assertTrue(fetch.torrent().isCompletedExceptionally());
+            assertEquals(
+                    List.of(MAGNET_ID),
+                    engine.torrents().stream().map(Torrent::id).toList());
+        }
+    }
+
+    @Test
     void aCancelledFetchLeavesRoomForTheRealAdd(@TempDir Path dir) throws Exception {
         TorrentStore store = new TorrentStore(dir.resolve("store"));
         try (LibtorrentEngine engine = engine(dir, store)) {
@@ -341,6 +435,31 @@ class LibtorrentEngineTest {
         try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
             return socket.getLocalPort();
         }
+    }
+
+    /** {@link #onPort}, with no way to find a peer but being told: no DHT, no local discovery. */
+    private static com.torrenta.engine.EngineSettings isolated(int port) {
+        com.torrenta.engine.EngineSettings d = onPort(port);
+        com.torrenta.engine.EngineSettings.Protocol p = d.protocol();
+        return new com.torrenta.engine.EngineSettings(
+                d.listenPort(),
+                d.randomPort(),
+                d.listenInterface(),
+                d.ipv6(),
+                d.upnp(),
+                d.maxConnections(),
+                d.maxConnectionsPerTorrent(),
+                d.uploadSlots(),
+                d.proxy(),
+                d.proxyHost(),
+                d.proxyPort(),
+                d.proxyUsername(),
+                d.proxyPassword(),
+                d.proxyPeers(),
+                new com.torrenta.engine.EngineSettings.Protocol(
+                        false, p.pex(), false, p.utp(), p.encryption(), false, List.of()),
+                d.speed(),
+                d.queue());
     }
 
     /** The defaults on a fixed port, without UPnP: two sessions in one test must not collide. */

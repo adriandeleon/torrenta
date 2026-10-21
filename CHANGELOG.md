@@ -5,6 +5,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Changed
+
+- **A magnet added from the Add dialog starts with the peers its file-list fetch found**, both
+  with "Add now, pick files when ready" and after the files arrived, instead of looking for the
+  swarm again from nothing.
+
 ### Added
 
 - **Run on event and desktop notifications** (Settings → Automation). One optional command line
