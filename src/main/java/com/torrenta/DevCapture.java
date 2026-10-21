@@ -115,5 +115,7 @@ final class DevCapture {
         System.out.println("capture: trayLine=" + window.trayLine());
         // False after a close-request with a tray to close to: the window is hidden, not gone.
         System.out.println("capture: showing=" + stage.isShowing());
+        // What a dialog opened on a later pulse than the action shows now, for the hook to read.
+        for (String line : window.lateLinesForCapture()) System.out.println("capture: " + line);
     }
 }
