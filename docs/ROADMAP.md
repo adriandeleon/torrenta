@@ -270,8 +270,8 @@ Everything in Settings that the engine already knows how to do.
 ### 0.6 — Search
 See "Search design" below.
 
-1. **Provider API and Torznab client**, with a provider settings page: add an indexer by URL and API
-   key, test it.
+1. ✓ **Provider API and Torznab client**, with a provider settings page: add an indexer by URL and API
+   key, test it. (`search.SearchProvider`, `TorznabProvider`, `SearchService`, Settings → Search.)
 2. **Search tab**: query, category, provider selection; results merged and deduplicated by
    info-hash; sort; add to the Add dialog.
 3. **Declarative providers**: a definition file format for sites without an API, loaded from the

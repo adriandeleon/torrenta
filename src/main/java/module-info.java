@@ -18,6 +18,8 @@ module com.torrenta {
 
     // Fetching a .torrent from a URL for the Add dialog, and the update check.
     requires java.net.http;
+    // The Torznab client reads RSS with StAX.
+    requires java.xml;
     // The update check's release payload gets a real parser.
     requires com.fasterxml.jackson.core;
 

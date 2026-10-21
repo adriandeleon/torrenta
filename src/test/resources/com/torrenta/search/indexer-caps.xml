@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<caps>
+  <indexer>Example Indexer</indexer>
+  <categories>
+    <category id="4000" name="PC" />
+  </categories>
+</caps>

@@ -7,6 +7,21 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Search providers** (Settings → Search), the first of the search milestone. A Torznab server,
+  Prowlarr (`http://host:9696/1/api`) or Jackett
+  (`http://host:9117/api/v2.0/indexers/all/results/torznab/api`, or one indexer's), is added by
+  URL and API key (blank for a Jackett without one), enabled or not; Test asks it who it is and
+  how many categories it knows, in the dialog and on the page, and fills a blank name in with the
+  server's title. Behind it, the search package the next step's tab will drive: a provider
+  interface, the Torznab client (`t=caps`, `t=search` with the Newznab category numbers, RSS with
+  the `torznab:attr` seeders, peers, size, info-hash and magnet read with the JDK's own parser,
+  the server's `<error>` and a 429 said in words), and a service that asks every enabled provider
+  at once on its own thread with a 20 s limit each, merges the answers, keeps the same torrent
+  once (by info-hash, else by link; the better-seeded copy wins and borrows what it lacked), ranks
+  them by seeds, then by how many of the query's words the name has, then by date, asks a
+  provider at most once every 2 s and remembers an answer for the session. The list, keys
+  included, is `search-providers.json` beside the settings: this machine's, never synced. `Ctrl+K`
+  and File → Search… open the page until the tab exists.
 - **Run on event and desktop notifications** (Settings → Automation). One optional command line
   per event: torrent added (not the ones restored at start), download finished, seeding done (the
   share limit paused or removed it). Placeholders are qBittorrent's, spelled the same: `%N` name,
