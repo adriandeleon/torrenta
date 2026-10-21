@@ -28,6 +28,27 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   exception, with its stack trace, in a window with Copy; the same lines are written to
   `torrenta-session.log` beside the settings, truncated each run, so a crash leaves its story
   behind. A packaged app has no console; this is where its stderr went. Termina's.
+- **RSS auto-download rules**, the second step of the RSS milestone, qBittorrent's shape. A rule
+  (Settings → RSS → Rules; Add…, Edit…, Remove, Duplicate) names the articles it wants: words the
+  title must and must not contain (every word of a phrase, `|` between alternatives,
+  case-insensitive) or regular expressions; an episode filter in qBittorrent's syntax (`1x2` one
+  episode, `1x2-5` a range, `1x2-` from episode 2 on, several separated by `;`), matched against
+  `S01E02`, `1x02` or `Season 1 Episode 2` in the title, a bad filter or regex said under the form
+  and Save held back; a smart episode filter that keeps the rule from taking an episode twice
+  (what it took is remembered with the rule, the last thousand); which feeds (none ticked: every
+  feed); how old is too old. And what to do with a match: start paused, started, or as the Add
+  dialog's default says; a category (its folder is then the save path); a save path of its own.
+  The rule dialog lists, as you type, every article the rule matches among those the feeds hold,
+  the matching off the FX thread. With Download new articles' torrents automatically on
+  (`rss.autoDownload`, synced), every refresh runs the rules over the feed's new articles on the
+  fetch thread: the first rule that wants an article takes it, its torrent is added (a magnet as it
+  is, a `.torrent` link fetched first), the article is marked downloaded (a glyph before its title)
+  and read, and the Event Log says "Rule 'Linux ISOs' added X from feed Y", or why it could not; an
+  article is never added twice. Run RSS Rules Now (File menu, the palette, the page's button) goes
+  over every unread article not yet downloaded, switch or not. The article context menu gains
+  Download (added at once with the defaults, no dialog) and Create rule from title… (the rule
+  dialog with the title's words before its episode token filled in). The rules are
+  `rss/rules.json` beside the settings, this machine's, never synced.
 - **The RSS reader** (`Ctrl+R`, File → RSS Feeds…, the toolbar's feed glyph), the first step of
   the RSS milestone, a third tab beside the transfers and the search: the feeds on the left (All
   feeds first, each with its unread count, a glyph while it refreshes or after it failed), the

@@ -369,6 +369,12 @@
     -fx-font-size: 0.9em;
 }
 
+/* The line under a dialog's form that says why Save is held back. */
+.dialog-problem {
+    -fx-text-fill: -color-danger-fg;
+    -fx-font-size: 0.9em;
+}
+
 /* The detail pane under the list. */
 .detail-pane {
     -fx-background-color: -color-bg-default;
@@ -684,4 +690,28 @@
 .debug-log-file {
     -fx-text-fill: -color-fg-muted;
     -fx-font-size: 11px;
+
+/* An article whose torrent has been added, by a rule or by Download: the glyph before its title. */
+.rss-downloaded-glyph {
+    -fx-text-fill: -color-success-fg;
+}
+
+/*
+ * The rule dialog: the feed check list on the subtle ground, and the Matches list on the right
+ * with its heading, which reads as the form's labels do.
+ */
+.rule-feeds,
+.rule-feeds > .viewport {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-insets: 0;
+    -fx-padding: 4;
+}
+
+.rule-matches-heading {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-weight: bold;
+}
+
+.rule-matches .list-cell {
+    -fx-padding: 3 8 3 8;
 }
