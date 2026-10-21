@@ -46,6 +46,23 @@ scripts/dev-run.sh -- "magnet:?xt=urn:btih:…"    # with arguments for the app
 
 Builds need a JDK 25: the formatter (Palantir 2.92) does not run on JDK 27.
 
+One Torrenta runs per settings folder. A second one started with a `.torrent` file, a magnet link
+or a URL on its command line hands them to the running one, which comes to the front (out of the
+tray if it was hidden there) and opens the Add dialog for each as it would for a dropped file;
+the second prints nothing and is gone within a second. Started with nothing, it just brings the
+window to the front. That is how a double-clicked `.torrent` and a browser's magnet link arrive:
+the packages register both types (the Linux desktop entry's `MimeType`, the macOS bundle's
+document and URL types, the Windows installer's file association), and Settings → General →
+Operating system → "Register as handler for .torrent files and magnet links" (on by default,
+`os.handler`, this machine's) makes Torrenta the default at each start: `xdg-mime default` on
+Linux, the `magnet:` protocol and the `.torrent` default under `HKCU\Software\Classes` on
+Windows (unticking removes them), and on macOS the bundle's declaration is all there is and
+Finder's Get Info → Open with chooses. Below it, "Show download activity on the dock icon"
+(`os.badge`) puts the download rate on the macOS dock badge and the count of downloading torrents
+on a Linux launcher that honours Unity's badge (KDE's task manager, GNOME's Dash to Dock), cleared
+when nothing downloads; Windows has no badge for a JavaFX window. The tray icon's tooltip and menu
+carry the rates on every platform.
+
 A folder can be watched for `.torrent` and `.magnet` files (Settings → Watch folders): what lands
 there is added without a dialog, then deleted or renamed `.added`. A program can run when a
 torrent is added, finishes or is done seeding (Settings → Automation, qBittorrent's `%N` `%F`
@@ -165,7 +182,10 @@ it): `settings.properties`, hand-editable; `stats.properties`, the all-time tota
 up, seconds active) the Statistics window adds this session to, written every five minutes and
 at quit, this machine's and never synced; `torrents/<info-hash>.fastresume`, one per torrent,
 libtorrent's resume data with the info dictionary inside, so deleting one file forgets one torrent;
-`native/<version>/`, the unpacked engine. Downloads go to `~/Downloads` until changed in
+`native/<version>/`, the unpacked engine. While Torrenta runs, `instance.lock` is held, and
+`instance.port` and `instance.token` (readable by you alone where the file system has modes) say
+where a second Torrenta hands over its command line; both are deleted at quit, and a stale pair
+left by a crash is taken over without a word. Downloads go to `~/Downloads` until changed in
 Settings (`Ctrl+,`), which writes the same file. Three more choices sit under the download folder
 there, all off by default: an **incomplete folder** (downloads start there and are moved to their
 save path, or their category's, when complete; a file already at the destination is never written

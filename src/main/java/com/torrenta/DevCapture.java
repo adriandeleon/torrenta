@@ -123,6 +123,12 @@ final class DevCapture {
         System.out.println("capture: trayLine=" + window.trayLine());
         // False after a close-request with a tray to close to: the window is hidden, not gone.
         System.out.println("capture: showing=" + stage.isShowing());
+        // The desktop: the single-instance lock, the badge backend (or why none), what the handler
+        // registration said, which open handlers are installed (macOS).
+        System.out.println("capture: instance=" + window.instanceDescription());
+        System.out.println("capture: badge=" + window.badgeDescription());
+        System.out.println("capture: handler=" + window.handlerDescription());
+        System.out.println("capture: openHandlers=" + window.openHandlersDescription());
         // What a dialog opened on a later pulse than the action shows now, for the hook to read.
         for (String line : window.lateLinesForCapture()) System.out.println("capture: " + line);
         if (Boolean.getBoolean(LOG_PROBE_PROPERTY)) probeDebugLog();

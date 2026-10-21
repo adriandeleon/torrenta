@@ -30,13 +30,9 @@ public final class Trays {
     private Trays() {}
 
     /**
-     * Whether the tray on this platform is AWT's, which needs AWT headful. Pure: {@code App.main}
-     * decides {@code java.awt.headless} from it before any AWT class loads, and keeps the guard
-     * everywhere else (on macOS a live AWT contends with JavaFX for the AppKit run loop, which is
-     * why the sibling applications run headless on purpose).
-     *
-     * @param trayWanted the setting
-     * @param osName {@code os.name}
+     * Whether the tray on this platform is AWT's, which needs AWT headful: everywhere but Linux.
+     * {@code os.AwtUse} folds this into the one rule {@code App.main} decides
+     * {@code java.awt.headless} from.
      */
     public static boolean usesAwt(boolean trayWanted, String osName) {
         return trayWanted && !isLinux(osName);

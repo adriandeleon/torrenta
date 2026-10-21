@@ -2,10 +2,11 @@
 Name=APPLICATION_NAME
 GenericName=BitTorrent Client
 Comment=APPLICATION_DESCRIPTION
-Exec=APPLICATION_LAUNCHER
+Exec=APPLICATION_LAUNCHER %U
 Icon=APPLICATION_ICON
 Terminal=false
 Type=Application
 Categories=Network;P2P;FileTransfer;
 Keywords=torrent;bittorrent;magnet;download;p2p;
+MimeType=application/x-bittorrent;x-scheme-handler/magnet;
 StartupWMClass=com.torrenta.App

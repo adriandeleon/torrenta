@@ -39,6 +39,8 @@ class SyncKeysTest {
         assertTrue(SyncKeys.isSynced("notify.error"));
         assertFalse(SyncKeys.isSynced("create.lastDir"), "a folder of this machine");
         assertFalse(SyncKeys.isSynced("create.defaultTrackers"));
+        assertFalse(SyncKeys.isSynced("os.handler"), "this machine's desktop");
+        assertFalse(SyncKeys.isSynced("os.badge"));
         assertFalse(SyncKeys.isSynced(""));
         assertFalse(SyncKeys.isSynced(null));
     }
