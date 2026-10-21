@@ -84,6 +84,7 @@ import com.torrenta.rss.Feed;
 import com.torrenta.rss.FeedFetcher;
 import com.torrenta.rss.RssService;
 import com.torrenta.rss.RssStore;
+import com.torrenta.rss.Rule;
 import com.torrenta.search.DeclarativeProvider;
 import com.torrenta.search.SearchProvider;
 import com.torrenta.search.SearchResult;
@@ -191,6 +192,9 @@ public final class MainWindow {
     private Engine engine;
     private String engineDescription = "";
     private final List<String> pendingInputs = new ArrayList<>();
+    /** Opened when the engine is up: a rule's add from a feed fetched before then waits on it. */
+    private final java.util.concurrent.CountDownLatch engineUp = new java.util.concurrent.CountDownLatch(1);
+
     private ScheduledExecutorService poller;
 
     /**
@@ -244,6 +248,7 @@ public final class MainWindow {
                 definitionStore,
                 () -> opener.accept(definitionStore.dir().toUri().toString()));
         settingsWindow.setRss(rss);
+        rss.setDownloader(this::downloadForRule, settings::rssAutoDownload, this::reportRule);
         rss.start();
         settingsWindow.setOnTestNotification(() -> {
             Automation a = automation;
@@ -336,6 +341,20 @@ public final class MainWindow {
         settingsWindow.closeDialogsForCapture();
     }
 
+    /**
+     * Printed after the shot, when a dialog opened on a pulse after the action has had its say:
+     * the RSS rule dialog's title, its Matches list and its problem line.
+     */
+    public List<String> lateLinesForCapture() {
+        List<String> out = new ArrayList<>();
+        if (!settingsWindow.ruleMatchesForCapture().isEmpty()) {
+            out.add("dialog=" + settingsWindow.dialogTitle());
+            out.add("rule-matches=" + settingsWindow.ruleMatchesForCapture());
+            out.add("rule-problem=" + settingsWindow.ruleProblemForCapture());
+        }
+        return out;
+    }
+
     /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
     public List<String> eventLines() {
         return log.events().stream()
@@ -408,6 +427,18 @@ public final class MainWindow {
                             action.substring("rss-keys:".length()).split("\\+"))
                     .map(key -> KeyCode.valueOf(key.trim().toUpperCase(java.util.Locale.ROOT)))
                     .toList());
+        } else if (action.startsWith("settings-rss-rule-add")) {
+            // settings-rss-rule-add, settings-rss-rule-add:<must contain>: the Add RSS Rule dialog from Settings → RSS.
+            settingsWindow.show(stage);
+            int colon = action.indexOf(':');
+            settingsWindow.openRuleDialogForCapture(colon < 0 ? "" : action.substring(colon + 1));
+        } else if (action.equals("rss-rule-from-title")) {
+            // The context menu's Create rule from title on the first article, once the feeds are fetched.
+            showRss();
+            rssPane.actOnArticleForCapture(false);
+        } else if (action.equals("rss-download")) {
+            showRss();
+            rssPane.actOnArticleForCapture(true);
         } else if (action.startsWith("settings-rss-add")) {
             settingsWindow.show(stage);
             int colon = action.indexOf(':');
@@ -514,6 +545,8 @@ public final class MainWindow {
         }
         if (!settingsWindow.rssStatus().isEmpty())
             System.out.println("capture: rss-settings=" + settingsWindow.rssStatus());
+        if (settingsWindow.isShowing())
+            for (String row : settingsWindow.rulesForCapture()) System.out.println("capture: rss-rule=" + row);
     }
 
     /**
@@ -548,6 +581,7 @@ public final class MainWindow {
     public void engineReady(Engine engine) {
         this.engine = engine;
         this.engineDescription = engine.description();
+        engineUp.countDown();
         globalShareLimit = settings.shareLimit();
         setStatus(engineDescription);
         List<String> queued = List.copyOf(pendingInputs);
@@ -1798,6 +1832,7 @@ public final class MainWindow {
                         "settings", "Settings…", chord(KeyCode.COMMA), null, always, () -> settingsWindow.show(stage)),
                 new Command("search", "Search…", chord(KeyCode.K), null, always, this::showSearch),
                 new Command("rss", "RSS Feeds…", chord(KeyCode.R), null, always, this::showRss),
+                new Command("rss-run-rules", "Run RSS Rules Now", null, null, always, rss::runRulesNow),
                 new Command("transfers", "Show Transfers", null, "Esc", always, this::showTransfers),
                 new Command(
                         "filter",
@@ -1937,6 +1972,7 @@ public final class MainWindow {
                         new SeparatorMenuItem(),
                         command("search").menuItem(),
                         command("rss").menuItem(),
+                        command("rss-run-rules").menuItem(),
                         command("settings").menuItem(),
                         new SeparatorMenuItem(),
                         quit);
@@ -2191,11 +2227,76 @@ public final class MainWindow {
 
     // ---- the RSS tab ----------------------------------------------------------------------------
 
+    /**
+     * The fetch thread. A rule's add: the article's magnet, or its {@code .torrent} fetched, added
+     * with the rule's save path, category and paused choice and the rest of the defaults; the
+     * engine's refusal is the reason thrown.
+     */
+    private void downloadForRule(Rule rule, Article article) throws IOException {
+        // The feeds due at start are fetched before the engine is up; the add waits for it, bounded.
+        try {
+            engineUp.await(60, TimeUnit.SECONDS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+        Engine e = engine;
+        if (e == null) throw new IOException("the engine is not running");
+        AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
+        Optional<Path> categoryFolder = labels.category(rule.category()).flatMap(Category::path);
+        try {
+            e.add(RuleAdd.request(rule, source, AddDialog.Defaults.from(settings), categoryFolder));
+        } catch (EngineException ex) {
+            throw new IOException(ex.getMessage() == null ? ex.toString() : ex.getMessage(), ex);
+        }
+    }
+
+    /** The fetch thread: a rule's add, or its failure, into the log and the status bar. */
+    private void reportRule(String message, boolean failed) {
+        reportFromWorker(EngineEvent.session(failed ? EngineEvent.Level.WARNING : EngineEvent.Level.INFO, message));
+    }
+
+    /**
+     * FX thread. The article's torrent added at once with the defaults, no dialog, and the article
+     * marked downloaded: the context menu's Download.
+     */
+    private void downloadArticle(Article article) {
+        Engine e = engine;
+        if (e == null) {
+            setStatus("The engine is still starting");
+            return;
+        }
+        String fetching = RssAdd.fetchingText(article);
+        if (!fetching.isEmpty()) setStatus(fetching);
+        AddDialog.Defaults defaults = AddDialog.Defaults.from(settings);
+        Thread.ofVirtual().name("rss-download").start(() -> {
+            try {
+                AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
+                Torrent added = e.add(AddDialog.withoutAsking(source, defaults));
+                rss.markDownloaded(article.feedId(), article.identity());
+                Platform.runLater(() -> setStatus("Added " + added.name()));
+            } catch (EngineException | IOException | RuntimeException ex) {
+                String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                Platform.runLater(() -> setStatus(message));
+            }
+        });
+    }
+
     /** What the RSS tab asks of the window. */
     private final class RssHost implements RssPane.Host {
         @Override
         public void add(Article article) {
             addFromArticle(article);
+        }
+
+        @Override
+        public void download(Article article) {
+            downloadArticle(article);
+        }
+
+        @Override
+        public void createRule(Article article) {
+            settingsWindow.show(stage);
+            settingsWindow.createRuleFromTitle(article.displayTitle());
         }
 
         @Override

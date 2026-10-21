@@ -15,6 +15,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -26,6 +27,12 @@ import java.util.logging.Logger;
  * tells its listeners through the other executor given (the FX thread in the window; inline in a
  * test). New articles are merged by identity, read flags kept; a feed's failure is its status.
  *
+ * <p>The auto-download rules run here too, on the fetch thread, never the notify one: when the
+ * switch is on and a refresh brings new articles, {@link RuleEngine} says which to add and the
+ * {@link Downloader} (the window's add path) adds them, each marked downloaded and said through
+ * the {@link Reporter}; {@link #runRulesNow()} runs them over everything unread and not yet
+ * downloaded. An article is never added twice: the flag is kept with it.
+ *
  * <p>Nothing here touches the engine or JavaFX. The window owns one for its life.
  */
 public final class RssService {
@@ -35,6 +42,16 @@ public final class RssService {
     /** Told on the notify executor; {@code feedId} is null when the feed list itself changed. */
     public interface Listener {
         void changed(String feedId);
+    }
+
+    /** Adds an article's torrent as a rule says, on the fetch thread; throws with the reason when it cannot. */
+    public interface Downloader {
+        void download(Rule rule, Article article) throws IOException;
+    }
+
+    /** Told, on the fetch thread, of each add a rule made and each it could not. */
+    public interface Reporter {
+        void report(String message, boolean failed);
     }
 
     /** A feed's refresh facts as the lists show them. */
@@ -52,7 +69,11 @@ public final class RssService {
     private final Clock clock;
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
     private final Set<String> refreshing = new HashSet<>();
+    private final Object rulesLock = new Object();
     private ScheduledExecutorService scheduler;
+    private volatile Downloader downloader;
+    private volatile Reporter reporter = (message, failed) -> {};
+    private volatile BooleanSupplier autoDownload = () -> false;
 
     public RssService(
             RssStore store,
@@ -81,6 +102,16 @@ public final class RssService {
     /** Where the feeds come from, for a dialog that wants to try one before adding it. */
     public FeedSource source() {
         return source;
+    }
+
+    /**
+     * Wires the rules to an add path: {@code on} is the global switch, read at each refresh;
+     * {@code reporter} hears of every add (the window puts it in the event log).
+     */
+    public void setDownloader(Downloader downloader, BooleanSupplier on, Reporter reporter) {
+        this.downloader = downloader;
+        this.autoDownload = on == null ? () -> false : on;
+        this.reporter = reporter == null ? (message, failed) -> {} : reporter;
     }
 
     public void addListener(Listener listener) {
@@ -242,6 +273,143 @@ public final class RssService {
         for (Feed f : store.feeds()) markFeedRead(f.id());
     }
 
+    /** Marks one article downloaded, and read: its torrent has been added. Any thread. */
+    public void markDownloaded(String feedId, String identity) {
+        boolean changed = false;
+        synchronized (this) {
+            FeedState s = store.state(feedId);
+            List<Article> list = new ArrayList<>(s.articles());
+            for (int i = 0; i < list.size(); i++) {
+                Article a = list.get(i);
+                if (a.identity().equals(identity) && !(a.downloaded() && a.read())) {
+                    list.set(i, a.withDownloaded(true).withRead(true));
+                    changed = true;
+                }
+            }
+            if (changed) save(feedId, s.withArticles(list));
+        }
+        if (changed) notify(feedId);
+    }
+
+    private synchronized boolean isDownloaded(Article article) {
+        for (Article a : store.state(article.feedId()).articles()) {
+            if (a.identity().equals(article.identity())) return a.downloaded();
+        }
+        return false;
+    }
+
+    // ---- rules ----------------------------------------------------------------------------------
+
+    public List<Rule> rules() {
+        return store.rules();
+    }
+
+    public Rule rule(String name) {
+        for (Rule r : store.rules()) if (r.name().equals(name)) return r;
+        return null;
+    }
+
+    /** Replaces the rules; listeners hear a list change. */
+    public void setRules(List<Rule> list) throws IOException {
+        synchronized (rulesLock) {
+            store.setRules(list);
+        }
+        notify(null);
+    }
+
+    /**
+     * Adds the rule, or replaces the one named {@code replacing} (a rename keeps its place); a
+     * rule of the new name that is not the one replaced is refused.
+     *
+     * @throws IllegalArgumentException when another rule has the name already
+     */
+    public void putRule(String replacing, Rule rule) throws IOException {
+        synchronized (rulesLock) {
+            List<Rule> list = new ArrayList<>(store.rules());
+            int at = -1;
+            for (int i = 0; i < list.size(); i++) {
+                String name = list.get(i).name();
+                if (name.equals(rule.name()) && !name.equals(replacing))
+                    throw new IllegalArgumentException("A rule named \"" + rule.name() + "\" exists already");
+                if (replacing != null && name.equals(replacing)) at = i;
+            }
+            if (at < 0) list.add(rule);
+            else list.set(at, rule);
+            store.setRules(list);
+        }
+        notify(null);
+    }
+
+    public void removeRule(String name) throws IOException {
+        synchronized (rulesLock) {
+            List<Rule> list = new ArrayList<>(store.rules());
+            if (!list.removeIf(r -> r.name().equals(name))) return;
+            store.setRules(list);
+        }
+        notify(null);
+    }
+
+    /**
+     * Runs every enabled rule over every article unread and not yet downloaded, on the fetch
+     * executor, whether or not the switch is on: the menu's command. The reporter hears the
+     * outcome in a line.
+     */
+    public void runRulesNow() {
+        fetchExecutor.execute(() -> {
+            List<Article> candidates = new ArrayList<>();
+            for (Article a : allArticles()) if (!a.read() && !a.downloaded() && a.hasTorrent()) candidates.add(a);
+            int added = runRules(candidates);
+            reporter.report(
+                    store.rules().isEmpty()
+                            ? "No RSS rules yet: Settings → RSS adds one"
+                            : added == 0
+                                    ? "RSS rules: nothing new to add among " + candidates.size() + " unread articles"
+                                    : "RSS rules added " + (added == 1 ? "1 torrent" : added + " torrents"),
+                    false);
+        });
+    }
+
+    /**
+     * The fetch thread. The rules over the candidates, one download at a time under the rules
+     * lock, so two feeds finishing together cannot take the same episode twice; returns how many
+     * went through.
+     */
+    private int runRules(List<Article> candidates) {
+        Downloader d = downloader;
+        if (d == null || candidates.isEmpty()) return 0;
+        synchronized (rulesLock) {
+            List<Rule> rules = store.rules();
+            if (rules.isEmpty()) return 0;
+            Instant now = Instant.now(clock);
+            List<RuleEngine.Download> wanted = RuleEngine.apply(rules, candidates, now);
+            List<RuleEngine.Download> done = new ArrayList<>();
+            Map<String, String> names = namesById();
+            for (RuleEngine.Download w : wanted) {
+                Article a = w.article();
+                if (isDownloaded(a)) continue; // by hand, meanwhile
+                String feedName = names.getOrDefault(a.feedId(), "");
+                try {
+                    d.download(w.rule(), a);
+                } catch (IOException | RuntimeException e) {
+                    String reason = e.getMessage() == null ? e.toString() : e.getMessage();
+                    reporter.report(RuleEngine.describeFailure(w.rule(), a, feedName, reason), true);
+                    continue;
+                }
+                markDownloaded(a.feedId(), a.identity());
+                done.add(w);
+                reporter.report(RuleEngine.describe(w.rule(), a, feedName), false);
+            }
+            if (done.isEmpty()) return 0;
+            try {
+                store.setRules(RuleEngine.record(store.rules(), done, now));
+            } catch (IOException e) {
+                LOG.log(Level.WARNING, "Could not write the rules", e);
+            }
+            notify(null);
+            return done.size();
+        }
+    }
+
     private void save(String feedId, FeedState state) {
         try {
             store.setState(feedId, state);
@@ -309,6 +477,7 @@ public final class RssService {
 
     private void finish(Feed fetched, FeedSource.Result result, String error) {
         boolean renamed = false;
+        List<Article> fresh = List.of();
         synchronized (this) {
             refreshing.remove(fetched.id());
             Feed feed = store.feed(fetched.id());
@@ -319,8 +488,13 @@ public final class RssService {
             if (error != null) {
                 after = before.failed(now, error);
             } else if (result.changed()) {
-                after = before.answered(
-                        result.etag(), result.lastModified(), now, merge(before.articles(), result.articles()));
+                List<Article> merged = merge(
+                        before.articles(),
+                        result.articles().stream()
+                                .map(a -> a.withFeedId(feed.id()))
+                                .toList());
+                after = before.answered(result.etag(), result.lastModified(), now, merged);
+                fresh = newOnes(before.articles(), merged);
             } else {
                 after = before.answered(before.etag(), before.lastModified(), now, before.articles());
             }
@@ -342,8 +516,18 @@ public final class RssService {
                 }
             }
         }
+        if (!fresh.isEmpty() && autoDownload.getAsBoolean()) runRules(fresh);
         if (renamed) notify(null);
         notify(fetched.id());
+    }
+
+    /** The articles of {@code merged} that {@code existing} did not have, by identity, in merged order. */
+    static List<Article> newOnes(List<Article> existing, List<Article> merged) {
+        Set<String> had = new HashSet<>();
+        for (Article a : existing) had.add(a.identity());
+        List<Article> out = new ArrayList<>();
+        for (Article a : merged) if (!had.contains(a.identity())) out.add(a);
+        return out;
     }
 
     /** Newest first; an article without a date sorts as newest, so a dateless feed keeps its order. */
@@ -364,7 +548,7 @@ public final class RssService {
         for (Article a : incoming) {
             if (!seen.add(a.identity())) continue;
             Article was = kept.get(a.identity());
-            out.add(was == null ? a : a.withReadOf(was));
+            out.add(was == null ? a : a.withFlagsOf(was));
         }
         for (Article a : existing) {
             if (seen.add(a.identity())) out.add(a);

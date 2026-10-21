@@ -89,6 +89,79 @@ class RssStoreTest {
     }
 
     @Test
+    void rulesRoundTripThroughTheirFile(@TempDir Path dir) throws IOException {
+        RssStore store = new RssStore(dir);
+        store.load();
+        assertTrue(store.rules().isEmpty(), "no file yet is simply empty");
+        Rule show = new Rule(
+                "Show",
+                true,
+                "show 720p|show 1080p",
+                "sample",
+                false,
+                "1x2-;2x1-4",
+                true,
+                List.of("f1", "f2"),
+                7,
+                Rule.AddPaused.YES,
+                "TV",
+                "/data/tv",
+                Instant.parse("2026-10-18T09:12:00Z"),
+                List.of("1x2", "1x3"));
+        Rule everything = Rule.blank("Everything").withEnabled(false);
+        store.setRules(List.of(show, everything));
+        String text = Files.readString(dir.resolve(RssStore.DIR).resolve(RssStore.RULES_FILE));
+        assertEquals(
+                "[\n"
+                        + "  {\"name\":\"Show\",\"enabled\":true,\"mustContain\":\"show 720p|show 1080p\","
+                        + "\"mustNotContain\":\"sample\",\"useRegex\":false,\"episodeFilter\":\"1x2-;2x1-4\","
+                        + "\"smartEpisodeFilter\":true,\"feeds\":[\"f1\",\"f2\"],\"ignoreDays\":7,\"addPaused\":\"yes\","
+                        + "\"category\":\"TV\",\"savePath\":\"/data/tv\",\"lastMatch\":\"2026-10-18T09:12:00Z\","
+                        + "\"previouslyMatched\":[\"1x2\",\"1x3\"]},\n"
+                        + "  {\"name\":\"Everything\",\"enabled\":false,\"mustContain\":\"\",\"mustNotContain\":\"\","
+                        + "\"useRegex\":false,\"episodeFilter\":\"\",\"smartEpisodeFilter\":false,\"feeds\":[],"
+                        + "\"ignoreDays\":0,\"addPaused\":\"default\",\"category\":\"\",\"savePath\":\"\","
+                        + "\"previouslyMatched\":[]}\n"
+                        + "]\n",
+                text,
+                "no lastMatch field while the rule never matched");
+        RssStore again = new RssStore(dir);
+        again.load();
+        assertEquals(List.of(show, everything), again.rules(), "every field back");
+        assertEquals("[]\n", RssStore.formatRules(List.of()));
+        assertThrows(IOException.class, () -> RssStore.parseRules("{}"));
+        assertEquals(
+                List.of("A"),
+                RssStore.parseRules("[{\"name\":\"A\"},{\"name\":\"\"},{\"name\":\"A\",\"enabled\":false},3]").stream()
+                        .map(Rule::name)
+                        .toList(),
+                "no name: skipped; a second of the same name: skipped");
+        assertTrue(RssStore.parseRules("[{\"name\":\"A\"}]").get(0).enabled(), "the defaults of a short entry");
+        Files.writeString(dir.resolve(RssStore.DIR).resolve(RssStore.RULES_FILE), "nope");
+        again.load();
+        assertTrue(again.rules().isEmpty(), "unreadable is empty, not fatal");
+    }
+
+    @Test
+    void theDownloadedFlagIsWrittenOnlyWhenSetAndSurvivesAMerge(@TempDir Path dir) throws IOException {
+        RssStore store = new RssStore(dir);
+        store.setFeeds(List.of(new Feed("f1", "https://x/rss", "", 0)));
+        Article taken = article("a", 0, true).withDownloaded(true);
+        store.setState("f1", FeedState.EMPTY.withArticles(List.of(taken, article("b", 1, false))));
+        String text = Files.readString(
+                dir.resolve(RssStore.DIR).resolve(RssStore.ARTICLES_DIR).resolve("f1.json"));
+        assertTrue(text.contains("\"read\":true,\"downloaded\":true}"), text);
+        assertEquals(1, text.split("downloaded", -1).length - 1, "absent while false");
+        RssStore again = new RssStore(dir);
+        again.load();
+        assertTrue(again.state("f1").articles().get(0).downloaded());
+        assertFalse(again.state("f1").articles().get(1).downloaded());
+        List<Article> merged = RssService.merge(List.of(taken), List.of(article("a", 0, false)));
+        assertTrue(merged.get(0).downloaded(), "a copy fetched again keeps the flag");
+        assertTrue(merged.get(0).read());
+    }
+
+    @Test
     void aFeedKeepsAtMostFiveHundredArticlesTheOldestDropped(@TempDir Path dir) throws IOException {
         RssStore store = new RssStore(dir);
         store.setFeeds(List.of(new Feed("f1", "https://x/rss", "", 0)));

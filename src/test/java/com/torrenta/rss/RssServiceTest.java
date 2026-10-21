@@ -10,12 +10,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The service with a stub source and inline executors, so every step is seen in order. */
@@ -233,5 +235,113 @@ class RssServiceTest {
                 List.of("b0", "b1", "a1"),
                 s.allArticles().stream().map(Article::guid).toList());
         assertEquals(Map.of("fa", "A", "fb", "B"), s.namesById());
+    }
+
+    private static Article torrent(String guid, String title, String when) {
+        return new Article(
+                "",
+                guid,
+                title,
+                "https://x/" + guid,
+                "magnet:?xt=urn:btih:" + "0".repeat(40) + "&dn=" + guid,
+                when == null ? null : Instant.parse(when),
+                "",
+                false);
+    }
+
+    @Test
+    void aNewArticleARuleWantsIsDownloadedOnceAndMarked(@TempDir Path dir) throws IOException {
+        RssService s = service(dir, 30);
+        List<String> downloads = new CopyOnWriteArrayList<>();
+        List<String> reports = new CopyOnWriteArrayList<>();
+        AtomicBoolean on = new AtomicBoolean(true);
+        s.setDownloader(
+                (rule, article) -> {
+                    if (article.title().contains("broken")) throw new IOException("the server answered 404");
+                    downloads.add(rule.name() + ":" + article.guid());
+                },
+                on::get,
+                (message, failed) -> reports.add((failed ? "! " : "") + message));
+        s.putRule(null, Rule.blank("Debian").withEnabled(true));
+        s.putRule(
+                "Debian",
+                new Rule("Debian", true, "debian", "", false, "", true, List.of(), 0, null, "", "", null, List.of()));
+        assertEquals(1, s.rules().size(), "a rename or an edit replaces");
+        assertEquals("debian", s.rule("Debian").mustContain());
+        assertThrows(IllegalArgumentException.class, () -> s.putRule(null, Rule.blank("Debian")), "names are unique");
+
+        stub.answers.put(
+                "https://x/rss",
+                answer(
+                        "Tracker",
+                        "\"v1\"",
+                        torrent("a", "Debian 12.7.0 netinst", "2026-10-18T10:00:00Z"),
+                        torrent("b", "Ubuntu 24.04", null),
+                        torrent("c", "Debian broken link", null)));
+        Feed f = Feed.of("https://x/rss", "", 0);
+        s.addFeed(f);
+        assertEquals(List.of("Debian:a"), downloads, "the one the rule wants, once");
+        assertEquals(
+                List.of(
+                        "! Rule 'Debian' could not add Debian broken link from feed Tracker: the server answered 404",
+                        "Rule 'Debian' added Debian 12.7.0 netinst from feed Tracker"),
+                reports,
+                "in the merged order, undated first; the feed's new name is known already");
+        List<Article> articles = s.articles(f.id());
+        Article a =
+                articles.stream().filter(x -> x.guid().equals("a")).findFirst().orElseThrow();
+        assertTrue(a.downloaded(), "marked downloaded");
+        assertTrue(a.read(), "and read");
+        assertFalse(articles.stream()
+                .filter(x -> x.guid().equals("c"))
+                .findFirst()
+                .orElseThrow()
+                .downloaded());
+        assertEquals(1, s.unread(f.id()) - 1, "b and c stay unread");
+        assertEquals(clocks.now, s.rule("Debian").lastMatch());
+        assertEquals(List.of("debian 12 7 0 netinst"), s.rule("Debian").previouslyMatched());
+
+        stub.answers.put(
+                "https://x/rss",
+                answer(
+                        "Tracker",
+                        "\"v2\"",
+                        torrent("a", "Debian 12.7.0 netinst", "2026-10-18T10:00:00Z"),
+                        torrent("d", "Debian 12.8.0 netinst", "2026-10-19T10:00:00Z")));
+        s.refresh(f.id());
+        assertEquals(List.of("Debian:a", "Debian:d"), downloads, "the old one is not added again; the new one is");
+
+        on.set(false);
+        stub.answers.put("https://x/rss", answer("Tracker", "\"v3\"", torrent("e", "Debian 13 alpha", null)));
+        s.refresh(f.id());
+        assertEquals(2, downloads.size(), "the switch off: nothing added by a refresh");
+        assertFalse(s.articles(f.id()).stream()
+                .filter(x -> x.guid().equals("e"))
+                .findFirst()
+                .orElseThrow()
+                .downloaded());
+
+        reports.clear();
+        s.runRulesNow();
+        assertEquals(List.of("Debian:a", "Debian:d", "Debian:e"), downloads, "Run rules now ignores the switch");
+        assertEquals("RSS rules added 1 torrent", reports.get(reports.size() - 1));
+        s.runRulesNow();
+        assertTrue(
+                reports.get(reports.size() - 1).startsWith("RSS rules: nothing new to add among"), reports.toString());
+        assertEquals(3, downloads.size());
+
+        s.markRead(f.id(), "g:b", true);
+        s.markDownloaded(f.id(), "g:b");
+        RssService reopened = service(dir, 30);
+        assertTrue(reopened.articles(f.id()).stream()
+                .filter(x -> x.guid().equals("b"))
+                .findFirst()
+                .orElseThrow()
+                .downloaded());
+        assertEquals(1, reopened.rules().size(), "rules on disk");
+        reopened.removeRule("Debian");
+        assertTrue(reopened.rules().isEmpty());
+        reopened.setDownloader(null, null, null);
+        reopened.runRulesNow();
     }
 }

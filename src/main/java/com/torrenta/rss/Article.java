@@ -7,8 +7,9 @@ import java.util.Locale;
  * One item of a feed, as the reader keeps it: which feed, the item's id (its {@code guid} or Atom
  * {@code id}; a feed that gives none is keyed by title and link), the title, the page it links
  * to, the torrent it carries (a magnet or a {@code .torrent} URL, empty when it carries none),
- * when it was published (null when the feed did not say), its description as plain text, and
- * whether it has been read.
+ * when it was published (null when the feed did not say), its description as plain text, whether
+ * it has been read, and whether its torrent has been added (by a rule, or by hand through
+ * Download).
  */
 public record Article(
         String feedId,
@@ -18,7 +19,21 @@ public record Article(
         String torrentLink,
         Instant published,
         String description,
-        boolean read) {
+        boolean read,
+        boolean downloaded) {
+
+    /** Not yet downloaded: what a parser or an older file hands over. */
+    public Article(
+            String feedId,
+            String guid,
+            String title,
+            String link,
+            String torrentLink,
+            Instant published,
+            String description,
+            boolean read) {
+        this(feedId, guid, title, link, torrentLink, published, description, read, false);
+    }
 
     public Article {
         feedId = feedId == null ? "" : feedId;
@@ -56,11 +71,24 @@ public record Article(
     public Article withRead(boolean isRead) {
         return read == isRead
                 ? this
-                : new Article(feedId, guid, title, link, torrentLink, published, description, isRead);
+                : new Article(feedId, guid, title, link, torrentLink, published, description, isRead, downloaded);
     }
 
-    /** The same item with another read flag: what a merge does with a copy fetched again. */
-    public Article withReadOf(Article other) {
-        return withRead(other.read);
+    /** The same item filed under a feed: what the service stamps on a source's items. */
+    public Article withFeedId(String id) {
+        return feedId.equals(id)
+                ? this
+                : new Article(id, guid, title, link, torrentLink, published, description, read, downloaded);
+    }
+
+    public Article withDownloaded(boolean isDownloaded) {
+        return downloaded == isDownloaded
+                ? this
+                : new Article(feedId, guid, title, link, torrentLink, published, description, read, isDownloaded);
+    }
+
+    /** The same item with another copy's flags: what a merge does with a copy fetched again. */
+    public Article withFlagsOf(Article other) {
+        return withRead(other.read).withDownloaded(other.downloaded);
     }
 }

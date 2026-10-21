@@ -110,5 +110,7 @@ final class DevCapture {
         if (!window.availableUpdateVersion().isEmpty())
             System.out.println("capture: update=" + window.availableUpdateVersion());
         if (scene != stage.getScene()) System.out.println("capture: scene=dialog");
+        // What a dialog opened on a later pulse than the action shows now, for the hook to read.
+        for (String line : window.lateLinesForCapture()) System.out.println("capture: " + line);
     }
 }
