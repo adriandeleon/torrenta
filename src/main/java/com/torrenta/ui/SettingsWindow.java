@@ -52,6 +52,9 @@ import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.WatchFolder;
+import com.torrenta.rss.Feed;
+import com.torrenta.rss.RssService;
+import com.torrenta.rss.Rule;
 import com.torrenta.search.SearchException;
 import com.torrenta.search.TorznabEndpoint;
 import com.torrenta.search.TorznabProvider;
@@ -94,6 +97,7 @@ final class SettingsWindow {
         WATCH(Group.APPLICATION, "Watch folders"),
         AUTOMATION(Group.APPLICATION, "Automation"),
         SEARCH(Group.APPLICATION, "Search"),
+        RSS(Group.APPLICATION, "RSS"),
         SYNC(Group.APPLICATION, "Sync"),
         LABELS(Group.APPLICATION, "Categories and tags"),
         CONNECTION(Group.ENGINE, "Connection"),
@@ -129,7 +133,7 @@ final class SettingsWindow {
                 Settings.UI_EXTENDED_WINDOW
             },
             concat(
-                    concat(Settings.DOWNLOAD_KEYS, Settings.AUTOMATION_KEYS),
+                    concat(Settings.DOWNLOAD_KEYS, concat(Settings.AUTOMATION_KEYS, Settings.RSS_KEYS)),
                     concat(
                             Settings.CONNECTION_KEYS,
                             concat(
@@ -257,6 +261,73 @@ final class SettingsWindow {
         reloadSearch();
     }
 
+    private RssService rssService;
+    private TableView<Feed> rssTable;
+    private Label rssStatusLabel;
+    private FeedDialog rssDialog;
+    private Spinner<Integer> rssMinutes;
+    private CheckBox rssAutoDownload;
+    private TableView<Rule> rulesTable;
+    private Label rulesStatusLabel;
+    private RuleDialog ruleDialog;
+
+    /** The reader the RSS page edits; its changes come back through the service's listener (FX thread). */
+    void setRss(RssService service) {
+        this.rssService = service;
+        service.addListener(id -> reloadRss());
+        reloadRss();
+    }
+
+    /** The RSS page's status line, or the open feed dialog's, for a capture; empty when it says nothing. */
+    String rssStatus() {
+        if (rssDialog != null && rssDialog.isShowing()) return rssDialog.statusText();
+        return rssStatusLabel == null ? "" : rssStatusLabel.getText();
+    }
+
+    /** Opens the Add Feed dialog from the RSS page, on the next pulse, with the URL typed in. */
+    void openRssDialogForCapture(String url) {
+        selectPageForCapture("RSS");
+        javafx.application.Platform.runLater(() -> addRssFeed(url));
+    }
+
+    /** Opens the Add RSS Rule dialog from the RSS page, on the next pulse, must-contain typed in. */
+    void openRuleDialogForCapture(String mustContain) {
+        selectPageForCapture("RSS");
+        javafx.application.Platform.runLater(() -> addRule(mustContain.isEmpty() ? "" : mustContain, mustContain));
+    }
+
+    /** The Rules table's lines, for a capture: "name | on | feeds | last match". */
+    List<String> rulesForCapture() {
+        List<String> out = new ArrayList<>();
+        if (rulesTable == null || rssService == null) return out;
+        Map<String, String> names = rssService.namesById();
+        for (Rule r : rulesTable.getItems()) {
+            out.add(r.name() + " | " + (r.enabled() ? "on" : "off") + " | " + RuleText.feedsText(r, names) + " | "
+                    + RuleText.lastMatchText(r, System.currentTimeMillis()));
+        }
+        return out;
+    }
+
+    /** The open rule dialog's Matches heading and lines, for a capture; empty while none is open. */
+    String ruleMatchesForCapture() {
+        return ruleDialog != null && ruleDialog.isShowing() ? ruleDialog.matchesForCapture() : "";
+    }
+
+    /** The open rule dialog's problem line, for a capture. */
+    String ruleProblemForCapture() {
+        return ruleDialog != null && ruleDialog.isShowing() ? ruleDialog.problemText() : "";
+    }
+
+    /**
+     * "Create rule from title": the RSS page, then the Add RSS Rule dialog with the name and
+     * must-contain filled from the title. FX thread, the window shown already.
+     */
+    void createRuleFromTitle(String title) {
+        selectPageForCapture("RSS");
+        String phrase = RuleText.mustContainFromTitle(title);
+        javafx.application.Platform.runLater(() -> addRule(phrase, phrase));
+    }
+
     private DefinitionStore definitionStore;
     private Runnable openDefinitionFolder = () -> {};
     private TableView<DefinitionStore.Entry> definitionTable;
@@ -306,6 +377,8 @@ final class SettingsWindow {
     Scene dialogScene() {
         if (watchDialog != null && watchDialog.isShowing()) return watchDialog.scene();
         if (searchDialog != null && searchDialog.isShowing()) return searchDialog.scene();
+        if (rssDialog != null && rssDialog.isShowing()) return rssDialog.scene();
+        if (ruleDialog != null && ruleDialog.isShowing()) return ruleDialog.scene();
         return null;
     }
 
@@ -313,6 +386,8 @@ final class SettingsWindow {
     String dialogTitle() {
         if (watchDialog != null && watchDialog.isShowing()) return watchDialog.title();
         if (searchDialog != null && searchDialog.isShowing()) return searchDialog.title();
+        if (rssDialog != null && rssDialog.isShowing()) return rssDialog.title();
+        if (ruleDialog != null && ruleDialog.isShowing()) return ruleDialog.title();
         return "";
     }
 
@@ -320,6 +395,8 @@ final class SettingsWindow {
     void closeDialogsForCapture() {
         if (watchDialog != null && watchDialog.isShowing()) watchDialog.cancel();
         if (searchDialog != null && searchDialog.isShowing()) searchDialog.cancel();
+        if (rssDialog != null && rssDialog.isShowing()) rssDialog.cancel();
+        if (ruleDialog != null && ruleDialog.isShowing()) ruleDialog.cancel();
     }
 
     /**
@@ -875,6 +952,7 @@ final class SettingsWindow {
             case WATCH -> buildWatch(page);
             case AUTOMATION -> buildAutomation(page);
             case SEARCH -> buildSearch(page);
+            case RSS -> buildRss(page);
             case CONNECTION -> buildConnection(page);
             case PROTOCOL -> buildProtocol(page);
             case IP_FILTER -> buildIpFilter(page);
@@ -1408,6 +1486,346 @@ final class SettingsWindow {
         if (selected != null && watchTable.getItems().contains(selected))
             watchTable.getSelectionModel().select(selected);
         refreshWatchStatus();
+    }
+
+    private void buildRss(VBox page) {
+        VBox refresh = section(page, "Refreshing");
+        rssMinutes = new Spinner<>(Feed.MIN_MINUTES, Feed.MAX_MINUTES, 30, 5);
+        rssMinutes.setEditable(true);
+        rssMinutes.setPrefWidth(90);
+        rssMinutes.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setRssRefreshMinutes(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.RSS,
+                refresh,
+                "Refresh every (minutes)",
+                "How often every feed is asked again, 5 to 1440; a feed can have its own interval. An unchanged"
+                        + " feed costs one request (ETag and Last-Modified are sent back). Syncs.",
+                rssMinutes,
+                "rss feed interval refresh minutes schedule");
+        rssAutoDownload = new CheckBox();
+        rssAutoDownload.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setRssAutoDownload(now);
+            settings.saveQuietly();
+            reloadRules();
+        });
+        row(
+                Category.RSS,
+                refresh,
+                "Download new articles' torrents automatically",
+                "As each feed refreshes, the rules below run over its new articles and add the torrents they"
+                        + " want, each once, said in the Event Log. Off, the rules run only on Run rules now. Syncs.",
+                rssAutoDownload,
+                "rss auto download automatic rules filter");
+
+        VBox feeds = section(page, "Feeds");
+        rssTable = new TableView<>();
+        rssTable.setPrefHeight(190);
+        rssTable.setPlaceholder(new Label("No feeds yet"));
+        rssTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        TableColumn<Feed, String> name = new TableColumn<>("Name");
+        name.setPrefWidth(130);
+        name.setCellValueFactory(c ->
+                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().displayName()));
+        TableColumn<Feed, String> url = new TableColumn<>("URL");
+        url.setPrefWidth(190);
+        url.setCellValueFactory(c ->
+                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().url()));
+        TableColumn<Feed, String> last = new TableColumn<>("Last refresh");
+        last.setPrefWidth(110);
+        last.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(rssLastRefresh(c.getValue())));
+        TableColumn<Feed, String> unread = new TableColumn<>("Unread");
+        unread.setPrefWidth(70);
+        unread.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                rssService == null
+                        ? ""
+                        : Integer.toString(rssService.unread(c.getValue().id()))));
+        TableColumn<Feed, String> status = new TableColumn<>("Status");
+        status.setPrefWidth(140);
+        status.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(rssFeedStatus(c.getValue())));
+        rssTable.getColumns().addAll(List.of(name, url, last, unread, status));
+        rssTable.setRowFactory(t -> {
+            javafx.scene.control.TableRow<Feed> row = new javafx.scene.control.TableRow<>();
+            row.setOnMouseClicked(e -> {
+                if (e.getClickCount() == 2 && !row.isEmpty()) editRssFeed();
+            });
+            return row;
+        });
+        Button add = new Button("Add…");
+        add.setOnAction(e -> addRssFeed(""));
+        Button edit = new Button("Edit…");
+        edit.disableProperty()
+                .bind(rssTable.getSelectionModel().selectedItemProperty().isNull());
+        edit.setOnAction(e -> editRssFeed());
+        Button remove = new Button("Remove");
+        remove.disableProperty()
+                .bind(rssTable.getSelectionModel().selectedItemProperty().isNull());
+        remove.setOnAction(e -> removeRssFeed());
+        Button refreshNow = new Button("Refresh");
+        refreshNow.setOnAction(e -> {
+            if (rssService == null) return;
+            Feed selected = rssTable.getSelectionModel().getSelectedItem();
+            if (selected == null) rssService.refreshAll();
+            else rssService.refresh(selected.id());
+        });
+        HBox buttons = new HBox(6, add, edit, remove, refreshNow);
+        buttons.setAlignment(Pos.CENTER_LEFT);
+        Label hint = new Label("The RSS tab (Ctrl+R) reads these. A feed is added by URL and fetched once to check it;"
+                + " a blank name takes the feed's title. The feeds and their articles, read or not, are rss/feeds.json"
+                + " and rss/articles/<id>.json beside the settings: this machine's, never synced.");
+        hint.setWrapText(true);
+        hint.getStyleClass().add("settings-row-description");
+        rssStatusLabel = new Label();
+        rssStatusLabel.setWrapText(true);
+        rssStatusLabel.getStyleClass().add("settings-row-description");
+        VBox box = new VBox(8, hint, rssTable, buttons, rssStatusLabel);
+        feeds.getChildren().add(box);
+        rows.add(new Row(
+                Category.RSS, box, "Feeds | rss atom feed url add edit remove refresh unread articles status", feeds));
+
+        VBox rulesSection = section(page, "Rules");
+        rulesTable = new TableView<>();
+        rulesTable.setPrefHeight(170);
+        rulesTable.setPlaceholder(
+                new Label("No rules yet: Add… writes one, or Create rule from title… in the RSS tab"));
+        rulesTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        TableColumn<Rule, String> ruleName = new TableColumn<>("Name");
+        ruleName.setPrefWidth(160);
+        ruleName.setCellValueFactory(c ->
+                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().name()));
+        TableColumn<Rule, String> ruleOn = new TableColumn<>("Enabled");
+        ruleOn.setPrefWidth(70);
+        ruleOn.setCellValueFactory(c ->
+                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().enabled() ? "yes" : "no"));
+        TableColumn<Rule, String> ruleFeeds = new TableColumn<>("Feeds");
+        ruleFeeds.setPrefWidth(200);
+        ruleFeeds.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                rssService == null ? "" : RuleText.feedsText(c.getValue(), rssService.namesById())));
+        TableColumn<Rule, String> ruleLast = new TableColumn<>("Last match");
+        ruleLast.setPrefWidth(110);
+        ruleLast.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                RuleText.lastMatchText(c.getValue(), System.currentTimeMillis())));
+        rulesTable.getColumns().addAll(List.of(ruleName, ruleOn, ruleFeeds, ruleLast));
+        rulesTable.setRowFactory(t -> {
+            javafx.scene.control.TableRow<Rule> row = new javafx.scene.control.TableRow<>();
+            row.setOnMouseClicked(e -> {
+                if (e.getClickCount() == 2 && !row.isEmpty()) editRule();
+            });
+            return row;
+        });
+        Button addRule = new Button("Add…");
+        addRule.setOnAction(e -> addRule("", ""));
+        Button editRule = new Button("Edit…");
+        editRule.disableProperty()
+                .bind(rulesTable.getSelectionModel().selectedItemProperty().isNull());
+        editRule.setOnAction(e -> editRule());
+        Button removeRule = new Button("Remove");
+        removeRule
+                .disableProperty()
+                .bind(rulesTable.getSelectionModel().selectedItemProperty().isNull());
+        removeRule.setOnAction(e -> removeRule());
+        Button duplicateRule = new Button("Duplicate");
+        duplicateRule
+                .disableProperty()
+                .bind(rulesTable.getSelectionModel().selectedItemProperty().isNull());
+        duplicateRule.setOnAction(e -> duplicateRule());
+        Button runRules = new Button("Run rules now");
+        runRules.setOnAction(e -> {
+            if (rssService != null) rssService.runRulesNow();
+        });
+        HBox ruleButtons = new HBox(6, addRule, editRule, removeRule, duplicateRule, runRules);
+        ruleButtons.setAlignment(Pos.CENTER_LEFT);
+        Label rulesHint = new Label("A rule names the articles it wants (words the title must and must not contain, or"
+                + " regular expressions; an episode filter such as 1x2-; which feeds; how old is too old) and what to"
+                + " do with them (start paused or not, a category, a save path). The first rule that wants an"
+                + " article takes it; the smart episode filter keeps a rule from taking an episode twice. Run rules"
+                + " now goes over every unread article not yet downloaded. The rules are rss/rules.json beside the"
+                + " settings: this machine's, never synced.");
+        rulesHint.setWrapText(true);
+        rulesHint.getStyleClass().add("settings-row-description");
+        rulesStatusLabel = new Label();
+        rulesStatusLabel.setWrapText(true);
+        rulesStatusLabel.getStyleClass().add("settings-row-description");
+        VBox rulesBox = new VBox(8, rulesHint, rulesTable, ruleButtons, rulesStatusLabel);
+        rulesSection.getChildren().add(rulesBox);
+        rows.add(new Row(
+                Category.RSS,
+                rulesBox,
+                "Rules | rss auto download rule regex episode filter smart category save path must contain feeds"
+                        + " add edit remove duplicate run",
+                rulesSection));
+    }
+
+    private void addRule(String name, String mustContain) {
+        if (rssService == null || (ruleDialog != null && ruleDialog.isShowing())) return;
+        Set<String> taken = new LinkedHashSet<>();
+        for (Rule r : rssService.rules()) taken.add(r.name());
+        ruleDialog = new RuleDialog(stage, null, rssService.feeds(), categoriesForRules(), taken, ruleArticles());
+        if (!name.isEmpty() || !mustContain.isEmpty()) ruleDialog.prefill(RuleText.freshName(name, taken), mustContain);
+        Optional<Rule> made = ruleDialog.showAndWait();
+        ruleDialog = null;
+        if (made.isEmpty()) return;
+        saveRule(null, made.get());
+    }
+
+    private void editRule() {
+        Rule selected = rulesTable.getSelectionModel().getSelectedItem();
+        if (rssService == null || selected == null || (ruleDialog != null && ruleDialog.isShowing())) return;
+        Set<String> taken = new LinkedHashSet<>();
+        for (Rule r : rssService.rules()) if (!r.name().equals(selected.name())) taken.add(r.name());
+        ruleDialog = new RuleDialog(stage, selected, rssService.feeds(), categoriesForRules(), taken, ruleArticles());
+        Optional<Rule> edited = ruleDialog.showAndWait();
+        ruleDialog = null;
+        if (edited.isEmpty()) return;
+        saveRule(selected.name(), edited.get());
+    }
+
+    private void duplicateRule() {
+        Rule selected = rulesTable.getSelectionModel().getSelectedItem();
+        if (rssService == null || selected == null) return;
+        Set<String> taken = new LinkedHashSet<>();
+        for (Rule r : rssService.rules()) taken.add(r.name());
+        saveRule(null, selected.duplicate(RuleText.copyName(selected.name(), taken)));
+    }
+
+    private void removeRule() {
+        Rule selected = rulesTable.getSelectionModel().getSelectedItem();
+        if (rssService == null || selected == null) return;
+        try {
+            rssService.removeRule(selected.name());
+        } catch (IOException e) {
+            report("Could not remove the rule: " + e.getMessage());
+        }
+        reloadRules();
+    }
+
+    private void saveRule(String replacing, Rule rule) {
+        try {
+            rssService.putRule(replacing, rule);
+        } catch (IOException e) {
+            report("Could not save the rule: " + e.getMessage());
+            return;
+        } catch (IllegalArgumentException e) {
+            report(e.getMessage());
+            return;
+        }
+        reloadRules();
+        for (Rule r : rulesTable.getItems())
+            if (r.name().equals(rule.name())) rulesTable.getSelectionModel().select(r);
+    }
+
+    private List<com.torrenta.engine.Category> categoriesForRules() {
+        return labelStore == null ? List.of() : labelStore.categories();
+    }
+
+    private RuleDialog.Articles ruleArticles() {
+        return new RuleDialog.Articles() {
+            @Override
+            public List<com.torrenta.rss.Article> all() {
+                return rssService.allArticles();
+            }
+
+            @Override
+            public Map<String, String> namesById() {
+                return rssService.namesById();
+            }
+        };
+    }
+
+    /** The service's rules into the table; keeps the selection where it can. */
+    private void reloadRules() {
+        if (rssService == null || rulesTable == null) return;
+        Rule selected = rulesTable.getSelectionModel().getSelectedItem();
+        List<Rule> rules = rssService.rules();
+        rulesTable.getItems().setAll(rules);
+        if (selected != null) {
+            for (Rule r : rules)
+                if (r.name().equals(selected.name()))
+                    rulesTable.getSelectionModel().select(r);
+        }
+        rulesStatusLabel.setText(RuleText.rulesStatus(rules, settings.rssAutoDownload()));
+    }
+
+    private String rssLastRefresh(Feed feed) {
+        if (rssService == null) return "";
+        RssService.Status s = rssService.status(feed.id());
+        return s.refreshing()
+                ? "refreshing…"
+                : s.refreshedEpochMs() <= 0 ? "never" : RssText.ago(s.refreshedEpochMs(), System.currentTimeMillis());
+    }
+
+    private String rssFeedStatus(Feed feed) {
+        if (rssService == null) return "";
+        RssService.Status s = rssService.status(feed.id());
+        return s.failed() ? "last error: " + s.error() : s.refreshedEpochMs() <= 0 ? "" : "ok";
+    }
+
+    private void addRssFeed(String prefill) {
+        if (rssService == null || (rssDialog != null && rssDialog.isShowing())) return;
+        rssDialog = new FeedDialog(stage, null, rssService.source(), settings.rssRefreshMinutes());
+        if (!prefill.isEmpty()) rssDialog.prefillUrl(prefill);
+        Optional<Feed> made = rssDialog.showAndWait();
+        rssDialog = null;
+        if (made.isEmpty()) return;
+        try {
+            rssService.addFeed(made.get());
+        } catch (IOException e) {
+            report("Could not save the feed: " + e.getMessage());
+            return;
+        }
+        reloadRss();
+        rssTable.getSelectionModel().select(made.get());
+    }
+
+    private void editRssFeed() {
+        Feed selected = rssTable.getSelectionModel().getSelectedItem();
+        if (rssService == null || selected == null) return;
+        rssDialog = new FeedDialog(stage, selected, rssService.source(), settings.rssRefreshMinutes());
+        Optional<Feed> edited = rssDialog.showAndWait();
+        rssDialog = null;
+        if (edited.isEmpty()) return;
+        try {
+            rssService.updateFeed(edited.get());
+        } catch (IOException e) {
+            report("Could not save the feed: " + e.getMessage());
+            return;
+        }
+        reloadRss();
+        rssTable.getSelectionModel().select(edited.get());
+    }
+
+    private void removeRssFeed() {
+        Feed selected = rssTable.getSelectionModel().getSelectedItem();
+        if (rssService == null || selected == null) return;
+        try {
+            rssService.removeFeed(selected.id());
+        } catch (IOException e) {
+            report("Could not remove the feed: " + e.getMessage());
+        }
+        reloadRss();
+    }
+
+    /** The service's list into the table; keeps the selection where it can. */
+    private void reloadRss() {
+        if (rssService == null || rssTable == null) return;
+        Feed selected = rssTable.getSelectionModel().getSelectedItem();
+        List<Feed> feeds = rssService.feeds();
+        rssTable.getItems().setAll(feeds);
+        if (selected != null) {
+            for (Feed f : feeds)
+                if (f.id().equals(selected.id())) rssTable.getSelectionModel().select(f);
+        }
+        reloadRules();
+        int unread = rssService.unreadTotal();
+        rssStatusLabel.setText(
+                feeds.isEmpty()
+                        ? ""
+                        : (feeds.size() == 1 ? "1 feed" : feeds.size() + " feeds") + ", "
+                                + (unread == 1 ? "1 unread article" : unread + " unread articles"));
     }
 
     private void buildSearch(VBox page) {
@@ -2429,6 +2847,9 @@ final class SettingsWindow {
             reloadLabels();
             reloadWatch();
             reloadDefinitions();
+            reloadRss();
+            rssMinutes.getValueFactory().setValue(settings.rssRefreshMinutes());
+            rssAutoDownload.setSelected(settings.rssAutoDownload());
             theme.setValue(Theme.byId(settings.theme(), Theme.DEFAULT));
             downloadDir.setText(settings.downloadDir().toString());
             incompleteEnabled.setSelected(settings.incompleteEnabled());

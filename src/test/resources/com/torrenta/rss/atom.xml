@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Atom Releases</title>
+  <id>urn:uuid:60a76c80-d399-11d9-b93C-0003939e0af6</id>
+  <updated>2026-10-18T10:00:00Z</updated>
+  <entry>
+    <title>Release 1.0</title>
+    <link rel="alternate" href="https://atom.example/releases/1.0"/>
+    <link rel="enclosure" type="application/x-bittorrent" href="https://atom.example/releases/1.0.torrent"/>
+    <id>urn:release:1.0</id>
+    <published>2026-10-18T09:00:00+02:00</published>
+    <updated>2026-10-18T10:00:00Z</updated>
+    <summary type="html">&lt;p&gt;First &amp;amp; final.&lt;/p&gt;</summary>
+  </entry>
+  <entry>
+    <title>Release 0.9</title>
+    <link href="https://atom.example/releases/0.9"/>
+    <id>urn:release:0.9</id>
+    <updated>2026-10-10T10:00:00Z</updated>
+    <content type="html"><![CDATA[Magnet inside: <a href="magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa">here</a>]]></content>
+  </entry>
+  <entry>
+    <title>Notes</title>
+    <link href="https://atom.example/notes"/>
+    <id>urn:notes:1</id>
+    <content type="xhtml">
+      <div xmlns="http://www.w3.org/1999/xhtml">
+        <p>Nested <em>xhtml</em> content.</p>
+        <p>Second paragraph.</p>
+      </div>
+    </content>
+  </entry>
+</feed>

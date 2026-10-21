@@ -5,14 +5,28 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Changed
+
+- **A magnet added from the Add dialog starts with the peers its file-list fetch found**, both
+  with "Add now, pick files when ready" and after the files arrived, instead of looking for the
+  swarm again from nothing.
+
 ### Fixed
 
+- **A crash, any time after a file of 40 pieces or more was checked, downloaded or seeded** (exit
+  139, no error file, "Segmentation fault" from the shell, usually at a garbage collection):
+  libtorrent's memory-mapped disk I/O installs a SIGSEGV/SIGBUS handler of its own in place of
+  the JVM's once it maps a file, and the JVM's next safepoint poll died under it. The engine now
+  sets libtorrent's mmap cutoff above every file, so the same disk I/O reads with `pread` and
+  installs nothing. Found while making the torrent creator, whose hashing met the same handler;
+  a test seeds a 2 MiB file while a thread drives the collector.
 - **A crash at quit with a torrent in the list** (exit 139, no error file, every few runs): the
   window's poll could still be reading the torrents while the engine deleted the native session
   under it. Every engine call now finishes before the session goes, and a later one is refused.
 
 ### Added
 
+<<<<<<< HEAD
 - **The menu bar can share the window's title bar.** Off by default, under Settings → General →
   Appearance, experimental; it applies on restart, since a window's style is fixed once it has
   been shown, and the status bar says so when the setting and the window disagree. With it on, the
@@ -22,6 +36,67 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   platform's own, so nothing about how the window behaves changes; only where the menus sit. The
   window buttons follow the app theme, not the desktop's, so a dark theme on a light desktop does
   not hide them. Not offered on macOS, where the menu belongs to the system menu bar.
+=======
+- **The Create Torrent dialog** (`Ctrl+N`, File → New Torrent…, the toolbar's page glyph), the
+  third step of the RSS, creation and statistics milestone: a file or folder (browsed, typed or
+  dropped on the dialog), hybrid, v1-only or v2-only, a piece size from 16 KiB to 32 MiB or
+  Automatic (about 1,500 pieces, qBittorrent's rule), private, "Start seeding after creation",
+  "Align files to piece boundaries" (always on for v2 and hybrid, libtorrent's canonical layout),
+  trackers one per line with a blank line between tiers (pre-filled from the last creation, else
+  the Protocol page's default trackers), web seeds, a comment and a private tracker's source tag.
+  The header sizes the source on a worker and shows the piece count for the size chosen, live.
+  Create… asks where to save (the folder is remembered as `create.lastDir`, this machine's),
+  hashes on a worker with a progress bar and a Cancel, writes the file beside its name and moves
+  it into place, and shows the v1 and v2 info-hashes and the magnet link with Copy buttons; the
+  dialog stays open so they can be copied. Seeding adds the torrent through the usual add path
+  with the source's parent as the save path and the hash check skipped, so it seeds at once.
+  `Engine.create` is the engine's side: libtorrent lists and lays out the files and writes the
+  torrent, the pieces are hashed in Java (v1 pieces and v2 piece layers, bit for bit what
+  libtorrent produces, which the tests check) so Cancel stops at the next piece, the `source`
+  key is written into the info dictionary by hand (libtorrent has no setter), and the hashes are
+  read off the final bytes.
+- **RSS auto-download rules**, the second step of the RSS milestone, qBittorrent's shape. A rule
+  (Settings → RSS → Rules; Add…, Edit…, Remove, Duplicate) names the articles it wants: words the
+  title must and must not contain (every word of a phrase, `|` between alternatives,
+  case-insensitive) or regular expressions; an episode filter in qBittorrent's syntax (`1x2` one
+  episode, `1x2-5` a range, `1x2-` from episode 2 on, several separated by `;`), matched against
+  `S01E02`, `1x02` or `Season 1 Episode 2` in the title, a bad filter or regex said under the form
+  and Save held back; a smart episode filter that keeps the rule from taking an episode twice
+  (what it took is remembered with the rule, the last thousand); which feeds (none ticked: every
+  feed); how old is too old. And what to do with a match: start paused, started, or as the Add
+  dialog's default says; a category (its folder is then the save path); a save path of its own.
+  The rule dialog lists, as you type, every article the rule matches among those the feeds hold,
+  the matching off the FX thread. With Download new articles' torrents automatically on
+  (`rss.autoDownload`, synced), every refresh runs the rules over the feed's new articles on the
+  fetch thread: the first rule that wants an article takes it, its torrent is added (a magnet as it
+  is, a `.torrent` link fetched first), the article is marked downloaded (a glyph before its title)
+  and read, and the Event Log says "Rule 'Linux ISOs' added X from feed Y", or why it could not; an
+  article is never added twice. Run RSS Rules Now (File menu, the palette, the page's button) goes
+  over every unread article not yet downloaded, switch or not. The article context menu gains
+  Download (added at once with the defaults, no dialog) and Create rule from title… (the rule
+  dialog with the title's words before its episode token filled in). The rules are
+  `rss/rules.json` beside the settings, this machine's, never synced.
+- **The RSS reader** (`Ctrl+R`, File → RSS Feeds…, the toolbar's feed glyph), the first step of
+  the RSS milestone, a third tab beside the transfers and the search: the feeds on the left (All
+  feeds first, each with its unread count, a glyph while it refreshes or after it failed), the
+  articles of the chosen feed on the right (title in bold while unread, date, feed; a filter box
+  and an Unread-only toggle above them), and the chosen article's text, plain, with its link,
+  below. A feed is added by URL (`N`, `Ctrl+N`, the Add feed… button, or Settings → RSS), fetched
+  once to check it, a blank name taken from the feed's title; it may have its own interval. RSS
+  2.0 and Atom are read with the JDK's own parser, entities and DTDs off; an item's torrent is
+  its enclosure, a magnet in its link, guid or text, a `<torrent:magnetURI>` or an info-hash
+  element; dates in the shapes feeds use, missing ones allowed. Every feed is refreshed on its
+  schedule (Settings → RSS → Refresh every, 30 minutes by default, 5 to 1440, synced), on `F5`,
+  or on Refresh; an unchanged feed costs one request (`ETag` and `Last-Modified` go back and a
+  304 comes). New articles are merged by guid, read flags kept, at most 500 per feed; a failure is
+  the feed's status ("last error: the server answered 404"). Choosing an article marks it read,
+  `M` toggles it, `Shift+M` marks the feed; `Enter` or a double-click on an article with a torrent
+  opens the Add dialog for it ("FROM RSS"), a `.torrent` link fetched first; `Ctrl+C` copies the
+  link; `Delete` removes a feed after a confirm; the context menus mirror the keys. The feeds and
+  articles are `rss/feeds.json` and `rss/articles/<id>.json` beside the settings, this machine's,
+  never synced. The columns are remembered as `rss.columns`. The auto-download switch on the
+  Settings page is there and off: the rules come next.
+>>>>>>> origin/master
 - **Search providers from definition files**, the last step of the search milestone. A site
   without an API is `search-providers/<id>.json` in the config folder: where to search (a URL
   template with `{query}` and `{category}`, the category mapped through the file's own table;

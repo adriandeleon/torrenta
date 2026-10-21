@@ -93,7 +93,8 @@ final class AddDialog {
         URL,
         MAGNET,
         CLIPBOARD,
-        SEARCH
+        SEARCH,
+        RSS
     }
 
     private final Stage stage = new Stage();
@@ -870,6 +871,7 @@ final class AddDialog {
                     case MAGNET -> "FROM MAGNET LINK";
                     case CLIPBOARD -> "FROM CLIPBOARD";
                     case SEARCH -> "FROM SEARCH";
+                    case RSS -> "FROM RSS";
                 };
         return "ADD TORRENT · " + from;
     }

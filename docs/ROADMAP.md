@@ -282,9 +282,13 @@ Everything in Settings that the engine already knows how to do.
 
 ### 0.7 — RSS, creation, statistics
 
-1. **RSS reader**: feeds, refresh interval, article list with read state.
-2. **RSS auto-download rules** with regex, episode filter, category and save path.
-3. **Torrent creator**: v1/v2/hybrid, piece size, private, trackers, web seeds, seed after creating.
+1. ✓ **RSS reader**: feeds, refresh interval, article list with read state. (`com.torrenta.rss`,
+   `ui.RssPane`, `Ctrl+R`; Settings → RSS.)
+2. ✓ **RSS auto-download rules** with regex, episode filter, category and save path. (`rss.Rule`,
+   `EpisodeFilter`, `RuleMatcher`, `RuleEngine`, `RssService.runRulesNow`; `ui.RuleDialog`,
+   Settings → RSS → Rules; `rss/rules.json`.)
+3. ✓ **Torrent creator**: v1/v2/hybrid, piece size, private, trackers, web seeds, seed after creating.
+   (`Engine.create`, `CreateRequest`/`CreatedTorrent`, `PieceSize`; `ui.CreateDialog`, `Ctrl+N`.)
 4. **Statistics** window and per-torrent and session speed graphs.
 
 ### 0.8 — App polish

@@ -37,6 +37,27 @@ class SettingsTest {
     }
 
     @Test
+    void rssIntervalIsClampedAndTheAutoDownloadSwitchIsOff(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        assertEquals(30, settings.rssRefreshMinutes(), "half an hour by default");
+        assertFalse(settings.rssAutoDownload());
+        settings.setRssRefreshMinutes(2);
+        assertEquals(5, settings.rssRefreshMinutes(), "the floor is five minutes");
+        settings.setRssRefreshMinutes(90);
+        settings.setRssAutoDownload(true);
+        settings.save();
+        Settings read = new Settings(file);
+        read.load();
+        assertEquals(90, read.rssRefreshMinutes());
+        assertTrue(read.rssAutoDownload());
+        read.set(Settings.RSS_REFRESH_MINUTES, "9999");
+        assertEquals(30, read.rssRefreshMinutes(), "out of range falls back");
+        assertTrue(com.torrenta.sync.SyncKeys.isSynced(Settings.RSS_REFRESH_MINUTES), "the interval travels");
+    }
+
+    @Test
     void incompleteFolderSuffixAndPreallocationRoundTrip(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Settings settings = new Settings(file);

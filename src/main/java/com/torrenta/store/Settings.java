@@ -211,6 +211,15 @@ public final class Settings {
     /** Inputs are added with the defaults above and the Add dialog does not open. Off by default. */
     public static final String ADD_WITHOUT_ASKING = "add.withoutAsking";
 
+    /** Where the Create Torrent dialog last saved a {@code .torrent}; a folder of this machine, never synced. */
+    public static final String CREATE_LAST_DIR = "create.lastDir";
+
+    /**
+     * The trackers the Create Torrent dialog starts with: the ones it last created with, as typed
+     * (one per line, a blank line between tiers); unset, the Protocol page's default trackers.
+     */
+    public static final String CREATE_DEFAULT_TRACKERS = "create.defaultTrackers";
+
     /**
      * The command lines run on an event, with placeholders ({@code EventCommand}); blank for none.
      * They name programs on this machine, so the {@code automation.} prefix never syncs.
@@ -225,6 +234,15 @@ public final class Settings {
     public static final String NOTIFY_FINISHED = "notify.finished";
     public static final String NOTIFY_SEEDING_DONE = "notify.seedingDone";
     public static final String NOTIFY_ERROR = "notify.error";
+
+    /** Minutes between feed refreshes, 5 to 1440, 30 by default; syncs (the feeds and articles do not). */
+    public static final String RSS_REFRESH_MINUTES = "rss.refreshMinutes";
+    /** Whether new articles' torrents are added without asking; off, and unused until the rules exist. */
+    public static final String RSS_AUTO_DOWNLOAD = "rss.autoDownload";
+    /** The RSS tab's article columns, the same format as {@link #TABLE_COLUMNS}. */
+    public static final String RSS_COLUMNS = "rss.columns";
+
+    public static final String[] RSS_KEYS = {RSS_REFRESH_MINUTES, RSS_AUTO_DOWNLOAD};
 
     public static final String[] AUTOMATION_KEYS = {
         AUTOMATION_ON_ADDED,
@@ -333,6 +351,24 @@ public final class Settings {
 
     public void setSyncIntervalMinutes(int minutes) {
         properties.setProperty(SYNC_INTERVAL, String.valueOf(Math.clamp(minutes, 1, 1440)));
+    }
+
+    /** Minutes between feed refreshes; 5 to 1440, 30 by default. */
+    public int rssRefreshMinutes() {
+        return readInt(RSS_REFRESH_MINUTES, 30, 5, 1440);
+    }
+
+    public void setRssRefreshMinutes(int minutes) {
+        properties.setProperty(RSS_REFRESH_MINUTES, String.valueOf(Math.clamp(minutes, 5, 1440)));
+    }
+
+    /** Off until the auto-download rules exist; the key is kept for them. */
+    public boolean rssAutoDownload() {
+        return readBoolean(RSS_AUTO_DOWNLOAD, false);
+    }
+
+    public void setRssAutoDownload(boolean on) {
+        properties.setProperty(RSS_AUTO_DOWNLOAD, String.valueOf(on));
     }
 
     public long syncLastEpochMs() {
@@ -465,6 +501,29 @@ public final class Settings {
 
     public void setAddStartPaused(boolean on) {
         properties.setProperty(ADD_START_PAUSED, String.valueOf(on));
+    }
+
+    /** The folder the last created {@code .torrent} went to, as written; empty when none yet. */
+    public String createLastDir() {
+        return properties.getProperty(CREATE_LAST_DIR, "").trim();
+    }
+
+    public void setCreateLastDir(Path dir) {
+        properties.setProperty(CREATE_LAST_DIR, dir.toString());
+    }
+
+    /**
+     * The Create Torrent dialog's starting trackers, as its text area shows them: the ones last
+     * created with, else the Protocol page's default trackers on one tier, else empty.
+     */
+    public String createDefaultTrackers() {
+        String own = properties.getProperty(CREATE_DEFAULT_TRACKERS, "");
+        if (!own.isBlank()) return own;
+        return String.join("\n", engineSettings().protocol().defaultTrackers());
+    }
+
+    public void setCreateDefaultTrackers(String text) {
+        properties.setProperty(CREATE_DEFAULT_TRACKERS, text == null ? "" : text);
     }
 
     public boolean addWithoutAsking() {

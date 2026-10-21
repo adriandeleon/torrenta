@@ -85,6 +85,11 @@ final class Icons {
 
     // ---- glyphs; the paths are Editora's, by the same name --------------------------------------
 
+    /** A page with a plus, Editora's new-file glyph, for "New Torrent". */
+    static Node newFile() {
+        return line("M4.5 2.5h4.6l2.9 2.9v8.1h-7.5zM9.1 2.5v2.9h2.9M8.25 8.2v3.2M6.65 9.8h3.2");
+    }
+
     /** Open: a folder, for "Add Torrent File". */
     static Node open() {
         return line("M2 12.5V3.5h4.2l1.5 2h5.8v2M2 12.5l2.2-5h10.3l-2.2 5z");
@@ -138,7 +143,16 @@ final class Icons {
                 + "M1.5 3.5H6M1.5 6.5H5.5M1.5 9.5H7.5M1.5 12.5H9");
     }
 
+<<<<<<< HEAD
     /** A clock face, for the event log, in the line style. */
+=======
+    /** RSS: the dot and two arcs, in the kit's line style. */
+    static Node rss() {
+        return line("M3 4a9 9 0 0 1 9 9M3 8a5 5 0 0 1 5 5M3 12.2a0.8 0.8 0 1 0 1.6 0a0.8 0.8 0 1 0 -1.6 0");
+    }
+
+    /** A clock face, for the event log. */
+>>>>>>> origin/master
     static Node history() {
         return line("M2.8 8a5.2 5.2 0 1 0 10.4 0a5.2 5.2 0 1 0-10.4 0M8 5.2v2.9l2 1.3");
     }

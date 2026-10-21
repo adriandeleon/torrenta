@@ -38,6 +38,7 @@ to try one on purpose).
 | Entry | `--help`/`--version`, toolkit start, theme | `com.torrenta.App`, `com.torrenta.cli` |
 | Events | `EngineEvent` (level, torrent, message), raised by the engine from libtorrent alerts and by its own start/stop/remove; `Engine.addListener` | `com.torrenta.engine` |
 | Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Engine.fetchMetadata` (a magnet's file list while the dialog is open), `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL); `ui.AddDialog` (rules as statics), `FileTree` (wanted + priority ladder), `FreeSpace` (disk bar and sentence) | `com.torrenta.engine`, `com.torrenta.net`, `ui` |
+| Create | `CreateRequest` (path, `Format` v1/v2/hybrid, piece size or 0, private, tracker tiers, web seeds, comment, `source` tag, align, seed), `CreatedTorrent` (bytes, engine id, both hashes, counts, magnet, the seeding torrent or the add's problem), `PieceSize` (the automatic rule: ~1,500 pieces, 16 KiB … 16 MiB; `count` packed or aligned), `Engine.create(request, CreateProgress)` blocking on the caller's worker, cancellable at the next piece; `libtorrent.PieceHasher` (v1 pieces and v2 piece layers in Java, bit for bit libtorrent's); `ui.CreateDialog` (modeless, sizes the source live, Save as…, atomic write), `CreateText` (tier parser, summary, outcome) | `com.torrenta.engine`, `.libtorrent`, `ui` |
 | Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags; JSON for the `<hash>.labels` sidecar), `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `ui.FilterQuery` (the filter box's `key:value` language → predicate + chips), `Sidebar` (a tree: All, Categories, Tags; Status and Tracker sections later), `TagsDialog` | `com.torrenta.engine`, `store`, `ui` |
 | Detail | `TorrentDetail` (general, files, peers, trackers, pieces) from `Engine.detail(id)`; `setFilePriority`, `addTrackers`, `removeTracker`; `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
 | Engine settings | `EngineSettings` (engine-neutral record; `listenInterfaces()` is the tested string), `Settings.engineSettings()` clamps the `connection.*` and `proxy.*` keys, `LibtorrentEngine.toPack` maps onto `settings_pack`; applied at start (`SessionParams`) and live (`applySettings`) | `com.torrenta.engine`, `store`, `.libtorrent` |
@@ -46,6 +47,7 @@ to try one on purpose).
 | Automation | `automation.EventCommand` (pure: `tokens` splits like a shell, `substitute` fills qBittorrent's `%N %L %G %F %R %D %C %Z %T %I %J %K %%` per token, `subject` from a `Torrent` + `TorrentDetail`), `Automation` (the service: `plan` is the rule, `handle(event)` runs on a virtual thread, `Subprocess` with a 10-min ceiling, outcomes back as events), `Notifier` + `Notifiers.forPlatform` (`notify-send` / `osascript` / `toast.ps1` through PowerShell, text as arguments), `AutomationSettings` from `Settings.automation()`; `EngineEvent.Kind` says which events count | `com.torrenta.automation` |
 | Search | `search.SearchProvider` (name + blocking `search(query, category)` throwing `SearchException`), `SearchResult` (sealed `Link`: `Magnet`/`TorrentUrl`; the hash is read off a magnet; `identity()` is hash else link), `SearchCategory` (Newznab numbers), `ResultRanker` (pure: dedupe keeps the better-seeded copy, rank by seeds → query coverage → date → name), `SearchService` (virtual thread per provider, 20 s each, one request per 2 s per provider through a `Ticker`, session cache, `SearchOutcome` with per-provider failures), `TorznabEndpoint` (+ `problem(url)`, the dialog's rule), `TorznabProvider` (`t=caps`/`t=search`, StAX, no entities); `store.SearchProviderStore` (`search-providers.json`, never synced); `ui.SearchProviderDialog`, Settings → Search. Declarative: `Definition` (the file, parsed and validated with the key at fault in `DefinitionException`), `DeclarativeProvider` (the one generic provider: `url`, `extract`, pure), `JsonExtractor` (tree + JSON-pointer paths), `HtmlParser` + `HtmlNode` + `Selector` (the lenient parser and the small CSS subset, no jsoup), `SizeText`/`DateText`, `SearchHttp` (the shared GET); `store.DefinitionStore` (`search-providers/<id>.json`, `refresh()` by size+mtime, `installExamples()` from `search/examples/index.txt`); `search.disabled` in settings (synced); `docs/search-providers.md` is the format | `com.torrenta.search`, `store`, `ui` |
 | Search | `search.SearchProvider`/`SearchResult`/`SearchCategory`, `SearchService` (parallel providers, dedupe through `ResultRanker`, rate limit, session cache; `Progress` reports each provider as it answers, in arrival order, on the searching thread), `TorznabProvider` + `TorznabEndpoint`, `store.SearchProviderStore` (`search-providers.json`); `ui.SearchPane` (the tab: query, chips, status line, results table remembered as `search.columns`), `SearchRows` (in-place reconcile by identity), `SearchStatus` (the line), `SearchChips` (which providers are on), `SearchAdd` (result → `AddRequest.Source`) | `com.torrenta.search`, `store`, `ui` |
+| RSS rules | `rss.Rule` (the record; `recordMatch` caps the memory at 1000), `EpisodeFilter` (qBittorrent's `1x2;1x3-5;2x1-` parsed with the term at fault; `find` reads `S01E02`/`1x02`/`Season 1 Episode 2` off a title), `RuleMatcher` (compiled once per rule: feed, phrases or regex, episode filter, age, smart memory; `problem(rule)` is the dialog's rule), `RuleEngine` (`apply`: first enabled rule wins, one copy of an episode per batch; `record`: the memory after the adds that went through; the log lines), `RssService.setDownloader`/`runRulesNow`/`markDownloaded`, `Article.downloaded`; `RssStore` `rules.json`; `ui.RuleDialog` (live Matches on a 250 ms pause, matched on a virtual thread), `RuleAdd` (rule → `AddRequest`), `RuleText` (create-rule-from-title and the table's words) | `com.torrenta.rss`, `ui` |
 | Update | `update.UpdateCheck` (pure: payload, version rules, due), `UpdateService` (GitHub, off the FX thread, `-Dtorrenta.updateEndpoint` for a capture) — Termina's, verbatim | `com.torrenta.update` |
 | UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a vertical `SplitPane`, the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
@@ -241,13 +243,33 @@ release process with the names changed; Termina's README and memory hold the war
   flush or settings walk sees it), its events are dropped, and its add alert is swallowed by id
   (`fetchAddAlerts`) so no blob is written even if it was cancelled before the alert came. On
   metadata it writes the `.torrent` (`write_torrent_file` with the link's trackers,
-  `allow_missing_piece_layer` for v2) and leaves the session. It must be cancelled before the same
-  magnet is added for real (duplicate otherwise): the window's add worker closes the `FetchSlot`
-  first. A v1 magnet of a hybrid torrent gets a new best hash (the v2 one) when its metadata
+  `allow_missing_piece_layer` for v2) and leaves the session. The real add goes through
+  `Engine.add(request, fetch)`, which ends the fetch first (libtorrent hands back the existing
+  handle for a duplicate, silently) and gives the new torrent the peers the fetch dialled, in
+  `add_torrent_params.peers`. Those are recorded from `peer_connect_alert` (direction out) as they
+  connect, not read at the end: once the metadata is in, the fetch is upload-only and a seed
+  drops it at once. A loopback test of this has to look at progress, not at peers: the new
+  torrent downloads the test payload in a moment and the two seeds part. A v1 magnet of a hybrid torrent gets a new best hash (the v2 one) when its metadata
   arrives, so the fetch is matched by either hash (`fetchOf`), never by `id()`.
 - **"Add now, pick files when ready"** adds with stop-after-metadata and marks
   `torrent.<hash>.pickFiles` in the settings; `MainWindow.chooseFiles(id)` opens the dialog's
   tree for a torrent in the list and clears the mark. Nothing shows the mark on the row yet.
+- **libtorrent's mmap disk I/O takes the JVM's SIGSEGV handler.** Once a file of
+  `mmap_file_size_cutoff` pieces (40 by default) is mapped, libtorrent installs a SIGSEGV/SIGBUS
+  guard of its own in place of the JVM's (`sigaction`, no chaining); a fault that is not its own,
+  such as the JVM's next safepoint poll, is reset to the default action and the process dies: exit
+  139, no `hs_err` file, "Segmentation fault" from the shell, any time after a big file was
+  touched, typically at a GC. `toPack` sets the cutoff to `Integer.MAX_VALUE`, so the same disk
+  I/O reads with `pread` and never installs it; `aFileBigEnoughToMapIsSeededWithout…` is the
+  shape that died (a 2 MiB file in 16 KiB pieces polled while a thread drives GC). The same guard
+  sits under `set_piece_hashes`, which the session settings do not reach, which is why
+  `Engine.create` hashes in Java (`PieceHasher`) and only lists, lays out and writes through
+  `create_torrent`; libtorrent4j's `TorrentBuilder` is for tests on files under the cutoff only
+  (`theJavaHasherMatchesLibtorrentsOwnBitForBit` compares the two). A cancel stops at the next
+  piece. `create_torrent`'s and `file_storage`'s constants are SWIG objects (`CreateFlags`
+  holder). There is no setter for the info dictionary's `source` key: it is put into the `entry`
+  by hand before bencoding, which is why the hashes are read off the final bytes with `load`. A
+  duplicate seed add hands back the torrent already in the list, silently.
 - **A removed torrent's alert carries only the hash.** `remove()` reads the name first and raises
   the event itself; the `TORRENT_REMOVED` alert is not listened to.
 - **A row's state is computed, not stored**: `RowState.of(torrent, quietSeconds)` and
@@ -287,6 +309,14 @@ release process with the names changed; Termina's README and memory hold the war
   `settings-search-dialog-test:<url>` (Test pressed in the dialog) and `settings-search-test`
   (the page's Test on the first row) drive the page; a stub serving the caps fixture is enough.
 
+- **The RSS rules run on the fetch thread, under their own lock, after the merge and before the
+  feed's listeners hear.** `RssService.finish` hands the articles new by identity to `runRules`
+  only when the switch is on; the downloader (the window's `downloadForRule`) waits on
+  `engineUp` because the feeds due at start are fetched before the engine is up, and a rule's
+  failure is reported, not retried: the article is no longer new. The service stamps the feed's
+  id on every article a source hands over (a stub's items had none, and the log line then had
+  no feed). `markDownloaded` also marks read; the Add dialog's own confirm does not mark an
+  article, only Download and the rules do.
 - **A definition file's `id` is its file name**, and the examples are found through
   `search/examples/index.txt`, never a directory listing (a jar and a jlink image list nothing).
   `Definition.parse` rejects unknown keys at every level on purpose; the examples are parsed and

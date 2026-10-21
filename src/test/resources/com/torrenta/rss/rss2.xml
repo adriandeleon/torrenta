@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:torrent="http://xmlns.ezrss.it/0.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Example Tracker &amp; Friends</title>
+    <link>https://tracker.example/</link>
+    <description>Releases as they land</description>
+    <item>
+      <title>Debian 12.7.0 amd64 netinst</title>
+      <link>https://tracker.example/torrents/42</link>
+      <guid isPermaLink="false">tracker-42</guid>
+      <pubDate>Sun, 18 Oct 2026 09:12:00 +0000</pubDate>
+      <description><![CDATA[<p>The <b>netinst</b> image &amp; nothing more.</p><p>Size: 661&nbsp;MiB<br>Arch: amd64</p>]]></description>
+      <enclosure url="https://tracker.example/download/42.torrent?passkey=abc" type="application/x-bittorrent" length="661651456"/>
+    </item>
+    <item>
+      <title>Debian 12.7.0 arm64 DVD</title>
+      <link>magnet:?xt=urn:btih:D1E2F3A4B5C6D7E8F9A0B1C2D3E4F5A6B7C8D9E0&amp;dn=debian-12.7.0-arm64-DVD-1.iso</link>
+      <description>No date, no guid: keyed by title and link.</description>
+    </item>
+    <item>
+      <title>Ubuntu 24.04.1 desktop</title>
+      <link>https://tracker.example/torrents/43</link>
+      <guid>https://tracker.example/torrents/43</guid>
+      <pubDate>2026-10-17T20:30:00Z</pubDate>
+      <description>The magnet is in its own element.</description>
+      <torrent:magnetURI><![CDATA[magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=ubuntu]]></torrent:magnetURI>
+    </item>
+    <item>
+      <title>Fedora 41 Workstation</title>
+      <link>https://tracker.example/torrents/44</link>
+      <guid>tracker-44</guid>
+      <pubDate>17 Oct 2026 08:00:00 GMT</pubDate>
+      <description>Grab it: &lt;a href="magnet:?xt=urn:btih:89abcdef0123456789abcdef0123456789abcdef&amp;amp;dn=fedora"&gt;magnet&lt;/a&gt; today.</description>
+    </item>
+    <item>
+      <title>Weekly news</title>
+      <link>https://tracker.example/news/7</link>
+      <guid>news-7</guid>
+      <pubDate>Fri, 16 Oct 2026 12:00:00 GMT</pubDate>
+      <description>Nothing to download here.</description>
+      <enclosure url="https://tracker.example/news/7.jpg" type="image/jpeg" length="1024"/>
+    </item>
+    <item>
+      <title>Arch 2026.10.01</title>
+      <link>https://tracker.example/torrents/45</link>
+      <guid isPermaLink="false">magnet:?xt=urn:btih:fedcba9876543210fedcba9876543210fedcba98&amp;dn=arch</guid>
+      <pubDate>not a date at all</pubDate>
+      <content:encoded><![CDATA[<div>Only <i>content:encoded</i>, no description.</div>]]></content:encoded>
+    </item>
+    <item>
+      <title>Alpine 3.20 standard</title>
+      <link>https://tracker.example/files/alpine-3.20.torrent</link>
+      <guid>alpine-320</guid>
+      <pubDate>Thu, 15 Oct 2026 06:00:00 +0200</pubDate>
+    </item>
+  </channel>
+</rss>

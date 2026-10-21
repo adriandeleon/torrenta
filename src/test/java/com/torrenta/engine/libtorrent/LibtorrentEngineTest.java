@@ -8,6 +8,9 @@ import java.util.Random;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import com.torrenta.engine.AddRequest;
+import com.torrenta.engine.CreateRequest;
+import com.torrenta.engine.CreatedTorrent;
+import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Priority;
@@ -23,6 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.libtorrent4j.TorrentBuilder;
 import org.libtorrent4j.TorrentStatus;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -310,6 +314,99 @@ class LibtorrentEngineTest {
     }
 
     @Test
+    void addingAfterTheFileListArrivedStartsWithThePeersTheFetchFound(@TempDir Path dir) throws Exception {
+        Path seeds = dir.resolve("seeds");
+        byte[] torrent = twoFileTorrent(seeds, "pair");
+        int seedPort = freePort();
+        try (LibtorrentEngine seeder = new LibtorrentEngine(
+                        () -> seeds, new TorrentStore(dir.resolve("seed-store")), isolated(seedPort));
+                LibtorrentEngine engine = new LibtorrentEngine(
+                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(freePort()));
+                LibtorrentEngine control = new LibtorrentEngine(
+                        () -> dir.resolve("control"),
+                        new TorrentStore(dir.resolve("control-store")),
+                        isolated(freePort()))) {
+            seeder.start();
+            Torrent seeded = seeder.add(AddRequest.defaults(new AddRequest.TorrentFile(torrent, "pair"), seeds));
+            await("seeding", () -> seeder.torrents().get(0).state() == TorrentState.SEEDING);
+            // No DHT, no local discovery, an unreachable tracker: the fetch meets the seeder only
+            // because it is told to, and nothing else can tell the torrent where the seeder is.
+            String magnet = seeder.magnetLink(seeded.id());
+
+            engine.start();
+            Engine.MetadataFetch fetch = engine.fetchMetadata(magnet);
+            engine.connectFetchForTest(fetch, seedPort);
+            byte[] fetched = fetch.torrent().get(30, java.util.concurrent.TimeUnit.SECONDS);
+
+            // Once the metadata is in, the fetch is upload-only and the seed drops it at once; the
+            // torrent still knows where the seed is, and downloads all of it from there.
+            Torrent added = engine.add(
+                    AddRequest.defaults(new AddRequest.TorrentFile(fetched, magnet), dir.resolve("downloads")), fetch);
+            await(
+                    "downloaded from the peer the fetch had",
+                    () -> engine.torrents().get(0).progress() >= 1.0);
+            assertEquals(added.id(), engine.torrents().get(0).id());
+
+            control.start();
+            control.add(AddRequest.defaults(new AddRequest.TorrentFile(fetched, magnet), dir.resolve("control")));
+            long until = System.currentTimeMillis() + 3000;
+            while (System.currentTimeMillis() < until) {
+                assertEquals(0.0, control.torrents().get(0).progress(), "without the fetch it finds no one");
+                Thread.sleep(100);
+            }
+        }
+    }
+
+    @Test
+    void addingNowStartsWithThePeersTheFetchFound(@TempDir Path dir) throws Exception {
+        int otherPort = freePort();
+        try (LibtorrentEngine other = new LibtorrentEngine(
+                        () -> dir.resolve("other"), new TorrentStore(dir.resolve("other-store")), isolated(otherPort));
+                LibtorrentEngine engine = new LibtorrentEngine(
+                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(freePort()))) {
+            // Another peer after the same magnet, without its metadata either: the fetch stays a
+            // fetch, as it is when the person presses Add now.
+            other.start();
+            other.add(MAGNET);
+            engine.start();
+            Engine.MetadataFetch fetch = engine.fetchMetadata(MAGNET);
+            engine.connectFetchForTest(fetch, otherPort);
+            await("the fetch is connected", () -> fetch.peers() > 0);
+
+            AddRequest now = new AddRequest(
+                    new AddRequest.Magnet(MAGNET),
+                    dir.resolve("downloads"),
+                    false,
+                    false,
+                    false,
+                    AddRequest.StopCondition.METADATA_RECEIVED,
+                    Map.of(),
+                    TorrentLabels.NONE);
+            Torrent added = engine.add(now, fetch);
+            assertEquals(MAGNET_ID, added.id());
+            assertTrue(fetch.torrent().isCompletedExceptionally(), "the fetch is over");
+            await("the torrent dials the peer the fetch had", () -> engine.dialledPeersForTest(MAGNET_ID) > 0);
+            assertEquals(1, engine.torrents().size());
+        }
+    }
+
+    @Test
+    void aFetchOfAnotherTorrentIsEndedAndLendsNothing(@TempDir Path dir) throws Exception {
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            Engine.MetadataFetch fetch =
+                    engine.fetchMetadata("magnet:?xt=urn:btih:89abcdef0123456789abcdef0123456789abcdef");
+            Torrent added =
+                    engine.add(AddRequest.defaults(new AddRequest.Magnet(MAGNET), dir.resolve("downloads")), fetch);
+            assertEquals(MAGNET_ID, added.id());
+            assertTrue(fetch.torrent().isCompletedExceptionally());
+            assertEquals(
+                    List.of(MAGNET_ID),
+                    engine.torrents().stream().map(Torrent::id).toList());
+        }
+    }
+
+    @Test
     void aCancelledFetchLeavesRoomForTheRealAdd(@TempDir Path dir) throws Exception {
         TorrentStore store = new TorrentStore(dir.resolve("store"));
         try (LibtorrentEngine engine = engine(dir, store)) {
@@ -341,6 +438,31 @@ class LibtorrentEngineTest {
         try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
             return socket.getLocalPort();
         }
+    }
+
+    /** {@link #onPort}, with no way to find a peer but being told: no DHT, no local discovery. */
+    private static com.torrenta.engine.EngineSettings isolated(int port) {
+        com.torrenta.engine.EngineSettings d = onPort(port);
+        com.torrenta.engine.EngineSettings.Protocol p = d.protocol();
+        return new com.torrenta.engine.EngineSettings(
+                d.listenPort(),
+                d.randomPort(),
+                d.listenInterface(),
+                d.ipv6(),
+                d.upnp(),
+                d.maxConnections(),
+                d.maxConnectionsPerTorrent(),
+                d.uploadSlots(),
+                d.proxy(),
+                d.proxyHost(),
+                d.proxyPort(),
+                d.proxyUsername(),
+                d.proxyPassword(),
+                d.proxyPeers(),
+                new com.torrenta.engine.EngineSettings.Protocol(
+                        false, p.pex(), false, p.utp(), p.encryption(), false, List.of()),
+                d.speed(),
+                d.queue());
     }
 
     /** The defaults on a fixed port, without UPnP: two sessions in one test must not collide. */
@@ -1302,6 +1424,316 @@ class LibtorrentEngineTest {
                 assertEquals(3, engine.torrents().size());
                 assertFalse(watcher.poll(), "nothing left to look at");
             }
+        }
+    }
+
+    // ---- creating torrents ---------------------------------------------------------------------
+
+    /** A two-file folder, {@code name/a.bin} (100 KiB) and {@code name/sub/b.bin} (50 KiB). */
+    private static Path twoFileFolder(Path parent, String name) throws Exception {
+        Path root = parent.resolve(name);
+        Files.createDirectories(root.resolve("sub"));
+        byte[] a = new byte[100 * 1024];
+        byte[] b = new byte[50 * 1024];
+        new Random(7).nextBytes(a);
+        new Random(8).nextBytes(b);
+        Files.write(root.resolve("a.bin"), a);
+        Files.write(root.resolve("sub").resolve("b.bin"), b);
+        return root;
+    }
+
+    private static CreateRequest request(Path path, CreateRequest.Format format, boolean align, boolean seed) {
+        return new CreateRequest(
+                path,
+                format,
+                16 * 1024,
+                true,
+                List.of(
+                        List.of("udp://one.example.org:6969/announce", "udp://two.example.org:6969/announce"),
+                        List.of("https://three.example.org/announce")),
+                List.of("https://seed.example.org/files/"),
+                "Made by the test",
+                "TEST",
+                align,
+                seed);
+    }
+
+    @Test
+    void createsAHybridTorrentOfAFolderThatInspectReadsBack(@TempDir Path dir) throws Exception {
+        Path root = twoFileFolder(dir.resolve("src"), "pair");
+        List<int[]> calls = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            CreatedTorrent made =
+                    engine.create(request(root, CreateRequest.Format.HYBRID, false, false), (done, total) -> {
+                        calls.add(new int[] {done, total});
+                        return true;
+                    });
+            assertEquals("pair", made.name());
+            assertEquals(40, made.v1().length(), made.v1());
+            assertEquals(64, made.v2().length(), made.v2());
+            assertEquals(made.v2().substring(0, 40), made.id(), "the engine's id: the v2 hash cut to 20 bytes");
+            assertEquals(16 * 1024, made.pieceSize());
+            // Every file on a piece boundary: 7 pieces of a.bin, then 4 of b.bin.
+            assertEquals(11, made.pieceCount());
+            assertEquals(150 * 1024, made.totalSize(), "padding is not content");
+            assertTrue(made.magnet().startsWith("magnet:?"), made.magnet());
+            assertTrue(made.magnet().contains("one.example.org"), "the trackers travel in the link: " + made.magnet());
+            assertTrue(made.seeding().isEmpty() && made.problem().isEmpty(), "not asked to seed");
+
+            assertEquals(11, calls.get(calls.size() - 1)[0], "the last report is the total");
+            assertEquals(11, calls.get(calls.size() - 1)[1]);
+            assertTrue(calls.stream().allMatch(c -> c[0] >= 1 && c[0] <= c[1]), "done within 1..total");
+
+            TorrentPreview preview = engine.inspect(made.bytes());
+            assertEquals("pair", preview.name());
+            assertEquals(
+                    List.of("pair/a.bin", "pair/sub/b.bin"),
+                    preview.files().stream().map(TorrentPreview.FileEntry::path).toList());
+            assertEquals(
+                    List.of(100 * 1024L, 50 * 1024L),
+                    preview.files().stream().map(TorrentPreview.FileEntry::size).toList());
+            assertEquals(150 * 1024, preview.size());
+            assertEquals(
+                    List.of(
+                            "udp://one.example.org:6969/announce",
+                            "udp://two.example.org:6969/announce",
+                            "https://three.example.org/announce"),
+                    preview.trackers(),
+                    "tier order");
+            assertTrue(preview.isPrivate());
+            assertEquals("Made by the test", preview.comment());
+            assertTrue(preview.createdBy().startsWith("Torrenta "), preview.createdBy());
+            assertTrue(preview.v1() && preview.v2(), "a hybrid");
+            assertEquals(made.id(), preview.id());
+
+            // The source key is in the info dictionary, so it changes the hashes.
+            String text = new String(made.bytes(), java.nio.charset.StandardCharsets.ISO_8859_1);
+            assertTrue(text.contains("6:source4:TEST"), "the source key is written");
+            assertTrue(text.contains("8:url-list"), "the web seed is written");
+            CreateRequest other = new CreateRequest(
+                    root,
+                    CreateRequest.Format.HYBRID,
+                    16 * 1024,
+                    true,
+                    List.of(),
+                    List.of(),
+                    "",
+                    "OTHER",
+                    false,
+                    false);
+            assertNotEquals(
+                    made.id(), engine.create(other, Engine.CreateProgress.NONE).id());
+            assertTrue(engine.torrents().isEmpty(), "creating adds nothing unless asked");
+        }
+    }
+
+    @Test
+    void v1AndV2OnlyTorrentsCarryOnlyTheirOwnHash(@TempDir Path dir) throws Exception {
+        Path root = twoFileFolder(dir.resolve("src"), "pair");
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            CreatedTorrent v1 =
+                    engine.create(request(root, CreateRequest.Format.V1, false, false), Engine.CreateProgress.NONE);
+            assertEquals(40, v1.v1().length());
+            assertEquals("", v1.v2());
+            assertEquals(v1.v1(), v1.id());
+            assertEquals(10, v1.pieceCount(), "files packed back to back: 150 KiB in 16 KiB pieces");
+            TorrentPreview p1 = engine.inspect(v1.bytes());
+            assertTrue(p1.v1() && !p1.v2());
+            assertTrue(v1.magnet().contains("urn:btih:" + v1.v1()), v1.magnet());
+
+            CreatedTorrent aligned =
+                    engine.create(request(root, CreateRequest.Format.V1, true, false), Engine.CreateProgress.NONE);
+            assertEquals(11, aligned.pieceCount(), "padded to piece boundaries");
+            assertEquals("", aligned.v2());
+            assertEquals(2, engine.inspect(aligned.bytes()).files().size(), "the pad files are not shown");
+
+            CreatedTorrent v2 =
+                    engine.create(request(root, CreateRequest.Format.V2, false, false), Engine.CreateProgress.NONE);
+            assertEquals("", v2.v1());
+            assertEquals(64, v2.v2().length());
+            assertEquals(11, v2.pieceCount());
+            TorrentPreview p2 = engine.inspect(v2.bytes());
+            assertTrue(!p2.v1() && p2.v2());
+            assertTrue(v2.magnet().contains("urn:btmh:"), v2.magnet());
+        }
+    }
+
+    @Test
+    void aCreatedTorrentSeedsFromItsFolderWithoutARecheck(@TempDir Path dir) throws Exception {
+        Path folder = dir.resolve("files");
+        Files.createDirectories(folder);
+        Path payload = folder.resolve("payload.bin");
+        byte[] bytes = new byte[300 * 1024];
+        new Random(3).nextBytes(bytes);
+        Files.write(payload, bytes);
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            CreateRequest request = request(payload, CreateRequest.Format.HYBRID, false, true);
+            assertEquals(folder, request.savePath(), "seeded from the parent, so the torrent's name is the file's");
+            CreatedTorrent made = engine.create(request, Engine.CreateProgress.NONE);
+            assertEquals("payload.bin", made.name());
+            assertTrue(made.seeding().isPresent(), made.problem());
+            Torrent added = made.seeding().get();
+            assertEquals(made.id(), added.id());
+            assertEquals(1.0, added.progress(), 1e-9, "trusted as complete: no check");
+            assertEquals(folder.toString(), added.savePath());
+            await("seeding", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+            TorrentPreview preview = engine.inspect(made.bytes());
+            assertEquals(
+                    List.of("payload.bin"),
+                    preview.files().stream().map(TorrentPreview.FileEntry::path).toList());
+            assertFalse(preview.hasRootFolder());
+
+            // The same torrent again: created all the same; the list holds one per hash, and
+            // libtorrent hands back the one already there, silently, so it is "seeding" still.
+            CreatedTorrent again = engine.create(request, Engine.CreateProgress.NONE);
+            assertEquals(made.id(), again.id());
+            assertEquals(java.util.Optional.of(made.id()), again.seeding().map(Torrent::id), again.problem());
+            assertEquals(1, engine.torrents().size());
+        }
+    }
+
+    @Test
+    void aCancelledCreationMakesNothing(@TempDir Path dir) throws Exception {
+        Path folder = dir.resolve("files");
+        Files.createDirectories(folder);
+        byte[] bytes = new byte[24 * 1024 * 1024];
+        new Random(5).nextBytes(bytes);
+        Files.write(folder.resolve("big.bin"), bytes);
+        List<int[]> calls = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            CreateRequest request = request(folder.resolve("big.bin"), CreateRequest.Format.HYBRID, false, true);
+            EngineException failure = assertThrows(
+                    EngineException.class,
+                    () -> engine.create(request, (done, total) -> {
+                        calls.add(new int[] {done, total});
+                        return false; // cancel at the first piece
+                    }));
+            assertEquals("Cancelled", failure.getMessage());
+            assertFalse(calls.isEmpty(), "the listener was asked");
+            assertEquals(1536, calls.get(0)[1], "24 MiB in 16 KiB pieces");
+            assertTrue(engine.torrents().isEmpty(), "nothing added though seeding was asked");
+
+            assertThrows(
+                    EngineException.class,
+                    () -> engine.create(CreateRequest.defaults(dir.resolve("nowhere")), Engine.CreateProgress.NONE),
+                    "a missing path");
+        }
+    }
+
+    /** A v1 .torrent of one file, bencoded by hand, so no libtorrent code touches the file. */
+    private static byte[] v1TorrentOf(Path file, int pieceLength) throws Exception {
+        byte[] data = Files.readAllBytes(file);
+        java.security.MessageDigest sha1 = java.security.MessageDigest.getInstance("SHA-1");
+        java.io.ByteArrayOutputStream pieces = new java.io.ByteArrayOutputStream();
+        for (int off = 0; off < data.length; off += pieceLength) {
+            sha1.reset();
+            sha1.update(data, off, Math.min(pieceLength, data.length - off));
+            pieces.write(sha1.digest());
+        }
+        byte[] name = file.getFileName().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        out.write("d4:infod6:lengthi".getBytes());
+        out.write(String.valueOf(data.length).getBytes());
+        out.write("e4:name".getBytes());
+        out.write((name.length + ":").getBytes());
+        out.write(name);
+        out.write("12:piece lengthi".getBytes());
+        out.write((pieceLength + "e6:pieces").getBytes());
+        out.write((pieces.size() + ":").getBytes());
+        out.write(pieces.toByteArray());
+        out.write("ee".getBytes());
+        return out.toByteArray();
+    }
+
+    @Test
+    void theJavaHasherMatchesLibtorrentsOwnBitForBit(@TempDir Path dir) throws Exception {
+        // Sizes that exercise every edge: a full piece plus a partial one with a short last block,
+        // a one-piece file whose tree is narrower than a piece, a one-block file; 64 KiB pieces.
+        Path root = dir.resolve("src").resolve("mixed");
+        Files.createDirectories(root.resolve("sub"));
+        byte[] a = new byte[100 * 1024];
+        byte[] b = new byte[20 * 1024];
+        byte[] c = new byte[3 * 1024];
+        new Random(11).nextBytes(a);
+        new Random(12).nextBytes(b);
+        new Random(13).nextBytes(c);
+        Files.write(root.resolve("a.bin"), a);
+        Files.write(root.resolve("sub").resolve("b.bin"), b);
+        Files.write(root.resolve("c.bin"), c);
+        NativeLibrary.ensureAvailable();
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            for (CreateRequest.Format format : CreateRequest.Format.values()) {
+                for (boolean align :
+                        format == CreateRequest.Format.V1 ? new boolean[] {false, true} : new boolean[] {false}) {
+                    CreateRequest request = new CreateRequest(
+                            root, format, 64 * 1024, true, List.of(), List.of(), "", "", align, false);
+                    CreatedTorrent ours = engine.create(request, Engine.CreateProgress.NONE);
+                    // libtorrent's own hashing, safe here: no file reaches its mmap cutoff.
+                    org.libtorrent4j.swig.create_flags_t flags = new org.libtorrent4j.swig.create_flags_t();
+                    if (format == CreateRequest.Format.V1) flags = flags.or_(TorrentBuilder.V1_ONLY);
+                    if (format == CreateRequest.Format.V1 && align) flags = flags.or_(TorrentBuilder.CANONICAL_FILES);
+                    if (format == CreateRequest.Format.V2) flags = flags.or_(TorrentBuilder.V2_ONLY);
+                    byte[] theirs = new TorrentBuilder()
+                            .path(root.toFile())
+                            .pieceSize(64 * 1024)
+                            .flags(flags)
+                            .setPrivate(true)
+                            .generate()
+                            .entry()
+                            .bencode();
+                    String label = format + (align ? " aligned" : "");
+                    assertArrayEquals(
+                            infoOf(theirs), infoOf(ours.bytes()), label + ": the info dictionaries are the same bytes");
+                    assertEquals(engine.inspect(theirs).id(), ours.id(), label);
+                }
+            }
+        }
+    }
+
+    /** The bencoded {@code info} dictionary: what both hashes are computed over. */
+    private static byte[] infoOf(byte[] torrent) {
+        return org.libtorrent4j.Entry.bdecode(torrent).dictionary().get("info").bencode();
+    }
+
+    @Test
+    void aFileBigEnoughToMapIsSeededWithoutLibtorrentTakingTheJvmsSignalHandler(@TempDir Path dir) throws Exception {
+        // libtorrent's mmap disk I/O installs a SIGSEGV/SIGBUS guard of its own, over the JVM's,
+        // once a file of 40 pieces or more is mapped; the JVM's next safepoint poll then kills the
+        // process (exit 139, no error file). The pack sets the mmap cutoff above every file; this
+        // is the shape that died: a 2 MiB file in 16 KiB pieces, polled while a thread drives GC.
+        Path downloads = dir.resolve("downloads");
+        Files.createDirectories(downloads);
+        byte[] bytes = new byte[2 * 1024 * 1024];
+        new Random(5).nextBytes(bytes);
+        Files.write(downloads.resolve("big.bin"), bytes);
+        byte[] torrent = v1TorrentOf(downloads.resolve("big.bin"), 16 * 1024);
+        NativeLibrary.ensureAvailable();
+        java.util.concurrent.atomic.AtomicBoolean on = new java.util.concurrent.atomic.AtomicBoolean(true);
+        Thread collector = new Thread(() -> {
+            while (on.get()) {
+                System.gc();
+                System.runFinalization();
+            }
+        });
+        collector.setDaemon(true);
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            Torrent added = engine.add(AddRequest.defaults(new AddRequest.TorrentFile(torrent, "big"), downloads));
+            await("seeding", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+            collector.start();
+            for (int i = 0; i < 40; i++) {
+                assertEquals(1, engine.torrents().size());
+                assertEquals(1, engine.detail(added.id()).files().size());
+                Thread.sleep(25);
+            }
+        } finally {
+            on.set(false);
+            collector.join(5_000);
         }
     }
 

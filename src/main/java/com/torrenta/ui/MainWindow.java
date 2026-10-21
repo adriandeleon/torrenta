@@ -80,6 +80,12 @@ import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.WatchFolders;
 import com.torrenta.net.TorrentFetch;
+import com.torrenta.rss.Article;
+import com.torrenta.rss.Feed;
+import com.torrenta.rss.FeedFetcher;
+import com.torrenta.rss.RssService;
+import com.torrenta.rss.RssStore;
+import com.torrenta.rss.Rule;
 import com.torrenta.search.DeclarativeProvider;
 import com.torrenta.search.SearchProvider;
 import com.torrenta.search.SearchResult;
@@ -134,6 +140,7 @@ public final class MainWindow {
             new java.util.EnumMap<>(Density.class);
     private List<Command> commands = List.of();
     private AddDialog currentDialog;
+    private CreateDialog createDialog;
     private LimitsDialog limitsDialog;
     private TagsDialog tagsDialog;
     /** A choice or text prompt of the category commands, while one is up. */
@@ -157,6 +164,11 @@ public final class MainWindow {
     private String lastClipboardOffer = "";
     private final DetailPane detail = new DetailPane();
     private SearchPane searchPane;
+    private final RssStore rssStore;
+    /** The reader: its own schedule, a virtual thread per fetch, listeners on the FX thread. */
+    private final RssService rss;
+
+    private RssPane rssPane;
     /** The transfers (sidebar, filter, list, detail) and the Search tab share the centre. */
     private javafx.scene.Node transfersView;
 
@@ -182,6 +194,9 @@ public final class MainWindow {
     private Engine engine;
     private String engineDescription = "";
     private final List<String> pendingInputs = new ArrayList<>();
+    /** Opened when the engine is up: a rule's add from a feed fetched before then waits on it. */
+    private final java.util.concurrent.CountDownLatch engineUp = new java.util.concurrent.CountDownLatch(1);
+
     private ScheduledExecutorService poller;
 
     /**
@@ -202,6 +217,14 @@ public final class MainWindow {
         this.definitionStore = new DefinitionStore(configDir);
         installExampleDefinitions();
         definitionStore.load();
+        this.rssStore = new RssStore(configDir);
+        rssStore.load();
+        this.rss = new RssService(
+                rssStore,
+                new FeedFetcher(),
+                settings::rssRefreshMinutes,
+                r -> Thread.ofVirtual().name("rss-fetch").start(r),
+                Platform::runLater);
         stage.setTitle(AppInfo.NAME);
         // Before anything else touches the stage: initStyle throws once a stage has been shown, and
         // the setting is read here, once, which is why it applies on restart.
@@ -241,6 +264,9 @@ public final class MainWindow {
         settingsWindow.setSearchDefinitions(
                 definitionStore,
                 () -> opener.accept(definitionStore.dir().toUri().toString()));
+        settingsWindow.setRss(rss);
+        rss.setDownloader(this::downloadForRule, settings::rssAutoDownload, this::reportRule);
+        rss.start();
         settingsWindow.setOnTestNotification(() -> {
             Automation a = automation;
             if (a != null) a.testNotification();
@@ -282,6 +308,7 @@ public final class MainWindow {
             rememberDivider();
             stopPolling();
             stopWatching();
+            rss.stop();
             updates.shutdown();
             sync.shutdown();
         });
@@ -307,12 +334,14 @@ public final class MainWindow {
     /** What to photograph: the open Add dialog if there is one, else a window of ours, else the window. */
     public javafx.scene.Scene captureScene() {
         if (currentDialog != null && currentDialog.isShowing()) return currentDialog.scene();
+        if (createDialog != null && createDialog.isShowing()) return createDialog.scene();
         if (limitsDialog != null && limitsDialog.isShowing()) return limitsDialog.scene();
         if (tagsDialog != null && tagsDialog.isShowing()) return tagsDialog.scene();
         if (promptDialog != null && promptDialog.isShowing())
             return promptDialog.getDialogPane().getScene();
         if (aboutDialog != null && aboutDialog.isShowing())
             return aboutDialog.getDialogPane().getScene();
+        if (rssPane != null && rssPane.dialogScene() != null) return rssPane.dialogScene();
         if (settingsWindow.dialogScene() != null) return settingsWindow.dialogScene();
         if (settingsWindow.isShowing()) return settingsWindow.scene();
         if (logWindow.isShowing()) return logWindow.scene();
@@ -322,11 +351,31 @@ public final class MainWindow {
     /** Dismisses an open Add dialog, so the capture hook can exit outside its nested event loop. */
     public void closeDialogsForCapture() {
         if (currentDialog != null && currentDialog.isShowing()) currentDialog.cancel();
+        if (createDialog != null && createDialog.isShowing()) createDialog.close();
         if (limitsDialog != null && limitsDialog.isShowing()) limitsDialog.cancel();
         if (tagsDialog != null && tagsDialog.isShowing()) tagsDialog.cancel();
         if (promptDialog != null && promptDialog.isShowing()) promptDialog.close();
         if (aboutDialog != null && aboutDialog.isShowing()) aboutDialog.close();
+        if (rssPane != null) rssPane.closeDialog();
         settingsWindow.closeDialogsForCapture();
+    }
+
+    /**
+     * Printed after the shot, when a dialog opened on a pulse after the action has had its say:
+     * the RSS rule dialog's title, its Matches list and its problem line.
+     */
+    public List<String> lateLinesForCapture() {
+        List<String> out = new ArrayList<>();
+        if (createDialog != null && createDialog.isShowing()) {
+            out.add("dialog=" + createDialog.title());
+            out.addAll(createDialog.linesForCapture());
+        }
+        if (!settingsWindow.ruleMatchesForCapture().isEmpty()) {
+            out.add("dialog=" + settingsWindow.dialogTitle());
+            out.add("rule-matches=" + settingsWindow.ruleMatchesForCapture());
+            out.add("rule-problem=" + settingsWindow.ruleProblemForCapture());
+        }
+        return out;
     }
 
     /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
@@ -376,6 +425,47 @@ public final class MainWindow {
         } else if (action.equals("settings-definitions-reload")) {
             settingsWindow.show(stage);
             settingsWindow.reloadDefinitionsForCapture();
+        } else if (action.equals("rss")) {
+            showRss();
+        } else if (action.startsWith("rss:")) {
+            // rss:<url>: the feed added through the service, as the dialog would, and refreshed.
+            showRss();
+            try {
+                rss.addFeed(Feed.of(action.substring("rss:".length()), "", 0));
+            } catch (IOException e) {
+                System.err.println("capture: could not add the feed: " + e.getMessage());
+            }
+        } else if (action.startsWith("rss-dialog")) {
+            // rss-dialog, rss-dialog:<url>: the Add Feed dialog from the tab, the URL typed in.
+            showRss();
+            int colon = action.indexOf(':');
+            rssPane.openDialogForCapture(colon < 0 ? "" : action.substring(colon + 1));
+        } else if (action.startsWith("rss-feed:")) {
+            showRss();
+            rssPane.selectFeedForCapture(action.substring("rss-feed:".length()));
+        } else if (action.startsWith("rss-keys:")) {
+            // Keys pressed where the focus is (DOWN+ENTER in the articles), once no feed is refreshing.
+            showRss();
+            rssPane.pressForCapture(java.util.Arrays.stream(
+                            action.substring("rss-keys:".length()).split("\\+"))
+                    .map(key -> KeyCode.valueOf(key.trim().toUpperCase(java.util.Locale.ROOT)))
+                    .toList());
+        } else if (action.startsWith("settings-rss-rule-add")) {
+            // settings-rss-rule-add, settings-rss-rule-add:<must contain>: the Add RSS Rule dialog from Settings → RSS.
+            settingsWindow.show(stage);
+            int colon = action.indexOf(':');
+            settingsWindow.openRuleDialogForCapture(colon < 0 ? "" : action.substring(colon + 1));
+        } else if (action.equals("rss-rule-from-title")) {
+            // The context menu's Create rule from title on the first article, once the feeds are fetched.
+            showRss();
+            rssPane.actOnArticleForCapture(false);
+        } else if (action.equals("rss-download")) {
+            showRss();
+            rssPane.actOnArticleForCapture(true);
+        } else if (action.startsWith("settings-rss-add")) {
+            settingsWindow.show(stage);
+            int colon = action.indexOf(':');
+            settingsWindow.openRssDialogForCapture(colon < 0 ? "" : action.substring(colon + 1));
         } else if (action.equals("search")) {
             showSearch();
         } else if (action.startsWith("search:")) {
@@ -389,6 +479,24 @@ public final class MainWindow {
                             action.substring("search-keys:".length()).split("\\+"))
                     .map(key -> KeyCode.valueOf(key.trim().toUpperCase(java.util.Locale.ROOT)))
                     .toList());
+        } else if (action.startsWith("create")) {
+            // create, create:<path> (the dialog with the source filled in), create-run:<path> (and
+            // created into a temporary file with seeding on, the Save As chooser skipped).
+            int colon = action.indexOf(':');
+            createTorrent();
+            if (createDialog != null && colon > 0) {
+                Path path = Path.of(action.substring(colon + 1));
+                createDialog.setSource(path);
+                if (action.startsWith("create-run:")) {
+                    try {
+                        Path target =
+                                Files.createTempDirectory("torrenta-create").resolve(CreateText.fileName(path));
+                        createDialog.createForCapture(target);
+                    } catch (IOException e) {
+                        System.err.println("capture: no temporary folder: " + e.getMessage());
+                    }
+                }
+            }
         } else if (action.equals("dialog-add")) {
             if (currentDialog != null && currentDialog.isShowing()) currentDialog.confirm();
         } else if (action.startsWith("dialog-press:")) {
@@ -467,6 +575,19 @@ public final class MainWindow {
                     + (searchPane.searching() ? " (searching)" : ""));
             for (String row : searchPane.rowsForCapture()) System.out.println("capture: search-row=" + row);
         }
+        System.out.println("capture: rss-tab=" + (rssShowing() ? "showing" : "hidden"));
+        if (rssShowing()) {
+            System.out.println("capture: rss-status=" + rssPane.statusText());
+            for (String f : rssPane.feedsForCapture()) System.out.println("capture: rss-feed=" + f);
+            for (String row : rssPane.rowsForCapture()) System.out.println("capture: rss-row=" + row);
+            System.out.println("capture: rss-detail=" + rssPane.detailForCapture());
+            if (!rssPane.dialogTitle().isEmpty())
+                System.out.println("capture: dialog=" + rssPane.dialogTitle() + " | " + rssPane.dialogStatus());
+        }
+        if (!settingsWindow.rssStatus().isEmpty())
+            System.out.println("capture: rss-settings=" + settingsWindow.rssStatus());
+        if (settingsWindow.isShowing())
+            for (String row : settingsWindow.rulesForCapture()) System.out.println("capture: rss-rule=" + row);
     }
 
     /**
@@ -501,6 +622,7 @@ public final class MainWindow {
     public void engineReady(Engine engine) {
         this.engine = engine;
         this.engineDescription = engine.description();
+        engineUp.countDown();
         globalShareLimit = settings.shareLimit();
         setStatus(engineDescription);
         List<String> queued = List.copyOf(pendingInputs);
@@ -868,6 +990,32 @@ public final class MainWindow {
     }
 
     /**
+     * FX thread. An article into the Add dialog: its magnet as it is, its {@code .torrent} link
+     * fetched first, the status bar saying so meanwhile.
+     */
+    private void addFromArticle(Article article) {
+        Engine e = engine;
+        if (e == null) {
+            setStatus("The engine is still starting");
+            return;
+        }
+        String fetching = RssAdd.fetchingText(article);
+        if (!fetching.isEmpty()) setStatus(fetching);
+        boolean withoutAsking = settings.addWithoutAsking();
+        AddDialog.Defaults defaults = AddDialog.Defaults.from(settings);
+        Thread.ofVirtual().name("rss-add").start(() -> {
+            try {
+                AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
+                if (!fetching.isEmpty()) Platform.runLater(() -> setStatus("Fetched " + article.displayTitle()));
+                addSource(e, source, AddDialog.Via.RSS, withoutAsking, defaults);
+            } catch (EngineException | IOException | RuntimeException ex) {
+                String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                Platform.runLater(() -> setStatus(message));
+            }
+        });
+    }
+
+    /**
      * A magnet's metadata being fetched for the open dialog. The fetch starts on a worker and may
      * land after the dialog has closed, so whichever comes second cancels it; both happen off the
      * FX thread, since cancelling is an engine call.
@@ -890,10 +1038,19 @@ public final class MainWindow {
             return closed ? null : fetch;
         }
 
-        /** Must come before the same magnet is added: the fetch holds its place in the session. */
+        /** Cancelled: the dialog closed without adding. */
         synchronized void close() {
+            Engine.MetadataFetch f = take();
+            if (f != null) f.cancel();
+        }
+
+        /**
+         * Added: the fetch, for {@link Engine#add(AddRequest, Engine.MetadataFetch)} to end and
+         * take the peers from; null if there was none. A fetch that starts later is cancelled.
+         */
+        synchronized Engine.MetadataFetch take() {
             closed = true;
-            if (fetch != null) fetch.cancel();
+            return fetch;
         }
     }
 
@@ -932,10 +1089,10 @@ public final class MainWindow {
         rememberLabels(request.labels());
         if (c.withoutAsking()) rememberAddDefaults(request);
         Thread.ofVirtual().name("engine-add").start(() -> {
-            slot.close();
+            Engine.MetadataFetch fetch = slot.take();
             String outcome;
             try {
-                Torrent added = e.add(request);
+                Torrent added = fetch == null ? e.add(request) : e.add(request, fetch);
                 outcome = "Added " + added.name();
                 if (c.firstAndLastFirst()) {
                     TorrentLimits limits = e.limits(added.id());
@@ -1088,6 +1245,17 @@ public final class MainWindow {
             String text = outcome;
             Platform.runLater(() -> setStatus(text));
         });
+    }
+
+    /** Opens the Create Torrent dialog, or brings the open one to the front; one at a time. */
+    private void createTorrent() {
+        Engine e = engine;
+        if (e == null) {
+            setStatus("The engine is still starting");
+            return;
+        }
+        if (createDialog == null || !createDialog.isShowing()) createDialog = new CreateDialog(stage, e, settings);
+        createDialog.show();
     }
 
     private void addTorrentFile() {
@@ -1633,6 +1801,7 @@ public final class MainWindow {
         BooleanBinding selection = Bindings.isNotEmpty(table.getSelectionModel().getSelectedItems());
         BooleanBinding always = Bindings.createBooleanBinding(() -> true);
         List<Command> all = new ArrayList<>(List.of(
+                new Command("create", "New Torrent…", chord(KeyCode.N), null, always, this::createTorrent),
                 new Command("add-file", "Add Torrent File…", chord(KeyCode.O), null, always, this::addTorrentFile),
                 new Command("add-magnet", "Add Magnet Link…", chord(KeyCode.M), null, always, this::addMagnetLink),
                 // The chord is a scene accelerator, not a menu one: Ctrl+V in a text field must paste.
@@ -1715,6 +1884,8 @@ public final class MainWindow {
                 new Command(
                         "settings", "Settings…", chord(KeyCode.COMMA), null, always, () -> settingsWindow.show(stage)),
                 new Command("search", "Search…", chord(KeyCode.K), null, always, this::showSearch),
+                new Command("rss", "RSS Feeds…", chord(KeyCode.R), null, always, this::showRss),
+                new Command("rss-run-rules", "Run RSS Rules Now", null, null, always, rss::runRulesNow),
                 new Command("transfers", "Show Transfers", null, "Esc", always, this::showTransfers),
                 new Command(
                         "filter",
@@ -1786,6 +1957,7 @@ public final class MainWindow {
                 "Command Palette (" + shiftChord(KeyCode.P).getDisplayText() + ")",
                 () -> palette.show(commands));
         toolbar = new ToolBar(
+                toolButton("create", Icons.newFile()),
                 toolButton("add-file", Icons.open()),
                 toolButton("add-magnet", Icons.magnet()),
                 new Separator(),
@@ -1796,6 +1968,7 @@ public final class MainWindow {
                 new Separator(),
                 toolButton("filter", Icons.find()),
                 toolButton("search", Icons.search()),
+                toolButton("rss", Icons.rss()),
                 toolButton("event-log", Icons.history()),
                 toolButton("settings", Icons.settings()),
                 spacer,
@@ -1847,11 +2020,15 @@ public final class MainWindow {
         Menu file = new Menu("File");
         file.getItems()
                 .addAll(
+                        command("create").menuItem(),
+                        new SeparatorMenuItem(),
                         addTorrent,
                         addMagnet,
                         addClipboard,
                         new SeparatorMenuItem(),
                         command("search").menuItem(),
+                        command("rss").menuItem(),
+                        command("rss-run-rules").menuItem(),
                         command("settings").menuItem(),
                         new SeparatorMenuItem(),
                         quit);
@@ -1979,7 +2156,7 @@ public final class MainWindow {
         // The first torrent makes the table appear; it takes the focus then, unless the person is
         // typing a filter at that moment.
         table.visibleProperty().addListener((o, was, now) -> {
-            if (now && !filter.isFocused() && !searchShowing()) table.requestFocus();
+            if (now && !filter.isFocused() && !searchShowing() && !rssShowing()) table.requestFocus();
         });
         StackPane centre = new StackPane(table, empty);
         split = new SplitPane(centre);
@@ -2050,7 +2227,8 @@ public final class MainWindow {
         // The Search tab shares the centre with the transfers: one is shown and managed, the
         // other neither, so the transfers look exactly as they did while Search is away.
         searchPane = new SearchPane(new SearchHost(), settings);
-        StackPane centre2 = new StackPane(centreWithSidebar, searchPane);
+        rssPane = new RssPane(new RssHost(), rss, settings);
+        StackPane centre2 = new StackPane(centreWithSidebar, searchPane, rssPane);
         VBox.setVgrow(centre2, Priority.ALWAYS);
         return new VBox(centre2);
     }
@@ -2103,6 +2281,123 @@ public final class MainWindow {
         return searchPane != null && searchPane.isVisible();
     }
 
+    // ---- the RSS tab ----------------------------------------------------------------------------
+
+    /**
+     * The fetch thread. A rule's add: the article's magnet, or its {@code .torrent} fetched, added
+     * with the rule's save path, category and paused choice and the rest of the defaults; the
+     * engine's refusal is the reason thrown.
+     */
+    private void downloadForRule(Rule rule, Article article) throws IOException {
+        // The feeds due at start are fetched before the engine is up; the add waits for it, bounded.
+        try {
+            engineUp.await(60, TimeUnit.SECONDS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+        Engine e = engine;
+        if (e == null) throw new IOException("the engine is not running");
+        AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
+        Optional<Path> categoryFolder = labels.category(rule.category()).flatMap(Category::path);
+        try {
+            e.add(RuleAdd.request(rule, source, AddDialog.Defaults.from(settings), categoryFolder));
+        } catch (EngineException ex) {
+            throw new IOException(ex.getMessage() == null ? ex.toString() : ex.getMessage(), ex);
+        }
+    }
+
+    /** The fetch thread: a rule's add, or its failure, into the log and the status bar. */
+    private void reportRule(String message, boolean failed) {
+        reportFromWorker(EngineEvent.session(failed ? EngineEvent.Level.WARNING : EngineEvent.Level.INFO, message));
+    }
+
+    /**
+     * FX thread. The article's torrent added at once with the defaults, no dialog, and the article
+     * marked downloaded: the context menu's Download.
+     */
+    private void downloadArticle(Article article) {
+        Engine e = engine;
+        if (e == null) {
+            setStatus("The engine is still starting");
+            return;
+        }
+        String fetching = RssAdd.fetchingText(article);
+        if (!fetching.isEmpty()) setStatus(fetching);
+        AddDialog.Defaults defaults = AddDialog.Defaults.from(settings);
+        Thread.ofVirtual().name("rss-download").start(() -> {
+            try {
+                AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
+                Torrent added = e.add(AddDialog.withoutAsking(source, defaults));
+                rss.markDownloaded(article.feedId(), article.identity());
+                Platform.runLater(() -> setStatus("Added " + added.name()));
+            } catch (EngineException | IOException | RuntimeException ex) {
+                String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                Platform.runLater(() -> setStatus(message));
+            }
+        });
+    }
+
+    /** What the RSS tab asks of the window. */
+    private final class RssHost implements RssPane.Host {
+        @Override
+        public void add(Article article) {
+            addFromArticle(article);
+        }
+
+        @Override
+        public void download(Article article) {
+            downloadArticle(article);
+        }
+
+        @Override
+        public void createRule(Article article) {
+            settingsWindow.show(stage);
+            settingsWindow.createRuleFromTitle(article.displayTitle());
+        }
+
+        @Override
+        public void openLink(String url) {
+            if (!url.isEmpty()) opener.accept(url);
+        }
+
+        @Override
+        public void copy(String text) {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(text);
+            Clipboard.getSystemClipboard().setContent(content);
+            setStatus("Copied " + (text.startsWith("magnet:") ? "the magnet link" : "the link"));
+        }
+
+        @Override
+        public void say(String text) {
+            setStatus(text);
+        }
+
+        @Override
+        public void leave() {
+            showTransfers();
+        }
+    }
+
+    private boolean rssShowing() {
+        return rssPane != null && rssPane.isVisible();
+    }
+
+    /** Ctrl+R: the RSS tab in place of the transfers, the articles focused. */
+    private void showRss() {
+        showView(rssPane);
+        rssPane.focusDefault();
+    }
+
+    /** One of the three centre views shown and managed, the other two neither. */
+    private void showView(javafx.scene.Node view) {
+        for (javafx.scene.Node n : List.of(transfersView, searchPane, rssPane)) {
+            boolean on = n == view;
+            n.setVisible(on);
+            n.setManaged(on);
+        }
+    }
+
     /**
      * The shipped definition files into the folder, the ones not there yet; a failure is a log
      * line, not a failed start.
@@ -2131,29 +2426,20 @@ public final class MainWindow {
             reportDefinitionProblems();
             searchPane.reloadProviders();
         }
-        if (!searchShowing()) {
-            transfersView.setVisible(false);
-            transfersView.setManaged(false);
-            searchPane.setVisible(true);
-            searchPane.setManaged(true);
-        }
+        showView(searchPane);
         searchPane.focusQuery();
     }
 
     /** Escape in the query: the transfers back, as they were. */
     private void showTransfers() {
-        if (searchShowing()) {
-            searchPane.setVisible(false);
-            searchPane.setManaged(false);
-            transfersView.setVisible(true);
-            transfersView.setManaged(true);
-        }
+        showView(transfersView);
         table.requestFocus();
     }
 
     /** The list that is showing takes the focus back: after a dialog, after the palette. */
     private void focusList() {
         if (searchShowing()) searchPane.focusResults();
+        else if (rssShowing()) rssPane.focusArticles();
         else table.requestFocus();
     }
 
