@@ -5,6 +5,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -212,8 +213,14 @@ public final class MainWindow {
     private final RssService rss;
 
     private RssPane rssPane;
-    /** The transfers (sidebar, filter, list, detail) and the Search tab share the centre. */
+    /** The transfers (sidebar, filter, list, detail), Search and RSS share the centre. */
     private javafx.scene.Node transfersView;
+    /** The centre's panes by view: the one for {@link #view} is shown and managed, the rest neither. */
+    private final Map<View, javafx.scene.Node> panes = new EnumMap<>(View.class);
+    /** The view showing; FX thread. */
+    private View view = View.TRANSFERS;
+    /** The row above the centre that says which view is showing. */
+    private ViewStrip viewStrip;
 
     private final UpdateService updates = new UpdateService();
     private final SettingsWindow settingsWindow;
@@ -343,6 +350,8 @@ public final class MainWindow {
         statusBar = buildStatusBar();
         root.setBottom(statusBar);
         commands = buildCommands();
+        // The strip is built with the centre, before the commands it names the chords of.
+        viewStrip.showChords(v -> command(v.id()).hint());
         paletteChord =
                 PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT).chord();
         // The toolbar first: the View menu's check item binds to its visibility.
@@ -411,6 +420,15 @@ public final class MainWindow {
         scene.getAccelerators().put(shiftChord(KeyCode.T), statsWindow::show);
         scene.getAccelerators().put(shiftChord(KeyCode.M), messagePopup::toggle);
         scene.getAccelerators().put(chord(KeyCode.V), this::addFromClipboard);
+        // Ctrl+Tab and Ctrl+Shift+Tab cycle the views. A filter, ahead of focus traversal, which
+        // would otherwise take Ctrl+Tab out of the table; Control on every platform, since Cmd+Tab
+        // is macOS's own application switcher and never reaches the window.
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+            if (e.getCode() == KeyCode.TAB && e.isControlDown() && !e.isAltDown() && !e.isMetaDown()) {
+                show(e.isShiftDown() ? ViewSwitch.previous(view) : ViewSwitch.next(view));
+                e.consume();
+            }
+        });
         scene.setOnDragOver(this::onDragOver);
         scene.setOnDragDropped(this::onDragDropped);
         // A magnet copied elsewhere is the commonest way a torrent arrives; say so when the window
@@ -888,6 +906,9 @@ public final class MainWindow {
         } else if (action.equals("settings-definitions-reload")) {
             settingsWindow.show(stage);
             settingsWindow.reloadDefinitionsForCapture();
+        } else if (action.startsWith("view:")) {
+            ViewSwitch.parse(action.substring("view:".length()))
+                    .ifPresentOrElse(this::show, () -> System.err.println("capture: no view " + action));
         } else if (action.equals("rss")) {
             showRss();
         } else if (action.startsWith("rss:")) {
@@ -1000,6 +1021,23 @@ public final class MainWindow {
             table.requestFocus();
             KeyCode code = KeyCode.valueOf(action.substring("table-key:".length()));
             table.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false));
+        } else if (action.startsWith("focus-key:")) {
+            // focus-key:CTRL+SHIFT+TAB: a key pressed where the focus is, through the scene's
+            // filters, which is where Ctrl+Tab is caught.
+            List<String> parts = List.of(action.substring("focus-key:".length()).split("\\+"));
+            KeyCode code = KeyCode.valueOf(parts.getLast());
+            javafx.scene.Node owner = stage.getScene().getFocusOwner();
+            javafx.event.Event.fireEvent(
+                    owner == null ? stage.getScene().getRoot() : owner,
+                    new KeyEvent(
+                            KeyEvent.KEY_PRESSED,
+                            "",
+                            "",
+                            code,
+                            parts.contains("SHIFT"),
+                            parts.contains("CTRL"),
+                            parts.contains("ALT"),
+                            parts.contains("META")));
         } else if (action.equals("select-first")) {
             table.getSelectionModel().clearAndSelect(0);
         } else if (action.startsWith("detail:")) {
@@ -1090,6 +1128,8 @@ public final class MainWindow {
         if (settingsWindow.isShowing())
             for (String row : settingsWindow.definitionsForCapture()) System.out.println("capture: definition=" + row);
         if (watcher != null) System.out.println("capture: watch=" + watchStatusText());
+        System.out.println("capture: view=" + view.id() + " focus=" + focusForCapture());
+        System.out.println("capture: view-strip=" + viewStrip.describe());
         System.out.println("capture: search-tab=" + (searchShowing() ? "showing" : "hidden"));
         if (searchShowing()) {
             System.out.println("capture: search-query=" + searchPane.queryText());
@@ -2629,6 +2669,13 @@ public final class MainWindow {
         return new KeyCodeCombination(key, KeyCombination.SHORTCUT_DOWN, KeyCombination.SHIFT_DOWN);
     }
 
+    /** Ctrl+Tab, or Ctrl+Shift+Tab: Control on macOS too, where Cmd+Tab belongs to the system. */
+    private static KeyCombination cycleChord(boolean backwards) {
+        return backwards
+                ? new KeyCodeCombination(KeyCode.TAB, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN)
+                : new KeyCodeCombination(KeyCode.TAB, KeyCombination.CONTROL_DOWN);
+    }
+
     private List<Command> buildCommands() {
         BooleanBinding selection = Bindings.isNotEmpty(table.getSelectionModel().getSelectedItems());
         BooleanBinding always = Bindings.createBooleanBinding(() -> true);
@@ -2776,6 +2823,22 @@ public final class MainWindow {
                 new Command("rss", tr("command.rss"), chord(KeyCode.R), null, always, this::showRss),
                 new Command("rss-run-rules", tr("command.rssRunRules"), null, null, always, rss::runRulesNow),
                 new Command("transfers", tr("command.transfers"), null, "Esc", always, this::showTransfers),
+                // The cycling chords are a scene filter, not accelerators: Ctrl+Tab is focus
+                // traversal's key, and an accelerator would lose it to the focused control.
+                new Command(
+                        "view-next",
+                        tr("command.viewNext"),
+                        null,
+                        cycleChord(false).getDisplayText(),
+                        always,
+                        () -> show(ViewSwitch.next(view))),
+                new Command(
+                        "view-previous",
+                        tr("command.viewPrevious"),
+                        null,
+                        cycleChord(true).getDisplayText(),
+                        always,
+                        () -> show(ViewSwitch.previous(view))),
                 new Command(
                         "filter",
                         tr("command.filter"),
@@ -3014,8 +3077,6 @@ public final class MainWindow {
                         addMagnet,
                         addClipboard,
                         new SeparatorMenuItem(),
-                        menuItem("search"),
-                        menuItem("rss"),
                         menuItem("rss-run-rules"),
                         menuItem("settings"),
                         menuItem("switch-profile"),
@@ -3048,6 +3109,12 @@ public final class MainWindow {
         Menu view = new Menu(tr("menu.view"));
         view.getItems()
                 .addAll(
+                        menuItem("transfers"),
+                        menuItem("search"),
+                        menuItem("rss"),
+                        menuItem("view-next"),
+                        menuItem("view-previous"),
+                        new SeparatorMenuItem(),
                         toolbarItem,
                         sidebarItem,
                         new SeparatorMenuItem(),
@@ -3055,7 +3122,6 @@ public final class MainWindow {
                         densityItems.get(Density.COMPACT),
                         new SeparatorMenuItem(),
                         menuItem("filter"),
-                        menuItem("transfers"),
                         menuItem("focus-sidebar"),
                         menuItem("select-all"),
                         menuItem("event-log"),
@@ -3239,13 +3305,18 @@ public final class MainWindow {
         BorderPane centreWithSidebar = new BorderPane(listAndDetail);
         centreWithSidebar.setLeft(sidebar);
         transfersView = centreWithSidebar;
-        // The Search tab shares the centre with the transfers: one is shown and managed, the
-        // other neither, so the transfers look exactly as they did while Search is away.
+        // The views share the centre: the one showing is visible and managed, the others neither,
+        // so the transfers look exactly as they did while Search or RSS is away.
         searchPane = new SearchPane(new SearchHost(), settings);
         rssPane = new RssPane(new RssHost(), rss, settings);
+        panes.put(View.TRANSFERS, transfersView);
+        panes.put(View.SEARCH, searchPane);
+        panes.put(View.RSS, rssPane);
         StackPane centre2 = new StackPane(centreWithSidebar, searchPane, rssPane);
         VBox.setVgrow(centre2, Priority.ALWAYS);
-        return new VBox(centre2);
+        viewStrip = new ViewStrip(this::show);
+        place(View.TRANSFERS);
+        return new VBox(viewStrip, centre2);
     }
 
     // ---- the Search tab -------------------------------------------------------------------------
@@ -3293,7 +3364,7 @@ public final class MainWindow {
     }
 
     private boolean searchShowing() {
-        return searchPane != null && searchPane.isVisible();
+        return view == View.SEARCH;
     }
 
     // ---- the RSS tab ----------------------------------------------------------------------------
@@ -3395,22 +3466,40 @@ public final class MainWindow {
     }
 
     private boolean rssShowing() {
-        return rssPane != null && rssPane.isVisible();
+        return view == View.RSS;
     }
 
-    /** Ctrl+R: the RSS tab in place of the transfers, the articles focused. */
+    /** Ctrl+R: the RSS view in place of the transfers, the articles focused. */
     private void showRss() {
-        showView(rssPane);
-        rssPane.focusDefault();
+        show(View.RSS);
     }
 
-    /** One of the three centre views shown and managed, the other two neither. */
-    private void showView(javafx.scene.Node view) {
-        for (javafx.scene.Node n : List.of(transfersView, searchPane, rssPane)) {
-            boolean on = n == view;
-            n.setVisible(on);
-            n.setManaged(on);
+    // ---- the views ------------------------------------------------------------------------------
+
+    /**
+     * Show one view in the centre and give it the focus: the transfers' list, Search's query, the
+     * RSS articles (the feeds while there are none). The menu, the chords, Ctrl+Tab and the strip
+     * all come here.
+     */
+    private void show(View wanted) {
+        if (wanted == View.SEARCH) refreshSearchDefinitions();
+        place(wanted);
+        switch (wanted) {
+            case TRANSFERS -> table.requestFocus();
+            case SEARCH -> searchPane.focusQuery();
+            case RSS -> rssPane.focusDefault();
         }
+    }
+
+    /** The view's pane shown and managed, the others neither, and the strip marked; no focus. */
+    private void place(View wanted) {
+        view = wanted;
+        panes.forEach((v, pane) -> {
+            boolean on = v == wanted;
+            pane.setVisible(on);
+            pane.setManaged(on);
+        });
+        viewStrip.select(wanted);
     }
 
     /**
@@ -3433,28 +3522,43 @@ public final class MainWindow {
         }
     }
 
-    /** Ctrl+Shift+F: the Search tab in place of the transfers, the query field focused. */
+    /** Ctrl+Shift+F: the Search view in place of the transfers, the query field focused. */
     private void showSearch() {
-        // The folder is re-read when the tab opens, so a file dropped in is a chip at once.
+        show(View.SEARCH);
+    }
+
+    /** The folder is re-read when Search opens, so a definition dropped in is a chip at once. */
+    private void refreshSearchDefinitions() {
         if (definitionStore.refresh()) {
             reportDefinitionProblems();
             searchPane.reloadProviders();
         }
-        showView(searchPane);
-        searchPane.focusQuery();
     }
 
-    /** Escape in the query: the transfers back, as they were. */
+    /** Escape in the query or the articles, the strip, the menu: the transfers back, as they were. */
     private void showTransfers() {
-        showView(transfersView);
-        table.requestFocus();
+        show(View.TRANSFERS);
     }
 
-    /** The list that is showing takes the focus back: after a dialog, after the palette. */
+    /** Where the focus is in the view showing, for the capture's {@code view=} line. */
+    private String focusForCapture() {
+        // The scene's focus owner, not isFocused(): a capture's window may never get the desktop's
+        // focus, and a node is "focused" only while its window is.
+        javafx.scene.Node owner = stage.getScene().getFocusOwner();
+        return switch (view) {
+            case TRANSFERS -> owner == table ? "table" : owner == filter ? "filter" : "other";
+            case SEARCH -> searchPane.focusForCapture(owner);
+            case RSS -> rssPane.focusForCapture(owner);
+        };
+    }
+
+    /** The view that is showing takes the focus back: after a dialog, after the palette. */
     private void focusList() {
-        if (searchShowing()) searchPane.focusResults();
-        else if (rssShowing()) rssPane.focusArticles();
-        else table.requestFocus();
+        switch (view) {
+            case TRANSFERS -> table.requestFocus();
+            case SEARCH -> searchPane.focusResults();
+            case RSS -> rssPane.focusArticles();
+        }
     }
 
     /** An engine action on one torrent by id. */

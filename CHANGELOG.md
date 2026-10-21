@@ -5,6 +5,17 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Added
+
+- **A view strip, and a key that cycles the views.** Transfers, Search and RSS share the window's
+  centre; a thin row above it names the three, marks the one showing with a line of the accent,
+  shows the key that reaches each (`Esc`, `Ctrl+Shift+F`, `Ctrl+R`) and switches on a click.
+  `Ctrl+Tab` and `Ctrl+Shift+Tab` cycle through them (`Ctrl` on macOS too, where `Cmd+Tab` is the
+  system's), and the View menu lists all three first, with Next View and Previous View; Search and
+  RSS Feeds moved there from the File menu. Each view takes the focus as it opens: the list, the
+  query, the articles (the feeds while there are none). Returning to Search after a dialog lands
+  in the query when there are no results to land in.
+
 ### Changed
 
 - **The filter box is an omnibox** (`Ctrl+K`, `Ctrl+F` still works): a `key:value` term becomes a
