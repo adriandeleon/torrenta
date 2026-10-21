@@ -172,4 +172,10 @@ class FormatTest {
         assertEquals("2 h 5 min", Format.coarse(7200 + 300 + 30));
         assertEquals("3 d", Format.coarse(3 * 86400 + 7200));
     }
+
+    @Test
+    void aStillRateIsADash() {
+        assertEquals("—", Format.rate(0));
+        assertEquals(Bytes.rate(2048), Format.rate(2048));
+    }
 }

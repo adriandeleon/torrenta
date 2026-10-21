@@ -45,6 +45,10 @@ public final class Settings {
     };
     /** The transfer list's columns: order, widths, visibility. See {@code ui.ColumnLayout}. */
     public static final String TABLE_COLUMNS = "table.columns";
+    /** The same for comfortable rows, which want different columns: each density keeps its own. */
+    public static final String TABLE_COLUMNS_COMFORTABLE = "table.columns.comfortable";
+    /** Row density, {@code comfortable} or {@code compact}; the UI maps it and falls back. */
+    public static final String UI_DENSITY = "ui.density";
     /** The Search tab's results columns, the same shape. */
     public static final String SEARCH_COLUMNS = "search.columns";
     /** The declarative search providers switched off, by id, space-separated; syncs. */
@@ -383,6 +387,15 @@ public final class Settings {
 
     public void setToolbar(boolean shown) {
         properties.setProperty(UI_TOOLBAR, String.valueOf(shown));
+    }
+
+    /** The row density as written, trimmed; empty when unset. */
+    public String density() {
+        return properties.getProperty(UI_DENSITY, "").trim();
+    }
+
+    public void setDensity(String id) {
+        properties.setProperty(UI_DENSITY, id);
     }
 
     public boolean stateColors() {

@@ -37,6 +37,11 @@ public final class Format {
         return String.join(", ", tags);
     }
 
+    /** A rate column: a dash for nothing moving, so the eye finds the rows that are. */
+    public static String rate(long bytesPerSecond) {
+        return bytesPerSecond <= 0 ? "—" : Bytes.rate(bytesPerSecond);
+    }
+
     public static String percent(double progress) {
         return String.format(Locale.ROOT, "%.1f %%", progress * 100);
     }
