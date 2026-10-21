@@ -137,6 +137,22 @@ public final class MainWindow {
     private final CommandPalette palette;
     private final EventLog log = new EventLog();
     private final LogWindow logWindow;
+    private final StatisticsWindow statsWindow;
+    /** Whether the poll should read the engine's counters: only while the Statistics window shows. */
+    private volatile boolean statsWanted;
+    /** The session rates, one sample per poll, for the Statistics window's graph. */
+    private final SpeedHistory sessionHistory = new SpeedHistory();
+    /** The rates of every torrent that has been selected, by id, for the Speed tab; gone with the torrent. */
+    private final java.util.concurrent.ConcurrentMap<String, SpeedHistory> torrentHistories =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    /** What the status bar has said; the popup over it shows the history. */
+    private final MessageLog messages = new MessageLog();
+
+    private HBox statusBar;
+    private final MessageLogPopup messagePopup;
+    /** Built on first use: most sessions never open it. */
+    private DebugLogWindow debugLogWindow;
+
     private final Label errorBadge = new Label();
     private TableView<TorrentRow> table;
     /** Two-line or one-line rows; each remembers its own columns. */
@@ -263,7 +279,8 @@ public final class MainWindow {
 
         BorderPane root = new BorderPane();
         root.setCenter(buildCenter());
-        root.setBottom(buildStatusBar());
+        statusBar = buildStatusBar();
+        root.setBottom(statusBar);
         commands = buildCommands();
         // The toolbar first: the View menu's check item binds to its visibility.
         ToolBar bar = buildToolbar();
@@ -276,7 +293,13 @@ public final class MainWindow {
         palette =
                 new CommandPalette(host, this::focusList, shiftChord(KeyCode.P).getDisplayText());
         logWindow = new LogWindow(stage, log);
+        statsWindow = new StatisticsWindow(stage, settings.statsWindowSeconds(), this::rememberStatsWindow);
+        statsWindow.showingProperty().addListener((o, was, now) -> statsWanted = now);
+        detail.setSpeedWindow(settings.statsWindowSeconds());
+        detail.setOnSpeedWindowChanged(this::rememberStatsWindow);
+        messagePopup = new MessageLogPopup(host, statusBar, messages, this::focusList);
         settingsWindow = new SettingsWindow(settings);
+        settingsWindow.setOnShowDebugLog(this::showDebugLog);
         settingsWindow.setOnEngineSettingsChanged(this::applyEngineSettings);
         settingsWindow.setLabels(labels, new LabelsHost());
         settingsWindow.setOnIpFilterChanged(this::refreshIpFilter, this::ipFilterStatusText);
@@ -320,6 +343,8 @@ public final class MainWindow {
         scene.getAccelerators().put(chord(KeyCode.K), this::focusFilter);
         scene.getAccelerators().put(shiftChord(KeyCode.P), () -> palette.show(commands));
         scene.getAccelerators().put(shiftChord(KeyCode.L), logWindow::show);
+        scene.getAccelerators().put(shiftChord(KeyCode.T), statsWindow::show);
+        scene.getAccelerators().put(shiftChord(KeyCode.M), messagePopup::toggle);
         scene.getAccelerators().put(chord(KeyCode.V), this::addFromClipboard);
         scene.setOnDragOver(this::onDragOver);
         scene.setOnDragDropped(this::onDragDropped);
@@ -492,9 +517,11 @@ public final class MainWindow {
         if (rssPane != null && rssPane.dialogScene() != null) return rssPane.dialogScene();
         if (settingsWindow.dialogScene() != null) return settingsWindow.dialogScene();
         if (settingsWindow.isShowing()) return settingsWindow.scene();
+        if (statsWindow.isShowing()) return statsWindow.scene();
         if (logWindow.isShowing()) return logWindow.scene();
         javafx.stage.PopupWindow popup = shownPopup();
         if (popup != null) return popup.getScene();
+        if (debugLogWindow != null && debugLogWindow.isShowing()) return debugLogWindow.scene();
         return stage.getScene();
     }
 
@@ -548,6 +575,12 @@ public final class MainWindow {
             out.add("dialog=" + createDialog.title());
             out.addAll(createDialog.linesForCapture());
         }
+        // After the shot: the window and the tab have had their ticks by then.
+        if (statsWindow.isShowing()) {
+            out.add("stats=" + statsWindow.summaryForCapture());
+            out.add("stats-graph=" + statsWindow.graph().summaryForCapture());
+        }
+        if (detailWanted && detail.activeTab().equals("speed")) out.add("speed-tab=" + detail.speedSummaryForCapture());
         if (!settingsWindow.ruleMatchesForCapture().isEmpty()) {
             out.add("dialog=" + settingsWindow.dialogTitle());
             out.add("rule-matches=" + settingsWindow.ruleMatchesForCapture());
@@ -581,6 +614,15 @@ public final class MainWindow {
             table.getSelectionModel().selectAll();
         } else if (action.equals("event-log")) {
             logWindow.show();
+        } else if (action.equals("stats")) {
+            statsWindow.show();
+        } else if (action.equals("message-log")) {
+            messagePopup.show();
+        } else if (action.startsWith("message-log:")) {
+            messagePopup.show();
+            messagePopup.setFilterForCapture(action.substring("message-log:".length()));
+        } else if (action.equals("debug-log")) {
+            showDebugLog();
         } else if (action.equals("settings")) {
             settingsWindow.show(stage);
         } else if (action.startsWith("settings-page:")) {
@@ -744,6 +786,8 @@ public final class MainWindow {
                 + table.getSelectionModel().getSelectedItems().size());
         if (palette.isShowing()) System.out.println("capture: palette=" + palette.visibleCommands());
         if (logWindow.isShowing()) System.out.println("capture: log-window=showing");
+        if (messagePopup.isShowing()) System.out.println("capture: message-log=" + messagePopup.visibleLines());
+        if (debugLogWindow != null && debugLogWindow.isShowing()) System.out.println("capture: debug-log=showing");
         if (currentDialog != null && currentDialog.isShowing()) {
             System.out.println("capture: dialog=" + currentDialog.title());
             System.out.println("capture: add-dialog=" + currentDialog.summaryForCapture());
@@ -809,7 +853,7 @@ public final class MainWindow {
             automation.handle(event);
             Platform.runLater(() -> {
                 log.add(event);
-                setStatus(event.message());
+                setStatus(event.message(), event.level());
             });
         });
     }
@@ -821,7 +865,7 @@ public final class MainWindow {
     private void reportFromWorker(EngineEvent event) {
         Platform.runLater(() -> {
             log.add(event);
-            if (!event.message().startsWith(Automation.OUTPUT_PREFIX)) setStatus(event.message());
+            if (!event.message().startsWith(Automation.OUTPUT_PREFIX)) setStatus(event.message(), event.level());
         });
     }
 
@@ -879,7 +923,7 @@ public final class MainWindow {
         public void report(EngineEvent event) {
             Platform.runLater(() -> {
                 log.add(event);
-                setStatus(event.message());
+                setStatus(event.message(), event.level());
             });
         }
 
@@ -937,7 +981,7 @@ public final class MainWindow {
                 altSpeedToggle.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("active"), alternative);
             });
         } catch (EngineException ex) {
-            Platform.runLater(() -> setStatus(ex.getMessage()));
+            Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
         }
     }
 
@@ -1023,7 +1067,7 @@ public final class MainWindow {
                 e.applySettings(current);
                 refreshLimits();
             } catch (EngineException ex) {
-                Platform.runLater(() -> setStatus(ex.getMessage()));
+                Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
             }
         });
     }
@@ -1047,7 +1091,7 @@ public final class MainWindow {
         settings.saveQuietly();
         updates.check(AppInfo.VERSION, outcome -> {
             onUpdateOutcome(outcome, true);
-            if (outcome.error() != null) setStatus("Update check failed: " + outcome.error());
+            if (outcome.error() != null) setStatus("Update check failed: " + outcome.error(), EngineEvent.Level.ERROR);
             else if (outcome.available())
                 setStatus(AppInfo.NAME + " " + outcome.latest().version() + " is available — see the Help menu");
             else setStatus(AppInfo.NAME + " " + AppInfo.VERSION + " is up to date");
@@ -1104,7 +1148,7 @@ public final class MainWindow {
 
     /** FX thread. The engine could not start; the window stays up so the message can be read. */
     public void engineFailed(EngineException failure) {
-        setStatus(failure.getMessage());
+        setStatus(failure.getMessage(), EngineEvent.Level.ERROR);
     }
 
     /**
@@ -1414,7 +1458,7 @@ public final class MainWindow {
                 d.files().forEach(f -> own.put(f.index(), f.priority()));
                 Platform.runLater(() -> openChooser(id, preview, own));
             } catch (EngineException ex) {
-                Platform.runLater(() -> setStatus(ex.getMessage()));
+                Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
             }
         });
     }
@@ -1547,6 +1591,19 @@ public final class MainWindow {
         }
         List<Torrent> snapshot = engine.torrents();
         Engine.Rates current = engine.rates();
+        long nowSeconds = System.currentTimeMillis() / 1000;
+        sessionHistory.add(nowSeconds, current.download(), current.upload());
+        if (!torrentHistories.isEmpty()) {
+            Set<String> present = new java.util.HashSet<>();
+            for (Torrent t : snapshot) {
+                present.add(t.id());
+                SpeedHistory h = torrentHistories.get(t.id());
+                if (h != null) h.add(nowSeconds, t.downloadRate(), t.uploadRate());
+            }
+            torrentHistories.keySet().retainAll(present);
+        }
+        // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
+        com.torrenta.engine.SessionStats stats = statsWanted ? engine.stats() : null;
         enforceShareLimits(snapshot);
         // The detail pane costs a status with the pieces bitfield; only for one shown torrent.
         String id = detailWanted ? detailId : null;
@@ -1561,13 +1618,16 @@ public final class MainWindow {
         TorrentDetail shown = detailSnapshot;
         pushTray(TrayStatus.of(snapshot, current));
         Platform.runLater(() -> {
-            rows.apply(snapshot, System.currentTimeMillis() / 1000);
+            rows.apply(snapshot, nowSeconds);
             refreshSidebar(snapshot);
             rates.setText(ratesText(current));
             if (detailWanted) {
-                if (shown != null && shown.general().id().equals(detailId)) detail.show(shown);
-                else if (detailId == null) detail.clear();
+                if (shown != null && shown.general().id().equals(detailId)) {
+                    detail.show(shown);
+                    detail.showSpeed(torrentHistories.get(detailId), nowSeconds);
+                } else if (detailId == null) detail.clear();
             }
+            if (stats != null) statsWindow.update(stats, sessionHistory, nowSeconds);
         });
     }
 
@@ -1614,6 +1674,14 @@ public final class MainWindow {
                 if (removed) forgetOverride(t.id());
             });
         }
+    }
+
+    /** FX thread. A graph's window chip was chosen: remembered, and the other graph follows. */
+    private void rememberStatsWindow(int seconds) {
+        settings.setStatsWindowSeconds(seconds);
+        settings.saveQuietly();
+        statsWindow.graph().setWindow(seconds);
+        detail.setSpeedWindow(seconds);
     }
 
     /** FX thread: a removed torrent takes its own share limit with it. */
@@ -1750,7 +1818,7 @@ public final class MainWindow {
             try {
                 current = e.limits(first.id());
             } catch (EngineException ex) {
-                Platform.runLater(() -> setStatus(ex.getMessage()));
+                Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
                 return;
             }
             Platform.runLater(() -> {
@@ -2124,6 +2192,21 @@ public final class MainWindow {
                         always,
                         () -> logWindow.show()),
                 new Command(
+                        "statistics",
+                        "Statistics",
+                        null,
+                        shiftChord(KeyCode.T).getDisplayText(),
+                        always,
+                        () -> statsWindow.show()),
+                new Command(
+                        "message-log",
+                        "Messages",
+                        null,
+                        shiftChord(KeyCode.M).getDisplayText(),
+                        always,
+                        () -> messagePopup.toggle()),
+                new Command("debug-log", "Debug Log", null, null, always, this::showDebugLog),
+                new Command(
                         "toggle-toolbar",
                         "Toggle Toolbar",
                         null,
@@ -2292,6 +2375,9 @@ public final class MainWindow {
                         menuItem("focus-sidebar"),
                         menuItem("select-all"),
                         menuItem("event-log"),
+                        menuItem("statistics"),
+                        menuItem("message-log"),
+                        menuItem("debug-log"),
                         paletteItem);
 
         // The two update items exist from the start and show only once a release is known, so the
@@ -2399,6 +2485,8 @@ public final class MainWindow {
                 c -> {
                     var selected = table.getSelectionModel().getSelectedItems();
                     detailId = selected.size() == 1 ? selected.get(0).id() : null;
+                    // The Speed tab's history starts with the first selection and is fed from the next poll.
+                    if (detailId != null) torrentHistories.computeIfAbsent(detailId, k -> new SpeedHistory());
                     if (detailId == null && detailWanted) detail.clear();
                 });
         detail.selectTab(settings.get(Settings.DETAIL_TAB, "general"));
@@ -3213,6 +3301,9 @@ public final class MainWindow {
         altSpeedToggle.getStyleClass().add("alt-speed");
         altSpeedToggle.setText("Alt speed: off");
         altSpeedToggle.setOnMouseClicked(e -> toggleAlternativeSpeed());
+        // The status text is the door to its own history: a click shows what scrolled past.
+        status.getStyleClass().add("status-message");
+        status.setOnMouseClicked(e -> messagePopup.toggle());
         HBox bar = new HBox(12, status, spacer, altSpeedToggle, updateBadge, syncBadge, errorBadge, rates);
         bar.setPadding(new Insets(4, 10, 4, 10));
         bar.getStyleClass().add("status-bar");
@@ -3224,6 +3315,25 @@ public final class MainWindow {
     }
 
     private void setStatus(String text) {
+        setStatus(text, EngineEvent.Level.INFO);
+    }
+
+    /**
+     * The status bar says {@code text}, coloured by {@code level}, and the message log keeps it.
+     * One line replaces the next, so an error that lands while nobody is looking is still in the
+     * log, in red, when the status bar is clicked.
+     */
+    private void setStatus(String text, EngineEvent.Level level) {
         status.setText(text);
+        status.getStyleClass().removeAll("status-warning", "status-error");
+        if (level == EngineEvent.Level.ERROR) status.getStyleClass().add("status-error");
+        else if (level == EngineEvent.Level.WARNING) status.getStyleClass().add("status-warning");
+        messages.add(text, level, java.time.Instant.now());
+    }
+
+    /** The debug log's window, built the first time it is asked for. */
+    private void showDebugLog() {
+        if (debugLogWindow == null) debugLogWindow = new DebugLogWindow(stage);
+        debugLogWindow.show();
     }
 }

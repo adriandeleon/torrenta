@@ -14,12 +14,14 @@ import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Priority;
+import com.torrenta.engine.SessionStats;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.engine.TorrentStorage;
+import com.torrenta.store.StatsStore;
 import com.torrenta.store.TorrentStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -1735,6 +1737,68 @@ class LibtorrentEngineTest {
             on.set(false);
             collector.join(5_000);
         }
+    }
+
+    @Test
+    void everyStatsCounterTheEngineReadsExists() throws Exception {
+        NativeLibrary.ensureAvailable();
+        int[] indices = LibtorrentEngine.Counter.resolve();
+        LibtorrentEngine.Counter[] counters = LibtorrentEngine.Counter.values();
+        for (int i = 0; i < counters.length; i++) {
+            assertTrue(indices[i] >= 0, counters[i].metric + " is not a session_stats metric of this libtorrent");
+        }
+    }
+
+    @Test
+    void statsCountTheBytesALoopbackPairMovesAndTheTotalsSurviveARestart(@TempDir Path dir) throws Exception {
+        byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        StatsStore statsStore = new StatsStore(dir.resolve("config").resolve(StatsStore.FILE_NAME));
+        long size;
+        try (LibtorrentEngine seed = seeder(dir, torrent);
+                LibtorrentEngine engine = new LibtorrentEngine(
+                        () -> dir.resolve("downloads"),
+                        store,
+                        com.torrenta.engine.EngineSettings.defaults(),
+                        statsStore)) {
+            engine.start();
+            SessionStats fresh = engine.stats();
+            assertEquals(0, fresh.sessionDownload());
+            assertEquals(0, fresh.allTimeDownload(), "no file yet: all time starts at zero");
+            Torrent t = engine.add(downloadsTorrent(dir, torrent));
+            size = t.size();
+            assertEquals(150 * 1024, size);
+            awaitDownload(
+                    "downloaded",
+                    engine,
+                    t.id(),
+                    seed,
+                    () -> engine.torrents().get(0).progress() >= 1.0 - 1e-6);
+            // The counters are read once a second, so they trail the transfer by a moment.
+            await("the download counter caught up", () -> engine.stats().sessionDownload() >= size);
+            await("the seeder's upload counter caught up", () -> seed.stats().sessionUpload() >= size);
+            await("the seeder counts its seed", () -> seed.stats().torrents().seeding() == 1);
+            SessionStats s = engine.stats();
+            assertEquals(s.sessionDownload(), s.allTimeDownload(), "the first run's all-time is the session");
+            assertEquals(s.sessionUpload(), s.allTimeUpload());
+            assertTrue(s.totalReceived() >= s.sessionDownload(), "every byte includes the payload");
+            assertTrue(s.diskBlocksWritten() * SessionStats.BLOCK_BYTES >= size, "the files were written: " + s);
+            assertTrue(s.wasted() >= 0 && s.dhtNodes() >= 0 && s.peersConnected() >= 0, "every counter known: " + s);
+            assertTrue(s.torrents().checking() >= 0 && s.torrents().stopped() >= 0, "every gauge known: " + s);
+            assertTrue(s.sessionSeconds() >= 0 && s.allTimeSeconds() == s.sessionSeconds());
+        }
+        StatsStore.Totals saved = statsStore.load();
+        assertTrue(saved.download() >= size, "stop wrote the totals: " + saved);
+        try (LibtorrentEngine again = new LibtorrentEngine(
+                () -> dir.resolve("downloads"), store, com.torrenta.engine.EngineSettings.defaults(), statsStore)) {
+            again.start();
+            SessionStats back = again.stats();
+            assertEquals(0, back.sessionDownload(), "a new session starts from nothing");
+            assertEquals(saved.download(), back.allTimeDownload(), "the earlier run's bytes are back");
+            assertEquals(saved.upload(), back.allTimeUpload());
+            assertTrue(back.allTimeSeconds() >= saved.activeSeconds());
+        }
+        assertTrue(statsStore.load().activeSeconds() >= saved.activeSeconds(), "the second stop wrote again");
     }
 
     private static LibtorrentEngine engine(Path dir) {

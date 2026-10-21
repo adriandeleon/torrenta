@@ -140,6 +140,9 @@ final class Icons {
             case "filter" -> find();
             case "select-all" -> selectAll();
             case "event-log" -> history();
+            case "statistics" -> gauge();
+            case "message-log" -> history();
+            case "debug-log" -> info();
             case "toggle-toolbar" -> toolbar();
             case "toggle-sidebar", "focus-sidebar" -> sidebar();
             default -> null;

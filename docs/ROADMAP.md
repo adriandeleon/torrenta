@@ -281,6 +281,7 @@ Everything in Settings that the engine already knows how to do.
    `store.DefinitionStore`, Settings → Search → Definition files; `docs/search-providers.md`.)
 
 ### 0.7 — RSS, creation, statistics
+**0.7 is feature-complete.**
 
 1. ✓ **RSS reader**: feeds, refresh interval, article list with read state. (`com.torrenta.rss`,
    `ui.RssPane`, `Ctrl+R`; Settings → RSS.)
@@ -289,7 +290,10 @@ Everything in Settings that the engine already knows how to do.
    Settings → RSS → Rules; `rss/rules.json`.)
 3. ✓ **Torrent creator**: v1/v2/hybrid, piece size, private, trackers, web seeds, seed after creating.
    (`Engine.create`, `CreateRequest`/`CreatedTorrent`, `PieceSize`; `ui.CreateDialog`, `Ctrl+N`.)
-4. **Statistics** window and per-torrent and session speed graphs.
+4. ✓ **Statistics** window and per-torrent and session speed graphs. (`Engine.stats` →
+   `SessionStats` from libtorrent's `session_stats` counters, `store.StatsStore` for the all-time
+   totals; `ui.SpeedHistory`, `SpeedPlot`, `SpeedGraph`, `StatisticsWindow`, `Ctrl+Shift+T`;
+   the detail pane's Speed tab.)
 
 ### 0.8 — App polish
 

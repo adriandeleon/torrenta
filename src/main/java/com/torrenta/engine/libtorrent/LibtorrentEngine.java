@@ -30,6 +30,7 @@ import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.IpRange;
 import com.torrenta.engine.Priority;
+import com.torrenta.engine.SessionStats;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
@@ -39,6 +40,7 @@ import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.engine.TorrentStorage;
 import com.torrenta.engine.TrackerHost;
+import com.torrenta.store.StatsStore;
 import com.torrenta.store.TorrentStore;
 import org.libtorrent4j.AddTorrentParams;
 import org.libtorrent4j.Address;
@@ -78,6 +80,7 @@ import org.libtorrent4j.alerts.PortmapAlert;
 import org.libtorrent4j.alerts.PortmapErrorAlert;
 import org.libtorrent4j.alerts.SaveResumeDataAlert;
 import org.libtorrent4j.alerts.SaveResumeDataFailedAlert;
+import org.libtorrent4j.alerts.SessionStatsAlert;
 import org.libtorrent4j.alerts.StorageMovedAlert;
 import org.libtorrent4j.alerts.StorageMovedFailedAlert;
 import org.libtorrent4j.alerts.TorrentAlert;
@@ -149,6 +152,8 @@ public final class LibtorrentEngine implements Engine {
 
     private static final long PERIODIC_FLUSH_SECONDS = 120;
     private static final long STOP_FLUSH_TIMEOUT_MS = 5000;
+    /** How often the all-time totals are written; a crash costs at most this much counting. */
+    private static final long STATS_SAVE_SECONDS = 300;
 
     /** Peers a fetch hands to its torrent at most; libtorrent's own peer list does the rest. */
     private static final int MAX_HANDED_OVER = 50;
@@ -168,6 +173,17 @@ public final class LibtorrentEngine implements Engine {
     private final java.util.function.Supplier<Path> downloadDir;
 
     private final TorrentStore store;
+    /** The all-time totals' file; loaded at start, written every few minutes and at stop. */
+    private final StatsStore statsStore;
+    /** What the stats file held at start; the session's counters are added to it, never to a later write. */
+    private volatile StatsStore.Totals baseline = StatsStore.Totals.ZERO;
+
+    private volatile long startedAtMs;
+    /** The {@link Counter}s' indices into a stats alert, resolved once the native is loaded; null before start. */
+    private volatile int[] counterIndex;
+    /** The last stats alert's values, one per {@link Counter}, in its order; written on the alert thread. */
+    private volatile long[] counters = new long[Counter.values().length];
+
     private SessionManager session;
     private ScheduledExecutorService flusher;
 
@@ -245,9 +261,19 @@ public final class LibtorrentEngine implements Engine {
 
     public LibtorrentEngine(
             java.util.function.Supplier<Path> downloadDir, TorrentStore store, EngineSettings settings) {
+        this(downloadDir, store, settings, new StatsStore(store.dir().resolveSibling(StatsStore.FILE_NAME)));
+    }
+
+    /** @param stats where the all-time totals live: {@code stats.properties} in the config folder */
+    public LibtorrentEngine(
+            java.util.function.Supplier<Path> downloadDir,
+            TorrentStore store,
+            EngineSettings settings,
+            StatsStore stats) {
         this.downloadDir = downloadDir;
         this.store = store;
         this.engineSettings = settings;
+        this.statsStore = stats;
     }
 
     @Override
@@ -272,6 +298,11 @@ public final class LibtorrentEngine implements Engine {
         }
         s.addListener(new Listener());
         session = s;
+        // The counters' places in a stats alert are the library's to say, and asking is native.
+        counterIndex = Counter.resolve();
+        counters = new long[Counter.values().length];
+        baseline = statsStore.load();
+        startedAtMs = System.currentTimeMillis();
         if (!ipFilter.isEmpty()) s.swig().set_ip_filter(toFilter(ipFilter));
         emit(EngineEvent.session(EngineEvent.Level.INFO, "Engine started: " + description()));
         restore(s);
@@ -282,6 +313,7 @@ public final class LibtorrentEngine implements Engine {
             return t;
         });
         flusher.scheduleAtFixedRate(this::flush, PERIODIC_FLUSH_SECONDS, PERIODIC_FLUSH_SECONDS, TimeUnit.SECONDS);
+        flusher.scheduleAtFixedRate(this::saveStats, STATS_SAVE_SECONDS, STATS_SAVE_SECONDS, TimeUnit.SECONDS);
     }
 
     /** Re-adds every stored torrent. One bad blob costs that torrent and a log line, not the rest. */
@@ -1421,6 +1453,84 @@ public final class LibtorrentEngine implements Engine {
         return new Rates(s.downloadRate(), s.uploadRate());
     }
 
+    /**
+     * Built from the last stats alert, so it never reaches the session and is cheap from any
+     * thread: libtorrent4j asks the session for its counters once a second and the listener keeps
+     * the values. A counter the library has no metric for is {@link SessionStats#UNKNOWN}.
+     */
+    @Override
+    public SessionStats stats() {
+        int[] idx = counterIndex;
+        long[] c = counters;
+        StatsStore.Totals base = baseline;
+        if (idx == null) {
+            return new SessionStats(
+                    0,
+                    0,
+                    base.download(),
+                    base.upload(),
+                    0,
+                    base.activeSeconds(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SessionStats.Torrents.NONE);
+        }
+        long down = Math.max(0, value(c, idx, Counter.RECV_PAYLOAD));
+        long up = Math.max(0, value(c, idx, Counter.SENT_PAYLOAD));
+        long seconds = Math.max(0, (System.currentTimeMillis() - startedAtMs) / 1000);
+        long redundant = value(c, idx, Counter.RECV_REDUNDANT);
+        long failed = value(c, idx, Counter.RECV_FAILED);
+        long queuedDown = value(c, idx, Counter.QUEUED_DOWNLOAD);
+        long queuedSeed = value(c, idx, Counter.QUEUED_SEEDING);
+        return new SessionStats(
+                down,
+                up,
+                base.download() + down,
+                base.upload() + up,
+                seconds,
+                base.activeSeconds() + seconds,
+                value(c, idx, Counter.RECV_BYTES),
+                value(c, idx, Counter.SENT_BYTES),
+                redundant < 0 || failed < 0 ? SessionStats.UNKNOWN : redundant + failed,
+                value(c, idx, Counter.PEERS_CONNECTED),
+                value(c, idx, Counter.PEERS_HALF_OPEN),
+                value(c, idx, Counter.DHT_NODES),
+                value(c, idx, Counter.BLOCKS_READ),
+                value(c, idx, Counter.BLOCKS_WRITTEN),
+                value(c, idx, Counter.BLOCKS_IN_USE),
+                value(c, idx, Counter.QUEUED_DISK_JOBS),
+                new SessionStats.Torrents(
+                        value(c, idx, Counter.CHECKING),
+                        value(c, idx, Counter.DOWNLOADING),
+                        value(c, idx, Counter.SEEDING),
+                        queuedDown < 0 || queuedSeed < 0 ? SessionStats.UNKNOWN : queuedDown + queuedSeed,
+                        value(c, idx, Counter.STOPPED),
+                        value(c, idx, Counter.ERRORED)));
+    }
+
+    private static long value(long[] counters, int[] index, Counter counter) {
+        return index[counter.ordinal()] < 0 ? SessionStats.UNKNOWN : counters[counter.ordinal()];
+    }
+
+    /** Writes the loaded totals plus this session's; from the flusher and from {@link #stop()}. */
+    private void saveStats() {
+        if (counterIndex == null) return;
+        SessionStats s = stats();
+        try {
+            statsStore.save(new StatsStore.Totals(s.allTimeDownload(), s.allTimeUpload(), s.allTimeSeconds()));
+        } catch (IOException e) {
+            LOG.log(Level.WARNING, "Could not write the statistics file " + statsStore.file(), e);
+        }
+    }
+
     /** Asks every torrent for fresh resume data, if it changed. Answers land through the alert. */
     @Override
     public synchronized void flush() {
@@ -1644,6 +1754,7 @@ public final class LibtorrentEngine implements Engine {
     public synchronized void stop() {
         if (session == null) return;
         if (flusher != null) flusher.shutdownNow();
+        saveStats();
         for (Fetch fetch : List.copyOf(fetches.values())) fetch.end(null, new EngineException("The engine stopped"));
         // Flush with the disk cache, then wait for the alerts, bounded: libtorrent answers every
         // request (success or "not modified"), but a wedged disk must not hold the quit.
@@ -1772,6 +1883,48 @@ public final class LibtorrentEngine implements Engine {
      * SWIG objects, and touching one before {@link NativeLibrary#ensureAvailable()} has run makes
      * the JNI class fail to initialise — and then every later use of it, for the life of the JVM.
      */
+    /**
+     * The {@code session_stats} metrics the engine reads, by libtorrent's names. Strings only, so
+     * the enum is safe to load before the native is; the indices come from {@link #resolve} at
+     * start. A name the library does not know resolves to -1 and shows as a dash.
+     */
+    enum Counter {
+        RECV_PAYLOAD("net.recv_payload_bytes"),
+        SENT_PAYLOAD("net.sent_payload_bytes"),
+        RECV_BYTES("net.recv_bytes"),
+        SENT_BYTES("net.sent_bytes"),
+        RECV_REDUNDANT("net.recv_redundant_bytes"),
+        RECV_FAILED("net.recv_failed_bytes"),
+        PEERS_CONNECTED("peer.num_peers_connected"),
+        PEERS_HALF_OPEN("peer.num_peers_half_open"),
+        DHT_NODES("dht.dht_nodes"),
+        BLOCKS_READ("disk.num_blocks_read"),
+        BLOCKS_WRITTEN("disk.num_blocks_written"),
+        BLOCKS_IN_USE("disk.disk_blocks_in_use"),
+        QUEUED_DISK_JOBS("disk.queued_disk_jobs"),
+        CHECKING("ses.num_checking_torrents"),
+        DOWNLOADING("ses.num_downloading_torrents"),
+        SEEDING("ses.num_seeding_torrents"),
+        QUEUED_DOWNLOAD("ses.num_queued_download_torrents"),
+        QUEUED_SEEDING("ses.num_queued_seeding_torrents"),
+        STOPPED("ses.num_stopped_torrents"),
+        ERRORED("ses.num_error_torrents");
+
+        final String metric;
+
+        Counter(String metric) {
+            this.metric = metric;
+        }
+
+        /** Each counter's index into a stats alert, in ordinal order; native, so after the load. */
+        static int[] resolve() {
+            Counter[] all = values();
+            int[] out = new int[all.length];
+            for (int i = 0; i < all.length; i++) out[i] = libtorrent.find_metric_idx_ex(all[i].metric);
+            return out;
+        }
+    }
+
     private static final class StatusQuery {
         /** The default status query leaves the strings out (they cost a copy per call); ask. */
         static final status_flags_t FLAGS = TorrentHandle.QUERY_NAME.or_(TorrentHandle.QUERY_SAVE_PATH);
@@ -1888,6 +2041,7 @@ public final class LibtorrentEngine implements Engine {
 
         private final int[] types = {
             AlertType.ADD_TORRENT.swig(),
+            AlertType.SESSION_STATS.swig(),
             AlertType.METADATA_RECEIVED.swig(),
             AlertType.TORRENT_FINISHED.swig(),
             AlertType.TORRENT_CHECKED.swig(),
@@ -1922,6 +2076,7 @@ public final class LibtorrentEngine implements Engine {
             try {
                 switch (alert.type()) {
                     case ADD_TORRENT -> onAdded((AddTorrentAlert) alert);
+                    case SESSION_STATS -> onStats((SessionStatsAlert) alert);
                     case METADATA_RECEIVED -> {
                         TorrentAlert<?> t = (TorrentAlert<?>) alert;
                         Fetch fetch = t.handle().isValid() ? fetchOf(t.handle().swig()) : null;
@@ -2084,6 +2239,15 @@ public final class LibtorrentEngine implements Engine {
          * name, trackers, save path — which is exactly what brings it back after a crash; the real
          * resume data replaces it when the metadata arrives.
          */
+        /** Once a second, by libtorrent4j's own request: the counters are copied out, nothing else. */
+        private void onStats(SessionStatsAlert alert) {
+            int[] idx = counterIndex;
+            if (idx == null) return;
+            long[] values = new long[idx.length];
+            for (int i = 0; i < idx.length; i++) values[i] = idx[i] < 0 ? SessionStats.UNKNOWN : alert.value(idx[i]);
+            counters = values;
+        }
+
         private void onAdded(AddTorrentAlert alert) {
             if (fetchAddAlerts.remove(alert.params().getInfoHashes().getBest().toHex())) return;
             if (alert.error().isError()) {
