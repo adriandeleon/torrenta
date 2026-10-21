@@ -6,6 +6,8 @@ import java.util.Optional;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentState;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The sidebar's Status section: qBittorrent's shape, decided from the snapshot alone (state,
  * the user's pause, the rates, the error). Pure, so the rule is tested; the counts and the
@@ -16,24 +18,19 @@ import com.torrenta.engine.TorrentState;
  * to move and not moving.
  */
 public enum SidebarStatus {
-    DOWNLOADING("Downloading"),
-    SEEDING("Seeding"),
-    COMPLETED("Completed"),
-    PAUSED("Paused"),
-    ACTIVE("Active"),
-    INACTIVE("Inactive"),
-    STALLED("Stalled"),
-    CHECKING("Checking"),
-    ERRORED("Errored");
+    DOWNLOADING,
+    SEEDING,
+    COMPLETED,
+    PAUSED,
+    ACTIVE,
+    INACTIVE,
+    STALLED,
+    CHECKING,
+    ERRORED;
 
-    private final String title;
-
-    SidebarStatus(String title) {
-        this.title = title;
-    }
-
+    /** The entry's text in the sidebar, in the UI language; read at call time, never cached. */
     public String title() {
-        return title;
+        return tr("sidebar.status." + key());
     }
 
     /** The name in the settings file and the filter's format: lower case. */

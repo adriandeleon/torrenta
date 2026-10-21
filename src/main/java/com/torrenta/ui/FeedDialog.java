@@ -27,6 +27,8 @@ import com.torrenta.rss.Feed;
 import com.torrenta.rss.FeedException;
 import com.torrenta.rss.FeedSource;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * One feed, added or edited: URL, an optional name, and its own refresh interval or the global
  * one. Shaped as the Add dialog: its own stage, the app's stylesheet and font, Enter saves,
@@ -40,11 +42,11 @@ final class FeedDialog {
     private final Stage stage = new Stage();
     private final TextField url = new TextField();
     private final TextField name = new TextField();
-    private final CheckBox ownInterval = new CheckBox("Its own interval");
+    private final CheckBox ownInterval = new CheckBox(tr("dialog.feed.ownInterval"));
     private final Spinner<Integer> minutes = new Spinner<>();
     private final Label problem = new Label();
     private final Label status = new Label();
-    private final Button save = new Button("Save");
+    private final Button save = new Button(tr("common.save"));
     private final FeedSource source;
     private final Feed existing;
     private Feed result;
@@ -60,7 +62,7 @@ final class FeedDialog {
         this.source = source;
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
-        stage.setTitle(existing == null ? "Add Feed" : "Edit Feed");
+        stage.setTitle(existing == null ? tr("dialog.feed.title.add") : tr("dialog.feed.title.edit"));
 
         GridPane form = new GridPane();
         form.setHgap(10);
@@ -73,19 +75,19 @@ final class FeedDialog {
 
         int row = 0;
         url.setPromptText("https://tracker.example/rss?passkey=…");
-        form.addRow(row++, muted("URL"), url);
-        name.setPromptText("what to call it; left blank, the feed's own title");
-        form.addRow(row++, muted("Name"), name);
+        form.addRow(row++, muted(tr("dialog.common.url")), url);
+        name.setPromptText(tr("dialog.feed.name.prompt"));
+        form.addRow(row++, muted(tr("common.name")), name);
         minutes.setValueFactory(new SpinnerValueFactory.IntegerSpinnerValueFactory(
                 Feed.MIN_MINUTES, Feed.MAX_MINUTES, globalMinutes, 5));
         minutes.setEditable(true);
         minutes.setPrefWidth(90);
         minutes.disableProperty().bind(ownInterval.selectedProperty().not());
-        Label every = new Label("minutes (the global interval is " + globalMinutes + ")");
+        Label every = new Label(tr("dialog.feed.every", Integer.toString(globalMinutes)));
         every.getStyleClass().add("dialog-hint");
         HBox interval = new HBox(8, ownInterval, minutes, every);
         interval.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
-        form.addRow(row++, muted("Refresh"), interval);
+        form.addRow(row++, muted(tr("dialog.feed.refresh")), interval);
 
         problem.getStyleClass().add("dialog-hint");
         problem.setWrapText(true);
@@ -97,10 +99,7 @@ final class FeedDialog {
                         url.textProperty()));
         form.add(problem, 1, row++);
 
-        Label hint = hint("RSS 2.0 and Atom. An item's torrent is its enclosure, a magnet in its link or"
-                + " description, or a <torrent:magnetURI>; Enter on an article in the tab opens the Add dialog"
-                + " for it. The feed and its articles are kept under rss/ beside the settings, this machine's,"
-                + " never synced; the global interval (Settings → RSS) syncs.");
+        Label hint = hint(tr("dialog.feed.hint"));
         hint.setMaxWidth(Double.MAX_VALUE);
 
         status.getStyleClass().add("dialog-hint");
@@ -113,7 +112,7 @@ final class FeedDialog {
         save.disableProperty()
                 .bind(Bindings.createBooleanBinding(
                         () -> Feed.problem(url.getText()).isPresent(), url.textProperty()));
-        Button cancel = new Button("Cancel");
+        Button cancel = new Button(tr("common.cancel"));
         cancel.setCancelButton(true);
         cancel.setOnAction(e -> cancel());
         Region spacer = new Region();
@@ -189,7 +188,7 @@ final class FeedDialog {
             return;
         }
         fetching = true;
-        status.setText("Fetching…");
+        status.setText(tr("dialog.feed.fetching"));
         Thread.ofVirtual().name("feed-check").start(() -> {
             try {
                 FeedSource.Result r = source.fetch(candidate, "", "");
@@ -207,7 +206,7 @@ final class FeedDialog {
             } catch (RuntimeException e) {
                 Platform.runLater(() -> {
                     fetching = false;
-                    status.setText("failed: " + e);
+                    status.setText(tr("dialog.common.failed", e.toString()));
                 });
             }
         });

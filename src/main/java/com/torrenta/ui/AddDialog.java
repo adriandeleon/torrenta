@@ -55,6 +55,8 @@ import com.torrenta.engine.DownloadPlan;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The Add dialog: what the torrent is, which files, where it goes, how it starts.
  *
@@ -107,13 +109,13 @@ final class AddDialog {
     /** One label per line: the disk sentence, then where the files start if not here. */
     private final VBox diskText = new VBox(1);
 
-    private final CheckBox sequential = new CheckBox("Sequential download");
-    private final CheckBox firstLast = new CheckBox("First and last pieces first");
-    private final CheckBox skipCheck = new CheckBox("Skip hash check");
+    private final CheckBox sequential = new CheckBox(tr("dialog.add.sequential"));
+    private final CheckBox firstLast = new CheckBox(tr("dialog.add.firstLast"));
+    private final CheckBox skipCheck = new CheckBox(tr("dialog.add.skipCheck"));
     private final ChoiceBox<AddRequest.StopCondition> stop = new ChoiceBox<>();
     private final ChoiceBox<String> category = new ChoiceBox<>();
     private final TextField tags = new TextField();
-    private final CheckBox withoutAsking = new CheckBox("Next time, add with these settings without asking");
+    private final CheckBox withoutAsking = new CheckBox(tr("dialog.add.withoutAsking"));
     private final List<Category> categories;
     private final Defaults defaults;
     /** Enter adds paused and Shift+Enter starts, rather than the other way round. */
@@ -126,14 +128,14 @@ final class AddDialog {
     private final VBox placeholder;
     private FileTree.Node root;
 
-    private final Button cancel = keyed("Cancel", "Esc");
-    private final Button add = keyed("Add", "Enter");
+    private final Button cancel = keyed(tr("common.cancel"), tr("dialog.common.key.esc"));
+    private final Button add = keyed(tr("common.add"), tr("dialog.common.key.enter"));
     private static final KeyCombination OTHER = new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN);
     private static final KeyCombination WAIT = new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHORTCUT_DOWN);
 
-    private final Button addOther = keyed("Add paused", keyLabel(OTHER.getDisplayText()));
-    private final Button addNow = keyed("Add now, pick files when ready", "Enter");
-    private final Button wait = keyed("Wait here for the file list", keyLabel(WAIT.getDisplayText()));
+    private final Button addOther = keyed(tr("dialog.add.addPaused"), keyLabel(OTHER.getDisplayText()));
+    private final Button addNow = keyed(tr("dialog.add.addNow"), tr("dialog.common.key.enter"));
+    private final Button wait = keyed(tr("dialog.add.wait"), keyLabel(WAIT.getDisplayText()));
 
     /** Files are known: a .torrent, or a magnet whose metadata has arrived. */
     private final BooleanProperty hasFiles = new SimpleBooleanProperty();
@@ -242,7 +244,10 @@ final class AddDialog {
         this.categories = List.copyOf(categories);
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
-        stage.setTitle(existing ? "Choose Files" : preview == null ? "Add Magnet Link" : "Add Torrent");
+        stage.setTitle(
+                existing
+                        ? tr("dialog.add.title.chooseFiles")
+                        : preview == null ? tr("dialog.add.title.magnet") : tr("dialog.add.title.torrent"));
 
         kicker.setText(kicker(via, existing));
         kicker.getStyleClass().add("add-kicker");
@@ -253,7 +258,7 @@ final class AddDialog {
         VBox header = new VBox(2, kicker, title, summary);
 
         // ---- left: the files ----
-        Label hint = new Label("Space toggles · + and − change priority · ← → fold");
+        Label hint = new Label(tr("dialog.add.treeHint"));
         hint.getStyleClass().add("dialog-hint");
         fetching.getStyleClass().add("add-fetching");
         placeholder = new VBox(10, bar(0.78), bar(0.56), bar(0.67), fetching);
@@ -269,7 +274,7 @@ final class AddDialog {
         // ---- right: where and how ----
         savePath.setText(defaults.savePath().toString());
         savePath.textProperty().addListener((o, was, now) -> updateDisk());
-        Button browse = new Button("Browse…");
+        Button browse = new Button(tr("common.browse"));
         browse.setOnAction(e -> browse());
         HBox.setHgrow(savePath, Priority.ALWAYS);
         HBox pathRow = new HBox(6, savePath, browse);
@@ -284,10 +289,10 @@ final class AddDialog {
         category.getItems().add("");
         for (Category c : this.categories) category.getItems().add(c.name());
         category.setValue("");
-        category.setConverter(converter(name -> name == null || name.isEmpty() ? "None" : name));
+        category.setConverter(converter(name -> name == null || name.isEmpty() ? tr("common.none") : name));
         category.setMaxWidth(Double.MAX_VALUE);
         category.valueProperty().addListener((o, was, now) -> categoryPath(now).ifPresent(savePath::setText));
-        tags.setPromptText("comma-separated");
+        tags.setPromptText(tr("dialog.add.tags.prompt"));
 
         GridPane filing = new GridPane();
         filing.setHgap(10);
@@ -295,7 +300,7 @@ final class AddDialog {
         ColumnConstraints half = new ColumnConstraints();
         half.setPercentWidth(50);
         filing.getColumnConstraints().addAll(half, half);
-        filing.addRow(0, muted("Category"), muted("Stop when"));
+        filing.addRow(0, muted(tr("dialog.common.category")), muted(tr("dialog.add.stopWhen")));
         filing.addRow(1, category, stop);
 
         // First-and-last is piece priorities, which need the metadata: not for "Add now".
@@ -304,14 +309,14 @@ final class AddDialog {
 
         VBox right = new VBox(
                 4,
-                muted("Save to"),
+                muted(tr("dialog.common.saveTo")),
                 pathRow,
                 spaced(diskBar, 8),
                 diskText,
                 spaced(filing, 12),
-                spaced(muted("Tags"), 12),
+                spaced(muted(tr("dialog.common.tags")), 12),
                 tags,
-                spaced(muted("Options"), 12),
+                spaced(muted(tr("dialog.add.options")), 12),
                 options);
         right.setPrefWidth(300);
         right.setMinWidth(300);
@@ -326,11 +331,11 @@ final class AddDialog {
         add.setOnAction(e -> confirm(startPausedDefault));
         addOther.setOnAction(e -> confirm(!startPausedDefault));
         if (startPausedDefault) {
-            add.setText(existing ? "Keep paused" : "Add paused");
-            addOther.setText(existing ? "Start" : "Add and start");
+            add.setText(existing ? tr("dialog.add.keepPaused") : tr("dialog.add.addPaused"));
+            addOther.setText(existing ? tr("dialog.add.start") : tr("dialog.add.addAndStart"));
         } else if (existing) {
-            add.setText("Start");
-            addOther.setText("Keep paused");
+            add.setText(tr("dialog.add.start"));
+            addOther.setText(tr("dialog.add.keepPaused"));
         }
         addNow.setOnAction(e -> addNow());
         wait.setOnAction(e -> waitHere());
@@ -607,7 +612,7 @@ final class AddDialog {
         tree.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
 
         TreeTableColumn<FileTree.Node, FileTree.Node> name = new TreeTableColumn<>();
-        Label filesHeader = new Label("FILES");
+        Label filesHeader = new Label(tr("dialog.add.column.files"));
         HBox nameHeader = new HBox(8, allFiles, filesHeader);
         nameHeader.setAlignment(Pos.CENTER_LEFT);
         name.setGraphic(nameHeader);
@@ -618,7 +623,7 @@ final class AddDialog {
         name.setCellValueFactory(p -> new ReadOnlyObjectWrapper<>(p.getValue().getValue()));
         name.setCellFactory(column -> new NameCell());
 
-        TreeTableColumn<FileTree.Node, String> size = new TreeTableColumn<>("SIZE");
+        TreeTableColumn<FileTree.Node, String> size = new TreeTableColumn<>(tr("dialog.add.column.size"));
         size.setSortable(false);
         size.setPrefWidth(92);
         size.setMinWidth(92);
@@ -627,7 +632,7 @@ final class AddDialog {
         size.setCellValueFactory(p ->
                 new ReadOnlyObjectWrapper<>(Bytes.human(p.getValue().getValue().size())));
 
-        TreeTableColumn<FileTree.Node, String> priority = new TreeTableColumn<>("PRIORITY");
+        TreeTableColumn<FileTree.Node, String> priority = new TreeTableColumn<>(tr("dialog.add.column.priority"));
         priority.setSortable(false);
         priority.setEditable(false);
         priority.setPrefWidth(72);
@@ -648,8 +653,10 @@ final class AddDialog {
                 super.updateItem(item, empty);
                 setText(empty ? null : item);
                 getStyleClass().removeAll("priority-high", "priority-skip");
-                if (!empty && "High".equals(item)) getStyleClass().add("priority-high");
-                if (!empty && "Skip".equals(item)) getStyleClass().add("priority-skip");
+                if (!empty && com.torrenta.engine.Priority.HIGH.label().equals(item))
+                    getStyleClass().add("priority-high");
+                if (!empty && com.torrenta.engine.Priority.IGNORE.label().equals(item))
+                    getStyleClass().add("priority-skip");
             }
         });
         tree.getColumns().addAll(List.of(name, size, priority));
@@ -775,7 +782,7 @@ final class AddDialog {
 
     private void browse() {
         DirectoryChooser chooser = new DirectoryChooser();
-        chooser.setTitle("Save to");
+        chooser.setTitle(tr("dialog.common.saveTo"));
         File current = new File(savePath.getText().trim());
         while (current != null && !current.isDirectory()) current = current.getParentFile();
         if (current != null) chooser.setInitialDirectory(current);
@@ -795,7 +802,8 @@ final class AddDialog {
         Optional<FreeSpace.Disk> disk = destination == null ? Optional.empty() : FreeSpace.disk(destination);
         long wanted = root == null ? -1 : FileTree.wantedSize(root);
         diskBar.set(disk.map(d -> FreeSpace.bar(d, wanted)).orElse(new FreeSpace.Bar(0, 0, true)));
-        String line = disk.map(d -> FreeSpace.sentence(d, wanted)).orElse(text.isEmpty() ? "" : "Free space unknown");
+        String line = disk.map(d -> FreeSpace.sentence(d, wanted))
+                .orElse(text.isEmpty() ? "" : tr("dialog.add.freeSpaceUnknown"));
         // With the incomplete folder on, the files start elsewhere: say where, and its free space.
         DownloadPlan plan = destination == null ? null : defaults.plan(destination);
         if (plan != null && plan.viaIncomplete()) {
@@ -858,30 +866,21 @@ final class AddDialog {
 
     /** "ADD TORRENT · FROM FILE", or "CHOOSE FILES" for a torrent already in the list. */
     static String kicker(Via via, boolean existing) {
-        if (existing) return "CHOOSE FILES";
-        String from =
-                switch (via) {
-                    case FILE -> "FROM FILE";
-                    case URL -> "FROM URL";
-                    case MAGNET -> "FROM MAGNET LINK";
-                    case CLIPBOARD -> "FROM CLIPBOARD";
-                    case SEARCH -> "FROM SEARCH";
-                    case RSS -> "FROM RSS";
-                };
-        return "ADD TORRENT · " + from;
+        if (existing) return tr("dialog.add.kicker.chooseFiles");
+        return tr("dialog.add.kicker", tr("dialog.add.via." + via.name().toLowerCase(Locale.ROOT)));
     }
 
     /** "5.9 GiB · 3 files · hybrid v1+v2 · 4 trackers · “Encoded by …”". */
     static String summary(TorrentPreview p) {
         List<String> parts = new ArrayList<>();
         parts.add(Bytes.human(p.size()));
-        parts.add(count(p.files().size(), "file"));
-        String version = p.v1() && p.v2() ? "hybrid v1+v2" : p.v2() ? "v2" : p.v1() ? "v1" : "";
+        parts.add(tr("dialog.add.files", p.files().size()));
+        String version = p.v1() && p.v2() ? tr("dialog.add.version.hybrid") : p.v2() ? "v2" : p.v1() ? "v1" : "";
         if (!version.isEmpty()) parts.add(version);
-        if (p.isPrivate()) parts.add("private");
-        parts.add(p.trackers().isEmpty() ? "no trackers" : count(p.trackers().size(), "tracker"));
+        if (p.isPrivate()) parts.add(tr("dialog.add.private"));
+        parts.add(tr("dialog.add.trackers", p.trackers().size()));
         String comment = p.comment().strip().replaceAll("\\s+", " ");
-        if (!comment.isEmpty()) parts.add("“" + comment + "”");
+        if (!comment.isEmpty()) parts.add(tr("dialog.add.comment", comment));
         return String.join(" · ", parts);
     }
 
@@ -889,15 +888,16 @@ final class AddDialog {
     static String magnetSummary(AddRequest.Source source) {
         if (!(source instanceof AddRequest.Magnet magnet)) return "";
         int trackers = MagnetNames.trackers(magnet.uri());
-        return "Size unknown until the file list arrives · "
-                + (trackers == 0 ? "no trackers, DHT only" : count(trackers, "tracker"));
+        return tr("dialog.add.magnetSummary", tr("dialog.add.magnetTrackers", trackers));
     }
 
     /** "Fetching file list · 3 peers · 12s"; a minute and more reads "1m 05s". */
     static String fetchingLine(int peers, long seconds) {
         long s = Math.max(0, seconds);
-        String elapsed = s < 60 ? s + "s" : String.format(Locale.ROOT, "%dm %02ds", s / 60, s % 60);
-        return "Fetching file list · " + count(Math.max(0, peers), "peer") + " · " + elapsed;
+        String elapsed = s < 60
+                ? tr("dialog.add.elapsed.seconds", Long.toString(s))
+                : tr("dialog.add.elapsed.minutes", Long.toString(s / 60), String.format(Locale.ROOT, "%02d", s % 60));
+        return tr("dialog.add.fetching", tr("dialog.add.peers", Math.max(0, peers)), elapsed);
     }
 
     /**
@@ -905,11 +905,7 @@ final class AddDialog {
      * JavaFX writes Enter as an arrow ("Shift+↵", "⌘↵" on macOS).
      */
     static String keyLabel(String displayText) {
-        return displayText.replace("↵", "Enter").replace("⏎", "Enter");
-    }
-
-    private static String count(int n, String noun) {
-        return n + " " + noun + (n == 1 ? "" : "s");
+        return displayText.replace("↵", tr("dialog.common.key.enter")).replace("⏎", tr("dialog.common.key.enter"));
     }
 
     /** The request an input is added with when the dialog does not open: the settings' defaults. */
@@ -942,7 +938,7 @@ final class AddDialog {
         if (preview != null) return preview.name();
         if (source instanceof AddRequest.Magnet magnet) {
             String dn = MagnetNames.displayName(magnet.uri());
-            return dn.isEmpty() ? "Unknown until the metadata arrives" : dn;
+            return dn.isEmpty() ? tr("dialog.add.nameUnknown") : dn;
         }
         return "";
     }

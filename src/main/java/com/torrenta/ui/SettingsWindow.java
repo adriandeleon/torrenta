@@ -65,6 +65,8 @@ import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
 import com.torrenta.sync.SyncEngine;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The Settings window: a sidebar of pages, a search box that filters rows across all of them, and
  * controls that write through the moment they change. Carried over from Termina's.
@@ -76,46 +78,49 @@ final class SettingsWindow {
 
     /** Sidebar groups; a page belongs to one. */
     enum Group {
-        APPLICATION("Application"),
-        ENGINE("Engine");
+        APPLICATION("application"),
+        ENGINE("engine");
 
-        private final String title;
+        private final String id;
 
-        Group(String title) {
-            this.title = title;
+        Group(String id) {
+            this.id = id;
         }
 
+        /** The sidebar heading in the UI language, read at call time: the language is chosen after enums load. */
         String title() {
-            return title;
+            return tr("settings.group." + id);
         }
     }
 
     /** The pages. Connection, Speed, BitTorrent and Advanced join as their settings arrive. */
     enum Category {
-        GENERAL(Group.APPLICATION, "General"),
-        ADDING(Group.APPLICATION, "Adding torrents"),
-        WATCH(Group.APPLICATION, "Watch folders"),
-        AUTOMATION(Group.APPLICATION, "Automation"),
-        SEARCH(Group.APPLICATION, "Search"),
-        RSS(Group.APPLICATION, "RSS"),
-        SYNC(Group.APPLICATION, "Sync"),
-        LABELS(Group.APPLICATION, "Categories and tags"),
-        CONNECTION(Group.ENGINE, "Connection"),
-        PROTOCOL(Group.ENGINE, "Protocol"),
-        IP_FILTER(Group.ENGINE, "IP filter"),
-        SPEED(Group.ENGINE, "Speed"),
-        QUEUE(Group.ENGINE, "Queue and share limits");
+        GENERAL(Group.APPLICATION, "general"),
+        ADDING(Group.APPLICATION, "adding"),
+        WATCH(Group.APPLICATION, "watchFolders"),
+        AUTOMATION(Group.APPLICATION, "automation"),
+        SEARCH(Group.APPLICATION, "search"),
+        RSS(Group.APPLICATION, "rss"),
+        SYNC(Group.APPLICATION, "sync"),
+        LABELS(Group.APPLICATION, "labels"),
+        CONNECTION(Group.ENGINE, "connection"),
+        PROTOCOL(Group.ENGINE, "protocol"),
+        IP_FILTER(Group.ENGINE, "ipFilter"),
+        SPEED(Group.ENGINE, "speed"),
+        QUEUE(Group.ENGINE, "queue");
 
         final Group group;
-        private final String title;
+        /** The page's key segment: {@code settings.<id>.*} in the catalogue. */
+        final String id;
 
-        Category(Group group, String title) {
+        Category(Group group, String id) {
             this.group = group;
-            this.title = title;
+            this.id = id;
         }
 
+        /** The page title in the UI language, read at call time: the language is chosen after enums load. */
         String title() {
-            return title;
+            return tr("settings." + id + ".title");
         }
     }
 
@@ -124,6 +129,7 @@ final class SettingsWindow {
     /** The keys this window owns, for Reset. */
     private static final String[] OWNED_KEYS = concat(
             new String[] {
+                Settings.UI_LANGUAGE,
                 Settings.UPDATE_CHECK,
                 Settings.ADD_START_PAUSED,
                 Settings.ADD_SEQUENTIAL,
@@ -463,6 +469,7 @@ final class SettingsWindow {
     /** Guards control listeners while a page is being populated from stored values. */
     private boolean loading;
 
+    private ChoiceBox<String> language;
     private ChoiceBox<Theme> theme;
     private TextField downloadDir;
     private CheckBox incompleteEnabled;
@@ -528,7 +535,7 @@ final class SettingsWindow {
     }
 
     private void buildSync(VBox page) {
-        VBox repository = section(page, "Repository");
+        VBox repository = section(page, tr("settings.sync.repository"));
         syncEnabled = new CheckBox();
         syncEnabled.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -542,12 +549,10 @@ final class SettingsWindow {
         row(
                 Category.SYNC,
                 repository,
-                "Keep settings in sync",
-                "Through a Git repository of yours, a private one on GitHub say. Every computer that connects to it"
-                        + " gets the same settings: themes, columns, connection, protocol, filter and bans. Not this"
-                        + " machine's folders, interface, clocks or proxy password.",
+                tr("settings.sync.enabled"),
+                tr("settings.sync.enabled.desc"),
                 syncEnabled,
-                "git github repository share machines computers");
+                tr("settings.sync.enabled.keywords"));
         syncUrl = new TextField();
         syncUrl.setPrefColumnCount(18);
         syncUrl.setPromptText("https://github.com/you/torrenta-settings.git");
@@ -557,16 +562,15 @@ final class SettingsWindow {
             settings.saveQuietly();
             if (sync != null) sync.settingsChanged();
         });
-        Button create = new Button("Create on GitHub…");
+        Button create = new Button(tr("settings.sync.createOnGitHub"));
         create.setOnAction(e -> createSyncRepository());
         row(
                 Category.SYNC,
                 repository,
-                "Repository",
-                "Its URL as git would clone it, HTTPS or SSH, without a password or token in it. Create on GitHub"
-                        + " makes a private one through the GitHub CLI and fills this in.",
+                tr("settings.sync.url"),
+                tr("settings.sync.url.desc"),
                 new HBox(6, syncUrl, create),
-                "url clone remote private gh");
+                tr("settings.sync.url.keywords"));
         syncBranch = new TextField();
         syncBranch.setPrefColumnCount(10);
         syncBranch.setPromptText("main");
@@ -575,7 +579,13 @@ final class SettingsWindow {
             settings.setSyncBranch(now);
             settings.saveQuietly();
         });
-        row(Category.SYNC, repository, "Branch", "main unless the repository uses another.", syncBranch, "branch");
+        row(
+                Category.SYNC,
+                repository,
+                tr("settings.sync.branch"),
+                tr("settings.sync.branch.desc"),
+                syncBranch,
+                tr("settings.sync.branch.keywords"));
         syncInterval = new Spinner<>(1, 1440, 15, 5);
         syncInterval.setEditable(true);
         syncInterval.setPrefWidth(90);
@@ -588,25 +598,24 @@ final class SettingsWindow {
         row(
                 Category.SYNC,
                 repository,
-                "Every, in minutes",
-                "How often to look while the window is in front. A change here syncs half a minute after it"
-                        + " anyway, and so does startup.",
+                tr("settings.sync.interval"),
+                tr("settings.sync.interval.desc"),
                 syncInterval,
-                "interval automatic timer schedule");
+                tr("settings.sync.interval.keywords"));
 
-        VBox status = section(page, "Status");
-        syncStatus = new Label("Not connected.");
+        VBox status = section(page, tr("settings.sync.status"));
+        syncStatus = new Label(tr("settings.sync.notConnected"));
         syncStatus.setWrapText(true);
         syncStatus.getStyleClass().add("settings-row-description");
-        syncNow = new Button("Sync now");
+        syncNow = new Button(tr("settings.sync.syncNow"));
         syncNow.setOnAction(e -> {
             if (sync != null) sync.syncNow();
         });
-        syncDisconnect = new Button("Disconnect");
+        syncDisconnect = new Button(tr("settings.sync.disconnect"));
         syncDisconnect.setOnAction(e -> disconnectSync());
         VBox statusBox = new VBox(8, syncStatus, new HBox(8, syncNow, syncDisconnect));
         status.getChildren().add(statusBox);
-        rows.add(new Row(Category.SYNC, statusBox, "status last sync now disconnect account", status));
+        rows.add(new Row(Category.SYNC, statusBox, tr("settings.sync.status.keywords"), status));
     }
 
     /** The switch went on: refuse a URL with a secret, show what connecting brings, then sync. */
@@ -614,19 +623,19 @@ final class SettingsWindow {
         String url = syncUrl.getText().trim();
         if (!SyncEngine.isUsableUrl(url)) {
             syncEnabled.setSelected(false);
-            syncStatus.setText("Enter the repository's URL first.");
+            syncStatus.setText(tr("settings.sync.enterUrl"));
             return;
         }
         if (SyncEngine.hasCredentials(url)) {
             syncEnabled.setSelected(false);
-            syncStatus.setText("The URL carries a password or token; git signs in by itself, take it out.");
+            syncStatus.setText(tr("settings.sync.urlHasSecret"));
             return;
         }
         settings.setSyncUrl(url);
         settings.setSyncEnabled(true);
         settings.saveQuietly();
         if (sync == null) return;
-        syncStatus.setText("Looking at the repository…");
+        syncStatus.setText(tr("settings.sync.looking"));
         sync.preview(url, settings.syncBranch(), report -> {
             if (!report.ok()) {
                 settings.setSyncEnabled(false);
@@ -638,22 +647,18 @@ final class SettingsWindow {
             if (!report.received().isEmpty()) {
                 Alert ask = new Alert(
                         Alert.AlertType.CONFIRMATION,
-                        "The repository already holds settings: "
-                                + report.received().size()
-                                + " would come to this machine"
-                                + (report.conflicts().isEmpty()
-                                        ? ""
-                                        : ", and " + report.conflicts().size()
-                                                + " that differ here keep this machine's value")
-                                + ". Connect?");
-                ask.setHeaderText("Connect to the repository");
+                        tr(
+                                "settings.sync.connectQuestion",
+                                report.received().size(),
+                                report.conflicts().size()));
+                ask.setHeaderText(tr("settings.sync.connectHeader"));
                 ask.initOwner(stage);
                 Fonts.installUiFont(ask.getDialogPane());
                 if (ask.showAndWait().filter(b -> b == ButtonType.OK).isEmpty()) {
                     settings.setSyncEnabled(false);
                     settings.saveQuietly();
                     reload();
-                    syncStatus.setText("Not connected.");
+                    syncStatus.setText(tr("settings.sync.notConnected"));
                     return;
                 }
             }
@@ -665,29 +670,27 @@ final class SettingsWindow {
     private void createSyncRepository() {
         TextInputDialog ask = new TextInputDialog("torrenta-settings");
         ask.initOwner(stage);
-        ask.setTitle("Create on GitHub");
-        ask.setHeaderText("A private repository under the GitHub CLI's account");
-        ask.setContentText("Name:");
+        ask.setTitle(tr("settings.sync.create.title"));
+        ask.setHeaderText(tr("settings.sync.create.header"));
+        ask.setContentText(tr("settings.sync.create.name"));
         Fonts.installUiFont(ask.getDialogPane());
         ask.showAndWait().map(String::trim).filter(n -> !n.isEmpty()).ifPresent(name -> {
             if (sync == null) return;
-            syncStatus.setText("Creating " + name + " on GitHub…");
+            syncStatus.setText(tr("settings.sync.creating", name));
             sync.createOnGitHub(name, created -> {
                 if (created.ok()) {
                     syncUrl.setText(created.url());
-                    syncStatus.setText("Created. Switch sync on to connect.");
+                    syncStatus.setText(tr("settings.sync.created"));
                 } else {
-                    syncStatus.setText("GitHub CLI: " + created.error());
+                    syncStatus.setText(tr("settings.sync.ghError", created.error()));
                 }
             });
         });
     }
 
     private void disconnectSync() {
-        Alert ask = new Alert(
-                Alert.AlertType.CONFIRMATION,
-                "Stop syncing, forget the repository and remove the local copy? The settings stay as they are.");
-        ask.setHeaderText("Disconnect");
+        Alert ask = new Alert(Alert.AlertType.CONFIRMATION, tr("settings.sync.disconnectQuestion"));
+        ask.setHeaderText(tr("settings.sync.disconnect"));
         ask.initOwner(stage);
         Fonts.installUiFont(ask.getDialogPane());
         if (ask.showAndWait().filter(b -> b == ButtonType.OK).isEmpty()) return;
@@ -701,17 +704,23 @@ final class SettingsWindow {
         SettingsSync.State s = sync.state();
         String text =
                 switch (s.phase()) {
-                    case OFF -> "Not connected.";
-                    case SYNCING -> "Syncing…";
+                    case OFF -> tr("settings.sync.notConnected");
+                    case SYNCING -> tr("settings.sync.syncing");
                     case IDLE ->
                         s.report() == null
-                                ? "Connected; the first sync is due."
-                                : "Last sync " + at(s.at()) + ": " + s.report().summary() + ".";
-                    case PROBLEM ->
-                        "⚠ " + (s.report() == null ? "" : s.report().summary())
-                                + (s.at() == null ? "" : " (" + at(s.at()) + ")");
+                                ? tr("settings.sync.firstDue")
+                                : tr(
+                                        "settings.sync.lastSync",
+                                        at(s.at()),
+                                        s.report().summary());
+                    case PROBLEM -> {
+                        String summary = s.report() == null ? "" : s.report().summary();
+                        yield s.at() == null
+                                ? tr("settings.sync.problem", summary)
+                                : tr("settings.sync.problemAt", summary, at(s.at()));
+                    }
                 };
-        if (!s.account().isEmpty()) text += "\nSigning in as " + s.account() + " through the GitHub CLI.";
+        if (!s.account().isEmpty()) text += "\n" + tr("settings.sync.signingIn", s.account());
         syncStatus.setText(text);
         boolean on = s.phase() != SettingsSync.Phase.OFF;
         syncNow.setDisable(!on || s.phase() == SettingsSync.Phase.SYNCING);
@@ -817,14 +826,14 @@ final class SettingsWindow {
     // ---------------------------------------------------------------- shell
 
     private void build() {
-        stage.setTitle(AppInfo.NAME + " Settings");
+        stage.setTitle(tr("settings.title", AppInfo.NAME));
         for (Category category : Category.values()) pages.put(category, buildPage(category));
 
-        search.setPromptText("Search settings");
+        search.setPromptText(tr("settings.searchBox.prompt"));
         search.textProperty().addListener((o, old, value) -> filter(value));
         VBox.setMargin(search, new Insets(0, 0, 8, 0));
 
-        sidebar.setPrefWidth(190);
+        sidebar.setPrefWidth(sidebarWidth());
         sidebar.setMinWidth(150);
         sidebar.getStyleClass().add("settings-sidebar");
         sidebar.setCellFactory(list -> new SidebarCell());
@@ -836,14 +845,14 @@ final class SettingsWindow {
         pageHost.setPadding(new Insets(4, 0, 0, PAGE_GUTTER));
         pageHost.setAlignment(Pos.TOP_LEFT);
 
-        Button reset = new Button("Reset to defaults");
+        Button reset = new Button(tr("settings.reset"));
         reset.setOnAction(e -> {
             settings.reset(OWNED_KEYS);
             settings.saveQuietly();
             reload();
             onAppearanceChanged.run();
         });
-        Button close = new Button("Close");
+        Button close = new Button(tr("common.close"));
         close.setOnAction(e -> stage.hide());
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -892,6 +901,20 @@ final class SettingsWindow {
     }
 
     /** Group headers are labels, not choices — they must not be selectable or clickable. */
+    /**
+     * Wide enough for the longest page title in the interface language (German's "Warteschlange und
+     * Verteilungslimits" is twice the English), never narrower than the 190 the English layout had,
+     * so no title is cut and the list never grows a horizontal scrollbar.
+     */
+    private static double sidebarWidth() {
+        double widest = 0;
+        for (Category category : Category.values()) {
+            javafx.scene.text.Text text = new javafx.scene.text.Text("    " + category.title());
+            widest = Math.max(widest, text.getLayoutBounds().getWidth());
+        }
+        return Math.max(190, Math.ceil(widest) + 36);
+    }
+
     private final class SidebarCell extends ListCell<Object> {
         @Override
         protected void updateItem(Object item, boolean empty) {
@@ -1035,7 +1058,37 @@ final class SettingsWindow {
     // ---------------------------------------------------------------- pages
 
     private void buildGeneral(VBox page) {
-        VBox appearance = section(page, "Appearance");
+        VBox languageSection = section(page, tr("settings.general.language.section"));
+        language = new ChoiceBox<String>();
+        language.getItems().add(com.torrenta.i18n.Messages.SYSTEM);
+        language.getItems().addAll(com.torrenta.i18n.Messages.available().keySet());
+        language.setConverter(new StringConverter<>() {
+            @Override
+            public String toString(String code) {
+                return code == null || com.torrenta.i18n.Messages.isAutomatic(code)
+                        ? tr("settings.general.language.system")
+                        : com.torrenta.i18n.Messages.languageName(code);
+            }
+
+            @Override
+            public String fromString(String s) {
+                return s;
+            }
+        });
+        language.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setUiLanguage(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.GENERAL,
+                languageSection,
+                tr("settings.general.language"),
+                tr("settings.general.language.desc"),
+                language,
+                tr("settings.general.language.keywords"));
+
+        VBox appearance = section(page, tr("settings.general.appearance"));
         theme = new ChoiceBox<>();
         theme.getItems().addAll(Theme.values());
         theme.valueProperty().addListener((o, was, now) -> {
@@ -1048,10 +1101,10 @@ final class SettingsWindow {
         row(
                 Category.GENERAL,
                 appearance,
-                "Theme",
-                "Editora's Caret & Ink pair, and AtlantaFX's Nord and Cupertino, light and dark. Applied at once.",
+                tr("settings.general.theme"),
+                tr("settings.general.theme.desc"),
                 theme,
-                "appearance colors colours dark light nord cupertino editora style");
+                tr("settings.general.theme.keywords"));
         density = new ChoiceBox<>();
         density.getItems().addAll(Density.values());
         density.valueProperty().addListener((o, was, now) -> {
@@ -1063,12 +1116,10 @@ final class SettingsWindow {
         row(
                 Category.GENERAL,
                 appearance,
-                "Row density",
-                "Comfortable rows are two lines: the name over a thin progress bar and what the torrent is"
-                        + " doing. Compact rows are one line, with Progress and Status as columns. Each keeps"
-                        + " its own columns.",
+                tr("settings.general.density"),
+                tr("settings.general.density.desc"),
                 density,
-                "rows density comfortable compact height two lines list table columns");
+                tr("settings.general.density.keywords"));
         stateColors = new CheckBox();
         stateColors.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -1079,13 +1130,12 @@ final class SettingsWindow {
         row(
                 Category.GENERAL,
                 appearance,
-                "Colour rows by state",
-                "Downloading teal, seeding periwinkle, stalled amber, errors red: the glyph, the start of the"
-                        + " status and the progress bar. Off, the glyphs and sentences still say it.",
+                tr("settings.general.stateColors"),
+                tr("settings.general.stateColors.desc"),
                 stateColors,
-                "state status colours colors glyph progress bar stalled seeding downloading error accessibility");
+                tr("settings.general.stateColors.keywords"));
 
-        VBox keyboard = section(page, "Keyboard");
+        VBox keyboard = section(page, tr("settings.general.keyboard"));
         paletteKey = new ChoiceBox<>();
         paletteKey.getItems().addAll(PaletteKey.values());
         paletteKey.valueProperty().addListener((o, was, now) -> {
@@ -1097,14 +1147,12 @@ final class SettingsWindow {
         row(
                 Category.GENERAL,
                 keyboard,
-                "Command palette",
-                "The chord that opens the palette: Alt+X, Editora's M-x, or the Ctrl+Shift+P of the"
-                        + " first releases. The View menu and the toolbar say the one in force. Applied"
-                        + " at once.",
+                tr("settings.general.paletteKey"),
+                tr("settings.general.paletteKey.desc"),
                 paletteKey,
-                "keyboard shortcut chord key binding keybinding palette command alt x m-x ctrl shift p");
+                tr("settings.general.paletteKey.keywords"));
 
-        VBox trayBox = section(page, "System tray");
+        VBox trayBox = section(page, tr("settings.general.systemTray"));
         tray = new CheckBox();
         tray.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -1115,13 +1163,10 @@ final class SettingsWindow {
         row(
                 Category.GENERAL,
                 trayBox,
-                "Show a tray icon",
-                "The arrow in the panel: teal while something downloads, red when a torrent has an error."
-                        + " Its tooltip and menu carry the rates. Where the desktop has a tray: KDE, GNOME with"
-                        + " the AppIndicator extension, Windows and the macOS menu bar; on Windows and macOS"
-                        + " it applies after restarting Torrenta.",
+                tr("settings.general.trayIcon"),
+                tr("settings.general.trayIcon.desc"),
                 tray,
-                "tray icon panel notification area menu bar status item indicator appindicator dock");
+                tr("settings.general.trayIcon.keywords"));
         closeToTray = new CheckBox();
         closeToTray.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -1133,13 +1178,12 @@ final class SettingsWindow {
         row(
                 Category.GENERAL,
                 trayBox,
-                "Closing the window keeps Torrenta in the tray",
-                "The torrents go on; the tray icon's Show Torrenta brings the window back, its Quit ends"
-                        + " the program, as does Quit in the File menu. Without a tray, closing quits.",
+                tr("settings.general.closeToTray"),
+                tr("settings.general.closeToTray.desc"),
                 closeToTray,
-                "close to tray hide minimize minimise background keep running quit exit window");
+                tr("settings.general.closeToTray.keywords"));
 
-        VBox desktop = section(page, "Operating system");
+        VBox desktop = section(page, tr("settings.general.operatingSystem"));
         osHandler = new CheckBox();
         osHandler.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -1150,16 +1194,10 @@ final class SettingsWindow {
         row(
                 Category.GENERAL,
                 desktop,
-                "Register as handler for .torrent files and magnet links",
-                "A double-clicked .torrent and a magnet link in the browser open here, in the running"
-                        + " Torrenta when there is one. On Linux this sets the desktop's default with xdg-mime"
-                        + " each time Torrenta starts; on Windows it writes the magnet: protocol and the"
-                        + " .torrent default under this user's registry key, and unticking removes them; on"
-                        + " macOS the app bundle declares both and Finder's Get Info → Open with chooses,"
-                        + " so this box only explains. The status bar says what happened.",
+                tr("settings.general.osHandler"),
+                tr("settings.general.osHandler.desc"),
                 osHandler,
-                "handler default application open with torrent magnet protocol scheme mime xdg-mime"
-                        + " registry file association single instance");
+                tr("settings.general.osHandler.keywords"));
         osBadge = new CheckBox();
         osBadge.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -1170,16 +1208,12 @@ final class SettingsWindow {
         row(
                 Category.GENERAL,
                 desktop,
-                "Show download activity on the dock icon",
-                "The macOS dock badge shows the download rate while something downloads; a Linux"
-                        + " launcher that honours Unity's badge (KDE, Dash to Dock) shows how many torrents"
-                        + " are downloading. Cleared when nothing does. Nothing on Windows, whose taskbar"
-                        + " badges only the kind of window Torrenta is not. On macOS it applies after"
-                        + " restarting Torrenta.",
+                tr("settings.general.osBadge"),
+                tr("settings.general.osBadge.desc"),
                 osBadge,
-                "badge dock taskbar launcher count rate download activity unity overlay");
+                tr("settings.general.osBadge.keywords"));
 
-        VBox downloads = section(page, "Downloads");
+        VBox downloads = section(page, tr("settings.general.downloads"));
         downloadDir = new TextField();
         downloadDir.setPrefColumnCount(28);
         downloadDir.textProperty().addListener((o, was, now) -> {
@@ -1187,10 +1221,10 @@ final class SettingsWindow {
             settings.downloadDir(Path.of(now.trim()));
             settings.saveQuietly();
         });
-        Button browse = new Button("Browse…");
+        Button browse = new Button(tr("common.browse"));
         browse.setOnAction(e -> {
             DirectoryChooser chooser = new DirectoryChooser();
-            chooser.setTitle("Download folder");
+            chooser.setTitle(tr("settings.general.downloadDir"));
             File current = new File(downloadDir.getText().trim());
             while (current != null && !current.isDirectory()) current = current.getParentFile();
             if (current != null) chooser.setInitialDirectory(current);
@@ -1200,10 +1234,10 @@ final class SettingsWindow {
         row(
                 Category.GENERAL,
                 downloads,
-                "Download folder",
-                "Where new torrents save their files; the Add dialog starts here and can pick another.",
+                tr("settings.general.downloadDir"),
+                tr("settings.general.downloadDir.desc"),
                 new HBox(6, downloadDir, browse),
-                "save path directory location");
+                tr("settings.general.downloadDir.keywords"));
 
         incompleteEnabled = new CheckBox();
         incompleteEnabled.selectedProperty().addListener((o, was, now) -> {
@@ -1221,13 +1255,13 @@ final class SettingsWindow {
         incompleteDir
                 .disableProperty()
                 .bind(incompleteEnabled.selectedProperty().not());
-        Button browseIncomplete = new Button("Browse…");
+        Button browseIncomplete = new Button(tr("common.browse"));
         browseIncomplete
                 .disableProperty()
                 .bind(incompleteEnabled.selectedProperty().not());
         browseIncomplete.setOnAction(e -> {
             DirectoryChooser chooser = new DirectoryChooser();
-            chooser.setTitle("Incomplete folder");
+            chooser.setTitle(tr("settings.general.incompleteDir"));
             File current = new File(incompleteDir.getText().trim());
             while (current != null && !current.isDirectory()) current = current.getParentFile();
             if (current != null) chooser.setInitialDirectory(current);
@@ -1239,11 +1273,10 @@ final class SettingsWindow {
         row(
                 Category.GENERAL,
                 downloads,
-                "Incomplete folder",
-                "Downloads start here and are moved to their save path when complete; a file already there is never"
-                        + " written over. This folder is this machine's and does not sync.",
+                tr("settings.general.incompleteDir"),
+                tr("settings.general.incompleteDir.desc"),
                 incompleteRow,
-                "temporary partial in progress move finished");
+                tr("settings.general.incompleteDir.keywords"));
         partSuffix = new CheckBox();
         partSuffix.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -1253,11 +1286,10 @@ final class SettingsWindow {
         row(
                 Category.GENERAL,
                 downloads,
-                "Append .part to incomplete files",
-                "Each file carries the suffix until it is complete, so a half-downloaded file is never mistaken for a"
-                        + " whole one. Applies to torrents added from now on.",
+                tr("settings.general.partSuffix"),
+                tr("settings.general.partSuffix.desc"),
                 partSuffix,
-                "suffix extension !qB !tr partial rename");
+                tr("settings.general.partSuffix.keywords"));
         preallocate = new CheckBox();
         preallocate.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -1267,13 +1299,12 @@ final class SettingsWindow {
         row(
                 Category.GENERAL,
                 downloads,
-                "Pre-allocate disk space for all files",
-                "A file is written at its full size from its first piece, which keeps it in one piece on disk and"
-                        + " fails early when the disk is full. Applies to torrents added from now on.",
+                tr("settings.general.preallocate"),
+                tr("settings.general.preallocate.desc"),
                 preallocate,
-                "allocate sparse fragmentation full size");
+                tr("settings.general.preallocate.keywords"));
 
-        VBox updates = section(page, "Updates");
+        VBox updates = section(page, tr("settings.general.updates"));
         updateCheck = new CheckBox();
         updateCheck.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -1283,22 +1314,21 @@ final class SettingsWindow {
         row(
                 Category.GENERAL,
                 updates,
-                "Check for updates",
-                "Ask GitHub for a newer release after startup, at most once a day. Help → Check for Updates asks regardless.",
+                tr("settings.general.updateCheck"),
+                tr("settings.general.updateCheck.desc"),
                 updateCheck,
-                "release version github automatic");
+                tr("settings.general.updateCheck.keywords"));
 
-        VBox diagnostics = section(page, "Diagnostics");
-        Button debugLog = new Button("Show debug log");
+        VBox diagnostics = section(page, tr("settings.general.diagnostics"));
+        Button debugLog = new Button(tr("settings.general.debugLog.button"));
         debugLog.setOnAction(e -> showDebugLog.run());
         row(
                 Category.GENERAL,
                 diagnostics,
-                "Debug log",
-                "Warnings, errors and crashes from this session, also written to " + DebugLog.FILE_NAME
-                        + " beside the settings. Copy it into a bug report.",
+                tr("settings.general.debugLog"),
+                tr("settings.general.debugLog.desc", DebugLog.FILE_NAME),
                 debugLog,
-                "debug log diagnostics errors warnings crash trace troubleshoot bug report session file");
+                tr("settings.general.debugLog.keywords"));
     }
 
     /**
@@ -1307,44 +1337,44 @@ final class SettingsWindow {
      * and the window re-files the torrents when one is deleted.
      */
     private void buildLabels(VBox page) {
-        VBox categories = section(page, "Categories");
+        VBox categories = section(page, tr("settings.labels.categories"));
         categoryTable = new TableView<>();
         categoryTable.setPrefHeight(170);
-        categoryTable.setPlaceholder(new Label("No categories yet"));
+        categoryTable.setPlaceholder(new Label(tr("settings.labels.categories.empty")));
         categoryTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        TableColumn<com.torrenta.engine.Category, String> name = new TableColumn<>("Name");
+        TableColumn<com.torrenta.engine.Category, String> name = new TableColumn<>(tr("common.name"));
         name.setPrefWidth(160);
         name.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().name()));
-        TableColumn<com.torrenta.engine.Category, String> path = new TableColumn<>("Save path");
+        TableColumn<com.torrenta.engine.Category, String> path = new TableColumn<>(tr("settings.labels.savePath"));
         path.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
                 c.getValue().savePath().isEmpty()
-                        ? "(the download folder)"
+                        ? tr("settings.labels.downloadFolder")
                         : c.getValue().savePath()));
         categoryTable.getColumns().addAll(List.of(name, path));
         categoryName = new TextField();
-        categoryName.setPromptText("name");
+        categoryName.setPromptText(tr("settings.labels.categoryName.prompt"));
         categoryName.setPrefColumnCount(12);
         categoryPath = new TextField();
-        categoryPath.setPromptText("save path, empty for the download folder");
+        categoryPath.setPromptText(tr("settings.labels.categoryPath.prompt"));
         HBox.setHgrow(categoryPath, Priority.ALWAYS);
-        Button browse = new Button("Browse…");
+        Button browse = new Button(tr("common.browse"));
         browse.setOnAction(e -> {
             DirectoryChooser chooser = new DirectoryChooser();
-            chooser.setTitle("Save path for the category");
+            chooser.setTitle(tr("settings.labels.categoryPath.chooser"));
             File current = new File(categoryPath.getText().trim());
             while (current != null && !current.isDirectory()) current = current.getParentFile();
             if (current != null) chooser.setInitialDirectory(current);
             File chosen = chooser.showDialog(stage);
             if (chosen != null) categoryPath.setText(chosen.getAbsolutePath());
         });
-        Button save = new Button("Save");
+        Button save = new Button(tr("common.save"));
         save.setDefaultButton(false);
         save.disableProperty().bind(categoryName.textProperty().map(String::isBlank));
         save.setOnAction(e -> saveCategory());
         categoryName.setOnAction(e -> saveCategory());
         categoryPath.setOnAction(e -> saveCategory());
-        categoryDelete = new Button("Delete");
+        categoryDelete = new Button(tr("common.delete"));
         categoryDelete
                 .disableProperty()
                 .bind(categoryTable.getSelectionModel().selectedItemProperty().isNull());
@@ -1356,9 +1386,7 @@ final class SettingsWindow {
         });
         HBox form = new HBox(6, categoryName, categoryPath, browse, save, categoryDelete);
         form.setAlignment(Pos.CENTER_LEFT);
-        Label hint = new Label("A category with a save path fills the Add dialog's folder when chosen: new torrents"
-                + " filed under it download there. Changing the path moves nothing already added. Save with"
-                + " an existing name changes that category's path; Delete unfiles its torrents.");
+        Label hint = new Label(tr("settings.labels.categories.hint"));
         hint.setWrapText(true);
         hint.getStyleClass().add("settings-row-description");
         VBox categoryBox = new VBox(8, hint, categoryTable, form);
@@ -1366,34 +1394,37 @@ final class SettingsWindow {
         rows.add(new Row(
                 Category.LABELS,
                 categoryBox,
-                "Categories | name save path folder download automatic torrent management delete",
+                tr("settings.labels.categories") + " | " + tr("settings.labels.categories.keywords"),
                 categories));
 
-        VBox tags = section(page, "Tags");
+        VBox tags = section(page, tr("settings.labels.tags"));
         tagList = new ListView<>();
         tagList.setPrefHeight(130);
-        tagList.setPlaceholder(new Label("No tags yet"));
+        tagList.setPlaceholder(new Label(tr("settings.labels.tags.empty")));
         newTag = new TextField();
-        newTag.setPromptText("new tags, comma-separated");
+        newTag.setPromptText(tr("settings.labels.newTag.prompt"));
         HBox.setHgrow(newTag, Priority.ALWAYS);
-        Button addTag = new Button("Add");
+        Button addTag = new Button(tr("common.add"));
         addTag.disableProperty().bind(newTag.textProperty().map(String::isBlank));
         addTag.setOnAction(e -> addTags());
         newTag.setOnAction(e -> addTags());
-        tagDelete = new Button("Delete");
+        tagDelete = new Button(tr("common.delete"));
         tagDelete
                 .disableProperty()
                 .bind(tagList.getSelectionModel().selectedItemProperty().isNull());
         tagDelete.setOnAction(e -> deleteTag());
         HBox tagForm = new HBox(6, newTag, addTag, tagDelete);
         tagForm.setAlignment(Pos.CENTER_LEFT);
-        Label tagHint = new Label("Any number of tags per torrent (Torrent → Edit Tags…, Ctrl+T). A tag typed in a"
-                + " dialog is added here by itself; Delete takes it off every torrent.");
+        Label tagHint = new Label(tr("settings.labels.tags.hint"));
         tagHint.setWrapText(true);
         tagHint.getStyleClass().add("settings-row-description");
         VBox tagBox = new VBox(8, tagHint, tagList, tagForm);
         tags.getChildren().add(tagBox);
-        rows.add(new Row(Category.LABELS, tagBox, "Tags | labels add delete", tags));
+        rows.add(new Row(
+                Category.LABELS,
+                tagBox,
+                tr("settings.labels.tags") + " | " + tr("settings.labels.tags.keywords"),
+                tags));
     }
 
     private void saveCategory() {
@@ -1401,7 +1432,7 @@ final class SettingsWindow {
         try {
             labelStore.putCategory(new com.torrenta.engine.Category(categoryName.getText(), categoryPath.getText()));
         } catch (IOException | IllegalArgumentException e) {
-            report("Could not save the category: " + e.getMessage());
+            report(tr("settings.labels.saveCategoryFailed", e.getMessage()));
             return;
         }
         String saved = categoryName.getText().trim();
@@ -1420,7 +1451,7 @@ final class SettingsWindow {
         try {
             labelStore.removeCategory(selected.name());
         } catch (IOException e) {
-            report("Could not delete the category: " + e.getMessage());
+            report(tr("settings.labels.deleteCategoryFailed", e.getMessage()));
             return;
         }
         categoryName.clear();
@@ -1434,7 +1465,7 @@ final class SettingsWindow {
         try {
             labelStore.addTags(List.of(newTag.getText()));
         } catch (IOException e) {
-            report("Could not save the tags: " + e.getMessage());
+            report(tr("settings.labels.saveTagsFailed", e.getMessage()));
             return;
         }
         newTag.clear();
@@ -1448,7 +1479,7 @@ final class SettingsWindow {
         try {
             labelStore.removeTag(selected);
         } catch (IOException e) {
-            report("Could not delete the tag: " + e.getMessage());
+            report(tr("settings.labels.deleteTagFailed", e.getMessage()));
             return;
         }
         reloadLabels();
@@ -1479,38 +1510,38 @@ final class SettingsWindow {
     }
 
     private void buildWatch(VBox page) {
-        VBox folders = section(page, "Watched folders");
+        VBox folders = section(page, tr("settings.watchFolders.folders"));
         watchTable = new TableView<>();
         watchTable.setPrefHeight(190);
-        watchTable.setPlaceholder(new Label("No folders watched yet"));
+        watchTable.setPlaceholder(new Label(tr("settings.watchFolders.empty")));
         watchTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        TableColumn<WatchFolder, String> folder = new TableColumn<>("Folder");
+        TableColumn<WatchFolder, String> folder = new TableColumn<>(tr("settings.watchFolders.column.folder"));
         folder.setPrefWidth(200);
         folder.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().folder()));
-        TableColumn<WatchFolder, String> saveTo = new TableColumn<>("Save to");
+        TableColumn<WatchFolder, String> saveTo = new TableColumn<>(tr("settings.watchFolders.column.saveTo"));
         saveTo.setPrefWidth(170);
         saveTo.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
                 switch (c.getValue().saveTo()) {
-                    case DEFAULT -> "(the download folder)";
-                    case WATCH_FOLDER -> "(the watch folder)";
+                    case DEFAULT -> tr("settings.watchFolders.saveTo.downloadFolder");
+                    case WATCH_FOLDER -> tr("settings.watchFolders.saveTo.watchFolder");
                     case FOLDER -> c.getValue().savePath();
                 }));
-        TableColumn<WatchFolder, String> after = new TableColumn<>("After adding");
+        TableColumn<WatchFolder, String> after = new TableColumn<>(tr("settings.watchFolders.column.afterAdding"));
         after.setPrefWidth(110);
         after.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
                 switch (c.getValue().afterAdd()) {
-                    case DELETE -> "Delete";
-                    case RENAME -> "Rename";
+                    case DELETE -> tr("common.delete");
+                    case RENAME -> tr("settings.watchFolders.afterAdd.rename");
                 }));
-        TableColumn<WatchFolder, String> category = new TableColumn<>("Category");
+        TableColumn<WatchFolder, String> category = new TableColumn<>(tr("settings.watchFolders.column.category"));
         category.setPrefWidth(100);
         category.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
                 c.getValue().category().isEmpty() ? "" : c.getValue().category()));
-        TableColumn<WatchFolder, String> paused = new TableColumn<>("Paused");
+        TableColumn<WatchFolder, String> paused = new TableColumn<>(tr("settings.watchFolders.column.paused"));
         paused.setPrefWidth(60);
-        paused.setCellValueFactory(c ->
-                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().startPaused() ? "yes" : ""));
+        paused.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                c.getValue().startPaused() ? tr("settings.table.yes") : ""));
         watchTable.getColumns().addAll(List.of(folder, saveTo, after, category, paused));
         watchTable.setRowFactory(t -> {
             javafx.scene.control.TableRow<WatchFolder> row = new javafx.scene.control.TableRow<>();
@@ -1519,21 +1550,19 @@ final class SettingsWindow {
             });
             return row;
         });
-        Button add = new Button("Add…");
+        Button add = new Button(tr("settings.table.add"));
         add.setOnAction(e -> addWatchFolder());
-        Button edit = new Button("Edit…");
+        Button edit = new Button(tr("common.edit"));
         edit.disableProperty()
                 .bind(watchTable.getSelectionModel().selectedItemProperty().isNull());
         edit.setOnAction(e -> editWatchFolder());
-        Button remove = new Button("Remove");
+        Button remove = new Button(tr("common.remove"));
         remove.disableProperty()
                 .bind(watchTable.getSelectionModel().selectedItemProperty().isNull());
         remove.setOnAction(e -> removeWatchFolder());
         HBox buttons = new HBox(6, add, edit, remove);
         buttons.setAlignment(Pos.CENTER_LEFT);
-        Label hint = new Label("A .torrent or .magnet file (one magnet link per line) dropped into a watched folder is"
-                + " added without a dialog, with the folder's choices, and then deleted or renamed .added."
-                + " Watched folders are this machine's (watch-folders.json beside the settings) and never sync.");
+        Label hint = new Label(tr("settings.watchFolders.hint"));
         hint.setWrapText(true);
         hint.getStyleClass().add("settings-row-description");
         watchStatusLabel = new Label();
@@ -1544,7 +1573,7 @@ final class SettingsWindow {
         rows.add(new Row(
                 Category.WATCH,
                 box,
-                "Watch folders | folder torrent magnet automatic add delete rename save path category paused status",
+                tr("settings.watchFolders.title") + " | " + tr("settings.watchFolders.keywords"),
                 folders));
     }
 
@@ -1585,7 +1614,7 @@ final class SettingsWindow {
         try {
             watchStore.set(list);
         } catch (IOException e) {
-            report("Could not save the watch folders: " + e.getMessage());
+            report(tr("settings.watchFolders.saveFailed", e.getMessage()));
             return;
         }
         reloadWatch();
@@ -1605,7 +1634,7 @@ final class SettingsWindow {
     }
 
     private void buildRss(VBox page) {
-        VBox refresh = section(page, "Refreshing");
+        VBox refresh = section(page, tr("settings.rss.refreshing"));
         rssMinutes = new Spinner<>(Feed.MIN_MINUTES, Feed.MAX_MINUTES, 30, 5);
         rssMinutes.setEditable(true);
         rssMinutes.setPrefWidth(90);
@@ -1617,11 +1646,10 @@ final class SettingsWindow {
         row(
                 Category.RSS,
                 refresh,
-                "Refresh every (minutes)",
-                "How often every feed is asked again, 5 to 1440; a feed can have its own interval. An unchanged"
-                        + " feed costs one request (ETag and Last-Modified are sent back). Syncs.",
+                tr("settings.rss.refreshMinutes"),
+                tr("settings.rss.refreshMinutes.desc"),
                 rssMinutes,
-                "rss feed interval refresh minutes schedule");
+                tr("settings.rss.refreshMinutes.keywords"));
         rssAutoDownload = new CheckBox();
         rssAutoDownload.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -1632,35 +1660,34 @@ final class SettingsWindow {
         row(
                 Category.RSS,
                 refresh,
-                "Download new articles' torrents automatically",
-                "As each feed refreshes, the rules below run over its new articles and add the torrents they"
-                        + " want, each once, said in the Event Log. Off, the rules run only on Run rules now. Syncs.",
+                tr("settings.rss.autoDownload"),
+                tr("settings.rss.autoDownload.desc"),
                 rssAutoDownload,
-                "rss auto download automatic rules filter");
+                tr("settings.rss.autoDownload.keywords"));
 
-        VBox feeds = section(page, "Feeds");
+        VBox feeds = section(page, tr("settings.rss.feeds"));
         rssTable = new TableView<>();
         rssTable.setPrefHeight(190);
-        rssTable.setPlaceholder(new Label("No feeds yet"));
+        rssTable.setPlaceholder(new Label(tr("settings.rss.feeds.empty")));
         rssTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        TableColumn<Feed, String> name = new TableColumn<>("Name");
+        TableColumn<Feed, String> name = new TableColumn<>(tr("common.name"));
         name.setPrefWidth(130);
         name.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().displayName()));
-        TableColumn<Feed, String> url = new TableColumn<>("URL");
+        TableColumn<Feed, String> url = new TableColumn<>(tr("settings.rss.column.url"));
         url.setPrefWidth(190);
         url.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().url()));
-        TableColumn<Feed, String> last = new TableColumn<>("Last refresh");
+        TableColumn<Feed, String> last = new TableColumn<>(tr("settings.rss.column.lastRefresh"));
         last.setPrefWidth(110);
         last.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(rssLastRefresh(c.getValue())));
-        TableColumn<Feed, String> unread = new TableColumn<>("Unread");
+        TableColumn<Feed, String> unread = new TableColumn<>(tr("settings.rss.column.unread"));
         unread.setPrefWidth(70);
         unread.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
                 rssService == null
                         ? ""
                         : Integer.toString(rssService.unread(c.getValue().id()))));
-        TableColumn<Feed, String> status = new TableColumn<>("Status");
+        TableColumn<Feed, String> status = new TableColumn<>(tr("settings.rss.column.status"));
         status.setPrefWidth(140);
         status.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(rssFeedStatus(c.getValue())));
         rssTable.getColumns().addAll(List.of(name, url, last, unread, status));
@@ -1671,17 +1698,17 @@ final class SettingsWindow {
             });
             return row;
         });
-        Button add = new Button("Add…");
+        Button add = new Button(tr("settings.table.add"));
         add.setOnAction(e -> addRssFeed(""));
-        Button edit = new Button("Edit…");
+        Button edit = new Button(tr("common.edit"));
         edit.disableProperty()
                 .bind(rssTable.getSelectionModel().selectedItemProperty().isNull());
         edit.setOnAction(e -> editRssFeed());
-        Button remove = new Button("Remove");
+        Button remove = new Button(tr("common.remove"));
         remove.disableProperty()
                 .bind(rssTable.getSelectionModel().selectedItemProperty().isNull());
         remove.setOnAction(e -> removeRssFeed());
-        Button refreshNow = new Button("Refresh");
+        Button refreshNow = new Button(tr("settings.rss.refresh"));
         refreshNow.setOnAction(e -> {
             if (rssService == null) return;
             Feed selected = rssTable.getSelectionModel().getSelectedItem();
@@ -1690,9 +1717,7 @@ final class SettingsWindow {
         });
         HBox buttons = new HBox(6, add, edit, remove, refreshNow);
         buttons.setAlignment(Pos.CENTER_LEFT);
-        Label hint = new Label("The RSS tab (Ctrl+R) reads these. A feed is added by URL and fetched once to check it;"
-                + " a blank name takes the feed's title. The feeds and their articles, read or not, are rss/feeds.json"
-                + " and rss/articles/<id>.json beside the settings: this machine's, never synced.");
+        Label hint = new Label(tr("settings.rss.feeds.hint"));
         hint.setWrapText(true);
         hint.getStyleClass().add("settings-row-description");
         rssStatusLabel = new Label();
@@ -1701,27 +1726,26 @@ final class SettingsWindow {
         VBox box = new VBox(8, hint, rssTable, buttons, rssStatusLabel);
         feeds.getChildren().add(box);
         rows.add(new Row(
-                Category.RSS, box, "Feeds | rss atom feed url add edit remove refresh unread articles status", feeds));
+                Category.RSS, box, tr("settings.rss.feeds") + " | " + tr("settings.rss.feeds.keywords"), feeds));
 
-        VBox rulesSection = section(page, "Rules");
+        VBox rulesSection = section(page, tr("settings.rss.rules"));
         rulesTable = new TableView<>();
         rulesTable.setPrefHeight(170);
-        rulesTable.setPlaceholder(
-                new Label("No rules yet: Add… writes one, or Create rule from title… in the RSS tab"));
+        rulesTable.setPlaceholder(new Label(tr("settings.rss.rules.empty")));
         rulesTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        TableColumn<Rule, String> ruleName = new TableColumn<>("Name");
+        TableColumn<Rule, String> ruleName = new TableColumn<>(tr("common.name"));
         ruleName.setPrefWidth(160);
         ruleName.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().name()));
-        TableColumn<Rule, String> ruleOn = new TableColumn<>("Enabled");
+        TableColumn<Rule, String> ruleOn = new TableColumn<>(tr("common.enabled"));
         ruleOn.setPrefWidth(70);
-        ruleOn.setCellValueFactory(c ->
-                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().enabled() ? "yes" : "no"));
-        TableColumn<Rule, String> ruleFeeds = new TableColumn<>("Feeds");
+        ruleOn.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                c.getValue().enabled() ? tr("settings.table.yes") : tr("settings.table.no")));
+        TableColumn<Rule, String> ruleFeeds = new TableColumn<>(tr("settings.rss.feeds"));
         ruleFeeds.setPrefWidth(200);
         ruleFeeds.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
                 rssService == null ? "" : RuleText.feedsText(c.getValue(), rssService.namesById())));
-        TableColumn<Rule, String> ruleLast = new TableColumn<>("Last match");
+        TableColumn<Rule, String> ruleLast = new TableColumn<>(tr("settings.rss.column.lastMatch"));
         ruleLast.setPrefWidth(110);
         ruleLast.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
                 RuleText.lastMatchText(c.getValue(), System.currentTimeMillis())));
@@ -1733,34 +1757,29 @@ final class SettingsWindow {
             });
             return row;
         });
-        Button addRule = new Button("Add…");
+        Button addRule = new Button(tr("settings.table.add"));
         addRule.setOnAction(e -> addRule("", ""));
-        Button editRule = new Button("Edit…");
+        Button editRule = new Button(tr("common.edit"));
         editRule.disableProperty()
                 .bind(rulesTable.getSelectionModel().selectedItemProperty().isNull());
         editRule.setOnAction(e -> editRule());
-        Button removeRule = new Button("Remove");
+        Button removeRule = new Button(tr("common.remove"));
         removeRule
                 .disableProperty()
                 .bind(rulesTable.getSelectionModel().selectedItemProperty().isNull());
         removeRule.setOnAction(e -> removeRule());
-        Button duplicateRule = new Button("Duplicate");
+        Button duplicateRule = new Button(tr("settings.rss.duplicate"));
         duplicateRule
                 .disableProperty()
                 .bind(rulesTable.getSelectionModel().selectedItemProperty().isNull());
         duplicateRule.setOnAction(e -> duplicateRule());
-        Button runRules = new Button("Run rules now");
+        Button runRules = new Button(tr("settings.rss.runRules"));
         runRules.setOnAction(e -> {
             if (rssService != null) rssService.runRulesNow();
         });
         HBox ruleButtons = new HBox(6, addRule, editRule, removeRule, duplicateRule, runRules);
         ruleButtons.setAlignment(Pos.CENTER_LEFT);
-        Label rulesHint = new Label("A rule names the articles it wants (words the title must and must not contain, or"
-                + " regular expressions; an episode filter such as 1x2-; which feeds; how old is too old) and what to"
-                + " do with them (start paused or not, a category, a save path). The first rule that wants an"
-                + " article takes it; the smart episode filter keeps a rule from taking an episode twice. Run rules"
-                + " now goes over every unread article not yet downloaded. The rules are rss/rules.json beside the"
-                + " settings: this machine's, never synced.");
+        Label rulesHint = new Label(tr("settings.rss.rules.hint"));
         rulesHint.setWrapText(true);
         rulesHint.getStyleClass().add("settings-row-description");
         rulesStatusLabel = new Label();
@@ -1771,8 +1790,7 @@ final class SettingsWindow {
         rows.add(new Row(
                 Category.RSS,
                 rulesBox,
-                "Rules | rss auto download rule regex episode filter smart category save path must contain feeds"
-                        + " add edit remove duplicate run",
+                tr("settings.rss.rules") + " | " + tr("settings.rss.rules.keywords"),
                 rulesSection));
     }
 
@@ -1814,7 +1832,7 @@ final class SettingsWindow {
         try {
             rssService.removeRule(selected.name());
         } catch (IOException e) {
-            report("Could not remove the rule: " + e.getMessage());
+            report(tr("settings.rss.removeRuleFailed", e.getMessage()));
         }
         reloadRules();
     }
@@ -1823,7 +1841,7 @@ final class SettingsWindow {
         try {
             rssService.putRule(replacing, rule);
         } catch (IOException e) {
-            report("Could not save the rule: " + e.getMessage());
+            report(tr("settings.rss.saveRuleFailed", e.getMessage()));
             return;
         } catch (IllegalArgumentException e) {
             report(e.getMessage());
@@ -1870,14 +1888,18 @@ final class SettingsWindow {
         if (rssService == null) return "";
         RssService.Status s = rssService.status(feed.id());
         return s.refreshing()
-                ? "refreshing…"
-                : s.refreshedEpochMs() <= 0 ? "never" : RssText.ago(s.refreshedEpochMs(), System.currentTimeMillis());
+                ? tr("settings.rss.feedRefreshing")
+                : s.refreshedEpochMs() <= 0
+                        ? tr("settings.rss.never")
+                        : RssText.ago(s.refreshedEpochMs(), System.currentTimeMillis());
     }
 
     private String rssFeedStatus(Feed feed) {
         if (rssService == null) return "";
         RssService.Status s = rssService.status(feed.id());
-        return s.failed() ? "last error: " + s.error() : s.refreshedEpochMs() <= 0 ? "" : "ok";
+        return s.failed()
+                ? tr("settings.rss.lastError", s.error())
+                : s.refreshedEpochMs() <= 0 ? "" : tr("settings.rss.ok");
     }
 
     private void addRssFeed(String prefill) {
@@ -1890,7 +1912,7 @@ final class SettingsWindow {
         try {
             rssService.addFeed(made.get());
         } catch (IOException e) {
-            report("Could not save the feed: " + e.getMessage());
+            report(tr("settings.rss.saveFeedFailed", e.getMessage()));
             return;
         }
         reloadRss();
@@ -1907,7 +1929,7 @@ final class SettingsWindow {
         try {
             rssService.updateFeed(edited.get());
         } catch (IOException e) {
-            report("Could not save the feed: " + e.getMessage());
+            report(tr("settings.rss.saveFeedFailed", e.getMessage()));
             return;
         }
         reloadRss();
@@ -1920,7 +1942,7 @@ final class SettingsWindow {
         try {
             rssService.removeFeed(selected.id());
         } catch (IOException e) {
-            report("Could not remove the feed: " + e.getMessage());
+            report(tr("settings.rss.removeFeedFailed", e.getMessage()));
         }
         reloadRss();
     }
@@ -1937,40 +1959,36 @@ final class SettingsWindow {
         }
         reloadRules();
         int unread = rssService.unreadTotal();
-        rssStatusLabel.setText(
-                feeds.isEmpty()
-                        ? ""
-                        : (feeds.size() == 1 ? "1 feed" : feeds.size() + " feeds") + ", "
-                                + (unread == 1 ? "1 unread article" : unread + " unread articles"));
+        rssStatusLabel.setText(feeds.isEmpty() ? "" : tr("settings.rss.status", feeds.size(), unread));
     }
 
     private void buildSearch(VBox page) {
-        VBox providers = section(page, "Search providers");
+        VBox providers = section(page, tr("settings.search.providers"));
         searchTable = new TableView<>();
         searchTable.setPrefHeight(190);
-        searchTable.setPlaceholder(new Label("No providers yet: add a Prowlarr or Jackett server"));
+        searchTable.setPlaceholder(new Label(tr("settings.search.providers.empty")));
         searchTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        TableColumn<TorznabEndpoint, String> name = new TableColumn<>("Name");
+        TableColumn<TorznabEndpoint, String> name = new TableColumn<>(tr("common.name"));
         name.setPrefWidth(120);
         name.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().name()));
-        TableColumn<TorznabEndpoint, String> url = new TableColumn<>("URL");
+        TableColumn<TorznabEndpoint, String> url = new TableColumn<>(tr("settings.search.column.url"));
         url.setPrefWidth(260);
         url.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().url()));
-        TableColumn<TorznabEndpoint, String> key = new TableColumn<>("API key");
+        TableColumn<TorznabEndpoint, String> key = new TableColumn<>(tr("settings.search.column.apiKey"));
         key.setPrefWidth(80);
         key.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().maskedKey()));
-        TableColumn<TorznabEndpoint, String> enabled = new TableColumn<>("Enabled");
+        TableColumn<TorznabEndpoint, String> enabled = new TableColumn<>(tr("common.enabled"));
         enabled.setPrefWidth(60);
-        enabled.setCellValueFactory(c ->
-                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().enabled() ? "yes" : ""));
-        TableColumn<TorznabEndpoint, String> categories = new TableColumn<>("Categories");
+        enabled.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                c.getValue().enabled() ? tr("settings.table.yes") : ""));
+        TableColumn<TorznabEndpoint, String> categories = new TableColumn<>(tr("settings.search.column.categories"));
         categories.setPrefWidth(90);
         categories.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
                 c.getValue().categories() < 0
-                        ? "not tested"
+                        ? tr("settings.search.notTested")
                         : Integer.toString(c.getValue().categories())));
         searchTable.getColumns().addAll(List.of(name, url, key, enabled, categories));
         searchTable.setRowFactory(t -> {
@@ -1980,26 +1998,23 @@ final class SettingsWindow {
             });
             return row;
         });
-        Button add = new Button("Add…");
+        Button add = new Button(tr("settings.table.add"));
         add.setOnAction(e -> addSearchProvider());
-        Button edit = new Button("Edit…");
+        Button edit = new Button(tr("common.edit"));
         edit.disableProperty()
                 .bind(searchTable.getSelectionModel().selectedItemProperty().isNull());
         edit.setOnAction(e -> editSearchProvider());
-        Button remove = new Button("Remove");
+        Button remove = new Button(tr("common.remove"));
         remove.disableProperty()
                 .bind(searchTable.getSelectionModel().selectedItemProperty().isNull());
         remove.setOnAction(e -> removeSearchProvider());
-        Button test = new Button("Test");
+        Button test = new Button(tr("settings.search.test"));
         test.disableProperty()
                 .bind(searchTable.getSelectionModel().selectedItemProperty().isNull());
         test.setOnAction(e -> testSearchProvider());
         HBox buttons = new HBox(6, add, edit, remove, test);
         buttons.setAlignment(Pos.CENTER_LEFT);
-        Label hint = new Label("A Torznab server, Prowlarr or Jackett, puts its indexers behind one URL and an API key;"
-                + " every enabled one is asked when searching. Test asks the server who it is and how many"
-                + " categories it knows. The list, keys included, is search-providers.json beside the settings:"
-                + " this machine's, never synced.");
+        Label hint = new Label(tr("settings.search.providers.hint"));
         hint.setWrapText(true);
         hint.getStyleClass().add("settings-row-description");
         searchStatusLabel = new Label();
@@ -2010,31 +2025,30 @@ final class SettingsWindow {
         rows.add(new Row(
                 Category.SEARCH,
                 box,
-                "Search providers | search torznab prowlarr jackett indexer api key url add edit remove test"
-                        + " enabled categories",
+                tr("settings.search.providers") + " | " + tr("settings.search.providers.keywords"),
                 providers));
         buildDefinitions(page);
     }
 
     /** The definition files: listed read-only, switched on or off, reloaded, the folder opened. */
     private void buildDefinitions(VBox page) {
-        VBox section = section(page, "Definition files");
+        VBox section = section(page, tr("settings.search.definitions"));
         definitionTable = new TableView<>();
         definitionTable.setPrefHeight(160);
-        definitionTable.setPlaceholder(new Label("No definition files in the folder"));
+        definitionTable.setPlaceholder(new Label(tr("settings.search.definitions.empty")));
         definitionTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        TableColumn<DefinitionStore.Entry, String> name = new TableColumn<>("Name");
+        TableColumn<DefinitionStore.Entry, String> name = new TableColumn<>(tr("common.name"));
         name.setPrefWidth(140);
         name.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().name()));
-        TableColumn<DefinitionStore.Entry, String> file = new TableColumn<>("File");
+        TableColumn<DefinitionStore.Entry, String> file = new TableColumn<>(tr("settings.search.column.file"));
         file.setPrefWidth(150);
         file.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
                 c.getValue().file().getFileName().toString()));
-        TableColumn<DefinitionStore.Entry, String> type = new TableColumn<>("Type");
+        TableColumn<DefinitionStore.Entry, String> type = new TableColumn<>(tr("settings.search.column.type"));
         type.setPrefWidth(50);
         type.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(definitionType(c.getValue())));
-        TableColumn<DefinitionStore.Entry, String> on = new TableColumn<>("Enabled");
+        TableColumn<DefinitionStore.Entry, String> on = new TableColumn<>(tr("common.enabled"));
         on.setPrefWidth(60);
         on.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
                 !c.getValue().loaded()
@@ -2042,8 +2056,8 @@ final class SettingsWindow {
                         : settings.disabledSearchDefinitions()
                                         .contains(c.getValue().id())
                                 ? ""
-                                : "yes"));
-        TableColumn<DefinitionStore.Entry, String> status = new TableColumn<>("Status");
+                                : tr("settings.table.yes")));
+        TableColumn<DefinitionStore.Entry, String> status = new TableColumn<>(tr("settings.search.column.status"));
         status.setPrefWidth(220);
         status.setCellValueFactory(
                 c -> new javafx.beans.property.ReadOnlyStringWrapper(definitionStatus(c.getValue())));
@@ -2061,22 +2075,17 @@ final class SettingsWindow {
                 e.consume();
             }
         });
-        Button toggle = new Button("Enable / Disable");
+        Button toggle = new Button(tr("settings.search.toggle"));
         toggle.disableProperty()
                 .bind(definitionTable.getSelectionModel().selectedItemProperty().isNull());
         toggle.setOnAction(e -> toggleDefinition());
-        Button reload = new Button("Reload definitions");
+        Button reload = new Button(tr("settings.search.reload"));
         reload.setOnAction(e -> reloadDefinitionsPressed());
-        Button open = new Button("Open folder");
+        Button open = new Button(tr("settings.search.openFolder"));
         open.setOnAction(e -> openDefinitionFolder.run());
         HBox buttons = new HBox(6, toggle, reload, open);
         buttons.setAlignment(Pos.CENTER_LEFT);
-        Label hint = new Label("A site without an API is a definition file: search-providers/<id>.json in the config"
-                + " folder says where to search and how to read the answer (JSON paths or CSS-like selectors;"
-                + " docs/search-providers.md has the format). The shipped examples are copied in once and never"
-                + " written over. Every file that loads is a provider chip in the Search tab unless switched off"
-                + " here (search.disabled, which syncs); a file that does not load says why. The folder is"
-                + " re-read when the Search tab opens, or on Reload.");
+        Label hint = new Label(tr("settings.search.definitions.hint"));
         hint.setWrapText(true);
         hint.getStyleClass().add("settings-row-description");
         definitionStatusLabel = new Label();
@@ -2087,8 +2096,7 @@ final class SettingsWindow {
         rows.add(new Row(
                 Category.SEARCH,
                 box,
-                "Definition files | search definition declarative provider json html selector folder reload"
-                        + " example archive linuxtracker academic enable disable",
+                tr("settings.search.definitions") + " | " + tr("settings.search.definitions.keywords"),
                 section));
     }
 
@@ -2097,7 +2105,7 @@ final class SettingsWindow {
     }
 
     private static String definitionStatus(DefinitionStore.Entry e) {
-        if (e.loaded()) return "loaded";
+        if (e.loaded()) return tr("settings.search.loaded");
         String problem = e.problem();
         String prefix = e.file().getFileName() + ": ";
         return problem.startsWith(prefix) ? problem.substring(prefix.length()) : problem;
@@ -2144,9 +2152,8 @@ final class SettingsWindow {
             long broken = entries.size() - loaded;
             definitionStatusLabel.setText(
                     entries.isEmpty()
-                            ? "Folder: " + definitionStore.dir()
-                            : on + " of " + loaded + " enabled" + (broken == 0 ? "" : ", " + broken + " did not load")
-                                    + " · " + definitionStore.dir());
+                            ? tr("settings.search.definitions.folder", definitionStore.dir())
+                            : tr("settings.search.definitions.status", on, loaded, broken, definitionStore.dir()));
         }
     }
 
@@ -2190,7 +2197,7 @@ final class SettingsWindow {
     private void testSearchProvider() {
         TorznabEndpoint selected = searchTable.getSelectionModel().getSelectedItem();
         if (searchStore == null || selected == null) return;
-        searchStatusLabel.setText("Testing " + selected.name() + "…");
+        searchStatusLabel.setText(tr("settings.search.testing", selected.name()));
         Thread.ofVirtual().name("torznab-test").start(() -> {
             String line;
             TorznabEndpoint tested = null;
@@ -2199,11 +2206,13 @@ final class SettingsWindow {
                 tested = selected.tested(caps.title(), caps.categories().size());
                 String found = SearchProviderDialog.categoriesLine(
                         caps.title(), caps.categories().size());
-                line = caps.title().equalsIgnoreCase(selected.name()) ? found : selected.name() + ": " + found;
+                line = caps.title().equalsIgnoreCase(selected.name())
+                        ? found
+                        : tr("settings.search.testResult", selected.name(), found);
             } catch (SearchException e) {
-                line = selected.name() + ": " + e.getMessage();
+                line = tr("settings.search.testResult", selected.name(), e.getMessage());
             } catch (RuntimeException e) {
-                line = selected.name() + ": failed: " + e;
+                line = tr("settings.search.testFailed", selected.name(), e);
             }
             TorznabEndpoint found = tested;
             String text = line;
@@ -2224,7 +2233,7 @@ final class SettingsWindow {
         try {
             searchStore.set(list);
         } catch (IOException e) {
-            report("Could not save the search providers: " + e.getMessage());
+            report(tr("settings.search.saveFailed", e.getMessage()));
             return;
         }
         reloadSearch();
@@ -2243,92 +2252,96 @@ final class SettingsWindow {
             searchStatusLabel.setText(
                     searchStore.entries().isEmpty()
                             ? ""
-                            : searchStore.enabled().size() + " of "
-                                    + searchStore.entries().size() + " enabled");
+                            : tr(
+                                    "settings.search.enabledCount",
+                                    searchStore.enabled().size(),
+                                    searchStore.entries().size()));
     }
 
     private void buildAutomation(VBox page) {
-        VBox run = section(page, "Run on event");
+        VBox run = section(page, tr("settings.automation.runOnEvent"));
         onAdded = commandField(EngineEvent.Kind.ADDED);
         row(
                 Category.AUTOMATION,
                 run,
-                "On added",
-                "Runs when a torrent is added to the session, not for the ones restored at start.",
+                tr("settings.automation.onAdded"),
+                tr("settings.automation.onAdded.desc"),
                 onAdded,
-                "run program command script execute added");
+                tr("settings.automation.onAdded.keywords"));
         onFinished = commandField(EngineEvent.Kind.FINISHED);
         row(
                 Category.AUTOMATION,
                 run,
-                "On finished",
-                "Runs when a download completes.",
+                tr("settings.automation.onFinished"),
+                tr("settings.automation.onFinished.desc"),
                 onFinished,
-                "run program command script execute finished complete download");
+                tr("settings.automation.onFinished.keywords"));
         onSeedingDone = commandField(EngineEvent.Kind.SEEDING_DONE);
         row(
                 Category.AUTOMATION,
                 run,
-                "On seeding done",
-                "Runs when a torrent reaches its share limit (Queue and share limits, or its own) and is paused or"
-                        + " removed.",
+                tr("settings.automation.onSeedingDone"),
+                tr("settings.automation.onSeedingDone.desc"),
                 onSeedingDone,
-                "run program command script execute seeding done share ratio limit");
-        Label legend = new Label("The line is split like a shell would (quotes keep a value together) but no shell"
-                + " runs it; placeholders are filled in per argument, so a name with spaces stays one argument."
-                + " %N name  %L category  %G tags  %F content path  %R root path  %D save path  %C file count"
-                + "  %Z size in bytes  %T tracker  %I info-hash v1  %J info-hash v2  %K torrent id  %% percent."
-                + " Output and exit code go to the Event Log; a program still running after 10 minutes is killed."
-                + " These lines name programs on this machine and never sync.");
+                tr("settings.automation.onSeedingDone.keywords"));
+        Label legend = new Label(tr("settings.automation.placeholders.legend"));
         legend.setWrapText(true);
         legend.getStyleClass().add("settings-row-description");
         run.getChildren().add(legend);
         rows.add(new Row(
-                Category.AUTOMATION, legend, "Placeholders | %N %L %G %F %R %D %C %Z %T %I %J %K shell quotes", run));
+                Category.AUTOMATION,
+                legend,
+                tr("settings.automation.placeholders") + " | " + tr("settings.automation.placeholders.keywords"),
+                run));
 
-        VBox notify = section(page, "Desktop notifications");
+        VBox notify = section(page, tr("settings.automation.notifications"));
         notifyAdded = notifyBox(EngineEvent.Kind.ADDED);
-        row(Category.AUTOMATION, notify, "Torrent added", "", notifyAdded, "notification notify desktop toast added");
+        row(
+                Category.AUTOMATION,
+                notify,
+                tr("settings.automation.notifyAdded"),
+                "",
+                notifyAdded,
+                tr("settings.automation.notifyAdded.keywords"));
         notifyFinished = notifyBox(EngineEvent.Kind.FINISHED);
         row(
                 Category.AUTOMATION,
                 notify,
-                "Download finished",
+                tr("settings.automation.notifyFinished"),
                 "",
                 notifyFinished,
-                "notification notify desktop toast finished complete");
+                tr("settings.automation.notifyFinished.keywords"));
         notifySeedingDone = notifyBox(EngineEvent.Kind.SEEDING_DONE);
         row(
                 Category.AUTOMATION,
                 notify,
-                "Seeding done",
+                tr("settings.automation.notifySeedingDone"),
                 "",
                 notifySeedingDone,
-                "notification notify desktop toast seeding share limit");
+                tr("settings.automation.notifySeedingDone.keywords"));
         notifyError = notifyBox(EngineEvent.Kind.ERROR);
         row(
                 Category.AUTOMATION,
                 notify,
-                "Torrent or tracker error",
+                tr("settings.automation.notifyError"),
                 "",
                 notifyError,
-                "notification notify desktop toast error tracker");
-        Button test = new Button("Test notification");
+                tr("settings.automation.notifyError.keywords"));
+        Button test = new Button(tr("settings.automation.testNotification"));
         test.setOnAction(e -> testNotification.run());
         row(
                 Category.AUTOMATION,
                 notify,
-                "Test",
-                "Shows one now, through notify-send on Linux, osascript on macOS and a PowerShell toast on Windows;"
-                        + " the Event Log says how it went.",
+                tr("settings.automation.test"),
+                tr("settings.automation.test.desc"),
                 test,
-                "notification notify desktop toast test try");
+                tr("settings.automation.test.keywords"));
     }
 
     private TextField commandField(EngineEvent.Kind kind) {
         TextField field = new TextField();
         field.setPrefColumnCount(30);
-        field.setPromptText("none");
+        field.setPromptText(tr("settings.automation.command.prompt"));
         field.textProperty().addListener((o, was, now) -> {
             if (loading) return;
             settings.setEventCommand(kind, now);
@@ -2348,7 +2361,7 @@ final class SettingsWindow {
     }
 
     private void buildAdding(VBox page) {
-        VBox defaults = section(page, "Add dialog defaults");
+        VBox defaults = section(page, tr("settings.adding.defaults"));
         addStartPaused = new CheckBox();
         addStartPaused.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -2358,10 +2371,10 @@ final class SettingsWindow {
         row(
                 Category.ADDING,
                 defaults,
-                "Start paused",
-                "New torrents wait until resumed: Enter in the Add dialog adds paused, and Shift+Enter starts.",
+                tr("settings.adding.startPaused"),
+                tr("settings.adding.startPaused.desc"),
                 addStartPaused,
-                "add stopped");
+                tr("settings.adding.startPaused.keywords"));
         addSequential = new CheckBox();
         addSequential.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -2371,10 +2384,10 @@ final class SettingsWindow {
         row(
                 Category.ADDING,
                 defaults,
-                "Sequential download",
-                "Fetch pieces in order rather than rarest first, for playing while downloading.",
+                tr("settings.adding.sequential"),
+                tr("settings.adding.sequential.desc"),
                 addSequential,
-                "add order streaming preview");
+                tr("settings.adding.sequential.keywords"));
         addWithoutAsking = new CheckBox();
         addWithoutAsking.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -2384,86 +2397,85 @@ final class SettingsWindow {
         row(
                 Category.ADDING,
                 defaults,
-                "Add without asking",
-                "Torrents and magnets are added at once with these defaults, into the download folder;"
-                        + " the Add dialog does not open.",
+                tr("settings.adding.withoutAsking"),
+                tr("settings.adding.withoutAsking.desc"),
                 addWithoutAsking,
-                "skip dialog confirm prompt silent automatic next time");
+                tr("settings.adding.withoutAsking.keywords"));
     }
 
     private void buildConnection(VBox page) {
-        VBox listening = section(page, "Listening");
+        VBox listening = section(page, tr("settings.connection.listening"));
         port = intSpinner(1024, 65535, Settings.CONN_PORT);
         row(
                 Category.CONNECTION,
                 listening,
-                "Port",
-                "The TCP and uTP port other peers connect to. Forward it on the router, or let UPnP do it.",
+                tr("settings.connection.port"),
+                tr("settings.connection.port.desc"),
                 port,
-                "listen incoming");
+                tr("settings.connection.port.keywords"));
         randomPort = bool(Settings.CONN_RANDOM_PORT);
         port.disableProperty().bind(randomPort.selectedProperty());
         row(
                 Category.CONNECTION,
                 listening,
-                "Random port",
-                "Let the system pick a free port each start; the event log says which.",
+                tr("settings.connection.randomPort"),
+                tr("settings.connection.randomPort.desc"),
                 randomPort,
-                "listen ephemeral");
+                tr("settings.connection.randomPort.keywords"));
         upnp = bool(Settings.CONN_UPNP);
         row(
                 Category.CONNECTION,
                 listening,
-                "Map the port with UPnP / NAT-PMP",
-                "Ask the router to forward the port. The event log reports the mapping or its failure.",
+                tr("settings.connection.upnp"),
+                tr("settings.connection.upnp.desc"),
                 upnp,
-                "router forward nat");
+                tr("settings.connection.upnp.keywords"));
         ipv6 = bool(Settings.CONN_IPV6);
         row(
                 Category.CONNECTION,
                 listening,
-                "Listen on IPv6",
-                "As well as IPv4, where the machine has it.",
+                tr("settings.connection.ipv6"),
+                tr("settings.connection.ipv6.desc"),
                 ipv6,
-                "v6 address");
+                tr("settings.connection.ipv6.keywords"));
         listenInterface = text(Settings.CONN_INTERFACE);
         listenInterface.setPrefColumnCount(18);
-        listenInterface.setPromptText("all interfaces");
+        listenInterface.setPromptText(tr("settings.connection.interface.prompt"));
         row(
                 Category.CONNECTION,
                 listening,
-                "Bind to",
-                "An address or interface name, for a VPN or one network card only. Blank means every interface.",
+                tr("settings.connection.interface"),
+                tr("settings.connection.interface.desc"),
                 listenInterface,
-                "interface address vpn tun");
+                tr("settings.connection.interface.keywords"));
 
-        VBox limits = section(page, "Limits");
+        VBox limits = section(page, tr("settings.connection.limits"));
         maxConnections = intSpinner(2, 10_000, Settings.CONN_MAX_CONNECTIONS);
         row(
                 Category.CONNECTION,
                 limits,
-                "Connections",
-                "Across every torrent.",
+                tr("settings.connection.maxConnections"),
+                tr("settings.connection.maxConnections.desc"),
                 maxConnections,
-                "global peers maximum");
+                tr("settings.connection.maxConnections.keywords"));
         maxPerTorrent = intSpinner(1, 10_000, Settings.CONN_MAX_PER_TORRENT);
         row(
                 Category.CONNECTION,
                 limits,
-                "Connections per torrent",
-                "Applied to each torrent as it is added.",
+                tr("settings.connection.maxPerTorrent"),
+                tr("settings.connection.maxPerTorrent.desc"),
                 maxPerTorrent,
-                "peers maximum");
+                tr("settings.connection.maxPerTorrent.keywords"));
         uploadSlots = intSpinner(1, 1_000, Settings.CONN_UPLOAD_SLOTS);
         row(
                 Category.CONNECTION,
                 limits,
-                "Upload slots",
-                "How many peers are sent data at once.",
+                tr("settings.connection.uploadSlots"),
+                tr("settings.connection.uploadSlots.desc"),
                 uploadSlots,
-                "unchoke");
+                tr("settings.connection.uploadSlots.keywords"));
 
-        VBox proxy = section(page, "Proxy");
+        VBox proxy = section(page, tr("settings.connection.proxy"));
         proxyType = new ChoiceBox<>();
         proxyType.getItems().addAll(EngineSettings.ProxyType.values());
         proxyType.setConverter(new StringConverter<>() {
@@ -2485,29 +2497,29 @@ final class SettingsWindow {
         row(
                 Category.CONNECTION,
                 proxy,
-                "Type",
-                "SOCKS5 or HTTP; trackers always go through it, peers when the box below is on.",
+                tr("settings.connection.proxyType"),
+                tr("settings.connection.proxyType.desc"),
                 proxyType,
-                "socks http none");
+                tr("settings.connection.proxyType.keywords"));
         proxyHost = text(Settings.PROXY_HOST);
         proxyHost.setPrefColumnCount(18);
         row(
                 Category.CONNECTION,
                 proxy,
-                "Host",
-                "Host names are resolved through the proxy, so a lookup does not leak what it hides.",
+                tr("settings.connection.proxyHost"),
+                tr("settings.connection.proxyHost.desc"),
                 proxyHost,
-                "server address");
+                tr("settings.connection.proxyHost.keywords"));
         proxyPort = intSpinner(1, 65535, Settings.PROXY_PORT);
-        row(Category.CONNECTION, proxy, "Proxy port", "", proxyPort, "");
+        row(Category.CONNECTION, proxy, tr("settings.connection.proxyPort"), "", proxyPort, "");
         proxyUsername = text(Settings.PROXY_USERNAME);
         row(
                 Category.CONNECTION,
                 proxy,
-                "Username",
-                "Leave blank for a proxy without a login.",
+                tr("settings.connection.proxyUsername"),
+                tr("settings.connection.proxyUsername.desc"),
                 proxyUsername,
-                "auth login");
+                tr("settings.connection.proxyUsername.keywords"));
         proxyPassword = new PasswordField();
         proxyPassword.textProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -2517,59 +2529,59 @@ final class SettingsWindow {
         row(
                 Category.CONNECTION,
                 proxy,
-                "Password",
-                "Kept in the settings file, which only you can read.",
+                tr("settings.connection.proxyPassword"),
+                tr("settings.connection.proxyPassword.desc"),
                 proxyPassword,
-                "auth secret");
+                tr("settings.connection.proxyPassword.keywords"));
         proxyPeers = bool(Settings.PROXY_PEERS);
         row(
                 Category.CONNECTION,
                 proxy,
-                "Use the proxy for peers",
-                "Off, and only tracker requests go through it; your own address is still visible to peers.",
+                tr("settings.connection.proxyPeers"),
+                tr("settings.connection.proxyPeers.desc"),
                 proxyPeers,
-                "connections privacy");
+                tr("settings.connection.proxyPeers.keywords"));
         for (var control : List.of(proxyHost, proxyPort, proxyUsername, proxyPassword, proxyPeers)) {
             control.disableProperty().bind(proxyType.valueProperty().isEqualTo(EngineSettings.ProxyType.NONE));
         }
     }
 
     private void buildProtocol(VBox page) {
-        VBox discovery = section(page, "Finding peers");
+        VBox discovery = section(page, tr("settings.protocol.findingPeers"));
         dht = bool(Settings.PROTO_DHT);
         row(
                 Category.PROTOCOL,
                 discovery,
-                "DHT",
-                "The distributed hash table. Magnet links need it; private torrents never use it.",
+                tr("settings.protocol.dht"),
+                tr("settings.protocol.dht.desc"),
                 dht,
-                "distributed hash table trackerless");
+                tr("settings.protocol.dht.keywords"));
         pex = bool(Settings.PROTO_PEX);
         row(
                 Category.PROTOCOL,
                 discovery,
-                "Peer exchange (PEX)",
-                "Swap peer lists with the peers you are connected to.",
+                tr("settings.protocol.pex"),
+                tr("settings.protocol.pex.desc"),
                 pex,
-                "ut_pex");
+                tr("settings.protocol.pex.keywords"));
         lsd = bool(Settings.PROTO_LSD);
         row(
                 Category.PROTOCOL,
                 discovery,
-                "Local peer discovery",
-                "Find peers on your own network, so a second machine at home fetches from the first.",
+                tr("settings.protocol.lsd"),
+                tr("settings.protocol.lsd.desc"),
                 lsd,
-                "lsd lan multicast");
+                tr("settings.protocol.lsd.keywords"));
 
-        VBox transport = section(page, "Transport");
+        VBox transport = section(page, tr("settings.protocol.transport"));
         utp = bool(Settings.PROTO_UTP);
         row(
                 Category.PROTOCOL,
                 transport,
-                "uTP",
-                "The UDP transport that yields to other traffic, keeping the connection usable while downloading. TCP stays on.",
+                tr("settings.protocol.utp"),
+                tr("settings.protocol.utp.desc"),
                 utp,
-                "udp congestion");
+                tr("settings.protocol.utp.keywords"));
         encryption = new ChoiceBox<>();
         encryption.getItems().addAll(EngineSettings.Protocol.Encryption.values());
         encryption.setConverter(new StringConverter<>() {
@@ -2591,20 +2603,20 @@ final class SettingsWindow {
         row(
                 Category.PROTOCOL,
                 transport,
-                "Encryption",
-                "Require it and refuse plain peers; prefer it and take either; or never encrypt. It hides the traffic's shape from a watching network, not its endpoints.",
+                tr("settings.protocol.encryption"),
+                tr("settings.protocol.encryption.desc"),
                 encryption,
-                "rc4 mse obfuscation require prefer");
+                tr("settings.protocol.encryption.keywords"));
         anonymous = bool(Settings.PROTO_ANONYMOUS);
         row(
                 Category.PROTOCOL,
                 transport,
-                "Anonymous mode",
-                "Send no client name or version and nothing a tracker could use to tell clients apart. Some trackers refuse such clients.",
+                tr("settings.protocol.anonymous"),
+                tr("settings.protocol.anonymous.desc"),
                 anonymous,
-                "privacy identify fingerprint");
+                tr("settings.protocol.anonymous.keywords"));
 
-        VBox trackers = section(page, "Trackers");
+        VBox trackers = section(page, tr("settings.protocol.trackers"));
         defaultTrackers = new TextArea();
         defaultTrackers.setPrefRowCount(4);
         defaultTrackers.setPrefColumnCount(26);
@@ -2618,14 +2630,14 @@ final class SettingsWindow {
         row(
                 Category.PROTOCOL,
                 trackers,
-                "Default trackers",
-                "One per line. Added to every torrent as it is added, and to the ones already here.",
+                tr("settings.protocol.defaultTrackers"),
+                tr("settings.protocol.defaultTrackers.desc"),
                 defaultTrackers,
-                "announce public list");
+                tr("settings.protocol.defaultTrackers.keywords"));
     }
 
     private void buildIpFilter(VBox page) {
-        VBox list = section(page, "Blocklist");
+        VBox list = section(page, tr("settings.ipFilter.blocklist"));
         ipFilterEnabled = new CheckBox();
         ipFilterEnabled.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -2636,10 +2648,10 @@ final class SettingsWindow {
         row(
                 Category.IP_FILTER,
                 list,
-                "Filter peers",
-                "Refuse connections to and from the addresses below. Off, and the lists are kept but not used.",
+                tr("settings.ipFilter.enabled"),
+                tr("settings.ipFilter.enabled.desc"),
                 ipFilterEnabled,
-                "enable block ban");
+                tr("settings.ipFilter.enabled.keywords"));
         ipFilterUrl = new TextField();
         ipFilterUrl.setPrefColumnCount(16);
         ipFilterUrl.setPromptText("https://…/list.p2p.gz");
@@ -2648,48 +2660,48 @@ final class SettingsWindow {
             settings.set(Settings.IPFILTER_URL, now.trim());
             settings.saveQuietly();
         });
-        Button refresh = new Button("Download now");
+        Button refresh = new Button(tr("settings.ipFilter.downloadNow"));
         refresh.setOnAction(e -> onIpFilterChanged.accept(true));
         row(
                 Category.IP_FILTER,
                 list,
-                "Blocklist URL",
-                "A .p2p or .dat list, plain or gzipped; downloaded on the schedule below and kept beside the settings.",
+                tr("settings.ipFilter.url"),
+                tr("settings.ipFilter.url.desc"),
                 new HBox(6, ipFilterUrl, refresh),
-                "download p2p dat gz");
+                tr("settings.ipFilter.url.keywords"));
         ipFilterHours = intSpinner(1, 720, Settings.IPFILTER_REFRESH_HOURS);
         row(
                 Category.IP_FILTER,
                 list,
-                "Refresh every (hours)",
-                "Checked at startup and while running.",
+                tr("settings.ipFilter.refreshHours"),
+                tr("settings.ipFilter.refreshHours.desc"),
                 ipFilterHours,
-                "schedule interval update");
+                tr("settings.ipFilter.refreshHours.keywords"));
         ipFilterFile = new TextField();
         ipFilterFile.setPrefColumnCount(16);
-        ipFilterFile.setPromptText("none");
+        ipFilterFile.setPromptText(tr("settings.ipFilter.file.prompt"));
         ipFilterFile.textProperty().addListener((o, was, now) -> {
             if (loading) return;
             settings.set(Settings.IPFILTER_FILE, now.trim());
             settings.saveQuietly();
             onIpFilterChanged.accept(false);
         });
-        Button browseFile = new Button("Browse…");
+        Button browseFile = new Button(tr("common.browse"));
         browseFile.setOnAction(e -> {
             javafx.stage.FileChooser chooser = new javafx.stage.FileChooser();
-            chooser.setTitle("Blocklist file");
+            chooser.setTitle(tr("settings.ipFilter.file.chooser"));
             java.io.File chosen = chooser.showOpenDialog(stage);
             if (chosen != null) ipFilterFile.setText(chosen.getAbsolutePath());
         });
         row(
                 Category.IP_FILTER,
                 list,
-                "Local list",
-                "A list on disk, read alongside the downloaded one.",
+                tr("settings.ipFilter.file"),
+                tr("settings.ipFilter.file.desc"),
                 new HBox(6, ipFilterFile, browseFile),
-                "file import p2p dat");
+                tr("settings.ipFilter.file.keywords"));
 
-        VBox bans = section(page, "Manual bans");
+        VBox bans = section(page, tr("settings.ipFilter.bans"));
         ipFilterBans = new TextArea();
         ipFilterBans.setPrefRowCount(4);
         ipFilterBans.setPrefColumnCount(24);
@@ -2706,68 +2718,86 @@ final class SettingsWindow {
         row(
                 Category.IP_FILTER,
                 bans,
-                "Banned addresses",
-                "One per line: an address, a range, or a CIDR. Ban peer in the Peers tab adds here.",
+                tr("settings.ipFilter.banned"),
+                tr("settings.ipFilter.banned.desc"),
                 ipFilterBans,
-                "ban address range cidr");
+                tr("settings.ipFilter.banned.keywords"));
         ipFilterStatusLabel = new Label("");
         ipFilterStatusLabel.getStyleClass().add("settings-row-description");
         ipFilterStatusLabel.setWrapText(true);
-        row(Category.IP_FILTER, bans, "Status", "", ipFilterStatusLabel, "loaded ranges blocked");
+        row(
+                Category.IP_FILTER,
+                bans,
+                tr("settings.ipFilter.status"),
+                "",
+                ipFilterStatusLabel,
+                tr("settings.ipFilter.status.keywords"));
     }
 
     private void buildSpeed(VBox page) {
-        VBox limits = section(page, "Limits (KiB/s, 0 for none)");
+        VBox limits = section(page, tr("settings.speed.limits"));
         speedDown = intSpinner(0, 10_000_000, Settings.SPEED_DOWNLOAD);
         row(
                 Category.SPEED,
                 limits,
-                "Download",
-                "The whole session, all torrents together.",
+                tr("settings.speed.download"),
+                tr("settings.speed.download.desc"),
                 speedDown,
-                "rate limit cap kb");
+                tr("settings.speed.download.keywords"));
         speedUp = intSpinner(0, 10_000_000, Settings.SPEED_UPLOAD);
         row(
                 Category.SPEED,
                 limits,
-                "Upload",
-                "A sensible upload cap keeps a home connection responsive.",
+                tr("settings.speed.upload"),
+                tr("settings.speed.upload.desc"),
                 speedUp,
-                "rate limit cap kb");
+                tr("settings.speed.upload.keywords"));
 
-        VBox alternative = section(page, "Alternative limits");
+        VBox alternative = section(page, tr("settings.speed.alternative"));
         altDown = intSpinner(0, 10_000_000, Settings.SPEED_ALT_DOWNLOAD);
         row(
                 Category.SPEED,
                 alternative,
-                "Alternative download",
-                "Used while the toggle below is on, or during the scheduled hours.",
+                tr("settings.speed.altDownload"),
+                tr("settings.speed.altDownload.desc"),
                 altDown,
-                "alt rate night");
+                tr("settings.speed.altDownload.keywords"));
         altUp = intSpinner(0, 10_000_000, Settings.SPEED_ALT_UPLOAD);
-        row(Category.SPEED, alternative, "Alternative upload", "", altUp, "alt rate night");
+        row(
+                Category.SPEED,
+                alternative,
+                tr("settings.speed.altUpload"),
+                "",
+                altUp,
+                tr("settings.speed.altUpload.keywords"));
         altOn = bool(Settings.SPEED_ALT_ON);
         row(
                 Category.SPEED,
                 alternative,
-                "Use alternative limits now",
-                "Also toggled from the status bar.",
+                tr("settings.speed.altOn"),
+                tr("settings.speed.altOn.desc"),
                 altOn,
-                "toggle turtle");
+                tr("settings.speed.altOn.keywords"));
 
-        VBox schedule = section(page, "Schedule");
+        VBox schedule = section(page, tr("settings.speed.schedule"));
         scheduleOn = bool(Settings.SPEED_SCHEDULE_ON);
         row(
                 Category.SPEED,
                 schedule,
-                "Switch to the alternative limits on a schedule",
-                "Checked every minute. A window that ends before it starts spans midnight.",
+                tr("settings.speed.scheduleOn"),
+                tr("settings.speed.scheduleOn.desc"),
                 scheduleOn,
-                "time night hours");
+                tr("settings.speed.scheduleOn.keywords"));
         scheduleFrom = timeField(Settings.SPEED_SCHEDULE_FROM);
-        row(Category.SPEED, schedule, "From", "24-hour clock, HH:mm.", scheduleFrom, "start time");
+        row(
+                Category.SPEED,
+                schedule,
+                tr("settings.speed.from"),
+                tr("settings.speed.from.desc"),
+                scheduleFrom,
+                tr("settings.speed.from.keywords"));
         scheduleTo = timeField(Settings.SPEED_SCHEDULE_TO);
-        row(Category.SPEED, schedule, "To", "", scheduleTo, "end time");
+        row(Category.SPEED, schedule, tr("settings.speed.to"), "", scheduleTo, tr("settings.speed.to.keywords"));
         HBox days = new HBox(8);
         for (java.time.DayOfWeek day : java.time.DayOfWeek.values()) {
             CheckBox box = new CheckBox(day.getDisplayName(java.time.format.TextStyle.SHORT, Locale.getDefault()));
@@ -2779,75 +2809,71 @@ final class SettingsWindow {
             scheduleDays.put(day, box);
             days.getChildren().add(box);
         }
-        row(Category.SPEED, schedule, "Days", "", days, "weekdays weekend");
+        row(Category.SPEED, schedule, tr("settings.speed.days"), "", days, tr("settings.speed.days.keywords"));
 
-        VBox options = section(page, "Options");
+        VBox options = section(page, tr("settings.speed.options"));
         countOverhead = bool(Settings.SPEED_COUNT_OVERHEAD);
         row(
                 Category.SPEED,
                 options,
-                "Count protocol overhead",
-                "Rate-limit TCP/IP headers too, so the limit matches what the line carries rather than the payload alone.",
+                tr("settings.speed.countOverhead"),
+                tr("settings.speed.countOverhead.desc"),
                 countOverhead,
-                "ip overhead headers");
+                tr("settings.speed.countOverhead.keywords"));
     }
 
     private void buildQueue(VBox page) {
-        VBox queue = section(page, "Queue (0 for no limit)");
+        VBox queue = section(page, tr("settings.queue.queue"));
         activeDownloads = intSpinner(0, 10_000, Settings.QUEUE_ACTIVE_DOWNLOADS);
         row(
                 Category.QUEUE,
                 queue,
-                "Active downloads",
-                "Torrents downloading at once; the rest wait their turn, in the order they were added. Force"
-                        + " Resume starts one regardless.",
+                tr("settings.queue.activeDownloads"),
+                tr("settings.queue.activeDownloads.desc"),
                 activeDownloads,
-                "queue slots maximum simultaneous");
+                tr("settings.queue.activeDownloads.keywords"));
         activeSeeds = intSpinner(0, 10_000, Settings.QUEUE_ACTIVE_SEEDS);
         row(
                 Category.QUEUE,
                 queue,
-                "Active seeds",
-                "Torrents seeding at once. A seed past its share limit gives up its slot first.",
+                tr("settings.queue.activeSeeds"),
+                tr("settings.queue.activeSeeds.desc"),
                 activeSeeds,
-                "queue slots maximum simultaneous uploads");
+                tr("settings.queue.activeSeeds.keywords"));
         activeLimit = intSpinner(0, 10_000, Settings.QUEUE_ACTIVE_LIMIT);
         row(
                 Category.QUEUE,
                 queue,
-                "Active torrents",
-                "Downloading and seeding together.",
+                tr("settings.queue.activeLimit"),
+                tr("settings.queue.activeLimit.desc"),
                 activeLimit,
-                "queue slots maximum total simultaneous");
+                tr("settings.queue.activeLimit.keywords"));
         ignoreSlow = bool(Settings.QUEUE_IGNORE_SLOW);
         row(
                 Category.QUEUE,
                 queue,
-                "Don't count slow torrents",
-                "A torrent moving under a few KiB/s for a minute does not hold a slot, so a stalled one"
-                        + " cannot block the queue.",
+                tr("settings.queue.ignoreSlow"),
+                tr("settings.queue.ignoreSlow.desc"),
                 ignoreSlow,
-                "slow stalled threshold inactive");
+                tr("settings.queue.ignoreSlow.keywords"));
 
-        VBox share = section(page, "Share limits");
+        VBox share = section(page, tr("settings.queue.share"));
         shareRatio = ratioSpinner(Settings.SHARE_RATIO);
         row(
                 Category.QUEUE,
                 share,
-                "Ratio limit",
-                "Uploaded over downloaded at which a finished torrent is done seeding; 0 for none. A torrent"
-                        + " whose files were there already is measured against its size.",
+                tr("settings.queue.shareRatio"),
+                tr("settings.queue.shareRatio.desc"),
                 shareRatio,
-                "share seed upload");
+                tr("settings.queue.shareRatio.keywords"));
         shareMinutes = intSpinner(0, 366 * 24 * 60, Settings.SHARE_SEED_MINUTES);
         row(
                 Category.QUEUE,
                 share,
-                "Seeding time limit, in minutes",
-                "Minutes spent finished, over the torrent's life; 0 for none. Either limit being reached is"
-                        + " enough.",
+                tr("settings.queue.shareMinutes"),
+                tr("settings.queue.shareMinutes.desc"),
                 shareMinutes,
-                "share seed time duration");
+                tr("settings.queue.shareMinutes.keywords"));
         shareAction = new ChoiceBox<>();
         shareAction.getItems().addAll(ShareLimit.Action.values());
         shareAction.setConverter(new StringConverter<>() {
@@ -2869,11 +2895,10 @@ final class SettingsWindow {
         row(
                 Category.QUEUE,
                 share,
-                "When a limit is reached",
-                "Checked once a second. Pause keeps the torrent in the list, stopped; Remove takes it out and"
-                        + " leaves the files. A torrent's own limits (Torrent → Limits…) replace these for it.",
+                tr("settings.queue.shareAction"),
+                tr("settings.queue.shareAction.desc"),
                 shareAction,
-                "action pause remove stop");
+                tr("settings.queue.shareAction.keywords"));
     }
 
     /** A decimal spinner in tenths, which writes its key as a person would type the number. */
@@ -2966,6 +2991,7 @@ final class SettingsWindow {
             reloadRss();
             rssMinutes.getValueFactory().setValue(settings.rssRefreshMinutes());
             rssAutoDownload.setSelected(settings.rssAutoDownload());
+            language.setValue(settings.uiLanguage());
             theme.setValue(Theme.byId(settings.theme(), Theme.DEFAULT));
             downloadDir.setText(settings.downloadDir().toString());
             incompleteEnabled.setSelected(settings.incompleteEnabled());

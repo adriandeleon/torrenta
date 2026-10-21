@@ -27,6 +27,8 @@ import javafx.stage.Window;
 import com.torrenta.AppInfo;
 import com.torrenta.engine.EngineEvent;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The event log in a window of its own: time, level, torrent, message; a level filter; copy and
  * clear. Non-modal and reusable: closing hides it, the next Ctrl+Shift+L shows it again with the
@@ -39,25 +41,25 @@ final class LogWindow {
     private final Stage stage = new Stage();
     private final EventLog log;
     private final FilteredList<EngineEvent> visible;
-    private final CheckBox info = new CheckBox("Info");
-    private final CheckBox warnings = new CheckBox("Warnings");
-    private final CheckBox errors = new CheckBox("Errors");
+    private final CheckBox info = new CheckBox(tr("eventLog.info"));
+    private final CheckBox warnings = new CheckBox(tr("eventLog.warnings"));
+    private final CheckBox errors = new CheckBox(tr("eventLog.errors"));
 
     LogWindow(Window owner, EventLog log) {
         this.log = log;
         this.visible = new FilteredList<>(log.events());
         stage.initOwner(owner);
-        stage.setTitle(AppInfo.NAME + " — Event Log");
+        stage.setTitle(tr("eventLog.title", AppInfo.NAME));
 
         TableView<EngineEvent> table = new TableView<>(visible);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        table.setPlaceholder(new Label("Nothing has happened yet"));
+        table.setPlaceholder(new Label(tr("eventLog.empty")));
         table.getStyleClass().add("event-table");
         TableColumn<EngineEvent, String> time =
-                column("Time", 80, e -> TIME.format(e.at().atZone(ZoneId.systemDefault())));
-        TableColumn<EngineEvent, String> level = column("Level", 80, e -> levelLabel(e.level()));
-        TableColumn<EngineEvent, String> torrent = column("Torrent", 200, EngineEvent::torrent);
-        TableColumn<EngineEvent, String> message = column("Message", 400, EngineEvent::message);
+                column(tr("eventLog.column.time"), 80, e -> TIME.format(e.at().atZone(ZoneId.systemDefault())));
+        TableColumn<EngineEvent, String> level = column(tr("eventLog.column.level"), 80, e -> levelLabel(e.level()));
+        TableColumn<EngineEvent, String> torrent = column(tr("eventLog.column.torrent"), 200, EngineEvent::torrent);
+        TableColumn<EngineEvent, String> message = column(tr("eventLog.column.message"), 400, EngineEvent::message);
         table.getColumns().addAll(List.of(time, level, torrent, message));
         table.setRowFactory(v -> new TableRow<>() {
             @Override
@@ -80,13 +82,13 @@ final class LogWindow {
             box.setSelected(true);
             box.selectedProperty().addListener((o, was, now) -> refilter());
         }
-        Button copy = new Button("Copy");
+        Button copy = new Button(tr("common.copy"));
         copy.setOnAction(e -> copyVisible());
-        Button clear = new Button("Clear");
+        Button clear = new Button(tr("eventLog.clear"));
         clear.setOnAction(e -> log.clear());
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox bar = new HBox(10, new Label("Show:"), info, warnings, errors, spacer, copy, clear);
+        HBox bar = new HBox(10, new Label(tr("eventLog.show")), info, warnings, errors, spacer, copy, clear);
         bar.setPadding(new Insets(8));
         bar.getStyleClass().add("event-bar");
 
@@ -123,9 +125,9 @@ final class LogWindow {
 
     static String levelLabel(EngineEvent.Level level) {
         return switch (level) {
-            case INFO -> "Info";
-            case WARNING -> "Warning";
-            case ERROR -> "Error";
+            case INFO -> tr("eventLog.level.info");
+            case WARNING -> tr("eventLog.level.warning");
+            case ERROR -> tr("eventLog.level.error");
         };
     }
 

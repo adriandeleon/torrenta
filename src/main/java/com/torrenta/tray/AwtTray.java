@@ -10,6 +10,8 @@ import java.awt.event.MouseEvent;
 import java.awt.image.BaseMultiResolutionImage;
 import java.awt.image.BufferedImage;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The AWT tray backend for Windows and macOS. All AWT mutations are marshaled onto the EDT; the
  * icon is a multi-resolution image so HiDPI trays pick a crisp variant. The menu mirrors the SNI
@@ -32,11 +34,11 @@ public final class AwtTray implements TorrentaTray {
         }
         tray = SystemTray.getSystemTray();
 
-        statusItem = new MenuItem("Starting…");
+        statusItem = new MenuItem(tr("tray.menu.starting"));
         statusItem.setEnabled(false);
-        MenuItem open = new MenuItem("Show Torrenta");
+        MenuItem open = new MenuItem(tr("tray.menu.show"));
         open.addActionListener(e -> onActivate.run());
-        MenuItem quit = new MenuItem("Quit");
+        MenuItem quit = new MenuItem(tr("tray.menu.quit"));
         quit.addActionListener(e -> onQuit.run());
         PopupMenu menu = new PopupMenu();
         menu.add(statusItem);

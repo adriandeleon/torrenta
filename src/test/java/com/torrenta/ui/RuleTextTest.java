@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
+import com.torrenta.i18n.Messages;
 import com.torrenta.rss.Article;
 import com.torrenta.rss.Rule;
 import org.junit.jupiter.api.Test;
@@ -30,7 +31,7 @@ class RuleTextTest {
         assertEquals("Some Show", RuleText.freshName("Some Show", List.of()));
         assertEquals("Some Show (2)", RuleText.freshName("Some Show", List.of("Some Show")));
         assertEquals("Some Show (3)", RuleText.freshName(" Some Show ", List.of("Some Show", "Some Show (2)")));
-        assertEquals("New rule", RuleText.freshName("", List.of()));
+        assertEquals(Messages.tr("dialog.rule.newName"), RuleText.freshName("", List.of()));
         assertEquals("Show (copy)", RuleText.copyName("Show", List.of("Show")));
         assertEquals("Show (copy 2)", RuleText.copyName("Show", List.of("Show", "Show (copy)")));
 
@@ -38,17 +39,16 @@ class RuleTextTest {
         Rule some =
                 new Rule("r", true, "", "", false, "", false, List.of("f1", "f9"), 0, null, "", "", null, List.of());
         Map<String, String> names = Map.of("f1", "Tracker", "f2", "Other");
-        assertEquals("All feeds", RuleText.feedsText(all, names));
+        assertEquals(Messages.tr("dialog.rule.allFeeds"), RuleText.feedsText(all, names));
         assertEquals("Tracker, f9", RuleText.feedsText(some, names), "an unknown id is shown as it is");
-        assertEquals("never", RuleText.lastMatchText(all, 0));
+        assertEquals(Messages.tr("dialog.rule.never"), RuleText.lastMatchText(all, 0));
         Rule matched = all.recordMatch("", Instant.ofEpochMilli(1_000_000));
         assertEquals("5 min ago", RuleText.lastMatchText(matched, 1_000_000 + 5 * 60_000));
 
         Article a = new Article("f1", "g", "Debian 12.7.0", "https://x/p", "", null, "", false);
         assertEquals("Debian 12.7.0 · Tracker", RuleText.matchLine(a, "Tracker"));
         assertEquals("Debian 12.7.0", RuleText.matchLine(a, ""));
-        assertEquals(
-                "Matches — no articles yet; the list fills as the feeds refresh", RuleText.matchesHeading(0, 0, false));
+        assertEquals(Messages.tr("dialog.rule.matches.empty"), RuleText.matchesHeading(0, 0, false));
         assertEquals("Matches — none of 1 article", RuleText.matchesHeading(0, 1, false));
         assertEquals("Matches — 3 of 120 articles…", RuleText.matchesHeading(3, 120, true));
 

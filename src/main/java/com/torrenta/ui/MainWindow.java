@@ -106,6 +106,8 @@ import com.torrenta.update.ReleaseInfo;
 import com.torrenta.update.UpdateCheck;
 import com.torrenta.update.UpdateService;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The one window: a menu bar, a filter box over the torrent list, a status bar, and the command
  * palette over all of it.
@@ -208,7 +210,7 @@ public final class MainWindow {
     private final Label altSpeedToggle = new Label();
     private ReleaseInfo availableUpdate;
     private SettingsSync sync;
-    private final Label syncBadge = new Label("Sync ⚠");
+    private final Label syncBadge = new Label(tr("status.syncProblem"));
     private Alert aboutDialog;
     private SplitPane split;
     private volatile String detailId;
@@ -368,7 +370,7 @@ public final class MainWindow {
             if (hiddenToTray) return;
             shutdown();
         });
-        setStatus("Starting the engine…");
+        setStatus(tr("status.starting"));
         rates.setText(ratesText(Engine.Rates.ZERO));
     }
 
@@ -449,8 +451,8 @@ public final class MainWindow {
             return;
         }
         Thread.ofPlatform().daemon().name("open-handlers").start(() -> {
-            String installed =
-                    MacHandlers.install(inputs -> Platform.runLater(() -> openFromOutside(inputs, "the desktop")));
+            String installed = MacHandlers.install(
+                    inputs -> Platform.runLater(() -> openFromOutside(inputs, tr("window.origin.desktop"))));
             openHandlers = installed;
             LOG.info("Desktop open handlers: " + installed);
         });
@@ -489,9 +491,8 @@ public final class MainWindow {
             stage.requestFocus();
         }
         String said = inputs.isEmpty()
-                ? "Brought to the front by " + origin
-                : "Received " + (inputs.size() == 1 ? "1 item" : inputs.size() + " items") + " from " + origin + ": "
-                        + String.join(", ", inputs);
+                ? tr("status.broughtToFront", origin)
+                : tr("status.received", inputs.size(), origin, String.join(", ", inputs));
         log.add(EngineEvent.info(null, null, said));
         setStatus(said);
         inputs.forEach(this::addInput);
@@ -538,7 +539,7 @@ public final class MainWindow {
                     trayReason = attempt.reason();
                     // Silence here is the bug a person actually hits: the setting is on, the box
                     // says so, and closing still quits, because no tray ever appeared.
-                    setStatus("No tray icon (" + attempt.reason() + "); closing the window quits " + AppInfo.NAME);
+                    setStatus(tr("status.noTray", attempt.reason(), AppInfo.NAME));
                     return;
                 }
                 TorrentaTray created = attempt.tray().get();
@@ -1065,7 +1066,7 @@ public final class MainWindow {
         try {
             boolean alternative = e.refreshLimits(java.time.LocalDateTime.now());
             Platform.runLater(() -> {
-                altSpeedToggle.setText("Alt speed: " + (alternative ? "on" : "off"));
+                altSpeedToggle.setText(alternative ? tr("status.altSpeed.on") : tr("status.altSpeed.off"));
                 altSpeedToggle.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("active"), alternative);
             });
         } catch (EngineException ex) {
@@ -1077,7 +1078,7 @@ public final class MainWindow {
         boolean on = !settings.engineSettings().speed().alternativeOn();
         settings.set(Settings.SPEED_ALT_ON, String.valueOf(on));
         settings.saveQuietly();
-        setStatus(on ? "Alternative speed limits on" : "Alternative speed limits off");
+        setStatus(on ? tr("status.altSpeedLimitsOn") : tr("status.altSpeedLimitsOff"));
         applyEngineSettings();
     }
 
@@ -1123,11 +1124,15 @@ public final class MainWindow {
     private String ipFilterStatusText() {
         IpFilterController.Status s = ipFilter.status();
         long blocked = engine == null ? 0 : engine.blockedPeers();
-        if (s.loadedAt() == 0) return s.note().isEmpty() ? "Nothing loaded" : s.note();
-        return s.ranges() + " ranges loaded at " + Format.dateTime(s.loadedAt() / 1000)
-                + (s.skipped() > 0 ? ", " + s.skipped() + " lines skipped" : "")
-                + (s.note().isEmpty() ? "" : " (" + s.note() + ")")
-                + " · " + blocked + " peers refused this session";
+        if (s.loadedAt() == 0) return s.note().isEmpty() ? tr("status.ipFilter.nothingLoaded") : s.note();
+        return tr(
+                "status.ipFilter.loaded",
+                s.ranges(),
+                Format.dateTime(s.loadedAt() / 1000),
+                s.skipped(),
+                s.note().isEmpty() ? 0 : 1,
+                s.note(),
+                blocked);
     }
 
     /** From the Peers tab: the address (without its port) joins the manual bans, and the filter is on. */
@@ -1140,7 +1145,7 @@ public final class MainWindow {
         settings.setIpFilterBans(bans);
         settings.set(Settings.IPFILTER_ENABLED, "true");
         settings.saveQuietly();
-        setStatus("Banned " + ip);
+        setStatus(tr("status.banned", ip));
         refreshIpFilter(false);
     }
 
@@ -1174,15 +1179,16 @@ public final class MainWindow {
 
     /** The user asked: ignores the interval, the setting and the skipped version, and always reports. */
     private void checkForUpdatesNow() {
-        setStatus("Checking for updates…");
+        setStatus(tr("status.checkingUpdates"));
         settings.setLastUpdateCheck(System.currentTimeMillis());
         settings.saveQuietly();
         updates.check(AppInfo.VERSION, outcome -> {
             onUpdateOutcome(outcome, true);
-            if (outcome.error() != null) setStatus("Update check failed: " + outcome.error(), EngineEvent.Level.ERROR);
+            if (outcome.error() != null) setStatus(tr("status.updateFailed", outcome.error()), EngineEvent.Level.ERROR);
             else if (outcome.available())
-                setStatus(AppInfo.NAME + " " + outcome.latest().version() + " is available — see the Help menu");
-            else setStatus(AppInfo.NAME + " " + AppInfo.VERSION + " is up to date");
+                setStatus(tr(
+                        "status.updateAvailable", AppInfo.NAME, outcome.latest().version()));
+            else setStatus(tr("status.upToDate", AppInfo.NAME, AppInfo.VERSION));
         });
     }
 
@@ -1191,14 +1197,14 @@ public final class MainWindow {
         if (!outcome.available()) return;
         if (!manual && outcome.latest().version().equals(settings.dismissedUpdate())) return;
         availableUpdate = outcome.latest();
-        downloadUpdateItem.setText("Download " + AppInfo.NAME + " " + availableUpdate.version() + "…");
-        skipUpdateItem.setText("Skip Version " + availableUpdate.version());
+        downloadUpdateItem.setText(tr("menu.help.downloadUpdate", AppInfo.NAME, availableUpdate.version()));
+        skipUpdateItem.setText(tr("menu.help.skipVersion", availableUpdate.version()));
         downloadUpdateItem.setVisible(true);
         skipUpdateItem.setVisible(true);
-        updateBadge.setText(availableUpdate.version() + " available");
+        updateBadge.setText(tr("status.updateBadge", availableUpdate.version()));
         updateBadge.setVisible(true);
         updateBadge.setManaged(true);
-        if (!manual) setStatus(AppInfo.NAME + " " + availableUpdate.version() + " is available — see the Help menu");
+        if (!manual) setStatus(tr("status.updateAvailable", AppInfo.NAME, availableUpdate.version()));
     }
 
     /** Help → About: one panel at a time, brought back if it is already open. */
@@ -1221,7 +1227,7 @@ public final class MainWindow {
         if (availableUpdate == null) return;
         settings.setDismissedUpdate(availableUpdate.version());
         settings.saveQuietly();
-        setStatus("Skipping " + AppInfo.NAME + " " + availableUpdate.version() + "; a manual check will still show it");
+        setStatus(tr("status.updateSkipped", AppInfo.NAME, availableUpdate.version()));
         availableUpdate = null;
         downloadUpdateItem.setVisible(false);
         skipUpdateItem.setVisible(false);
@@ -1273,7 +1279,8 @@ public final class MainWindow {
                             case MAGNET -> new AddRequest.Magnet(text);
                             case FILE -> {
                                 Path file = Path.of(text);
-                                if (!Files.isRegularFile(file)) throw new EngineException("No such file: " + text);
+                                if (!Files.isRegularFile(file))
+                                    throw new EngineException(tr("status.noSuchFile", text));
                                 yield new AddRequest.TorrentFile(Files.readAllBytes(file), text);
                             }
                             case URL -> new AddRequest.TorrentFile(new TorrentFetch().fetch(URI.create(text)), text);
@@ -1295,7 +1302,7 @@ public final class MainWindow {
             throws EngineException {
         if (withoutAsking) {
             Torrent added = e.add(AddDialog.withoutAsking(source, defaults));
-            Platform.runLater(() -> setStatus("Added " + added.name()));
+            Platform.runLater(() -> setStatus(tr("status.added", added.name())));
             return;
         }
         TorrentPreview preview = source instanceof AddRequest.TorrentFile file ? e.inspect(file.bytes()) : null;
@@ -1309,7 +1316,7 @@ public final class MainWindow {
     private void addFromSearch(SearchResult result) {
         Engine e = engine;
         if (e == null) {
-            setStatus("The engine is still starting");
+            setStatus(tr("status.engineStarting"));
             return;
         }
         String fetching = SearchAdd.fetchingText(result);
@@ -1319,7 +1326,7 @@ public final class MainWindow {
         Thread.ofVirtual().name("search-add").start(() -> {
             try {
                 AddRequest.Source source = SearchAdd.sourceOf(result, new TorrentFetch()::fetch);
-                if (!fetching.isEmpty()) Platform.runLater(() -> setStatus("Fetched " + result.name()));
+                if (!fetching.isEmpty()) Platform.runLater(() -> setStatus(tr("status.fetched", result.name())));
                 addSource(e, source, AddDialog.Via.SEARCH, withoutAsking, defaults);
             } catch (EngineException | IOException | RuntimeException ex) {
                 String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
@@ -1335,7 +1342,7 @@ public final class MainWindow {
     private void addFromArticle(Article article) {
         Engine e = engine;
         if (e == null) {
-            setStatus("The engine is still starting");
+            setStatus(tr("status.engineStarting"));
             return;
         }
         String fetching = RssAdd.fetchingText(article);
@@ -1345,7 +1352,8 @@ public final class MainWindow {
         Thread.ofVirtual().name("rss-add").start(() -> {
             try {
                 AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
-                if (!fetching.isEmpty()) Platform.runLater(() -> setStatus("Fetched " + article.displayTitle()));
+                if (!fetching.isEmpty())
+                    Platform.runLater(() -> setStatus(tr("status.fetched", article.displayTitle())));
                 addSource(e, source, AddDialog.Via.RSS, withoutAsking, defaults);
             } catch (EngineException | IOException | RuntimeException ex) {
                 String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
@@ -1432,7 +1440,7 @@ public final class MainWindow {
             String outcome;
             try {
                 Torrent added = fetch == null ? e.add(request) : e.add(request, fetch);
-                outcome = "Added " + added.name();
+                outcome = tr("status.added", added.name());
                 if (c.firstAndLastFirst()) {
                     TorrentLimits limits = e.limits(added.id());
                     e.setLimits(
@@ -1445,7 +1453,7 @@ public final class MainWindow {
                                     true));
                 }
                 if (c.filesLater()) {
-                    outcome += " · its files can be chosen when the file list arrives";
+                    outcome = tr("status.addedFilesLater", added.name());
                     String id = added.id();
                     Platform.runLater(() -> {
                         settings.setFilesToPick(id, true);
@@ -1504,8 +1512,7 @@ public final class MainWindow {
         AddDialog.folderToRemember(request.savePath(), settings.downloadDir(), categoryFolder)
                 .ifPresent(settings::downloadDir);
         settings.saveQuietly();
-        log.add(EngineEvent.info(
-                null, null, "Torrents are added without asking from now on; Settings → Adding turns it off"));
+        log.add(EngineEvent.info(null, null, tr("log.addWithoutAsking")));
     }
 
     /**
@@ -1520,13 +1527,13 @@ public final class MainWindow {
             try {
                 TorrentDetail d = e.detail(id);
                 if (d.files().isEmpty()) {
-                    Platform.runLater(() -> setStatus("The file list has not arrived yet"));
+                    Platform.runLater(() -> setStatus(tr("status.noFileList")));
                     return;
                 }
                 Torrent t = e.torrents().stream()
                         .filter(x -> x.id().equals(id))
                         .findFirst()
-                        .orElseThrow(() -> new EngineException("No such torrent: " + id));
+                        .orElseThrow(() -> new EngineException(tr("status.noSuchTorrent", id)));
                 List<TorrentPreview.FileEntry> files = d.files().stream()
                         .map(f -> new TorrentPreview.FileEntry(f.index(), f.path(), f.size()))
                         .toList();
@@ -1577,7 +1584,9 @@ public final class MainWindow {
                     if (p != own.get(f.index())) e.setFilePriority(id, f.index(), p);
                 }
                 if (!request.startPaused()) e.resume(id);
-                outcome = (request.startPaused() ? "Files chosen for " : "Started ") + preview.name();
+                outcome = request.startPaused()
+                        ? tr("status.filesChosen", preview.name())
+                        : tr("status.started", preview.name());
             } catch (EngineException ex) {
                 outcome = ex.getMessage();
             }
@@ -1590,7 +1599,7 @@ public final class MainWindow {
     private void createTorrent() {
         Engine e = engine;
         if (e == null) {
-            setStatus("The engine is still starting");
+            setStatus(tr("status.engineStarting"));
             return;
         }
         if (createDialog == null || !createDialog.isShowing()) createDialog = new CreateDialog(stage, e, settings);
@@ -1599,8 +1608,8 @@ public final class MainWindow {
 
     private void addTorrentFile() {
         FileChooser chooser = new FileChooser();
-        chooser.setTitle("Add Torrent File");
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Torrent files", "*.torrent"));
+        chooser.setTitle(tr("window.addFile.title"));
+        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter(tr("window.addFile.filter"), "*.torrent"));
         List<java.io.File> files = chooser.showOpenMultipleDialog(stage);
         if (files != null) files.forEach(f -> addInput(f.getAbsolutePath()));
     }
@@ -1610,9 +1619,9 @@ public final class MainWindow {
                 new javafx.scene.control.TextInputDialog(clipboardCandidate().orElse(""));
         prompt.initOwner(stage);
         Fonts.installUiFont(prompt.getDialogPane());
-        prompt.setTitle("Add Magnet Link");
-        prompt.setHeaderText("Magnet link, or a link to a .torrent");
-        prompt.setContentText("Link:");
+        prompt.setTitle(tr("window.addMagnet.title"));
+        prompt.setHeaderText(tr("window.addMagnet.header"));
+        prompt.setContentText(tr("window.addMagnet.link"));
         prompt.getEditor().setPrefColumnCount(48);
         prompt.showAndWait().map(String::trim).filter(t -> !t.isEmpty()).ifPresent(this::addInput);
     }
@@ -1631,8 +1640,10 @@ public final class MainWindow {
         clipboardCandidate().ifPresent(text -> {
             if (text.equals(lastClipboardOffer)) return;
             lastClipboardOffer = text;
-            setStatus((Inputs.classify(text) == Inputs.Kind.MAGNET ? "Magnet link" : "Torrent link")
-                    + " on the clipboard — press Ctrl+V to add it");
+            setStatus(
+                    Inputs.classify(text) == Inputs.Kind.MAGNET
+                            ? tr("status.clipboard.magnet")
+                            : tr("status.clipboard.torrent"));
         });
     }
 
@@ -1640,8 +1651,7 @@ public final class MainWindow {
         if (currentDialog != null) return;
         clipboardCandidate()
                 .ifPresentOrElse(
-                        text -> addInput(text, AddDialog.Via.CLIPBOARD),
-                        () -> setStatus("Nothing to add on the clipboard"));
+                        text -> addInput(text, AddDialog.Via.CLIPBOARD), () -> setStatus(tr("status.clipboardEmpty")));
     }
 
     private void onDragOver(DragEvent e) {
@@ -1739,16 +1749,16 @@ public final class MainWindow {
                 switch (due.get()) {
                     case PAUSE -> {
                         engine.pause(t.id());
-                        text = "Share limit reached: paused " + t.name();
+                        text = tr("log.shareLimit.paused", t.name());
                     }
                     case REMOVE -> {
                         engine.remove(t.id(), false);
-                        text = "Share limit reached: removed " + t.name();
+                        text = tr("log.shareLimit.removed", t.name());
                     }
                     default -> throw new IllegalStateException(due.get().name());
                 }
             } catch (EngineException e) {
-                text = "Share limit on " + t.name() + ": " + e.getMessage();
+                text = tr("log.shareLimit.failed", t.name(), e.getMessage());
             }
             String message = text;
             boolean removed = due.get() == ShareLimit.Action.REMOVE;
@@ -1866,27 +1876,31 @@ public final class MainWindow {
     }
 
     private void togglePause() {
-        if (Actions.shouldResume(selectedTorrents())) onSelection("Resumed", (e, t) -> e.resume(t.id()));
-        else onSelection("Paused", (e, t) -> e.pause(t.id()));
+        if (Actions.shouldResume(selectedTorrents()))
+            onSelection(tr("actions.verb.resumed"), (e, t) -> e.resume(t.id()));
+        else onSelection(tr("actions.verb.paused"), (e, t) -> e.pause(t.id()));
     }
 
     private void toggleSequential() {
         boolean on = Actions.shouldEnableSequential(selectedTorrents());
-        onSelection(on ? "Sequential on for" : "Sequential off for", (e, t) -> e.setSequential(t.id(), on));
+        onSelection(
+                on ? tr("actions.verb.sequentialOn") : tr("actions.verb.sequentialOff"),
+                (e, t) -> e.setSequential(t.id(), on));
     }
 
     private void remove(boolean deleteFiles) {
         List<Torrent> selected = selectedTorrents();
         if (selected.isEmpty()) return;
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, Actions.removeQuestion(selected.size(), deleteFiles));
-        confirm.setHeaderText(deleteFiles ? "Remove and delete files" : "Remove");
+        confirm.setHeaderText(deleteFiles ? tr("window.remove.header.delete") : tr("common.remove"));
         confirm.initOwner(stage);
         Fonts.installUiFont(confirm.getDialogPane());
-        ButtonType yes = new ButtonType(deleteFiles ? "Delete files" : "Remove", ButtonType.OK.getButtonData());
+        ButtonType yes = new ButtonType(
+                deleteFiles ? tr("window.remove.button.delete") : tr("common.remove"), ButtonType.OK.getButtonData());
         confirm.getButtonTypes().setAll(yes, ButtonType.CANCEL);
         Optional<ButtonType> answer = confirm.showAndWait();
         if (answer.isEmpty() || answer.get() != yes) return;
-        onSelection("Removed", (e, t) -> {
+        onSelection(tr("actions.verb.removed"), (e, t) -> {
             e.remove(t.id(), deleteFiles);
             Platform.runLater(() -> forgetOverride(t.id()));
         });
@@ -1911,7 +1925,7 @@ public final class MainWindow {
                 return;
             }
             Platform.runLater(() -> {
-                String subject = selected.size() == 1 ? first.name() : selected.size() + " torrents";
+                String subject = selected.size() == 1 ? first.name() : tr("window.torrentsCount", selected.size());
                 LimitsDialog dialog = new LimitsDialog(
                         stage,
                         subject,
@@ -1927,7 +1941,7 @@ public final class MainWindow {
                     settings.setShareOverride(t.id(), result.get().shareOverride());
                 settings.saveQuietly();
                 onSelection(
-                        "Limits set on",
+                        tr("actions.verb.limitsSet"),
                         (eng, t) -> eng.setLimits(t.id(), result.get().limits()));
             });
         });
@@ -1942,7 +1956,7 @@ public final class MainWindow {
                 labels.putCategory(new Category(l.category()));
             labels.addTags(l.tags());
         } catch (IOException e) {
-            setStatus("Could not write " + labels.dir() + ": " + e.getMessage());
+            setStatus(tr("status.labelsWriteFailed", labels.dir(), e.getMessage()));
         }
         refreshSidebar(rows.list().stream().map(TorrentRow::torrent).toList());
     }
@@ -1950,7 +1964,7 @@ public final class MainWindow {
     /** Files the selection under the category (empty for none), on a worker. */
     private void setCategory(String name) {
         rememberLabels(new TorrentLabels(name, List.of()));
-        String verb = name.isEmpty() ? "Category cleared on" : "Filed under " + name + ":";
+        String verb = name.isEmpty() ? tr("actions.verb.categoryCleared") : tr("actions.verb.filedUnder", name);
         onSelection(verb, (e, t) -> e.setCategory(t.id(), name));
     }
 
@@ -1966,28 +1980,37 @@ public final class MainWindow {
 
     private void showCategoryChoice() {
         if (selectedTorrents().isEmpty() || (promptDialog != null && promptDialog.isShowing())) return;
+        String noneChoice = noneChoice();
+        String newChoice = newChoice();
         List<String> choices = new ArrayList<>();
-        choices.add(NONE_CHOICE);
+        choices.add(noneChoice);
         for (Category c : labels.categories()) choices.add(c.name());
-        choices.add(NEW_CHOICE);
+        choices.add(newChoice);
         String current = selectedTorrents().get(0).category();
         javafx.scene.control.ChoiceDialog<String> prompt =
-                new javafx.scene.control.ChoiceDialog<>(current.isEmpty() ? NONE_CHOICE : current, choices);
+                new javafx.scene.control.ChoiceDialog<>(current.isEmpty() ? noneChoice : current, choices);
         prompt.initOwner(stage);
         Fonts.installUiFont(prompt.getDialogPane());
-        prompt.setTitle("Set Category");
-        prompt.setHeaderText("File the selection under");
-        prompt.setContentText("Category:");
+        prompt.setTitle(tr("window.category.title"));
+        prompt.setHeaderText(tr("window.category.header"));
+        prompt.setContentText(tr("window.category.label"));
         promptDialog = prompt;
         Optional<String> answer = prompt.showAndWait();
         promptDialog = null;
         if (answer.isEmpty()) return;
-        if (answer.get().equals(NEW_CHOICE)) newCategory();
-        else setCategory(answer.get().equals(NONE_CHOICE) ? "" : answer.get());
+        if (answer.get().equals(newChoice)) newCategory();
+        else setCategory(answer.get().equals(noneChoice) ? "" : answer.get());
     }
 
-    private static final String NONE_CHOICE = "None";
-    private static final String NEW_CHOICE = "New category…";
+    /** The "no category" entry of the choice and the submenu; read at use, since the language is chosen at start. */
+    private static String noneChoice() {
+        return tr("common.none");
+    }
+
+    /** The "make a new category" entry of the choice and the submenu. */
+    private static String newChoice() {
+        return tr("window.category.new");
+    }
 
     /** Asks for a name, makes the category, files the selection under it. */
     private void newCategory() {
@@ -1999,9 +2022,9 @@ public final class MainWindow {
         javafx.scene.control.TextInputDialog prompt = new javafx.scene.control.TextInputDialog();
         prompt.initOwner(stage);
         Fonts.installUiFont(prompt.getDialogPane());
-        prompt.setTitle("New Category");
-        prompt.setHeaderText("A name for the category; its save path can be set in Settings");
-        prompt.setContentText("Name:");
+        prompt.setTitle(tr("window.newCategory.title"));
+        prompt.setHeaderText(tr("window.newCategory.header"));
+        prompt.setContentText(tr("window.newCategory.name"));
         promptDialog = prompt;
         Optional<String> name = prompt.showAndWait().map(String::trim).filter(n -> !n.isEmpty());
         promptDialog = null;
@@ -2017,7 +2040,7 @@ public final class MainWindow {
     private void showTagsDialog() {
         List<Torrent> selected = selectedTorrents();
         if (selected.isEmpty() || (tagsDialog != null && tagsDialog.isShowing())) return;
-        String subject = selected.size() == 1 ? selected.get(0).name() : selected.size() + " torrents";
+        String subject = selected.size() == 1 ? selected.get(0).name() : tr("window.torrentsCount", selected.size());
         TagsDialog dialog = new TagsDialog(
                 stage,
                 subject,
@@ -2029,7 +2052,7 @@ public final class MainWindow {
         table.requestFocus();
         if (result.isEmpty()) return;
         rememberLabels(new TorrentLabels("", result.get().add()));
-        onTorrents("Tags set on", selected, (e, t) -> {
+        onTorrents(tr("actions.verb.tagsSet"), selected, (e, t) -> {
             List<String> tags = new ArrayList<>(e.tags(t.id()));
             tags.removeAll(result.get().remove());
             tags.addAll(result.get().add());
@@ -2055,13 +2078,15 @@ public final class MainWindow {
         @Override
         public void categoryDeleted(String name) {
             onTorrents(
-                    "Category cleared on", carrying(SidebarFilter.category(name)), (e, t) -> e.setCategory(t.id(), ""));
+                    tr("actions.verb.categoryCleared"),
+                    carrying(SidebarFilter.category(name)),
+                    (e, t) -> e.setCategory(t.id(), ""));
             labelsChanged();
         }
 
         @Override
         public void tagDeleted(String name) {
-            onTorrents("Tag removed from", carrying(SidebarFilter.tag(name)), (e, t) -> {
+            onTorrents(tr("actions.verb.tagRemoved"), carrying(SidebarFilter.tag(name)), (e, t) -> {
                 List<String> tags = new ArrayList<>(e.tags(t.id()));
                 tags.remove(name);
                 e.setTags(t.id(), tags);
@@ -2115,13 +2140,14 @@ public final class MainWindow {
         sidebar.focus();
     }
 
-    private void copyToClipboard(String what, Function<Torrent, String> text) {
+    /** {@code key} names the status sentence ({@code status.copied.*}), given the selection's size. */
+    private void copyToClipboard(String key, Function<Torrent, String> text) {
         List<Torrent> selected = selectedTorrents();
         if (selected.isEmpty()) return;
         ClipboardContent content = new ClipboardContent();
         content.putString(String.join("\n", selected.stream().map(text).toList()));
         Clipboard.getSystemClipboard().setContent(content);
-        setStatus("Copied " + what + (selected.size() == 1 ? "" : " of " + selected.size() + " torrents"));
+        setStatus(tr(key, selected.size()));
     }
 
     private void copyMagnetLinks() {
@@ -2141,7 +2167,7 @@ public final class MainWindow {
                 ClipboardContent content = new ClipboardContent();
                 content.putString(String.join("\n", links));
                 Clipboard.getSystemClipboard().setContent(content);
-                setStatus("Copied " + (links.size() == 1 ? "magnet link" : links.size() + " magnet links"));
+                setStatus(tr("status.copied.magnet", links.size()));
             });
         });
     }
@@ -2166,156 +2192,174 @@ public final class MainWindow {
         BooleanBinding selection = Bindings.isNotEmpty(table.getSelectionModel().getSelectedItems());
         BooleanBinding always = Bindings.createBooleanBinding(() -> true);
         List<Command> all = new ArrayList<>(List.of(
-                new Command("create", "New Torrent…", chord(KeyCode.N), null, always, this::createTorrent),
-                new Command("add-file", "Add Torrent File…", chord(KeyCode.O), null, always, this::addTorrentFile),
-                new Command("add-magnet", "Add Magnet Link…", chord(KeyCode.M), null, always, this::addMagnetLink),
+                new Command("create", tr("command.create"), chord(KeyCode.N), null, always, this::createTorrent),
+                new Command("add-file", tr("command.addFile"), chord(KeyCode.O), null, always, this::addTorrentFile),
+                new Command("add-magnet", tr("command.addMagnet"), chord(KeyCode.M), null, always, this::addMagnetLink),
                 // The chord is a scene accelerator, not a menu one: Ctrl+V in a text field must paste.
                 new Command(
                         "add-clipboard",
-                        "Add from Clipboard",
+                        tr("command.addClipboard"),
                         null,
                         chord(KeyCode.V).getDisplayText(),
                         always,
                         this::addFromClipboard),
-                new Command("pause-resume", "Pause / Resume", null, "Space", selection, this::togglePause),
+                new Command("pause-resume", tr("command.pauseResume"), null, "Space", selection, this::togglePause),
                 new Command(
                         "force-resume",
-                        "Force Resume",
+                        tr("command.forceResume"),
                         shiftChord(KeyCode.U),
                         null,
                         selection,
-                        () -> onSelection("Forced", (e, t) -> e.forceResume(t.id()))),
+                        () -> onSelection(tr("actions.verb.forced"), (e, t) -> e.forceResume(t.id()))),
                 new Command(
                         "recheck",
-                        "Force Recheck",
+                        tr("command.recheck"),
                         shiftChord(KeyCode.R),
                         null,
                         selection,
-                        () -> onSelection("Rechecking", (e, t) -> e.recheck(t.id()))),
+                        () -> onSelection(tr("actions.verb.rechecking"), (e, t) -> e.recheck(t.id()))),
                 new Command(
                         "reannounce",
-                        "Force Reannounce",
+                        tr("command.reannounce"),
                         shiftChord(KeyCode.A),
                         null,
                         selection,
-                        () -> onSelection("Reannounced", (e, t) -> e.reannounce(t.id()))),
+                        () -> onSelection(tr("actions.verb.reannounced"), (e, t) -> e.reannounce(t.id()))),
                 new Command(
                         "sequential",
-                        "Sequential Download",
+                        tr("command.sequential"),
                         shiftChord(KeyCode.S),
                         null,
                         selection,
                         this::toggleSequential),
-                new Command("limits", "Limits…", chord(KeyCode.L), null, selection, this::editLimits),
+                new Command("limits", tr("command.limits"), chord(KeyCode.L), null, selection, this::editLimits),
                 new Command(
-                        "set-category", "Set Category…", shiftChord(KeyCode.G), null, selection, this::chooseCategory),
-                new Command("edit-tags", "Edit Tags…", chord(KeyCode.T), null, selection, this::editTags),
-                new Command("manage-categories", "Manage Categories and Tags…", null, null, always, () -> {
+                        "set-category",
+                        tr("command.setCategory"),
+                        shiftChord(KeyCode.G),
+                        null,
+                        selection,
+                        this::chooseCategory),
+                new Command("edit-tags", tr("command.editTags"), chord(KeyCode.T), null, selection, this::editTags),
+                new Command("manage-categories", tr("command.manageCategories"), null, null, always, () -> {
                     settingsWindow.show(stage);
                     settingsWindow.selectPageForCapture("LABELS");
                 }),
                 new Command(
                         "copy-name",
-                        "Copy Name",
+                        tr("command.copyName"),
                         chord(KeyCode.C),
                         null,
                         selection,
-                        () -> copyToClipboard("name", Torrent::name)),
+                        () -> copyToClipboard("status.copied.name", Torrent::name)),
                 new Command(
                         "copy-hash",
-                        "Copy Info-Hash",
+                        tr("command.copyHash"),
                         shiftChord(KeyCode.H),
                         null,
                         selection,
-                        () -> copyToClipboard("info-hash", Torrent::id)),
+                        () -> copyToClipboard("status.copied.infoHash", Torrent::id)),
                 new Command(
                         "copy-magnet",
-                        "Copy Magnet Link",
+                        tr("command.copyMagnet"),
                         shiftChord(KeyCode.C),
                         null,
                         selection,
                         this::copyMagnetLinks),
                 new Command(
                         "open-folder",
-                        "Open Destination Folder",
+                        tr("command.openFolder"),
                         shiftChord(KeyCode.O),
                         null,
                         selection,
                         this::openFolder),
-                new Command("remove", "Remove…", null, "Delete", selection, () -> remove(false)),
-                new Command("remove-data", "Remove with Data…", null, "Shift+Delete", selection, () -> remove(true)),
-                new Command("check-updates", "Check for Updates", null, null, always, this::checkForUpdatesNow),
-                new Command("about", "About " + AppInfo.NAME, null, null, always, this::showAbout),
+                new Command("remove", tr("command.remove"), null, "Delete", selection, () -> remove(false)),
                 new Command(
-                        "settings", "Settings…", chord(KeyCode.COMMA), null, always, () -> settingsWindow.show(stage)),
-                new Command("search", "Search…", chord(KeyCode.K), null, always, this::showSearch),
-                new Command("rss", "RSS Feeds…", chord(KeyCode.R), null, always, this::showRss),
-                new Command("rss-run-rules", "Run RSS Rules Now", null, null, always, rss::runRulesNow),
-                new Command("transfers", "Show Transfers", null, "Esc", always, this::showTransfers),
+                        "remove-data", tr("command.removeData"), null, "Shift+Delete", selection, () -> remove(true)),
+                new Command("check-updates", tr("command.checkUpdates"), null, null, always, this::checkForUpdatesNow),
+                new Command("about", tr("command.about", AppInfo.NAME), null, null, always, this::showAbout),
+                new Command(
+                        "settings",
+                        tr("command.settings"),
+                        chord(KeyCode.COMMA),
+                        null,
+                        always,
+                        () -> settingsWindow.show(stage)),
+                new Command("search", tr("command.search"), chord(KeyCode.K), null, always, this::showSearch),
+                new Command("rss", tr("command.rss"), chord(KeyCode.R), null, always, this::showRss),
+                new Command("rss-run-rules", tr("command.rssRunRules"), null, null, always, rss::runRulesNow),
+                new Command("transfers", tr("command.transfers"), null, "Esc", always, this::showTransfers),
                 new Command(
                         "filter",
-                        "Filter Torrents",
+                        tr("command.filter"),
                         null,
                         chord(KeyCode.F).getDisplayText(),
                         always,
                         this::focusFilter),
                 new Command(
                         "toggle-density",
-                        "Toggle Row Density (Comfortable / Compact)",
+                        tr("command.toggleDensity"),
                         null,
                         null,
                         always,
                         () -> chooseDensity(density.other())),
                 new Command(
                         "select-all",
-                        "Select All",
+                        tr("command.selectAll"),
                         null,
                         chord(KeyCode.A).getDisplayText(),
                         always,
                         () -> table.getSelectionModel().selectAll()),
                 new Command(
                         "event-log",
-                        "Event Log",
+                        tr("command.eventLog"),
                         null,
                         shiftChord(KeyCode.L).getDisplayText(),
                         always,
                         () -> logWindow.show()),
                 new Command(
                         "statistics",
-                        "Statistics",
+                        tr("command.statistics"),
                         null,
                         shiftChord(KeyCode.T).getDisplayText(),
                         always,
                         () -> statsWindow.show()),
                 new Command(
                         "message-log",
-                        "Messages",
+                        tr("command.messageLog"),
                         null,
                         shiftChord(KeyCode.M).getDisplayText(),
                         always,
                         () -> messagePopup.toggle()),
-                new Command("debug-log", "Debug Log", null, null, always, this::showDebugLog),
+                new Command("debug-log", tr("command.debugLog"), null, null, always, this::showDebugLog),
                 new Command(
                         "toggle-toolbar",
-                        "Toggle Toolbar",
+                        tr("command.toggleToolbar"),
                         null,
                         null,
                         always,
                         () -> toolbar.setVisible(!toolbar.isVisible())),
                 new Command(
                         "toggle-sidebar",
-                        "Toggle Sidebar",
+                        tr("command.toggleSidebar"),
                         shiftChord(KeyCode.B),
                         null,
                         always,
                         () -> setSidebarVisible(!sidebar.isVisible())),
-                new Command("focus-sidebar", "Focus Sidebar", chord(KeyCode.B), null, always, this::focusSidebar)));
+                new Command(
+                        "focus-sidebar",
+                        tr("command.focusSidebar"),
+                        chord(KeyCode.B),
+                        null,
+                        always,
+                        this::focusSidebar)));
         // One "Show: …" per status, and Show: All, so a filter is picked without the mouse.
-        all.add(new Command("show-all", "Show: All", null, null, always, () -> chooseFilter(SidebarFilter.ALL)));
+        all.add(new Command(
+                "show-all", tr("command.showAll"), null, null, always, () -> chooseFilter(SidebarFilter.ALL)));
         for (SidebarStatus status : SidebarStatus.values()) {
             all.add(new Command(
                     "show-" + status.key(),
-                    "Show: " + status.title(),
+                    tr("command.show", status.title()),
                     null,
                     null,
                     always,
@@ -2365,7 +2409,7 @@ public final class MainWindow {
     private Button toolButton(String id, javafx.scene.Node icon) {
         Command c = command(id);
         String name = c.label().replace("…", "");
-        if (!c.hint().isEmpty()) name += " (" + c.hint() + ")";
+        if (!c.hint().isEmpty()) name = tr("toolbar.withChord", name, c.hint());
         Button b = Icons.toolbarButton(icon, name, c.run());
         b.disableProperty().bind(Bindings.not(c.enabled()));
         return b;
@@ -2391,11 +2435,11 @@ public final class MainWindow {
         MenuItem addMagnet = command("add-magnet").menuItem();
         MenuItem addClipboard = command("add-clipboard").menuItem();
 
-        MenuItem quit = new MenuItem("Quit");
+        MenuItem quit = new MenuItem(tr("menu.file.quit"));
         quit.setAccelerator(chord(KeyCode.Q));
         quit.setOnAction(e -> quit());
 
-        Menu file = new Menu("File");
+        Menu file = new Menu(tr("menu.file"));
         file.getItems()
                 .addAll(
                         command("create").menuItem(),
@@ -2411,25 +2455,26 @@ public final class MainWindow {
                         new SeparatorMenuItem(),
                         quit);
 
-        Menu torrent = new Menu("Torrent");
+        Menu torrent = new Menu(tr("menu.torrent"));
         torrent.getItems().addAll(torrentItems());
 
-        paletteItem = new MenuItem("Command Palette…");
+        paletteItem = new MenuItem(tr("menu.view.commandPalette"));
         paletteItem.setAccelerator(paletteChord);
         paletteItem.setOnAction(e -> palette.show(commands));
-        CheckMenuItem toolbarItem = new CheckMenuItem("Toolbar");
+        CheckMenuItem toolbarItem = new CheckMenuItem(tr("menu.view.toolbar"));
         toolbarItem.selectedProperty().bindBidirectional(toolbar.visibleProperty());
-        CheckMenuItem sidebarItem = new CheckMenuItem("Sidebar");
+        CheckMenuItem sidebarItem = new CheckMenuItem(tr("menu.view.sidebar"));
         sidebarItem.setAccelerator(shiftChord(KeyCode.B));
         sidebarItem.selectedProperty().bindBidirectional(sidebar.visibleProperty());
         for (Density d : Density.values()) {
-            javafx.scene.control.RadioMenuItem item = new javafx.scene.control.RadioMenuItem(d + " Rows");
+            javafx.scene.control.RadioMenuItem item =
+                    new javafx.scene.control.RadioMenuItem(tr("menu.view.densityRows", d.toString()));
             item.setToggleGroup(densityGroup);
             item.setSelected(d == density);
             item.setOnAction(e -> chooseDensity(d));
             densityItems.put(d, item);
         }
-        Menu view = new Menu("View");
+        Menu view = new Menu(tr("menu.view"));
         view.getItems()
                 .addAll(
                         toolbarItem,
@@ -2454,7 +2499,7 @@ public final class MainWindow {
         downloadUpdateItem.setOnAction(e -> downloadUpdate());
         skipUpdateItem.setVisible(false);
         skipUpdateItem.setOnAction(e -> skipUpdate());
-        Menu help = new Menu("Help");
+        Menu help = new Menu(tr("menu.help"));
         help.getItems()
                 .addAll(
                         command("check-updates").menuItem(),
@@ -2491,7 +2536,7 @@ public final class MainWindow {
      * checked, then None and New Category…. Rebuilt each time it opens, since the list changes.
      */
     private Menu categoryMenu() {
-        Menu menu = new Menu("Set Category");
+        Menu menu = new Menu(tr("menu.torrent.setCategory"));
         menu.disableProperty().bind(Bindings.not(command("set-category").enabled()));
         menu.setOnShowing(e -> {
             List<Torrent> selected = selectedTorrents();
@@ -2504,16 +2549,16 @@ public final class MainWindow {
                 items.add(item);
             }
             if (!items.isEmpty()) items.add(new SeparatorMenuItem());
-            MenuItem none = new MenuItem(NONE_CHOICE);
+            MenuItem none = new MenuItem(noneChoice());
             none.setOnAction(a -> setCategory(""));
-            MenuItem fresh = new MenuItem(NEW_CHOICE);
+            MenuItem fresh = new MenuItem(newChoice());
             fresh.setOnAction(a -> newCategory());
             items.add(none);
             items.add(fresh);
             menu.getItems().setAll(items);
         });
         // Never empty, or the submenu arrow has nothing to open and some platforms drop it.
-        menu.getItems().add(new MenuItem(NONE_CHOICE));
+        menu.getItems().add(new MenuItem(noneChoice()));
         return menu;
     }
 
@@ -2556,7 +2601,7 @@ public final class MainWindow {
         detail.selectTab(settings.get(Settings.DETAIL_TAB, "general"));
         detail.setOnFilePriority((index, priority) -> {
             String id = detailId;
-            if (id != null) onTorrent("Priority set for", id, (e, t) -> e.setFilePriority(t, index, priority));
+            if (id != null) onTorrent("status.prioritySet", id, (e, t) -> e.setFilePriority(t, index, priority));
         });
         detail.setOnOpenFile(row -> {
             String id = detailId;
@@ -2568,15 +2613,15 @@ public final class MainWindow {
         });
         detail.setOnAddTrackers(urls -> {
             String id = detailId;
-            if (id != null) onTorrent("Trackers added to", id, (e, t) -> e.addTrackers(t, urls));
+            if (id != null) onTorrent("status.trackersAdded", id, (e, t) -> e.addTrackers(t, urls));
         });
         detail.setOnRemoveTracker(url -> {
             String id = detailId;
-            if (id != null) onTorrent("Tracker removed from", id, (e, t) -> e.removeTracker(t, url));
+            if (id != null) onTorrent("status.trackerRemoved", id, (e, t) -> e.removeTracker(t, url));
         });
         detail.setOnReannounce(() -> {
             String id = detailId;
-            if (id != null) onTorrent("Reannounced", id, (e, t) -> e.reannounce(t));
+            if (id != null) onTorrent("status.reannounced", id, (e, t) -> e.reannounce(t));
         });
         Platform.runLater(() -> {
             setDetailVisible(Boolean.parseBoolean(settings.get(Settings.DETAIL_VISIBLE, "true")));
@@ -2651,7 +2696,7 @@ public final class MainWindow {
             ClipboardContent content = new ClipboardContent();
             content.putString(text);
             Clipboard.getSystemClipboard().setContent(content);
-            setStatus("Copied " + (text.startsWith("magnet:") ? "the magnet link" : "the link"));
+            setStatus(text.startsWith("magnet:") ? tr("status.copied.theMagnet") : tr("status.copied.theLink"));
         }
 
         @Override
@@ -2679,7 +2724,7 @@ public final class MainWindow {
             Thread.currentThread().interrupt();
         }
         Engine e = engine;
-        if (e == null) throw new IOException("the engine is not running");
+        if (e == null) throw new IOException(tr("status.engineNotRunning"));
         AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
         Optional<Path> categoryFolder = labels.category(rule.category()).flatMap(Category::path);
         try {
@@ -2701,7 +2746,7 @@ public final class MainWindow {
     private void downloadArticle(Article article) {
         Engine e = engine;
         if (e == null) {
-            setStatus("The engine is still starting");
+            setStatus(tr("status.engineStarting"));
             return;
         }
         String fetching = RssAdd.fetchingText(article);
@@ -2712,7 +2757,7 @@ public final class MainWindow {
                 AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
                 Torrent added = e.add(AddDialog.withoutAsking(source, defaults));
                 rss.markDownloaded(article.feedId(), article.identity());
-                Platform.runLater(() -> setStatus("Added " + added.name()));
+                Platform.runLater(() -> setStatus(tr("status.added", added.name())));
             } catch (EngineException | IOException | RuntimeException ex) {
                 String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
                 Platform.runLater(() -> setStatus(message));
@@ -2748,7 +2793,7 @@ public final class MainWindow {
             ClipboardContent content = new ClipboardContent();
             content.putString(text);
             Clipboard.getSystemClipboard().setContent(content);
-            setStatus("Copied " + (text.startsWith("magnet:") ? "the magnet link" : "the link"));
+            setStatus(text.startsWith("magnet:") ? tr("status.copied.theMagnet") : tr("status.copied.theLink"));
         }
 
         @Override
@@ -2797,8 +2842,7 @@ public final class MainWindow {
     private void reportDefinitionProblems() {
         for (DefinitionStore.Entry entry : definitionStore.problems()) {
             if (reportedDefinitionProblems.add(entry.problem()))
-                log.add(EngineEvent.session(
-                        EngineEvent.Level.WARNING, "Search definition skipped: " + entry.problem()));
+                log.add(EngineEvent.session(EngineEvent.Level.WARNING, tr("log.definitionSkipped", entry.problem())));
         }
     }
 
@@ -2831,7 +2875,8 @@ public final class MainWindow {
         void apply(Engine engine, String id) throws EngineException;
     }
 
-    private void onTorrent(String verb, String id, IdAction action) {
+    /** {@code key} names the status sentence for success; the torrent's name is its one placeholder. */
+    private void onTorrent(String key, String id, IdAction action) {
         if (engine == null) return;
         Engine e = engine;
         TorrentRow row = rows.get(id);
@@ -2840,7 +2885,7 @@ public final class MainWindow {
             String text;
             try {
                 action.apply(e, id);
-                text = verb + " " + name;
+                text = tr(key, name);
             } catch (EngineException ex) {
                 text = ex.getMessage();
             }
@@ -2850,7 +2895,7 @@ public final class MainWindow {
     }
 
     private HBox buildFilterBar() {
-        filter.setPromptText("Filter (Ctrl+F) — try state:seeding");
+        filter.setPromptText(tr("window.filter.prompt"));
         // Not traversable: the scene hands initial focus to the first traversable node, and while
         // the table is hidden (no torrents yet) that would be this box, so every keystroke on a
         // fresh launch would land in the filter. Ctrl+F reaches it; Tab does not need to.
@@ -2903,40 +2948,40 @@ public final class MainWindow {
         // Widths are remembered, so they are not stretched to fit; the last column does not flex.
         table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
         table.setTableMenuButtonVisible(true);
-        table.setPlaceholder(new Label("No torrents match the filter"));
+        table.setPlaceholder(new Label(tr("window.table.noMatch")));
         table.getStyleClass().add("torrent-table");
         table.setOnKeyPressed(this::onTableKey);
         table.setRowFactory(t -> new StateRow());
 
         TableColumn<TorrentRow, RowView> name = nameColumn();
         TableColumn<TorrentRow, Double> progress =
-                column("progress", "Progress", 110, true, Torrent::progress, Format::percent);
+                column("progress", tr("column.progress"), 110, true, Torrent::progress, Format::percent);
         progress.setCellFactory(ProgressBarTableCell.forTableColumn());
         table.getColumns()
                 .addAll(List.of(
                         name,
-                        column("size", "Size", 90, true, Torrent::size, v -> v == 0 ? "—" : Bytes.human(v)),
-                        column("done", "Done", 90, false, Torrent::done, Bytes::human),
+                        column("size", tr("common.size"), 90, true, Torrent::size, v -> v == 0 ? "—" : Bytes.human(v)),
+                        column("done", tr("column.done"), 90, false, Torrent::done, Bytes::human),
                         progress,
                         statusColumn(),
-                        column("seeds", "Seeds", 70, true, Torrent::seeds, String::valueOf),
-                        column("peers", "Peers", 70, true, Torrent::peers, String::valueOf),
-                        column("down", "Down", 90, true, Torrent::downloadRate, Format::rate),
-                        column("up", "Up", 90, true, Torrent::uploadRate, Format::rate),
-                        column("eta", "ETA", 80, true, Format::etaSeconds, Format::eta),
+                        column("seeds", tr("column.seeds"), 70, true, Torrent::seeds, String::valueOf),
+                        column("peers", tr("column.peers"), 70, true, Torrent::peers, String::valueOf),
+                        column("down", tr("column.down"), 90, true, Torrent::downloadRate, Format::rate),
+                        column("up", tr("column.up"), 90, true, Torrent::uploadRate, Format::rate),
+                        column("eta", tr("column.eta"), 80, true, Format::etaSeconds, Format::eta),
                         column(
                                 "ratio",
-                                "Ratio",
+                                tr("column.ratio"),
                                 70,
                                 true,
                                 t -> Format.ratioValue(t.uploaded(), t.downloaded()),
                                 Format::ratio),
-                        column("added", "Added", 130, false, Torrent::added, Format::dateTime),
-                        column("completed", "Completed", 130, false, Torrent::completed, Format::dateTime),
-                        column("tracker", "Tracker", 160, false, Torrent::tracker, Format::host),
-                        column("category", "Category", 120, false, Torrent::category, s -> s),
-                        column("tags", "Tags", 160, false, t -> Format.tags(t.tags()), s -> s),
-                        column("path", "Save path", 240, false, Torrent::savePath, s -> s)));
+                        column("added", tr("column.added"), 130, false, Torrent::added, Format::dateTime),
+                        column("completed", tr("column.completed"), 130, false, Torrent::completed, Format::dateTime),
+                        column("tracker", tr("column.tracker"), 160, false, Torrent::tracker, Format::host),
+                        column("category", tr("column.category"), 120, false, Torrent::category, s -> s),
+                        column("tags", tr("column.tags"), 160, false, t -> Format.tags(t.tags()), s -> s),
+                        column("path", tr("column.path"), 240, false, Torrent::savePath, s -> s)));
 
         builtInLayout = ColumnLayout.format(ColumnMemory.capture(table));
         density = Density.byId(settings.density(), Density.DEFAULT);
@@ -3007,7 +3052,7 @@ public final class MainWindow {
     }
 
     private String paletteButtonName() {
-        return "Command Palette (" + paletteChord.getDisplayText() + ")";
+        return tr("toolbar.palette.tooltip", paletteChord.getDisplayText());
     }
 
     /**
@@ -3038,7 +3083,7 @@ public final class MainWindow {
     record RowView(String name, StatusLine line, double progress) {}
 
     private TableColumn<TorrentRow, RowView> nameColumn() {
-        TableColumn<TorrentRow, RowView> column = new TableColumn<>("Name");
+        TableColumn<TorrentRow, RowView> column = new TableColumn<>(tr("common.name"));
         column.setId("name");
         column.setPrefWidth(360);
         column.setCellValueFactory(cell -> {
@@ -3144,7 +3189,7 @@ public final class MainWindow {
      * state, in {@link RowState}'s order: errors and stalls first.
      */
     private TableColumn<TorrentRow, StatusLine> statusColumn() {
-        TableColumn<TorrentRow, StatusLine> column = new TableColumn<>("Status");
+        TableColumn<TorrentRow, StatusLine> column = new TableColumn<>(tr("column.state"));
         column.setId("state");
         column.setPrefWidth(300);
         column.setCellValueFactory(cell -> {
@@ -3233,10 +3278,14 @@ public final class MainWindow {
     }
 
     private VBox buildEmptyState() {
-        Label title = new Label("No torrents yet");
+        Label title = new Label(tr("window.empty.title"));
         title.getStyleClass().add("empty-title");
-        Label hint = new Label("Press Ctrl+O to add a .torrent file, Ctrl+M for a magnet link, or drop either here.");
+        Label hint = new Label(tr("window.empty.hint"));
         hint.getStyleClass().add("empty-hint");
+        // A translation runs longer than the English line; a paragraph, never an ellipsis.
+        hint.setWrapText(true);
+        hint.setTextAlignment(javafx.scene.text.TextAlignment.CENTER);
+        hint.setMaxWidth(560);
         VBox box = new VBox(8, title, hint);
         box.setAlignment(Pos.CENTER);
         box.getStyleClass().add("empty-state");
@@ -3251,10 +3300,7 @@ public final class MainWindow {
         errorBadge
                 .textProperty()
                 .bind(Bindings.createStringBinding(
-                        () -> log.errorsProperty().get() == 1
-                                ? "1 error"
-                                : log.errorsProperty().get() + " errors",
-                        log.errorsProperty()));
+                        () -> tr("status.errors", log.errorsProperty().get()), log.errorsProperty()));
         errorBadge.visibleProperty().bind(log.errorsProperty().greaterThan(0));
         errorBadge.managedProperty().bind(errorBadge.visibleProperty());
         errorBadge.setOnMouseClicked(e -> logWindow.show());
@@ -3273,7 +3319,7 @@ public final class MainWindow {
         });
         // The alternative-speed toggle: a click flips the manual switch; the schedule shows too.
         altSpeedToggle.getStyleClass().add("alt-speed");
-        altSpeedToggle.setText("Alt speed: off");
+        altSpeedToggle.setText(tr("status.altSpeed.off"));
         altSpeedToggle.setOnMouseClicked(e -> toggleAlternativeSpeed());
         // The status text is the door to its own history: a click shows what scrolled past.
         status.getStyleClass().add("status-message");
@@ -3285,7 +3331,7 @@ public final class MainWindow {
     }
 
     private static String ratesText(Engine.Rates r) {
-        return "↓ " + Bytes.rate(r.download()) + "   ↑ " + Bytes.rate(r.upload());
+        return tr("status.rates", Bytes.rate(r.download()), Bytes.rate(r.upload()));
     }
 
     private void setStatus(String text) {

@@ -13,6 +13,8 @@ import javafx.beans.property.SimpleObjectProperty;
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.TorrentPreview;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The Add dialog's file tree, built from the flat file list, and the rules its keys follow. Pure,
  * so the shape and the rules are tested.
@@ -120,7 +122,7 @@ public final class FileTree {
     public static String label(Node node) {
         List<String> labels =
                 files(node).stream().map(f -> choice(f).label()).distinct().toList();
-        return labels.size() == 1 ? labels.get(0) : labels.isEmpty() ? "" : "Mixed";
+        return labels.size() == 1 ? labels.get(0) : labels.isEmpty() ? "" : tr("dialog.add.priority.mixed");
     }
 
     /** The bytes the wanted files add up to: what the disk bar says the torrent will take. */

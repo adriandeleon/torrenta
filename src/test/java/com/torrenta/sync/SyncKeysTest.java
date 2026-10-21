@@ -14,6 +14,7 @@ class SyncKeysTest {
     @Test
     void whatStaysOnThisMachine() {
         assertTrue(SyncKeys.isSynced("ui.theme"));
+        assertTrue(SyncKeys.isSynced("ui.language"), "the interface language is a preference");
         assertTrue(SyncKeys.isSynced("connection.port"));
         assertTrue(SyncKeys.isSynced("protocol.defaultTrackers"));
         assertTrue(SyncKeys.isSynced("ipfilter.bans"));

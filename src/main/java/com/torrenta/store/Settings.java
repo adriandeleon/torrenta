@@ -49,6 +49,12 @@ public final class Settings {
     public static final String TABLE_COLUMNS_COMFORTABLE = "table.columns.comfortable";
     /** Row density, {@code comfortable} or {@code compact}; the UI maps it and falls back. */
     public static final String UI_DENSITY = "ui.density";
+    /**
+     * The interface language: {@code system} (the default, follow the operating system) or one of
+     * the codes {@code com.torrenta.i18n.Messages} bundles; applied at start, so a change relabels
+     * on restart. A preference, so it syncs.
+     */
+    public static final String UI_LANGUAGE = "ui.language";
     /** The Search tab's results columns, the same shape. */
     public static final String SEARCH_COLUMNS = "search.columns";
     /** The declarative search providers switched off, by id, space-separated; syncs. */
@@ -460,6 +466,16 @@ public final class Settings {
 
     public void setDensity(String id) {
         properties.setProperty(UI_DENSITY, id);
+    }
+
+    /** The interface language as written, trimmed; {@code system} when unset. */
+    public String uiLanguage() {
+        String value = properties.getProperty(UI_LANGUAGE, "system").trim();
+        return value.isEmpty() ? "system" : value;
+    }
+
+    public void setUiLanguage(String code) {
+        properties.setProperty(UI_LANGUAGE, code == null || code.isBlank() ? "system" : code.trim());
     }
 
     public boolean stateColors() {

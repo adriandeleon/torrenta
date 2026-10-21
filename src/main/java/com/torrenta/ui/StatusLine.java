@@ -3,6 +3,8 @@ package com.torrenta.ui;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The sentence a row ends in, saying what the torrent is doing in words: "62% · 38 peers, 12
  * seeds", "Seeding to 2 peers · ratio 1.84 of 2", "Queued #1 · starts when a download slot frees".
@@ -11,6 +13,9 @@ import com.torrenta.engine.Torrent;
  * <p>Pure, and tested, like {@link Format}: the window only lays the two parts out.
  */
 public record StatusLine(RowState state, String lead, String rest) implements Comparable<StatusLine> {
+
+    /** The bullet between the sentence's clauses; punctuation, the same in every language. */
+    private static final String SEP = " · ";
 
     public String text() {
         return lead + rest;
@@ -31,35 +36,47 @@ public record StatusLine(RowState state, String lead, String rest) implements Co
         RowState state = RowState.of(t, quietSeconds);
         String percent = Format.wholePercent(t.progress());
         return switch (state) {
-            case ERROR -> new StatusLine(state, "Error", " · " + t.error());
-            case MOVING -> new StatusLine(state, "Moving files", " · " + percent);
-            case CHECKING -> new StatusLine(state, "Checking files", " · " + percent + " verified");
+            case ERROR -> new StatusLine(state, tr("statusLine.error"), SEP + t.error());
+            case MOVING -> new StatusLine(state, tr("statusLine.movingFiles"), SEP + percent);
+            case CHECKING ->
+                new StatusLine(state, tr("statusLine.checkingFiles"), SEP + tr("statusLine.verified", percent));
             case METADATA ->
                 new StatusLine(
-                        state, "Fetching metadata", t.peers() == 0 ? " · looking for peers" : " · " + peers(t.peers()));
+                        state,
+                        tr("statusLine.fetchingMetadata"),
+                        SEP + (t.peers() == 0 ? tr("statusLine.lookingForPeers") : peers(t.peers())));
             case QUEUED ->
                 new StatusLine(
                         state,
-                        t.queuePosition() >= 0 ? "Queued #" + (t.queuePosition() + 1) : "Queued",
-                        RowState.complete(t) ? " · seeds when a slot frees" : " · starts when a download slot frees");
-            case PAUSED -> new StatusLine(state, "Paused by you", " · " + percent);
-            case DONE -> new StatusLine(state, "Done", doneRest(t, limit));
+                        t.queuePosition() >= 0
+                                ? tr("statusLine.queuedAt", t.queuePosition() + 1)
+                                : tr("statusLine.queued"),
+                        SEP
+                                + (RowState.complete(t)
+                                        ? tr("statusLine.seedsWhenSlotFrees")
+                                        : tr("statusLine.startsWhenSlotFrees")));
+            case PAUSED -> new StatusLine(state, tr("statusLine.pausedByYou"), SEP + percent);
+            case DONE -> new StatusLine(state, tr("statusLine.done"), doneRest(t, limit));
             case STALLED ->
                 new StatusLine(
                         state,
-                        "Stalled " + Format.coarse(quietSeconds),
-                        " · " + percent
-                                + (t.peers() == 0 ? " · no peers" : " · " + peers(t.peers()) + ", none sending"));
+                        tr("statusLine.stalled", Format.coarse(quietSeconds)),
+                        SEP
+                                + percent
+                                + SEP
+                                + (t.peers() == 0
+                                        ? tr("statusLine.noPeers")
+                                        : tr("statusLine.peersNoneSending", t.peers())));
             case DOWNLOADING ->
-                new StatusLine(state, percent, " · " + swarm(t) + (t.sequential() ? " · in order" : ""));
-            case SEEDING -> new StatusLine(state, "Seeding", seedingRest(t, limit));
+                new StatusLine(state, percent, SEP + swarm(t) + (t.sequential() ? SEP + tr("statusLine.inOrder") : ""));
+            case SEEDING -> new StatusLine(state, tr("statusLine.seeding"), seedingRest(t, limit));
         };
     }
 
     private static String seedingRest(Torrent t, ShareLimit limit) {
-        String who = t.peers() == 0 ? " · no one asking" : " to " + peers(t.peers());
+        String who = t.peers() == 0 ? SEP + tr("statusLine.noOneAsking") : " " + tr("statusLine.seedingTo", t.peers());
         if (limit.ratio() > 0) {
-            return who + " · ratio " + Format.ratio(ratio(t)) + " of " + ShareLimit.formatRatio(limit.ratio());
+            return who + SEP + tr("statusLine.ratioOf", Format.ratio(ratio(t)), ShareLimit.formatRatio(limit.ratio()));
         }
         return who;
     }
@@ -67,10 +84,10 @@ public record StatusLine(RowState state, String lead, String rest) implements Co
     private static String doneRest(Torrent t, ShareLimit limit) {
         if (limit.limited() && limit.reached(t.uploaded(), t.downloaded(), t.size(), t.seedingTime())) {
             return limit.ratio() > 0 && limit.reached(t.uploaded(), t.downloaded(), t.size(), 0)
-                    ? " · ratio goal " + ShareLimit.formatRatio(limit.ratio()) + " reached, stopped"
-                    : " · seeding time goal reached, stopped";
+                    ? SEP + tr("statusLine.ratioGoalReached", ShareLimit.formatRatio(limit.ratio()))
+                    : SEP + tr("statusLine.seedingTimeGoalReached");
         }
-        return " · stopped";
+        return SEP + tr("statusLine.stopped");
     }
 
     /** The ratio as {@link ShareLimit} measures it: over what was downloaded, else over the size. */
@@ -80,12 +97,12 @@ public record StatusLine(RowState state, String lead, String rest) implements Co
     }
 
     private static String swarm(Torrent t) {
-        if (t.peers() == 0) return "no peers yet";
+        if (t.peers() == 0) return tr("statusLine.noPeersYet");
         if (t.seeds() == 0) return peers(t.peers());
-        return peers(t.peers()) + ", " + t.seeds() + (t.seeds() == 1 ? " seed" : " seeds");
+        return tr("statusLine.peersSeeds", t.peers(), t.seeds());
     }
 
     private static String peers(int n) {
-        return n + (n == 1 ? " peer" : " peers");
+        return tr("statusLine.peers", n);
     }
 }

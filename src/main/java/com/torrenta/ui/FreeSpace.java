@@ -9,6 +9,8 @@ import java.util.OptionalLong;
 
 import com.torrenta.engine.DownloadPlan;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /** The volume a path is (or will be) on: its free space, and what a torrent would leave of it. */
 public final class FreeSpace {
 
@@ -41,11 +43,17 @@ public final class FreeSpace {
      * own (the download has to fit there first). Pure: the dialog hands in what it measured.
      */
     public static String hint(DownloadPlan plan, OptionalLong freeAtStart, OptionalLong freeAtDestination) {
-        String destination = freeAtDestination.isPresent() ? Bytes.human(freeAtDestination.getAsLong()) + " free" : "";
-        if (!plan.viaIncomplete()) return destination;
-        String start = "Starts in " + plan.start()
-                + (freeAtStart.isPresent() ? " (" + Bytes.human(freeAtStart.getAsLong()) + " free)" : "");
-        String then = "Moved here when complete" + (destination.isEmpty() ? "" : " (" + destination + ")");
+        if (!plan.viaIncomplete()) {
+            return freeAtDestination.isPresent()
+                    ? tr("freeSpace.free", Bytes.human(freeAtDestination.getAsLong()))
+                    : "";
+        }
+        String start = freeAtStart.isPresent()
+                ? tr("freeSpace.startsInFree", plan.start(), Bytes.human(freeAtStart.getAsLong()))
+                : tr("freeSpace.startsIn", plan.start());
+        String then = freeAtDestination.isPresent()
+                ? tr("freeSpace.movedWhenCompleteFree", Bytes.human(freeAtDestination.getAsLong()))
+                : tr("freeSpace.movedWhenComplete");
         return start + "\n" + then;
     }
 
@@ -96,10 +104,10 @@ public final class FreeSpace {
      * when it does not fit; the first half alone while the size is unknown ({@code wanted < 0}).
      */
     public static String sentence(Disk disk, long wanted) {
-        String free = Bytes.human(disk.free()) + " free on " + disk.volume();
-        if (wanted < 0) return free;
+        String free = Bytes.human(disk.free());
+        if (wanted < 0) return tr("freeSpace.freeOn", free, disk.volume());
         if (wanted <= disk.free())
-            return free + " · " + Bytes.human(wanted) + " leaves " + Bytes.human(disk.free() - wanted);
-        return free + " · " + Bytes.human(wanted) + " is " + Bytes.human(wanted - disk.free()) + " more than that";
+            return tr("freeSpace.leaves", free, disk.volume(), Bytes.human(wanted), Bytes.human(disk.free() - wanted));
+        return tr("freeSpace.moreThan", free, disk.volume(), Bytes.human(wanted), Bytes.human(wanted - disk.free()));
     }
 }

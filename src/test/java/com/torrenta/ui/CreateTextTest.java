@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.torrenta.engine.CreatedTorrent;
+import com.torrenta.i18n.Messages;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -68,8 +69,8 @@ class CreateTextTest {
 
     @Test
     void theSummarySaysFilesBytesAndPieces() {
-        assertEquals("Sizing…", CreateText.summary(-1, 0, 16 * 1024, 0));
-        assertEquals("Nothing to hash: the source is empty", CreateText.summary(0, 0, 16 * 1024, 0));
+        assertEquals(Messages.tr("dialog.create.sizing"), CreateText.summary(-1, 0, 16 * 1024, 0));
+        assertEquals(Messages.tr("dialog.create.empty"), CreateText.summary(0, 0, 16 * 1024, 0));
         assertEquals("1 file · 300.0 KiB · 19 pieces of 16 KiB", CreateText.summary(1, 300 * 1024, 16 * 1024, 19));
         assertEquals(
                 "2 files · 1.5 GiB · 1,536 pieces of 1 MiB",
@@ -79,7 +80,7 @@ class CreateTextTest {
         assertEquals("Automatic (1 MiB)", CreateText.pieceSizeLabel(0, 1024L * 1024 * 1024));
         assertEquals("4 MiB", CreateText.pieceSizeLabel(4 * 1024 * 1024, 0));
         assertEquals("Hashing · 120 of 1,500 pieces", CreateText.hashing(120, 1500));
-        assertEquals("Hashing…", CreateText.hashing(0, 0));
+        assertEquals(Messages.tr("dialog.create.hashing"), CreateText.hashing(0, 0));
     }
 
     @Test
@@ -109,8 +110,8 @@ class CreateTextTest {
 
     @Test
     void createNeedsASourceThatExists(@TempDir Path dir) throws Exception {
-        assertEquals("Choose a file or folder first", CreateText.problem(""));
-        assertEquals("Choose a file or folder first", CreateText.problem(null));
+        assertEquals(Messages.tr("dialog.create.problem.noSource"), CreateText.problem(""));
+        assertEquals(Messages.tr("dialog.create.problem.noSource"), CreateText.problem(null));
         Path gone = dir.resolve("gone");
         assertEquals("Not found: " + gone, CreateText.problem(gone.toString()));
         Path file = dir.resolve("file.bin");

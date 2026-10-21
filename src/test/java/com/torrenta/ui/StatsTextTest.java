@@ -106,7 +106,7 @@ class StatsTextTest {
             assertEquals(a.get(i).label(), b.get(i).label());
         }
         assertEquals(
-                StatsText.SECTIONS,
+                StatsText.sections(),
                 a.stream().map(StatsText.Row::section).distinct().toList(),
                 "the sections appear in their order, each once");
         assertEquals("This session", a.get(0).section());

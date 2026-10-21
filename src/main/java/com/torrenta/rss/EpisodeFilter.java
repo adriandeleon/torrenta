@@ -7,6 +7,8 @@ import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * qBittorrent's episode filter: terms separated by {@code ;}, each {@code 1x2} (one episode),
  * {@code 1x2-5} (a range) or {@code 1x2-} (from episode 2 of season 1 on); a trailing {@code ;}
@@ -33,9 +35,10 @@ public final class EpisodeFilter {
 
     public static final EpisodeFilter NONE = new EpisodeFilter(List.of());
 
-    /** The help line under the field. */
-    public static final String HELP = "1x2 one episode, 1x2-5 a range, 1x2- from episode 2 on, several with ;"
-            + " — read off S01E02, 1x02 or Season 1 Episode 2 in the title";
+    /** The help line under the field, in the interface language. */
+    public static String help() {
+        return tr("dialog.rule.episodeHelp");
+    }
 
     private static final Pattern TERM = Pattern.compile("(?i)(\\d{1,4})x(\\d{1,4})(?:-(\\d{1,4})?)?");
 

@@ -28,6 +28,8 @@ import javafx.scene.layout.VBox;
 
 import com.torrenta.engine.EngineEvent;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The {@link MessageLog} as a card above the status bar, newest first, each line with its time.
  * Editora's. A filter box leads it (the log fills fast); Copy takes the selected lines or all of
@@ -68,22 +70,22 @@ final class MessageLogPopup {
         backdrop.getStyleClass().add("palette-backdrop");
         backdrop.setOnMousePressed(e -> hide());
 
-        Label header = new Label("Messages");
+        Label header = new Label(tr("messageLog.title"));
         header.getStyleClass().add("message-log-header");
 
         filter.getStyleClass().add("message-log-filter");
-        filter.setPromptText("Filter messages…");
+        filter.setPromptText(tr("messageLog.filter.prompt"));
         filter.textProperty().addListener((o, was, now) -> applyFilter());
 
         list.getStyleClass().add("message-log-list");
         list.setPrefSize(WIDTH, LIST_HEIGHT);
         list.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-        Label empty = new Label("No messages yet");
+        Label empty = new Label(tr("messageLog.empty"));
         empty.getStyleClass().add("message-log-empty");
         list.setPlaceholder(empty);
         list.setCellFactory(view -> new EntryCell());
 
-        Button copy = new Button("Copy");
+        Button copy = new Button(tr("common.copy"));
         copy.getStyleClass().add("flat");
         copy.setFocusTraversable(false);
         copy.setOnAction(e -> {
@@ -91,7 +93,7 @@ final class MessageLogPopup {
                 list.getSelectionModel().selectAll();
             copySelection();
         });
-        Button clear = new Button("Clear");
+        Button clear = new Button(tr("messageLog.clear"));
         clear.getStyleClass().add("flat");
         clear.setFocusTraversable(false);
         clear.setOnAction(e -> {
@@ -100,7 +102,7 @@ final class MessageLogPopup {
         });
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        Label hint = new Label("↑↓  move      Ctrl+C  copy      Esc  close");
+        Label hint = new Label(tr("messageLog.hint"));
         hint.getStyleClass().add("message-log-hint");
         HBox footer = new HBox(8, copy, clear, spacer, hint);
         footer.getStyleClass().add("message-log-footer");

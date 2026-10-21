@@ -10,6 +10,8 @@ import java.util.Set;
 import com.torrenta.engine.CreatedTorrent;
 import com.torrenta.engine.PieceSize;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /** The Create Torrent dialog's words and its text rules, pure so they are tested without a scene. */
 final class CreateText {
 
@@ -82,47 +84,49 @@ final class CreateText {
      * the piece count the piece size gives. {@code pieceSize} 0 means automatic, shown resolved.
      */
     static String summary(int files, long total, int pieceSize, long pieces) {
-        if (files < 0) return "Sizing…";
-        if (files == 0) return "Nothing to hash: the source is empty";
-        StringBuilder sb = new StringBuilder();
-        sb.append(files == 1 ? "1 file" : files + " files");
-        sb.append(" · ").append(Bytes.human(total));
-        sb.append(" · ").append(pieces == 1 ? "1 piece" : String.format("%,d pieces", pieces));
-        sb.append(" of ").append(PieceSize.label(pieceSize));
-        return sb.toString();
+        if (files < 0) return tr("dialog.create.sizing");
+        if (files == 0) return tr("dialog.create.empty");
+        return tr(
+                "dialog.create.summary",
+                tr("dialog.create.summary.files", files),
+                Bytes.human(total),
+                tr("dialog.create.summary.pieces", pieces),
+                PieceSize.label(pieceSize));
     }
 
     /** The piece-size choice's label: {@code Automatic (1 MiB)} for 0, the size otherwise. */
     static String pieceSizeLabel(int choice, long totalSize) {
-        if (choice == 0) return "Automatic (" + PieceSize.label(PieceSize.suggest(totalSize)) + ")";
+        if (choice == 0) return tr("dialog.create.pieceSize.automatic", PieceSize.label(PieceSize.suggest(totalSize)));
         return PieceSize.label(choice);
     }
 
     /** The progress line: {@code Hashing · 120 of 1,500 pieces}. */
     static String hashing(int done, int total) {
-        if (total <= 0) return "Hashing…";
-        return String.format("Hashing · %,d of %,d pieces", done, total);
+        if (total <= 0) return tr("dialog.create.hashing");
+        return tr("dialog.create.hashingProgress", done, total);
     }
 
     /** The outcome line under the hashes: where it went and whether it seeds. */
     static String outcome(Path saved, CreatedTorrent made, boolean seedingAsked) {
-        StringBuilder sb = new StringBuilder("Saved to ").append(saved);
-        if (made.seeding().isPresent()) sb.append(" · added and seeding");
-        else if (seedingAsked)
-            sb.append(" · not added: ").append(made.problem().isEmpty() ? "unknown" : made.problem());
-        return sb.toString();
+        String where = saved.toString();
+        if (made.seeding().isPresent()) return tr("dialog.create.saved.seeding", where);
+        if (seedingAsked) {
+            String why = made.problem().isEmpty() ? tr("dialog.create.saved.notAdded.unknown") : made.problem();
+            return tr("dialog.create.saved.notAdded", where, why);
+        }
+        return tr("dialog.create.saved", where);
     }
 
     /** Why Create cannot go ahead, or empty: the source must be a file or folder that exists. */
     static String problem(String sourceText) {
         String text = sourceText == null ? "" : sourceText.trim();
-        if (text.isEmpty()) return "Choose a file or folder first";
+        if (text.isEmpty()) return tr("dialog.create.problem.noSource");
         try {
             Path path = Path.of(text);
-            if (!Files.exists(path)) return "Not found: " + text;
-            if (path.toAbsolutePath().normalize().getParent() == null) return "Choose something below the root";
+            if (!Files.exists(path)) return tr("dialog.create.problem.notFound", text);
+            if (path.toAbsolutePath().normalize().getParent() == null) return tr("dialog.create.problem.root");
         } catch (RuntimeException e) {
-            return "Not a path: " + text;
+            return tr("dialog.create.problem.notPath", text);
         }
         return "";
     }

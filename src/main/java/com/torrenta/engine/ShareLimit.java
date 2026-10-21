@@ -5,6 +5,8 @@ import java.math.RoundingMode;
 import java.util.Locale;
 import java.util.Optional;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * When a finished torrent has seeded enough, and what to do then. Pure, so it is tested: "it
  * paused my seed too early" and "it never stops seeding" are both rules here.
@@ -19,8 +21,8 @@ import java.util.Optional;
 public record ShareLimit(double ratio, int seedingMinutes, Action action) {
 
     public enum Action {
-        PAUSE("Pause"),
-        REMOVE("Remove");
+        PAUSE("pause"),
+        REMOVE("remove");
 
         private final String label;
 
@@ -29,7 +31,7 @@ public record ShareLimit(double ratio, int seedingMinutes, Action action) {
         }
 
         public String label() {
-            return label;
+            return tr("shareLimit.action." + label);
         }
     }
 
@@ -103,15 +105,18 @@ public record ShareLimit(double ratio, int seedingMinutes, Action action) {
                 .toPlainString();
     }
 
+    /** The limit as a phrase in the interface language: {@code ratio 2 or 60 min → remove}, or {@code none}. */
     @Override
     public String toString() {
-        if (!limited()) return "none";
-        StringBuilder sb = new StringBuilder();
-        if (ratio > 0) sb.append("ratio ").append(formatRatio(ratio));
-        if (seedingMinutes > 0) {
-            if (sb.length() > 0) sb.append(" or ");
-            sb.append(seedingMinutes).append(" min");
+        if (!limited()) return tr("shareLimit.none");
+        String condition;
+        if (ratio > 0 && seedingMinutes > 0) {
+            condition = tr("shareLimit.ratioOrMinutes", formatRatio(ratio), Integer.toString(seedingMinutes));
+        } else if (ratio > 0) {
+            condition = tr("shareLimit.ratio", formatRatio(ratio));
+        } else {
+            condition = tr("shareLimit.minutes", Integer.toString(seedingMinutes));
         }
-        return sb.append(" → ").append(action.label().toLowerCase(Locale.ROOT)).toString();
+        return tr("shareLimit.then", condition, action.label().toLowerCase(Locale.ROOT));
     }
 }

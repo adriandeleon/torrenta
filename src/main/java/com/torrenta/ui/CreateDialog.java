@@ -49,6 +49,8 @@ import com.torrenta.engine.EngineException;
 import com.torrenta.engine.PieceSize;
 import com.torrenta.store.Settings;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The Create Torrent dialog: a file or folder, the format, the piece size, the flags, the
  * trackers and web seeds, then Create…, which asks where to save and hashes on a worker.
@@ -75,9 +77,9 @@ final class CreateDialog {
     /** 0 is automatic, the rest the ladder. */
     private final ChoiceBox<Integer> pieceSize = new ChoiceBox<>();
 
-    private final CheckBox isPrivate = new CheckBox("Private torrent");
-    private final CheckBox seed = new CheckBox("Start seeding after creation");
-    private final CheckBox align = new CheckBox("Align files to piece boundaries");
+    private final CheckBox isPrivate = new CheckBox(tr("dialog.create.private"));
+    private final CheckBox seed = new CheckBox(tr("dialog.create.seed"));
+    private final CheckBox align = new CheckBox(tr("dialog.create.align"));
     private final TextArea trackers = new TextArea();
     private final TextArea webSeeds = new TextArea();
     private final TextField comment = new TextField();
@@ -94,9 +96,9 @@ final class CreateDialog {
     private final GridPane resultBox = new GridPane();
     private final Label problem = new Label();
 
-    private final Button close = keyed("Close", "Esc");
-    private final Button create = keyed("Create…", "Enter");
-    private final Button cancelHashing = new Button("Cancel");
+    private final Button close = keyed(tr("common.close"), tr("dialog.common.key.esc"));
+    private final Button create = keyed(tr("dialog.create.create"), tr("dialog.common.key.enter"));
+    private final Button cancelHashing = new Button(tr("common.cancel"));
 
     private final BooleanProperty hashing = new SimpleBooleanProperty();
     /** The sizes of the source's files, for the piece count; empty until sized. */
@@ -117,24 +119,24 @@ final class CreateDialog {
         this.settings = settings;
         stage.initOwner(owner);
         stage.initModality(Modality.NONE);
-        stage.setTitle("New Torrent");
+        stage.setTitle(tr("dialog.create.title"));
 
-        Label kicker = new Label("NEW TORRENT");
+        Label kicker = new Label(tr("dialog.create.kicker"));
         kicker.getStyleClass().add("add-kicker");
         title.getStyleClass().add("add-title");
         summary.getStyleClass().add("add-summary");
         VBox header = new VBox(2, kicker, title, summary);
 
         // ---- the source ----
-        source.setPromptText("A file or a folder");
+        source.setPromptText(tr("dialog.create.source.prompt"));
         source.textProperty().addListener((o, was, now) -> sourceChanged());
-        Button file = new Button("File…");
+        Button file = new Button(tr("dialog.create.file"));
         file.setOnAction(e -> chooseFile());
-        Button folder = new Button("Folder…");
+        Button folder = new Button(tr("dialog.create.folder"));
         folder.setOnAction(e -> chooseFolder());
         HBox.setHgrow(source, Priority.ALWAYS);
         HBox sourceRow = new HBox(6, source, file, folder);
-        Label drop = new Label("Drop a file or folder here");
+        Label drop = new Label(tr("dialog.create.drop"));
         drop.getStyleClass().add("dialog-hint");
 
         // ---- format, piece size, flags ----
@@ -149,7 +151,7 @@ final class CreateDialog {
         pieceSize.setMaxWidth(Double.MAX_VALUE);
         pieceSize.valueProperty().addListener((o, was, now) -> updateSummary());
         GridPane options = twoColumns();
-        options.addRow(0, muted("Format"), muted("Piece size"));
+        options.addRow(0, muted(tr("dialog.create.format")), muted(tr("dialog.create.pieceSize")));
         options.addRow(1, format, pieceSize);
 
         align.selectedProperty().addListener((o, was, now) -> updateSummary());
@@ -158,13 +160,13 @@ final class CreateDialog {
         flags.setAlignment(Pos.CENTER_LEFT);
 
         // ---- trackers and web seeds ----
-        trackers.setPromptText("One per line; a blank line starts the next tier");
+        trackers.setPromptText(tr("dialog.create.trackers.prompt"));
         trackers.setPrefRowCount(5);
         trackers.setText(settings.createDefaultTrackers());
-        webSeeds.setPromptText("One URL per line");
+        webSeeds.setPromptText(tr("dialog.create.webSeeds.prompt"));
         webSeeds.setPrefRowCount(5);
-        VBox trackerBox = new VBox(4, muted("Trackers"), trackers);
-        VBox seedBox = new VBox(4, muted("Web seeds"), webSeeds);
+        VBox trackerBox = new VBox(4, muted(tr("dialog.create.trackers")), trackers);
+        VBox seedBox = new VBox(4, muted(tr("dialog.create.webSeeds")), webSeeds);
         VBox.setVgrow(trackers, Priority.ALWAYS);
         VBox.setVgrow(webSeeds, Priority.ALWAYS);
         HBox.setHgrow(trackerBox, Priority.ALWAYS);
@@ -174,13 +176,19 @@ final class CreateDialog {
         HBox lists = new HBox(10, trackerBox, seedBox);
         VBox.setVgrow(lists, Priority.ALWAYS);
 
-        comment.setPromptText("Optional");
-        sourceTag.setPromptText("A private tracker's source tag, optional");
+        comment.setPromptText(tr("dialog.create.comment.prompt"));
+        sourceTag.setPromptText(tr("dialog.create.sourceTag.prompt"));
         GridPane texts = twoColumns();
-        texts.addRow(0, muted("Comment"), muted("Source"));
+        texts.addRow(0, muted(tr("dialog.create.comment")), muted(tr("dialog.create.sourceTag")));
         texts.addRow(1, comment, sourceTag);
 
-        form = new VBox(10, new VBox(4, muted("File or folder"), sourceRow, drop), options, flags, lists, texts);
+        form = new VBox(
+                10,
+                new VBox(4, muted(tr("dialog.create.fileOrFolder")), sourceRow, drop),
+                options,
+                flags,
+                lists,
+                texts);
         VBox.setVgrow(form, Priority.ALWAYS);
 
         // ---- progress ----
@@ -198,9 +206,9 @@ final class CreateDialog {
         ColumnConstraints field = new ColumnConstraints();
         field.setHgrow(Priority.ALWAYS);
         resultBox.getColumnConstraints().addAll(label, field, new ColumnConstraints());
-        resultBox.addRow(0, muted("Info-hash v1"), v1, copyButton(v1));
-        resultBox.addRow(1, muted("Info-hash v2"), v2, copyButton(v2));
-        resultBox.addRow(2, muted("Magnet"), magnet, copyButton(magnet));
+        resultBox.addRow(0, muted(tr("dialog.create.infoHashV1")), v1, copyButton(v1));
+        resultBox.addRow(1, muted(tr("dialog.create.infoHashV2")), v2, copyButton(v2));
+        resultBox.addRow(2, muted(tr("dialog.create.magnet")), magnet, copyButton(magnet));
         outcome.getStyleClass().add("dialog-hint");
         outcome.setWrapText(true);
         resultBox.add(outcome, 0, 3, 3, 1);
@@ -292,7 +300,7 @@ final class CreateDialog {
         String text = source.getText().trim();
         title.setText(
                 text.isEmpty()
-                        ? "Choose a file or folder"
+                        ? tr("dialog.create.chooseSource")
                         : Path.of(text).getFileName() == null
                                 ? text
                                 : Path.of(text).getFileName().toString());
@@ -350,7 +358,7 @@ final class CreateDialog {
 
     private void updateSummary() {
         if (source.getText().isBlank()) {
-            summary.setText("The files, their size and the piece count show here");
+            summary.setText(tr("dialog.create.summaryHint"));
             return;
         }
         long total = totalSize();
@@ -363,7 +371,7 @@ final class CreateDialog {
 
     private void chooseFile() {
         FileChooser chooser = new FileChooser();
-        chooser.setTitle("File to share");
+        chooser.setTitle(tr("dialog.create.fileChooser"));
         startIn(chooser);
         File chosen = chooser.showOpenDialog(stage);
         if (chosen != null) setSource(chosen.toPath());
@@ -371,7 +379,7 @@ final class CreateDialog {
 
     private void chooseFolder() {
         DirectoryChooser chooser = new DirectoryChooser();
-        chooser.setTitle("Folder to share");
+        chooser.setTitle(tr("dialog.create.folderChooser"));
         File current = currentFolder();
         if (current != null) chooser.setInitialDirectory(current);
         File chosen = chooser.showDialog(stage);
@@ -433,8 +441,9 @@ final class CreateDialog {
         }
         Path path = Path.of(source.getText().trim());
         FileChooser chooser = new FileChooser();
-        chooser.setTitle("Save Torrent As");
-        chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Torrent files", "*.torrent"));
+        chooser.setTitle(tr("dialog.create.saveAs"));
+        chooser.getExtensionFilters()
+                .add(new FileChooser.ExtensionFilter(tr("dialog.create.torrentFiles"), "*.torrent"));
         chooser.setInitialDirectory(
                 CreateText.saveDir(settings.createLastDir(), path).toFile());
         chooser.setInitialFileName(CreateText.fileName(path));
@@ -506,7 +515,7 @@ final class CreateDialog {
         if (!hashing.get()) return;
         hashGeneration++;
         hashing.set(false);
-        problem.setText("Cancelled; nothing was written");
+        problem.setText(tr("dialog.create.cancelled"));
     }
 
     /** Beside its final name, then moved into place: no half-written torrent survives a crash. */
@@ -579,7 +588,7 @@ final class CreateDialog {
     }
 
     private static Button copyButton(TextField of) {
-        Button button = new Button("Copy");
+        Button button = new Button(tr("common.copy"));
         button.setOnAction(e -> copy(of.getText()));
         button.disableProperty()
                 .bind(of.textProperty().isEmpty().or(of.textProperty().isEqualTo("—")));

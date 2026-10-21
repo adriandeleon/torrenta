@@ -26,6 +26,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Interface languages: English, Deutsch, Español, Français, Italiano and Português**, Termina's
+  `i18n` package ported. Settings → General → Language picks one or follows the operating system
+  (the default; English when the system's language is not bundled), in force after a restart;
+  `ui.language` is a preference, so it syncs. Every text of the window, the menus and the palette,
+  the toolbar, the Settings pages (titles, descriptions and the words the search box finds), every
+  dialog, the Search and RSS tabs, the detail pane, the status bar and its history, the event log's
+  own lines, the tray and the badge reads from the catalogue; what libtorrent says stays as it is.
+  A test keeps the six catalogues in step and sweeps the UI sources for English left behind.
 - **Torrenta is the program for `.torrent` files and `magnet:` links, and runs once.** One
   instance per settings folder: a second one started with files, magnets or URLs on its command
   line hands them to the running one over a loopback socket (a lock on `instance.lock`, the port

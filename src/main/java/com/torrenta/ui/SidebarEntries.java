@@ -10,6 +10,8 @@ import javafx.beans.property.SimpleIntegerProperty;
 import com.torrenta.engine.Torrent;
 import com.torrenta.ui.SidebarFilter.Axis;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The sidebar's entries, section by section, reconciled in place from every poll as
  * {@link TorrentRows} does for the table: an entry keeps its identity (and so its cell) while it
@@ -71,10 +73,10 @@ final class SidebarEntries {
     }
 
     final Entry all = new Entry(SidebarFilter.ALL, Axis.ALL);
-    final Section status = new Section(Axis.STATUS, "Status");
-    final Section categories = new Section(Axis.CATEGORY, "Categories");
-    final Section tags = new Section(Axis.TAG, "Tags");
-    final Section trackers = new Section(Axis.TRACKER, "Trackers");
+    final Section status = new Section(Axis.STATUS, tr("sidebar.section.status"));
+    final Section categories = new Section(Axis.CATEGORY, tr("sidebar.section.categories"));
+    final Section tags = new Section(Axis.TAG, tr("sidebar.section.tags"));
+    final Section trackers = new Section(Axis.TRACKER, tr("sidebar.section.trackers"));
 
     SidebarEntries() {
         List<Entry> fixed = new ArrayList<>();
