@@ -23,7 +23,12 @@ final class CapabilityRules {
     private static final Map<String, Capability> COMMANDS = Map.of(
             "create", Capability.CREATE_TORRENT,
             "open-folder", Capability.LOCAL_FILES,
-            "sequential", Capability.SEQUENTIAL_DOWNLOAD);
+            "sequential", Capability.SEQUENTIAL_DOWNLOAD,
+            "queue-top", Capability.QUEUE_ORDER,
+            "queue-up", Capability.QUEUE_ORDER,
+            "queue-down", Capability.QUEUE_ORDER,
+            "queue-bottom", Capability.QUEUE_ORDER,
+            "set-location", Capability.MOVE_STORAGE);
 
     /** Settings pages that need one of a set of capabilities; the rest are for every engine. */
     private static final Map<String, Set<Capability>> PAGES =

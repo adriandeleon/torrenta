@@ -57,6 +57,28 @@ class TorrentRowsTest {
         assertEquals(List.of(a, b), rows.list());
     }
 
+    /** The Queue column reads the position off the row's torrent, so a move re-sorts it in place. */
+    @Test
+    void aQueuePositionChangeUpdatesTheRowInPlace() {
+        TorrentRows rows = new TorrentRows();
+        rows.apply(List.of(
+                T.downloading().id("a").queued(0).build(),
+                T.downloading().id("b").queued(1).build()));
+        TorrentRow a = rows.get("a");
+        int[] updates = {0};
+        rows.list().addListener((javafx.collections.ListChangeListener<TorrentRow>) c -> {
+            while (c.next()) if (c.wasUpdated()) updates[0]++;
+        });
+
+        rows.apply(List.of(
+                T.downloading().id("a").queued(1).build(),
+                T.downloading().id("b").queued(0).build()));
+        assertSame(a, rows.get("a"));
+        assertEquals(1, a.torrent().queuePosition());
+        assertEquals(0, rows.get("b").torrent().queuePosition());
+        assertEquals(2, updates[0], "the extractor fires an update per changed row, which re-sorts a SortedList");
+    }
+
     @Test
     void newTorrentsAppendAndVanishedOnesLeave() {
         TorrentRows rows = new TorrentRows();

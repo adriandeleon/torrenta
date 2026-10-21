@@ -34,6 +34,18 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Queue order and Set Location, for both engines.** Torrent → Queue → Move to Top / Up / Down /
+  Bottom (`Ctrl+Shift+Home` / `Up` / `Down` / `End`, the context menu and the palette too) move
+  the selection in the download queue, the selected torrents keeping their order among themselves;
+  a hidden Queue column shows the positions and sorts by them. Torrent → Set Location…
+  (`Ctrl+Shift+D`) moves the selection's files to another folder, typed or browsed, with the
+  volume's free space under the field: libtorrent moves with `dont_replace` (a file already at
+  the destination is kept, never written over) and the log says when the move landed or why it
+  did not, the row reads "Moving files" in between, and a torrent still on its way through the
+  incomplete folder gets the new destination in its sidecar instead of a move now; a Transmission
+  daemon gets `torrent-set-location` with a path on its machine (no Browse, no free space there).
+  Two new capabilities, `QUEUE_ORDER` and `MOVE_STORAGE`, both engines have.
+
 - **A Transmission daemon as the engine** (roadmap 0.9): the same window drives a
   `transmission-daemon` on a seedbox or a NAS over its RPC (`TransmissionEngine`: JSON over HTTP(S),
   the session-id handshake, basic auth; one lean `torrent-get` per poll, the detail fields only for

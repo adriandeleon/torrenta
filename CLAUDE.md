@@ -18,7 +18,10 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `capture:` lines (title, focus, engine, status bar) and exits. `-Dtorrenta.captureAction=` runs
   window actions first: `select-all`, `palette`, `palette:<query>`, or a command id such as
   `pause-resume`, `menu:<File|Torrent|View|Help>` or `context-menu` (opens that menu; the PNG is
-  then of the popup and `menu=` lines list its items, `[icon]` after those with a glyph),
+  then of the popup and `menu=` lines list its items, `[icon]` after those with a glyph, a
+  submenu's items indented under it; `menu:Torrent>Queue` opens the submenu itself, from the
+  keyboard), `set-location[:<folder>]` (the Set Location dialog, the folder typed in; a
+  `location-hint=` line has its free-space sentence),
   `dialog-add` to press Add on an open Add dialog (`dialog-press:now|wait|paused`
 for the others, `dialog-key:<KeyCode>` for a key in its file tree), `choose-files` for the
 selected torrent, `select-first`, `message-log` / `message-log:<query>` (the status bar's history card; its visible
@@ -456,8 +459,8 @@ release process with the names changed; Termina's README and memory hold the war
 ## Not done
 
 0.2 through 0.9 are feature-complete; 0.4's Settings pages (Connection, Protocol, IP filter, Speed,
-Queue and share limits) and the per-torrent Limits dialog are in. Left from 0.4: queue positions,
-super seeding, set location, rename, export `.torrent` (none of them in the `Engine` interface, so
-the Transmission engine maps none either). The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
+Queue and share limits), the per-torrent Limits dialog, queue moves and Set Location are in. Left
+from 0.4: super seeding, rename, export `.torrent` (none of them in the `Engine` interface, so the
+Transmission engine maps none either). The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
 run of release.yml, and the Homebrew/winget packagers need the `PACKAGES_TOKEN` secret copied from
 Termina's repository (the same PAT) before they do anything.
