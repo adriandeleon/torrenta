@@ -62,6 +62,9 @@ final class LimitsDialog {
     private final Spinner<Integer> upload = kibSpinner();
     private final Spinner<Integer> connections = countSpinner(10_000);
     private final Spinner<Integer> uploadSlots = countSpinner(1_000);
+    private Label uploadSlotsLabel;
+    private javafx.scene.Node uploadSlotsField;
+    private Label piecesLabel;
     private final CheckBox firstAndLast = new CheckBox(tr("dialog.limits.firstAndLast"));
     private final ChoiceBox<ShareChoice> shareChoice = new ChoiceBox<>();
     private final Spinner<Double> ratio =
@@ -103,9 +106,11 @@ final class LimitsDialog {
         form.addRow(row++, muted(tr("dialog.limits.upload")), unit(upload, tr("dialog.limits.rate.unit")));
         form.addRow(
                 row++, muted(tr("dialog.limits.connections")), unit(connections, tr("dialog.limits.connections.unit")));
-        form.addRow(
-                row++, muted(tr("dialog.limits.uploadSlots")), unit(uploadSlots, tr("dialog.limits.uploadSlots.unit")));
-        form.addRow(row++, muted(tr("dialog.limits.pieces")), firstAndLast);
+        uploadSlotsLabel = muted(tr("dialog.limits.uploadSlots"));
+        uploadSlotsField = unit(uploadSlots, tr("dialog.limits.uploadSlots.unit"));
+        form.addRow(row++, uploadSlotsLabel, uploadSlotsField);
+        piecesLabel = muted(tr("dialog.limits.pieces"));
+        form.addRow(row++, piecesLabel, firstAndLast);
         if (!hasMetadata) {
             firstAndLast.setDisable(true);
             form.add(hint(tr("dialog.limits.metadataHint")), 1, row++);
@@ -187,6 +192,21 @@ final class LimitsDialog {
     }
 
     /** Blocks on a nested event loop, as a dialog does; empty when cancelled. */
+
+    /** Hides the rows the engine has no capability for: upload slots, first and last pieces. Before showing. */
+    void applyCapabilities(com.torrenta.engine.Engine.Capabilities caps) {
+        boolean slots = caps.has(com.torrenta.engine.Engine.Capability.UPLOAD_SLOTS);
+        for (javafx.scene.Node n : java.util.List.of(uploadSlotsLabel, uploadSlotsField)) {
+            n.setVisible(slots);
+            n.setManaged(slots);
+        }
+        boolean pieces = caps.has(com.torrenta.engine.Engine.Capability.FIRST_LAST_PIECES);
+        for (javafx.scene.Node n : java.util.List.of(piecesLabel, firstAndLast)) {
+            n.setVisible(pieces);
+            n.setManaged(pieces);
+        }
+    }
+
     Optional<Result> showAndWait() {
         download.requestFocus();
         stage.showAndWait();

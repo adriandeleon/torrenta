@@ -9,11 +9,13 @@ import javafx.stage.Stage;
 
 import com.torrenta.cli.CommandLine;
 import com.torrenta.engine.Engine;
-import com.torrenta.engine.EngineException;
+import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.libtorrent.LibtorrentEngine;
+import com.torrenta.engine.transmission.TransmissionEngine;
 import com.torrenta.os.AwtUse;
 import com.torrenta.os.SingleInstance;
 import com.torrenta.store.ConfigDir;
+import com.torrenta.store.ProfileStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.StatsStore;
 import com.torrenta.store.TorrentStore;
@@ -29,7 +31,6 @@ public final class App extends Application {
     /** The lock on the config folder, held for the life of the process; null when none could be taken. */
     private static SingleInstance instance;
 
-    private Engine engine;
     private MainWindow window;
 
     public static void main(String[] args) {
@@ -129,35 +130,38 @@ public final class App extends Application {
             System.setProperty("torrenta.nativeDir", configDir.resolve("native").toString());
         }
 
-        // The engine loads a native library, opens sockets and re-adds every stored torrent:
-        // hundreds of milliseconds that the first frame should not wait for. The window is up with
-        // "Starting the engine…" meanwhile.
-        engine = new LibtorrentEngine(
-                settings::downloadDir,
-                new TorrentStore(configDir.resolve(TorrentStore.FOLDER)),
-                settings.engineSettings(),
-                new StatsStore(configDir.resolve(StatsStore.FILE_NAME)));
-        window.listenTo(engine);
-        Thread starter = new Thread(
-                () -> {
-                    try {
-                        engine.start();
-                        Platform.runLater(() -> window.engineReady(engine));
-                    } catch (EngineException e) {
-                        Platform.runLater(() -> window.engineFailed(e));
-                    }
-                },
-                "engine-start");
-        starter.setDaemon(true);
-        starter.start();
+        // The engine loads a native library, opens sockets and re-adds every stored torrent, or
+        // reaches a daemon over the network: hundreds of milliseconds that the first frame should
+        // not wait for. The window is up with "Starting the engine…" meanwhile. Which engine is the
+        // profile's (Settings → Engine); a profile that is gone from the file falls back to the
+        // local one, said in the status bar.
+        ProfileStore profiles = new ProfileStore(configDir);
+        profiles.load();
+        EngineProfile profile = profiles.byId(settings.engineProfile()).orElse(EngineProfile.LOCAL);
+        window.setEngineFactory(p -> createEngine(p, settings, configDir));
+        window.startEngine(profile);
 
         if (DevCapture.requested()) DevCapture.schedule(stage, window);
     }
 
+    /** libtorrent in this process with its stores, or a Transmission daemon reached as the profile says. */
+    static Engine createEngine(EngineProfile profile, Settings settings, Path configDir) {
+        if (profile.isLocal()) {
+            return new LibtorrentEngine(
+                    settings::downloadDir,
+                    new TorrentStore(configDir.resolve(TorrentStore.FOLDER)),
+                    settings.engineSettings(),
+                    new StatsStore(configDir.resolve(StatsStore.FILE_NAME)));
+        }
+        return new TransmissionEngine(profile, settings::downloadDir, settings.engineSettings());
+    }
+
     @Override
     public void stop() {
-        if (window != null) window.stopPolling();
-        if (engine != null) engine.stop();
+        if (window != null) {
+            window.stopPolling();
+            window.stopEngine();
+        }
         if (window != null) {
             window.disposeTray();
             window.disposeBadge();

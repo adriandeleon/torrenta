@@ -106,6 +106,13 @@ public final class Settings {
     /** The dock or launcher badge with the download activity; on by default. This machine's. */
     public static final String OS_BADGE = "os.badge";
 
+    /**
+     * Which engine profile to use at the next start: {@code local} (the default, libtorrent in
+     * this process) or the id of a remote daemon in {@code profiles.json}. This machine's, never
+     * synced: the daemon is reached from here.
+     */
+    public static final String ENGINE_PROFILE = "engine.profile";
+
     public static final String LAST_UPDATE_CHECK = "updates.lastCheckEpochMs";
     /** The version the user chose to skip; a manual check still reports it. */
     public static final String DISMISSED_UPDATE = "updates.dismissedVersion";
@@ -497,6 +504,20 @@ public final class Settings {
 
     public boolean sidebar() {
         return readBoolean(UI_SIDEBAR, true);
+    }
+
+    /** The profile id for the next start; {@code local} when none is set. */
+    public String engineProfile() {
+        String id = properties.getProperty(ENGINE_PROFILE, "").trim();
+        return id.isEmpty() ? com.torrenta.engine.EngineProfile.LOCAL_ID : id;
+    }
+
+    public void setEngineProfile(String id) {
+        if (id == null || id.isBlank() || id.equals(com.torrenta.engine.EngineProfile.LOCAL_ID)) {
+            properties.remove(ENGINE_PROFILE);
+        } else {
+            properties.setProperty(ENGINE_PROFILE, id.trim());
+        }
     }
 
     public boolean tray() {

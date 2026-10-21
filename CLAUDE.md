@@ -59,6 +59,7 @@ to try one on purpose).
 | UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `MessageLog` + `MessageLogPopup` (the status bar's history: every `setStatus` with its level, a card over the bar in the palette's chrome, Editora's), `DebugLog` + `DebugLogWindow` (Termina's: j.u.l WARNING and above from every logger plus uncaught exceptions, mirrored to `torrenta-session.log`; View → Debug Log and Settings → General → Diagnostics), `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a vertical `SplitPane`, the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `PaletteKey` (the chord that opens it, `ui.paletteKey`, Alt+X by default, re-applied live by `applyPaletteKey`); `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
+| Remote engine | `TransmissionEngine` over Transmission's RPC (`RpcClient`: POST JSON, the 409 session-id handshake, basic auth; `Json` tree over jackson-core streaming; `Bencode` reads a `.torrent` for `inspect`; `TransmissionLabels` puts the category in a `category:` label); `Engine.Capability`/`Capabilities` say what an engine can do, `ui.CapabilityRules` is the pure rule the window hides by; `EngineProfile` (local or remote, URL, user, password) in `store.ProfileStore` (`profiles.json`, owner-only, never synced), `engine.profile` picks the next start's; Settings → Engine, `ui.EngineProfileDialog`; `MainWindow.startEngine/switchProfile` build the engine through App's `EngineFactory` | `com.torrenta.engine.transmission`, `engine`, `store`, `ui` |
 | Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
 | i18n | Termina's: `Messages.tr(key)` / `tr(key, args…)` (MessageFormat in the active locale), English `messages.properties` as base and fallback, `messages_<de|es|fr|it|pt>.properties` as overlays, UTF-8 through `getResourceAsStream`; `ui.language` (`system` by default) chosen in `App.start` after the settings load, before any window, applied on restart; a missing key shows itself and is logged once | `com.torrenta.i18n` |
 
@@ -269,6 +270,36 @@ release process with the names changed; Termina's README and memory hold the war
   holder). There is no setter for the info dictionary's `source` key: it is put into the `entry`
   by hand before bencoding, which is why the hashes are read off the final bytes with `load`. A
   duplicate seed add hands back the torrent already in the list, silently.
+- **A remote engine is a second `Engine`, and the window hides what it lacks.** `Engine.capabilities()`
+  is valid after `start()` (a daemon's depends on its RPC version); `MainWindow.applyCapabilities`
+  runs in `engineReady` and sets one `BooleanProperty` per capability that the gated commands'
+  `enabled` is and-ed with (`gate(id, enabled)`), so a hidden command's chord and palette entry are
+  dead too, not only its menu item; every menu item is made through `menuItem(id)` and every toolbar
+  button through `toolButton` so they can be found. `CapabilityRules` is the one map (command id →
+  capability, page → capabilities); Settings rows carry theirs in `row(…, capability)`, dialogs get
+  `applyCapabilities(caps)` before showing. Add a capability by adding the enum value, its
+  `capability.*` key in six catalogues, and the places that need it; never grey out, never imitate.
+- **The Transmission engine owns no store and pushes no settings at start.** The daemon keeps its
+  torrents, resume data and labels; `applySettings` sends `sessionDiff(lastApplied, next)`, the keys
+  that differ from the record it was built with (this machine's file), so a page edit sets one key
+  and the daemon's port and limits are never overwritten by local defaults. Speeds are KB (1000) on
+  the daemon and KiB on the pages; `kibToKb`/`kbps` convert. The poll is one `torrent-get` with
+  `LIST_FIELDS` (plus `sequential_download` from RPC 18, which is the field's name; `sequentialDownload`
+  is silently ignored by 4.1.0-beta.2); `detail()` alone asks for files, peers, `trackerStats` and
+  the base64 `pieces` bitfield (first piece in the high bit). Events are `diff(before, after,
+  announced, removedByUs)`: the engine's own add and remove are announced by the action, the poll
+  announces what another client did. A save path equal to this machine's default download folder
+  means "the daemon's own" and is not sent (`addArguments`); the Add dialog defaults to
+  `engine.downloadDir()` when `LOCAL_FILES` is missing. `sizeWhenDone` counts pieces the daemon
+  already has even when unwanted, so a complete torrent with a file skipped is a seed to it.
+  `TransmissionDaemonTest` starts the real daemon on free ports with `--auth` and destroys it in
+  `@AfterAll`; it is `@EnabledIf` the daemon and `transmission-create` are on the PATH.
+- **Profiles are machine-local secrets.** `profiles.json` is written owner-only where POSIX modes
+  exist, `EngineProfile.toString()` never prints the password, `engine.*` is in `SyncKeys`'s local
+  prefixes. `App.createEngine` is the one place an engine is built; `MainWindow.switchProfile` stops
+  the poll, the watcher and the old engine (on a worker), empties the list and runs `startEngine`,
+  which ends in `engineReady` again; `engineUp` stays counted down, so a rule's add during the gap
+  sees `engine == null` and fails plainly.
 - **A removed torrent's alert carries only the hash.** `remove()` reads the name first and raises
   the event itself; the `TORRENT_REMOVED` alert is not listened to.
 - **A row's state is computed, not stored**: `RowState.of(torrent, quietSeconds)` and
@@ -392,8 +423,9 @@ release process with the names changed; Termina's README and memory hold the war
 
 ## Not done
 
-0.2 and 0.3 are feature-complete; 0.4's Settings pages (Connection, Protocol, IP filter, Speed,
+0.2 through 0.9 are feature-complete; 0.4's Settings pages (Connection, Protocol, IP filter, Speed,
 Queue and share limits) and the per-torrent Limits dialog are in. Left from 0.4: queue positions,
-super seeding, set location, rename, export `.torrent`. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
+super seeding, set location, rename, export `.torrent` (none of them in the `Engine` interface, so
+the Transmission engine maps none either). The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
 run of release.yml, and the Homebrew/winget packagers need the `PACKAGES_TOKEN` secret copied from
 Termina's repository (the same PAT) before they do anything.

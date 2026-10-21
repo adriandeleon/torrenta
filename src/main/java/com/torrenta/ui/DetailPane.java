@@ -73,6 +73,7 @@ final class DetailPane extends VBox {
     private Consumer<String> onRemoveTracker = url -> {};
     private Runnable onReannounce = () -> {};
     private Consumer<String> onBanPeer = address -> {};
+    private MenuItem openItem;
 
     DetailPane() {
         getStyleClass().add("detail-pane");
@@ -120,6 +121,11 @@ final class DetailPane extends VBox {
 
     void setOnBanPeer(Consumer<String> handler) {
         onBanPeer = handler;
+    }
+
+    /** Hides what the engine cannot do here: Open file when the files are not on this machine. */
+    void applyCapabilities(com.torrenta.engine.Engine.Capabilities caps) {
+        if (openItem != null) openItem.setVisible(caps.has(com.torrenta.engine.Engine.Capability.LOCAL_FILES));
     }
 
     /** The Speed tab's window, shared with the Statistics window through the settings. */
@@ -321,7 +327,8 @@ final class DetailPane extends VBox {
         });
         files.getColumns().addAll(List.of(name, size, progress, priority));
 
-        MenuItem open = new MenuItem(tr("detail.files.openFile"));
+        openItem = new MenuItem(tr("detail.files.openFile"));
+        MenuItem open = openItem;
         open.setOnAction(e -> {
             var item = files.getSelectionModel().getSelectedItem();
             if (item != null && item.getValue().isFile()) onOpenFile.accept(item.getValue());

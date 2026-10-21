@@ -110,6 +110,9 @@ final class DevCapture {
         System.out.println("capture: title=" + stage.getTitle());
         System.out.println("capture: focus=" + scene.getFocusOwner());
         System.out.println("capture: engine=" + window.engineDescription());
+        // The profile the engine was built from (never its password) and what it cannot do.
+        System.out.println("capture: profile=" + window.profileDescription());
+        System.out.println("capture: capabilities-missing=" + window.capabilitiesLine());
         System.out.println("capture: javafx=" + System.getProperty("javafx.runtime.version", "?"));
         System.out.println("capture: status=" + window.statusText());
         for (String line : window.eventLines()) System.out.println("capture: event=" + line);

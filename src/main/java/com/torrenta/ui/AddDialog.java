@@ -113,6 +113,8 @@ final class AddDialog {
     private final CheckBox firstLast = new CheckBox(tr("dialog.add.firstLast"));
     private final CheckBox skipCheck = new CheckBox(tr("dialog.add.skipCheck"));
     private final ChoiceBox<AddRequest.StopCondition> stop = new ChoiceBox<>();
+    private Label stopLabel;
+    private Button browse;
     private final ChoiceBox<String> category = new ChoiceBox<>();
     private final TextField tags = new TextField();
     private final CheckBox withoutAsking = new CheckBox(tr("dialog.add.withoutAsking"));
@@ -179,6 +181,12 @@ final class AddDialog {
                     settings.incompleteDir(),
                     settings.partSuffix(),
                     settings.preallocate());
+        }
+
+        /** The same defaults with another folder: a remote engine's own, when the files are not here. */
+        Defaults withSavePath(Path path) {
+            return new Defaults(
+                    path, startPaused, sequential, incompleteEnabled, incompleteDir, partSuffix, preallocate);
         }
 
         /** Where a torrent saved to {@code destination} starts and ends. */
@@ -274,7 +282,7 @@ final class AddDialog {
         // ---- right: where and how ----
         savePath.setText(defaults.savePath().toString());
         savePath.textProperty().addListener((o, was, now) -> updateDisk());
-        Button browse = new Button(tr("common.browse"));
+        browse = new Button(tr("common.browse"));
         browse.setOnAction(e -> browse());
         HBox.setHgrow(savePath, Priority.ALWAYS);
         HBox pathRow = new HBox(6, savePath, browse);
@@ -300,7 +308,8 @@ final class AddDialog {
         ColumnConstraints half = new ColumnConstraints();
         half.setPercentWidth(50);
         filing.getColumnConstraints().addAll(half, half);
-        filing.addRow(0, muted(tr("dialog.common.category")), muted(tr("dialog.add.stopWhen")));
+        stopLabel = muted(tr("dialog.add.stopWhen"));
+        filing.addRow(0, muted(tr("dialog.common.category")), stopLabel);
         filing.addRow(1, category, stop);
 
         // First-and-last is piece priorities, which need the metadata: not for "Add now".
@@ -463,6 +472,39 @@ final class AddDialog {
                 fetchingLine(peers, Duration.between(opened, Instant.now()).toSeconds()));
         if (!treeHost.getChildren().contains(placeholder))
             treeHost.getChildren().setAll(placeholder);
+    }
+
+    /**
+     * There is no fetch to wait for: the engine lists the files once the torrent is added. Said in
+     * the tree's place, not as a failure; Add adds the magnet blind.
+     */
+    void noFetch(String message) {
+        if (hasFiles.get()) return;
+        fetching.setText(message);
+        waiting.set(false);
+    }
+
+    /**
+     * Hides the choices the engine has no capability for: skip check (seed mode), the stop
+     * condition, first and last pieces, sequential, and Browse with the free-space readout when
+     * the files are not on this machine. Before {@link #show}.
+     */
+    void applyCapabilities(com.torrenta.engine.Engine.Capabilities caps) {
+        shown(skipCheck, caps.has(com.torrenta.engine.Engine.Capability.SEED_MODE));
+        boolean stopping = caps.has(com.torrenta.engine.Engine.Capability.STOP_CONDITION);
+        shown(stop, stopping);
+        shown(stopLabel, stopping);
+        shown(firstLast, caps.has(com.torrenta.engine.Engine.Capability.FIRST_LAST_PIECES));
+        shown(sequential, caps.has(com.torrenta.engine.Engine.Capability.SEQUENTIAL_DOWNLOAD));
+        boolean local = caps.has(com.torrenta.engine.Engine.Capability.LOCAL_FILES);
+        shown(browse, local);
+        shown(diskBar, local);
+        shown(diskText, local);
+    }
+
+    private static void shown(javafx.scene.Node node, boolean on) {
+        node.setVisible(on);
+        node.setManaged(on);
     }
 
     /** The fetch could not start (already in the list) or failed; Add now still works. */
