@@ -131,6 +131,7 @@ final class SettingsWindow {
                 Settings.UI_STATE_COLORS,
                 Settings.UI_DENSITY,
                 Settings.UI_EXTENDED_WINDOW,
+                Settings.UI_PALETTE_KEY,
                 Settings.UI_TRAY,
                 Settings.UI_CLOSE_TO_TRAY
             },
@@ -467,6 +468,7 @@ final class SettingsWindow {
     private CheckBox stateColors;
     private ChoiceBox<Density> density;
     private CheckBox extendedWindow;
+    private ChoiceBox<PaletteKey> paletteKey;
     private CheckBox tray;
     private CheckBox closeToTray;
     private CheckBox addStartPaused;
@@ -1091,6 +1093,25 @@ final class SettingsWindow {
                 extendedWindow,
                 "title bar titlebar menu bar menubar header extended window chrome decorations csd"
                         + " compact row space");
+
+        VBox keyboard = section(page, "Keyboard");
+        paletteKey = new ChoiceBox<>();
+        paletteKey.getItems().addAll(PaletteKey.values());
+        paletteKey.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setPaletteKey(now.id());
+            settings.saveQuietly();
+            onAppearanceChanged.run();
+        });
+        row(
+                Category.GENERAL,
+                keyboard,
+                "Command palette",
+                "The chord that opens the palette: Alt+X, Editora's M-x, or the Ctrl+Shift+P of the"
+                        + " first releases. The View menu and the toolbar say the one in force. Applied"
+                        + " at once.",
+                paletteKey,
+                "keyboard shortcut chord key binding keybinding palette command alt x m-x ctrl shift p");
 
         VBox trayBox = section(page, "System tray");
         tray = new CheckBox();
@@ -2924,6 +2945,7 @@ final class SettingsWindow {
             stateColors.setSelected(settings.stateColors());
             density.setValue(Density.byId(settings.density(), Density.DEFAULT));
             extendedWindow.setSelected(settings.extendedWindow());
+            paletteKey.setValue(PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT));
             tray.setSelected(settings.tray());
             closeToTray.setSelected(settings.closeToTray());
             syncEnabled.setSelected(settings.syncEnabled());

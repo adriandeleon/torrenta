@@ -98,6 +98,19 @@ class SettingsTest {
     }
 
     @Test
+    void thePaletteChordIsKeptAsWritten(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        assertEquals("", settings.paletteKey(), "unset: the UI picks the default");
+        settings.setPaletteKey("shortcut-shift-p");
+        settings.save();
+        Settings read = new Settings(file);
+        read.load();
+        assertEquals("shortcut-shift-p", read.paletteKey());
+    }
+
+    @Test
     void toolbarShowsUnlessTurnedOff(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Settings settings = new Settings(file);

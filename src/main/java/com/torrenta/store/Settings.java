@@ -94,6 +94,11 @@ public final class Settings {
     public static final String UI_EXTENDED_WINDOW = "ui.extendedWindow";
     /** A tray (menu-bar) icon with the rates and a menu; on by default, where the desktop has one. */
     public static final String UI_TRAY = "ui.tray";
+    /**
+     * Which chord opens the command palette, by {@code ui.PaletteKey} id ({@code alt-x}, Editora's
+     * M-x, or {@code shortcut-shift-p}); the UI maps it and falls back.
+     */
+    public static final String UI_PALETTE_KEY = "ui.paletteKey";
     /** Closing the window hides it behind the tray icon and keeps the torrents going; on by default. */
     public static final String UI_CLOSE_TO_TRAY = "ui.closeToTray";
 
@@ -465,6 +470,15 @@ public final class Settings {
 
     public void setStateColors(boolean on) {
         properties.setProperty(UI_STATE_COLORS, String.valueOf(on));
+    }
+
+    /** The palette's chord id as written, trimmed; empty when unset. */
+    public String paletteKey() {
+        return properties.getProperty(UI_PALETTE_KEY, "").trim();
+    }
+
+    public void setPaletteKey(String id) {
+        properties.setProperty(UI_PALETTE_KEY, id);
     }
 
     public boolean sidebar() {
