@@ -30,7 +30,8 @@ window or limits yet; see [docs/ROADMAP.md](docs/ROADMAP.md).
 ./mvnw javafx:run
 ```
 
-Requires JDK 25. Everything else — including Maven itself, via the wrapper — is fetched on demand.
+Requires JDK 25 (the build refuses another and says so). Everything else — including Maven itself,
+via the wrapper — is fetched on demand.
 
 ```bash
 ./mvnw verify
@@ -50,6 +51,10 @@ there is added without a dialog, then deleted or renamed `.added`. A program can
 torrent is added, finishes or is done seeding (Settings → Automation, qBittorrent's `%N` `%F`
 `%D` … placeholders, no shell), and a desktop notification can be shown for each of those and for
 errors, through `notify-send`, `osascript` or a PowerShell toast.
+
+Search goes through a Torznab server of yours, Prowlarr or Jackett (Settings → Search): add it by
+URL and API key, press Test, and every enabled one is asked at once when the search tab (next)
+asks; the same torrent from two servers is shown once, the better-seeded copy first.
 
 ### Building a native app image
 
@@ -97,7 +102,9 @@ Add dialog's line under the save path says where the files start and how much ro
 filed under which is `torrents/<info-hash>.labels` beside its resume data, written the moment it
 changes and deleted with the torrent. Watch folders are `watch-folders.json` (folder, what to do
 with the file, save path, category, start paused), this machine's and never synced; a file that is
-not a torrent is renamed `.invalid` and left alone. The commands run on an event are
+not a torrent is renamed `.invalid` and left alone. Search providers are `search-providers.json`
+(name, URL, API key, enabled, the category count the last Test found), this machine's too and
+never synced, since the key is a secret. The commands run on an event are
 `automation.onAdded`, `automation.onFinished` and `automation.onSeedingDone` in the settings file,
 this machine's too (they name its programs); the notification switches are `notify.added`,
 `notify.finished`, `notify.seedingDone` and `notify.error` and do sync. A torrent's own share limit (Torrent → Limits…)
@@ -139,7 +146,8 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
 | `Ctrl+B` / `Ctrl+Shift+B` | Focus the sidebar (All, then Status, Categories, Tags and Trackers, every entry with a count; arrows walk every section, `Space` makes the entry the section's choice, `Enter` chooses and returns to the list, `Esc` returns without choosing; `Left`/`Right` fold a section) / show or hide it |
 | `Ctrl+Shift+P` | Command palette: every command, found by typing part of its name |
-| `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Categories and tags (names, save paths, delete), Watch folders, Automation (a command per event with placeholders, desktop notifications), Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
+| `Ctrl+K` | Search providers (Settings → Search) until the search tab exists: Prowlarr or Jackett by URL and API key, Test |
+| `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Categories and tags (names, save paths, delete), Watch folders, Automation (a command per event with placeholders, desktop notifications), Search (Torznab providers), Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
 | `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
 | `Space` | Pause the selected torrents, or resume them if all are paused |

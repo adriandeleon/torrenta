@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <atom:link href="http://localhost:9696/1/api" rel="self" type="application/rss+xml" />
+    <title>Prowlarr</title>
+    <description>Prowlarr feed</description>
+    <link>http://localhost:9696/</link>
+    <language>en-US</language>
+    <item>
+      <title>Debian 12.7.0 amd64 netinst</title>
+      <guid>https://example.test/details/42</guid>
+      <prowlarrindexer id="5" type="public">Example</prowlarrindexer>
+      <comments>https://example.test/details/42</comments>
+      <pubDate>Sat, 31 Aug 2024 12:00:00 +0000</pubDate>
+      <size>661651456</size>
+      <link>http://localhost:9696/5/download?apikey=abc&amp;link=xyz&amp;file=Debian+12.7.0</link>
+      <category>4000</category>
+      <enclosure url="http://localhost:9696/5/download?apikey=abc&amp;link=xyz&amp;file=Debian+12.7.0" length="661651456" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="4000" />
+      <torznab:attr name="size" value="661651456" />
+      <torznab:attr name="seeders" value="210" />
+      <torznab:attr name="leechers" value="12" />
+      <torznab:attr name="peers" value="222" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>Debian 12.7.0 arm64 DVD</title>
+      <guid>https://example.test/details/43</guid>
+      <prowlarrindexer id="5" type="public">Example</prowlarrindexer>
+      <comments>https://example.test/details/43</comments>
+      <pubDate>2024-08-31T13:30:00Z</pubDate>
+      <link>http://localhost:9696/5/download?apikey=abc&amp;link=uvw&amp;file=Debian+12.7.0+arm64</link>
+      <category>4000</category>
+      <enclosure url="http://localhost:9696/5/download?apikey=abc&amp;link=uvw&amp;file=Debian+12.7.0+arm64" length="3989831680" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="4000" />
+      <torznab:attr name="seeders" value="14" />
+      <torznab:attr name="peers" value="20" />
+      <torznab:attr name="infohash" value="D1E2F3A4B5C6D7E8F9A0B1C2D3E4F5A6B7C8D9E0" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:D1E2F3A4B5C6D7E8F9A0B1C2D3E4F5A6B7C8D9E0&amp;dn=debian-12.7.0-arm64-DVD-1.iso" />
+    </item>
+  </channel>
+</rss>

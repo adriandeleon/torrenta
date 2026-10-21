@@ -77,6 +77,7 @@ import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.WatchFolders;
 import com.torrenta.net.TorrentFetch;
 import com.torrenta.store.LabelStore;
+import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
 import com.torrenta.update.ReleaseInfo;
@@ -121,6 +122,7 @@ public final class MainWindow {
 
     private final LabelStore labels;
     private final WatchFolderStore watchStore;
+    private final SearchProviderStore searchStore;
     private WatchFolders watcher;
     /** Runs the person's commands and shows notifications; made with the engine in {@link #listenTo}. */
     private volatile Automation automation;
@@ -166,6 +168,8 @@ public final class MainWindow {
         labels.load();
         this.watchStore = new WatchFolderStore(configDir);
         watchStore.load();
+        this.searchStore = new SearchProviderStore(configDir);
+        searchStore.load();
         stage.setTitle(AppInfo.NAME);
 
         BorderPane root = new BorderPane();
@@ -186,6 +190,8 @@ public final class MainWindow {
         settingsWindow.setOnAppearanceChanged(this::applyStateColors);
         applyStateColors();
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
+        // The Search tab (next) will reread the list from here; until then there is nothing to tell.
+        settingsWindow.setSearchProviders(searchStore, () -> {});
         settingsWindow.setOnTestNotification(() -> {
             Automation a = automation;
             if (a != null) a.testNotification();
@@ -281,14 +287,17 @@ public final class MainWindow {
     }
 
     /**
-     * Drives the window from the capture hook, by name: {@code select-all}, {@code palette},
+     * Drives the window from the capture hook, by name: {@code close-window} (the quit path a
+     * person takes, where the hook itself exits through Platform.exit), {@code select-all}, {@code palette},
      * {@code palette:<query>}, {@code sidebar:<filter>} (as {@link SidebarFilter#parse} reads it),
      * {@code sidebar-keys:<KEY+KEY+…>} (focus the sidebar and press them),
      * {@code dialog-category:<name>} on an open Add dialog, or a command id. Prints what a
      * screenshot cannot show.
      */
     public void runForCapture(String action) {
-        if (action.equals("select-all")) {
+        if (action.equals("close-window")) {
+            stage.close();
+        } else if (action.equals("select-all")) {
             table.getSelectionModel().selectAll();
         } else if (action.equals("event-log")) {
             logWindow.show();
@@ -303,6 +312,17 @@ public final class MainWindow {
         } else if (action.equals("settings-watch-add")) {
             settingsWindow.show(stage);
             settingsWindow.openWatchDialogForCapture();
+        } else if (action.startsWith("settings-search-add")) {
+            // settings-search-add, settings-search-add:<url>, settings-search-test:<url> (Test pressed)
+            settingsWindow.show(stage);
+            int colon = action.indexOf(':');
+            settingsWindow.openSearchDialogForCapture(colon < 0 ? "" : action.substring(colon + 1), false);
+        } else if (action.startsWith("settings-search-dialog-test:")) {
+            settingsWindow.show(stage);
+            settingsWindow.openSearchDialogForCapture(action.substring("settings-search-dialog-test:".length()), true);
+        } else if (action.equals("settings-search-test")) {
+            settingsWindow.show(stage);
+            settingsWindow.testSearchProviderForCapture();
         } else if (action.equals("dialog-add")) {
             if (currentDialog != null && currentDialog.isShowing()) currentDialog.confirm();
         } else if (action.startsWith("dialog-press:")) {
@@ -368,6 +388,8 @@ public final class MainWindow {
             System.out.println("capture: settings=" + settingsWindow.visibleRowsForCapture());
         if (!settingsWindow.dialogTitle().isEmpty())
             System.out.println("capture: dialog=" + settingsWindow.dialogTitle());
+        if (!settingsWindow.searchStatus().isEmpty())
+            System.out.println("capture: search=" + settingsWindow.searchStatus());
         if (watcher != null) System.out.println("capture: watch=" + watchStatusText());
     }
 
@@ -1158,7 +1180,15 @@ public final class MainWindow {
      * torrents, and the sidebar would take that for the choices' entries having gone.
      */
     public void stopPolling() {
-        if (poller != null) poller.shutdownNow();
+        if (poller == null) return;
+        poller.shutdownNow();
+        // A poll in flight finishes before the engine is stopped behind it; the engine's own lock
+        // guards that too, this just keeps the quit orderly.
+        try {
+            poller.awaitTermination(3, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     // ---- commands -------------------------------------------------------------------------------
@@ -1581,6 +1611,14 @@ public final class MainWindow {
                 new Command("about", "About " + AppInfo.NAME, null, null, always, this::showAbout),
                 new Command(
                         "settings", "Settings…", chord(KeyCode.COMMA), null, always, () -> settingsWindow.show(stage)),
+                // Opens the provider list until the Search tab exists; the chord is the tab's.
+                new Command(
+                        "search",
+                        "Search…",
+                        chord(KeyCode.K),
+                        null,
+                        always,
+                        () -> settingsWindow.showSearchProviders(stage)),
                 new Command(
                         "filter",
                         "Filter Torrents",
@@ -1708,6 +1746,7 @@ public final class MainWindow {
                         addMagnet,
                         addClipboard,
                         new SeparatorMenuItem(),
+                        command("search").menuItem(),
                         command("settings").menuItem(),
                         new SeparatorMenuItem(),
                         quit);

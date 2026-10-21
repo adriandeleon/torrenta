@@ -789,6 +789,63 @@ class LibtorrentEngineTest {
     }
 
     @Test
+    void stopWaitsForACallInFlightAndRefusesTheNext(@TempDir Path dir) throws Exception {
+        // The window polls the engine from its own thread every second, actions run on virtual
+        // threads, the flusher on another. A quit that deleted the native session under a call in
+        // flight read freed memory. stop() now waits for the call in flight and later calls find
+        // no session. Four threads hammer the engine through three start/stop rounds: no call may
+        // throw anything but EngineException, every thread must end, and the stopped engine must
+        // answer empty. (The window of the old race was too narrow for this to crash the old code
+        // on a quiet machine; the test guards the contract, not the crash.)
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "race");
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        java.util.concurrent.atomic.AtomicReference<Throwable> unexpected =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        for (int round = 0; round < 3; round++) {
+            LibtorrentEngine engine = engine(dir, store);
+            engine.start();
+            String id = round == 0 ? engine.add(downloadsTorrent(dir, torrent)).id() : null;
+            await("the torrent is back", () -> !engine.torrents().isEmpty());
+            String tid = id != null ? id : engine.torrents().get(0).id();
+            java.util.concurrent.atomic.AtomicBoolean on = new java.util.concurrent.atomic.AtomicBoolean(true);
+            java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+            List<Thread> hammers = new java.util.ArrayList<>();
+            for (int n = 0; n < 4; n++) {
+                Thread h = new Thread(
+                        () -> {
+                            while (on.get()) {
+                                try {
+                                    engine.torrents();
+                                    engine.rates();
+                                    engine.detail(tid);
+                                    engine.flush();
+                                    calls.incrementAndGet();
+                                } catch (EngineException e) {
+                                    // the engine stopped under the call: the right answer
+                                } catch (Throwable e) {
+                                    unexpected.set(e);
+                                    return;
+                                }
+                            }
+                        },
+                        "hammer-" + n);
+                h.start();
+                hammers.add(h);
+            }
+            await("hammering", () -> calls.get() > 20);
+            engine.stop();
+            Thread.sleep(200);
+            on.set(false);
+            for (Thread h : hammers) h.join(5_000);
+            for (Thread h : hammers) assertFalse(h.isAlive(), h.getName() + " ended");
+            assertEquals(null, unexpected.get(), String.valueOf(unexpected.get()));
+            assertEquals(List.of(), engine.torrents(), "a stopped engine has nothing");
+            assertThrows(EngineException.class, () -> engine.detail(tid));
+        }
+    }
+
+    @Test
     void ipFilterRefusesTheRangesItIsGiven(@TempDir Path dir) throws Exception {
         try (LibtorrentEngine engine = engine(dir)) {
             engine.setIpFilter(List.of(new com.torrenta.engine.IpRange("10.0.0.0", "10.255.255.255")));
