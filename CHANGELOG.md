@@ -26,7 +26,6 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
-<<<<<<< HEAD
 - **The menu bar can share the window's title bar.** Off by default, under Settings → General →
   Appearance, experimental; it applies on restart, since a window's style is fixed once it has
   been shown, and the status bar says so when the setting and the window disagree. With it on, the
@@ -36,7 +35,6 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   platform's own, so nothing about how the window behaves changes; only where the menus sit. The
   window buttons follow the app theme, not the desktop's, so a dark theme on a light desktop does
   not hide them. Not offered on macOS, where the menu belongs to the system menu bar.
-=======
 - **The Create Torrent dialog** (`Ctrl+N`, File → New Torrent…, the toolbar's page glyph), the
   third step of the RSS, creation and statistics milestone: a file or folder (browsed, typed or
   dropped on the dialog), hybrid, v1-only or v2-only, a piece size from 16 KiB to 32 MiB or
@@ -96,7 +94,6 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   articles are `rss/feeds.json` and `rss/articles/<id>.json` beside the settings, this machine's,
   never synced. The columns are remembered as `rss.columns`. The auto-download switch on the
   Settings page is there and off: the rules come next.
->>>>>>> origin/master
 - **Search providers from definition files**, the last step of the search milestone. A site
   without an API is `search-providers/<id>.json` in the config folder: where to search (a URL
   template with `{query}` and `{category}`, the category mapped through the file's own table;
