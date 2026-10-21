@@ -1,6 +1,5 @@
 package com.torrenta.ui;
 
-import java.net.http.HttpClient;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -41,8 +40,6 @@ import com.torrenta.search.SearchOutcome;
 import com.torrenta.search.SearchProvider;
 import com.torrenta.search.SearchResult;
 import com.torrenta.search.SearchService;
-import com.torrenta.search.TorznabEndpoint;
-import com.torrenta.search.TorznabProvider;
 import com.torrenta.store.Settings;
 
 /**
@@ -61,8 +58,11 @@ final class SearchPane extends VBox {
 
     /** What the pane needs from the window; every call on the FX thread. */
     interface Host {
-        /** The enabled providers from the store, in its order. */
-        List<TorznabEndpoint> enabledProviders();
+        /**
+         * The enabled providers, built: the Torznab endpoints in the store's order, then the
+         * definition files in the folder's, each on unless disabled in Settings.
+         */
+        List<SearchProvider> enabledProviders();
 
         /** Settings → Search, for the "no provider yet" link. */
         void openProviderSettings();
@@ -92,7 +92,6 @@ final class SearchPane extends VBox {
     private final SearchRows rows = new SearchRows();
     private final TableView<SearchRow> table;
     private final SearchService service = new SearchService();
-    private final HttpClient client = TorznabProvider.defaultClient();
     /** The providers switched off by hand, by name; see {@link SearchChips}. */
     private Set<String> providersOff = new LinkedHashSet<>();
 
@@ -201,10 +200,10 @@ final class SearchPane extends VBox {
 
     /** The provider chips from the store: every enabled provider, on unless switched off before. */
     void reloadProviders() {
-        List<TorznabEndpoint> enabled = host.enabledProviders();
+        List<SearchProvider> enabled = host.enabledProviders();
         providersOff = SearchChips.keep(providersOff, enabled);
         providerChips.getChildren().clear();
-        for (TorznabEndpoint e : enabled) {
+        for (SearchProvider e : enabled) {
             ToggleButton chip = chip(e.name());
             chip.setSelected(!providersOff.contains(e.name()));
             chip.selectedProperty().addListener((o, was, now) -> {
@@ -234,7 +233,7 @@ final class SearchPane extends VBox {
     }
 
     /** The providers the chips leave on. */
-    List<TorznabEndpoint> chosenProviders() {
+    List<SearchProvider> chosenProviders() {
         return SearchChips.chosen(host.enabledProviders(), providersOff);
     }
 
@@ -315,8 +314,8 @@ final class SearchPane extends VBox {
     /** Runs the query as typed: Enter, or the capture. */
     void runSearch() {
         String q = query.getText().trim();
-        List<TorznabEndpoint> enabled = host.enabledProviders();
-        List<TorznabEndpoint> chosen = SearchChips.chosen(enabled, providersOff);
+        List<SearchProvider> enabled = host.enabledProviders();
+        List<SearchProvider> chosen = SearchChips.chosen(enabled, providersOff);
         String problem = SearchStatus.cannotSearch(!enabled.isEmpty(), !chosen.isEmpty(), !q.isEmpty());
         if (!problem.isEmpty()) {
             showProblem(problem);
@@ -325,8 +324,7 @@ final class SearchPane extends VBox {
         cancelRunning();
         int gen = ++generation;
         searched = true;
-        List<SearchProvider> providers = new ArrayList<>();
-        for (TorznabEndpoint e : chosen) providers.add(new TorznabProvider(e, client));
+        List<SearchProvider> providers = List.copyOf(chosen);
         List<String> names = providers.stream().map(SearchProvider::name).toList();
         SearchCategory cat = category();
         Map<String, Integer> counts = new LinkedHashMap<>();

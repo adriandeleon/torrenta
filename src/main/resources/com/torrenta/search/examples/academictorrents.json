@@ -1,0 +1,18 @@
+{
+  "id": "academictorrents",
+  "name": "Academic Torrents",
+  "homepage": "https://academictorrents.com",
+  "type": "html",
+  "search": {
+    "url": "https://academictorrents.com/rss.xml",
+    "localFilter": true
+  },
+  "fields": {
+    "rows": "item",
+    "name": "title",
+    "infoHash": "infohash",
+    "size": "size",
+    "detailUrl": "link",
+    "torrentUrl": { "template": "https://academictorrents.com/download/{infoHash}.torrent" }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "archive-org",
+  "name": "Internet Archive",
+  "homepage": "https://archive.org",
+  "type": "json",
+  "search": {
+    "url": "https://archive.org/advancedsearch.php?q={query}{category}&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=item_size&fl%5B%5D=publicdate&rows=50&page=1&output=json",
+    "page": "https://archive.org/advancedsearch.php?q={query}{category}&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=item_size&fl%5B%5D=publicdate&rows=50&page={page}&output=json",
+    "pages": 1
+  },
+  "categories": {
+    "default": "",
+    "Movies": " AND mediatype:movies",
+    "TV": " AND mediatype:movies AND collection:television",
+    "Music": " AND mediatype:audio",
+    "Games": " AND mediatype:software",
+    "Software": " AND mediatype:software",
+    "Books": " AND mediatype:texts",
+    "Anime": " AND mediatype:movies",
+    "Other": " AND mediatype:data"
+  },
+  "fields": {
+    "rows": "/response/docs",
+    "identifier": "/identifier",
+    "name": "/title",
+    "size": "/item_size",
+    "date": "/publicdate",
+    "torrentUrl": { "template": "https://archive.org/download/{identifier}/{identifier}_archive.torrent" },
+    "detailUrl": { "template": "https://archive.org/details/{identifier}" }
+  }
+}

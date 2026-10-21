@@ -8,11 +8,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
@@ -76,8 +79,12 @@ import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.WatchFolders;
 import com.torrenta.net.TorrentFetch;
+import com.torrenta.search.DeclarativeProvider;
+import com.torrenta.search.SearchProvider;
 import com.torrenta.search.SearchResult;
 import com.torrenta.search.TorznabEndpoint;
+import com.torrenta.search.TorznabProvider;
+import com.torrenta.store.DefinitionStore;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
@@ -99,6 +106,7 @@ import com.torrenta.update.UpdateService;
 public final class MainWindow {
 
     private static final long POLL_MS = 1000;
+    private static final Logger LOG = Logger.getLogger(MainWindow.class.getName());
 
     private final Stage stage;
     private final Settings settings;
@@ -133,6 +141,12 @@ public final class MainWindow {
     private final LabelStore labels;
     private final WatchFolderStore watchStore;
     private final SearchProviderStore searchStore;
+    private final DefinitionStore definitionStore;
+    /** One connection pool for every search provider. */
+    private final java.net.http.HttpClient searchClient = TorznabProvider.defaultClient();
+    /** The definition problems already said in the log, so a broken file is reported once. */
+    private final Set<String> reportedDefinitionProblems = new java.util.HashSet<>();
+
     private WatchFolders watcher;
     /** Runs the person's commands and shows notifications; made with the engine in {@link #listenTo}. */
     private volatile Automation automation;
@@ -184,6 +198,9 @@ public final class MainWindow {
         watchStore.load();
         this.searchStore = new SearchProviderStore(configDir);
         searchStore.load();
+        this.definitionStore = new DefinitionStore(configDir);
+        installExampleDefinitions();
+        definitionStore.load();
         stage.setTitle(AppInfo.NAME);
 
         BorderPane root = new BorderPane();
@@ -205,6 +222,9 @@ public final class MainWindow {
         applyAppearance();
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
         settingsWindow.setSearchProviders(searchStore, searchPane::reloadProviders);
+        settingsWindow.setSearchDefinitions(
+                definitionStore,
+                () -> opener.accept(definitionStore.dir().toUri().toString()));
         settingsWindow.setOnTestNotification(() -> {
             Automation a = automation;
             if (a != null) a.testNotification();
@@ -221,6 +241,7 @@ public final class MainWindow {
         settings.setOnSaved(() -> Platform.runLater(sync::markDirty));
         detail.setOnBanPeer(this::banPeer);
         log.installLogBridge(Platform::runLater);
+        reportDefinitionProblems();
         host.getChildren().add(root);
 
         Scene scene = new Scene(host, 960, 600);
@@ -336,6 +357,9 @@ public final class MainWindow {
         } else if (action.equals("settings-search-test")) {
             settingsWindow.show(stage);
             settingsWindow.testSearchProviderForCapture();
+        } else if (action.equals("settings-definitions-reload")) {
+            settingsWindow.show(stage);
+            settingsWindow.reloadDefinitionsForCapture();
         } else if (action.equals("search")) {
             showSearch();
         } else if (action.startsWith("search:")) {
@@ -416,6 +440,8 @@ public final class MainWindow {
             System.out.println("capture: dialog=" + settingsWindow.dialogTitle());
         if (!settingsWindow.searchStatus().isEmpty())
             System.out.println("capture: search=" + settingsWindow.searchStatus());
+        if (settingsWindow.isShowing())
+            for (String row : settingsWindow.definitionsForCapture()) System.out.println("capture: definition=" + row);
         if (watcher != null) System.out.println("capture: watch=" + watchStatusText());
         System.out.println("capture: search-tab=" + (searchShowing() ? "showing" : "hidden"));
         if (searchShowing()) {
@@ -2018,8 +2044,14 @@ public final class MainWindow {
     /** What the Search tab asks of the window. */
     private final class SearchHost implements SearchPane.Host {
         @Override
-        public List<TorznabEndpoint> enabledProviders() {
-            return searchStore.enabled();
+        public List<SearchProvider> enabledProviders() {
+            List<SearchProvider> out = new ArrayList<>();
+            for (TorznabEndpoint e : searchStore.enabled()) out.add(new TorznabProvider(e, searchClient));
+            Set<String> off = settings.disabledSearchDefinitions();
+            for (var d : definitionStore.definitions()) {
+                if (!off.contains(d.id())) out.add(new DeclarativeProvider(d, searchClient));
+            }
+            return out;
         }
 
         @Override
@@ -2055,8 +2087,34 @@ public final class MainWindow {
         return searchPane != null && searchPane.isVisible();
     }
 
+    /**
+     * The shipped definition files into the folder, the ones not there yet; a failure is a log
+     * line, not a failed start.
+     */
+    private void installExampleDefinitions() {
+        try {
+            definitionStore.installExamples();
+        } catch (IOException e) {
+            LOG.log(Level.WARNING, "Could not copy the example search definitions into " + definitionStore.dir(), e);
+        }
+    }
+
+    /** FX thread: every definition file that did not load, said once in the log. */
+    private void reportDefinitionProblems() {
+        for (DefinitionStore.Entry entry : definitionStore.problems()) {
+            if (reportedDefinitionProblems.add(entry.problem()))
+                log.add(EngineEvent.session(
+                        EngineEvent.Level.WARNING, "Search definition skipped: " + entry.problem()));
+        }
+    }
+
     /** Ctrl+K: the Search tab in place of the transfers, the query field focused. */
     private void showSearch() {
+        // The folder is re-read when the tab opens, so a file dropped in is a chip at once.
+        if (definitionStore.refresh()) {
+            reportDefinitionProblems();
+            searchPane.reloadProviders();
+        }
         if (!searchShowing()) {
             transfersView.setVisible(false);
             transfersView.setManaged(false);
