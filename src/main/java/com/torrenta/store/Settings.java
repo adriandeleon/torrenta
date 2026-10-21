@@ -45,6 +45,8 @@ public final class Settings {
     };
     /** The transfer list's columns: order, widths, visibility. See {@code ui.ColumnLayout}. */
     public static final String TABLE_COLUMNS = "table.columns";
+    /** The Search tab's results columns, the same shape. */
+    public static final String SEARCH_COLUMNS = "search.columns";
     /** The detail pane: shown, which tab, and the divider position (0..1 of the window). */
     public static final String DETAIL_VISIBLE = "detail.visible";
 

@@ -13,6 +13,21 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **The Search tab** (`Ctrl+K`, File → Search…, the toolbar's search glyph), the second step of
+  the search milestone. It takes the place of the transfers, which come back as they were with
+  `Esc`: a query field, a row of category chips (All by default), a row of provider chips (every
+  enabled provider, on unless switched off; a link to Settings → Search while there is none), a
+  status line with one clause per provider ("Prowlarr: 42 results · Jackett: could not connect")
+  and the results table: Name, Size, Seeds, Leechers, Date, Provider, sorted by seeds, the ranked
+  order when no column is. `Enter` asks every chosen provider at once on a worker and each answer
+  lands as it arrives, the rows reconciled in place so the selection survives; a new search drops
+  the running one. `Enter` or a double-click on a result opens the Add dialog for it ("FROM
+  SEARCH"): a magnet as it is, a `.torrent` link fetched first with the status bar saying so;
+  `Ctrl+C` copies the link; the context menu adds, copies and opens the detail page. The whole tab
+  is driven from the keyboard: `Tab` between the query, the chips and the table, `Space` on a
+  chip, `Down` from the query into the results, `Esc` in the results back to the query. The
+  columns are remembered as `search.columns`. The service now reports each provider as it answers
+  (`SearchService.Progress`), in arrival order, on the searching thread.
 - **Search providers** (Settings → Search), the first of the search milestone. A Torznab server,
   Prowlarr (`http://host:9696/1/api`) or Jackett
   (`http://host:9117/api/v2.0/indexers/all/results/torznab/api`, or one indexer's), is added by
@@ -26,8 +41,7 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   once (by info-hash, else by link; the better-seeded copy wins and borrows what it lacked), ranks
   them by seeds, then by how many of the query's words the name has, then by date, asks a
   provider at most once every 2 s and remembers an answer for the session. The list, keys
-  included, is `search-providers.json` beside the settings: this machine's, never synced. `Ctrl+K`
-  and File → Search… open the page until the tab exists.
+  included, is `search-providers.json` beside the settings: this machine's, never synced.
 - **Run on event and desktop notifications** (Settings → Automation). One optional command line
   per event: torrent added (not the ones restored at start), download finished, seeding done (the
   share limit paused or removed it). Placeholders are qBittorrent's, spelled the same: `%N` name,

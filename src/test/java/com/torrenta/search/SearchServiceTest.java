@@ -164,6 +164,70 @@ class SearchServiceTest {
         assertEquals(3, ticker.sleeps.size(), "a cached answer asks nothing and waits for nothing");
     }
 
+    /** Writes down each call as it comes, with the thread it came on. */
+    private static final class Notes implements SearchService.Progress {
+        final List<String> lines = java.util.Collections.synchronizedList(new ArrayList<>());
+        final List<Thread> threads = java.util.Collections.synchronizedList(new ArrayList<>());
+
+        @Override
+        public void answered(String provider, List<SearchResult> results) {
+            lines.add(provider + "=" + results.size());
+            threads.add(Thread.currentThread());
+        }
+
+        @Override
+        public void failed(String provider, String reason) {
+            lines.add(provider + "!" + reason);
+            threads.add(Thread.currentThread());
+        }
+    }
+
+    @Test
+    void eachProviderIsReportedAsItAnswersOnTheCallingThread() {
+        Fake fast = Fake.answering("Fast", hit("a", 5, H1, "Fast"));
+        Fake slow = new Fake("Slow", List.of(hit("b", 3, H2, "Slow")), Duration.ofMillis(300), null);
+        Fake bad = new Fake("Bad", List.of(), Duration.ofMillis(100), "the API key was refused (401)");
+        Notes notes = new Notes();
+        SearchOutcome outcome =
+                quick(Duration.ofSeconds(5)).search("x", SearchCategory.ALL, List.of(slow, bad, fast), notes);
+        assertEquals(List.of("Fast=1", "Bad!the API key was refused (401)", "Slow=1"), notes.lines, "arrival order");
+        assertTrue(notes.threads.stream().allMatch(t -> t == Thread.currentThread()));
+        assertEquals(2, outcome.results().size(), "the outcome is the same whole as without a listener");
+        assertEquals(Map.of("Bad", "the API key was refused (401)"), outcome.failures());
+    }
+
+    @Test
+    void aTimedOutProviderIsReportedAsSuchAndACachedAnswerAtOnce() {
+        Fake fast = Fake.answering("Fast", hit("a", 5, H1, "Fast"));
+        Fake slow = new Fake("Slow", List.of(), Duration.ofSeconds(30), null);
+        SearchService service = quick(Duration.ofMillis(400));
+        Notes notes = new Notes();
+        service.search("x", SearchCategory.ALL, List.of(fast, slow), notes);
+        assertEquals(List.of("Fast=1", "Slow!timed out after 0 s"), notes.lines);
+        Notes again = new Notes();
+        service.search("x", SearchCategory.ALL, List.of(fast), again);
+        assertEquals(List.of("Fast=1"), again.lines, "from the cache, before anything is asked");
+        assertEquals(1, fast.calls.get());
+    }
+
+    @Test
+    void interruptingTheSearchMarksWhatHadNotAnsweredAndKeepsWhatHad() throws Exception {
+        Fake fast = Fake.answering("Fast", hit("a", 5, H1, "Fast"));
+        Fake slow = new Fake("Slow", List.of(), Duration.ofSeconds(30), null);
+        Notes notes = new Notes();
+        SearchOutcome[] outcome = new SearchOutcome[1];
+        Thread searcher = new Thread(() ->
+                outcome[0] = quick(Duration.ofSeconds(30)).search("x", SearchCategory.ALL, List.of(fast, slow), notes));
+        searcher.start();
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+        while (notes.lines.isEmpty() && System.nanoTime() < deadline) Thread.sleep(10);
+        searcher.interrupt();
+        searcher.join(Duration.ofSeconds(5).toMillis());
+        assertEquals(List.of("Fast=1", "Slow!interrupted"), notes.lines);
+        assertEquals(1, outcome[0].results().size());
+        assertEquals(Map.of("Slow", "interrupted"), outcome[0].failures());
+    }
+
     @Test
     void aBlankQueryAsksNobody() {
         Fake a = Fake.answering("A", hit("a", 5, H1, "A"));

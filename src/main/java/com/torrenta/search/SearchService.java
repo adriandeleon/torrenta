@@ -7,13 +7,14 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionService;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorCompletionService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * Runs a search across providers: each on its own virtual thread with a timeout, the answers
@@ -76,55 +77,115 @@ public final class SearchService {
     }
 
     /**
+     * Told of each provider as it answers or fails, in the order they do, on the searching thread:
+     * the tab shows what has arrived while the slow ones are still being waited for.
+     */
+    public interface Progress {
+        /** The provider answered with these results (empty when nothing matched). */
+        void answered(String provider, List<SearchResult> results);
+
+        /** The provider could not answer; the reason is what the status line says. */
+        void failed(String provider, String reason);
+
+        /** Nobody listening. */
+        Progress NONE = new Progress() {
+            @Override
+            public void answered(String provider, List<SearchResult> results) {}
+
+            @Override
+            public void failed(String provider, String reason) {}
+        };
+    }
+
+    /**
      * Asks every provider at once and waits up to the timeout for all of them. A provider that
      * throws, times out or is interrupted is a line in {@link SearchOutcome#failures()}; the rest
      * are merged. A blank query asks nobody.
      */
     public SearchOutcome search(String query, SearchCategory category, List<SearchProvider> providers) {
+        return search(query, category, providers, Progress.NONE);
+    }
+
+    /**
+     * {@link #search(String, SearchCategory, List)}, reporting each provider's answer or failure
+     * as it comes in. Interrupting the calling thread cancels every provider still being waited
+     * for and marks it "interrupted"; the outcome still holds what arrived before.
+     */
+    public SearchOutcome search(
+            String query, SearchCategory category, List<SearchProvider> providers, Progress progress) {
         String q = query == null ? "" : query.trim();
         if (q.isEmpty() || providers.isEmpty()) return new SearchOutcome(List.of(), Map.of(), 0);
         SearchCategory cat = category == null ? SearchCategory.ALL : category;
+        String lower = q.toLowerCase(Locale.ROOT);
 
         List<List<SearchResult>> answers = new ArrayList<>();
         Map<String, String> failures = new LinkedHashMap<>();
         List<SearchProvider> toAsk = new ArrayList<>();
         for (SearchProvider provider : providers) {
-            List<SearchResult> cached = cache.get(new Key(provider.name(), q.toLowerCase(Locale.ROOT), cat));
-            if (cached != null) answers.add(cached);
-            else toAsk.add(provider);
+            List<SearchResult> cached = cache.get(new Key(provider.name(), lower, cat));
+            if (cached != null) {
+                answers.add(cached);
+                progress.answered(provider.name(), cached);
+            } else {
+                toAsk.add(provider);
+            }
         }
         if (!toAsk.isEmpty()) {
             try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
-                List<Future<List<SearchResult>>> futures = new ArrayList<>();
-                for (SearchProvider provider : toAsk) futures.add(pool.submit(() -> ask(provider, q, cat)));
+                CompletionService<List<SearchResult>> done = new ExecutorCompletionService<>(pool);
+                Map<Future<List<SearchResult>>, SearchProvider> pending = new LinkedHashMap<>();
+                for (SearchProvider provider : toAsk) pending.put(done.submit(() -> ask(provider, q, cat)), provider);
                 long deadline = System.nanoTime() + timeout.toNanos();
-                for (int i = 0; i < toAsk.size(); i++) {
-                    SearchProvider provider = toAsk.get(i);
-                    Future<List<SearchResult>> future = futures.get(i);
+                String leftover = null;
+                while (!pending.isEmpty()) {
+                    Future<List<SearchResult>> future;
                     try {
-                        List<SearchResult> results =
-                                future.get(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
-                        cache.put(new Key(provider.name(), q.toLowerCase(Locale.ROOT), cat), results);
-                        answers.add(results);
-                    } catch (TimeoutException e) {
-                        future.cancel(true);
-                        failures.put(provider.name(), "timed out after " + timeout.toSeconds() + " s");
-                    } catch (CancellationException e) {
-                        failures.put(provider.name(), "cancelled");
-                    } catch (ExecutionException e) {
-                        failures.put(provider.name(), reason(e.getCause()));
+                        future = done.poll(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
-                        for (Future<?> f : futures) f.cancel(true);
-                        failures.put(provider.name(), "interrupted");
-                        for (int j = i + 1; j < toAsk.size(); j++)
-                            failures.put(toAsk.get(j).name(), "interrupted");
+                        leftover = "interrupted";
                         break;
+                    }
+                    if (future == null) {
+                        leftover = "timed out after " + timeout.toSeconds() + " s";
+                        break;
+                    }
+                    SearchProvider provider = pending.remove(future);
+                    try {
+                        List<SearchResult> results = future.get();
+                        cache.put(new Key(provider.name(), lower, cat), results);
+                        answers.add(results);
+                        progress.answered(provider.name(), results);
+                    } catch (CancellationException e) {
+                        failures.put(provider.name(), "cancelled");
+                        progress.failed(provider.name(), "cancelled");
+                    } catch (ExecutionException e) {
+                        failures.put(provider.name(), reason(e.getCause()));
+                        progress.failed(provider.name(), reason(e.getCause()));
+                    } catch (InterruptedException e) {
+                        // Cannot happen: the future is done. Treated as the interruption it says.
+                        Thread.currentThread().interrupt();
+                        leftover = "interrupted";
+                        pending.put(future, provider);
+                        break;
+                    }
+                }
+                if (leftover != null) {
+                    for (Map.Entry<Future<List<SearchResult>>, SearchProvider> e : pending.entrySet()) {
+                        e.getKey().cancel(true);
+                        failures.put(e.getValue().name(), leftover);
+                        progress.failed(e.getValue().name(), leftover);
                     }
                 }
             }
         }
-        return new SearchOutcome(ResultRanker.merge(answers, q), failures, providers.size());
+        // Failures in the providers' order, whatever order they arrived in.
+        Map<String, String> ordered = new LinkedHashMap<>();
+        for (SearchProvider provider : providers) {
+            String reason = failures.get(provider.name());
+            if (reason != null) ordered.put(provider.name(), reason);
+        }
+        return new SearchOutcome(ResultRanker.merge(answers, q), ordered, providers.size());
     }
 
     /** Waits its turn at the provider's gate, then asks. */

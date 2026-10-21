@@ -37,6 +37,7 @@ class AddDialogTest {
         assertEquals("ADD TORRENT · FROM FILE", AddDialog.kicker(AddDialog.Via.FILE, false));
         assertEquals("ADD TORRENT · FROM URL", AddDialog.kicker(AddDialog.Via.URL, false));
         assertEquals("ADD TORRENT · FROM MAGNET LINK", AddDialog.kicker(AddDialog.Via.MAGNET, false));
+        assertEquals("ADD TORRENT · FROM SEARCH", AddDialog.kicker(AddDialog.Via.SEARCH, false));
         assertEquals("ADD TORRENT · FROM CLIPBOARD", AddDialog.kicker(AddDialog.Via.CLIPBOARD, false));
         assertEquals("CHOOSE FILES", AddDialog.kicker(AddDialog.Via.CLIPBOARD, true));
     }
