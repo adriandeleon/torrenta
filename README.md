@@ -182,7 +182,9 @@ it): `settings.properties`, hand-editable; `stats.properties`, the all-time tota
 up, seconds active) the Statistics window adds this session to, written every five minutes and
 at quit, this machine's and never synced; `torrents/<info-hash>.fastresume`, one per torrent,
 libtorrent's resume data with the info dictionary inside, so deleting one file forgets one torrent;
-`native/<version>/`, the unpacked engine. While Torrenta runs, `instance.lock` is held, and
+`native/<version>/`, the unpacked engine; `profiles.json`, the remote engine profiles (name, URL,
+user, password; readable by you alone where the file system has modes, never synced), chosen by
+`engine.profile` in the settings file. While Torrenta runs, `instance.lock` is held, and
 `instance.port` and `instance.token` (readable by you alone where the file system has modes) say
 where a second Torrenta hands over its command line; both are deleted at quit, and a stale pair
 left by a crash is taken over without a word. Downloads go to `~/Downloads` until changed in
@@ -319,7 +321,53 @@ Two things about the dependency that are not written down anywhere else:
 
 The alternatives considered were [bt](https://github.com/atomashpolskiy/bt) (pure Java, but its last
 release is from 2021, and it has no uTP or v2 torrents) and a Transmission daemon over RPC (no engine
-work, but a second program to install).
+work, but a second program to install). The second is now the other engine, below.
+
+## Remote: Transmission
+
+The same window can drive a `transmission-daemon` on a seedbox or a NAS instead of libtorrent in
+this process: `com.torrenta.engine.transmission.TransmissionEngine` speaks Transmission's RPC
+(JSON over HTTP(S) at `/transmission/rpc`, the `X-Transmission-Session-Id` handshake, basic auth)
+and the window does not know the difference. Tested against transmission-daemon 4.1.0-beta.2
+(RPC 18); anything from 4.0 (RPC 17) works, with sequential download missing before 4.1.
+
+**Setting it up.** Settings → Engine (`Ctrl+,`, the first page of the Engine group) lists the
+profiles: Local (libtorrent) is always there; Add… takes a name, the daemon's URL (`http://host:9091`
+is enough, the path is added), a user name and a password, and Test connection asks the daemon its
+version, RPC version and download folder. Use at next start remembers the choice
+(`engine.profile` in the settings file, this machine's, never synced); Switch now, or File → Switch
+engine profile… (also in the palette), restarts the engine in place: the list empties, the old
+engine stops, the new one comes up and the list fills from it. The profiles are `profiles.json`
+beside the settings, readable by you alone where the file system has modes, never synced, never
+logged with their passwords. The window title names the profile while a daemon is in use, the
+status bar says "Connecting to …" meanwhile, and when the daemon cannot be reached the window stays
+up with the reason and two buttons, Retry and Switch profile… (both palette commands too).
+
+**What is hidden.** The daemon's RPC has no word for some of what libtorrent does, and the window
+hides those rather than greying them out or pretending: the torrent creator (Ctrl+N and its
+toolbar button), the magnet file list before adding (the Add dialog says the daemon lists the files
+once the torrent is added, and adds blind), the IP filter from ranges (the local blocklist file,
+manual bans, Ban Peer; the page keeps the blocklist URL and the switch, which the daemon fetches
+itself, and says how many ranges it holds), first-and-last-pieces, the skip-check and stop-condition
+choices of the Add dialog, upload slots (session and per torrent), the proxy, interface binding and
+IPv6, anonymous mode, overhead in rate limits, the incomplete-folder, `.part` and pre-allocation
+choices, the limit on torrents active in all, and, before RPC 18, sequential download. Open folder,
+Open file, Browse and the free-space readout stay only when the daemon is on this machine
+(`localhost`, `127.*`, `::1`): a seedbox's paths are its own. Everything else works as it does with
+libtorrent: pause, resume, force resume, recheck, reannounce, remove with or without data, per-file
+priorities, trackers (added and removed through `trackerList`), per-torrent rate caps and peer
+limits, categories and tags (one flat label list on the daemon: the category travels as
+`category:<name>`, the tags as they are), the detail pane (files, peers, trackers, the pieces map
+decoded from the daemon's bitfield), the statistics (the daemon's cumulative counters; what it lacks
+shows a dash), the Speed, Queue, Protocol and Connection pages, watch folders, RSS rules, search,
+run-on-event and notifications. The daemon has no push, so the Event Log's added, finished, removed
+and error lines come from comparing one poll with the last.
+
+**The daemon keeps its own settings.** The Settings → Engine pages still show this machine's file;
+a value changed there while a daemon is in use is sent to the daemon, and only that value:
+untouched rows never overwrite what the daemon's administrator configured. The save path in the
+Add dialog defaults to the daemon's download folder; a torrent sent with the folder unchanged gets
+the daemon's own. Speeds are converted (the daemon counts kilobytes of 1000, the pages KiB).
 
 ## Layout
 
@@ -328,6 +376,7 @@ src/main/java/com/torrenta                    App, AppInfo, DevCapture
 src/main/java/com/torrenta/cli                CommandLine (--help, --version, inputs)
 src/main/java/com/torrenta/engine             Engine, Torrent, TorrentState — no libtorrent types
 src/main/java/com/torrenta/engine/libtorrent  LibtorrentEngine, NativeLibrary
+src/main/java/com/torrenta/engine/transmission TransmissionEngine, RpcClient, Bencode, Json
 src/main/java/com/torrenta/store              ConfigDir, Settings, TorrentStore
 src/main/java/com/torrenta/ui                 MainWindow, Theme, Bytes
 src/main/resources/com/torrenta               build-info.properties, styles/

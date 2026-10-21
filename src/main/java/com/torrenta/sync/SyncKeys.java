@@ -25,10 +25,11 @@ public final class SyncKeys {
      * {@code ui.sidebar} without the dot, travels); {@code automation.*} names programs on this
      * machine (the {@code notify.*} switches travel); {@code create.*} is the Create Torrent
      * dialog's last folder and trackers, this machine's; {@code os.*} is this machine's desktop
-     * (whether it is registered as the handler, whether its dock shows a badge).
+     * (whether it is registered as the handler, whether its dock shows a badge); {@code engine.*}
+     * names which engine profile this machine starts, the daemon being reachable from here.
      */
     static final List<String> LOCAL_PREFIXES =
-            List.of("sync.", "torrent.", "ui.sidebar.", "automation.", "create.", "os.");
+            List.of("sync.", "torrent.", "ui.sidebar.", "automation.", "create.", "os.", "engine.");
 
     static final List<String> LOCAL_KEYS = List.of(
             "download.dir",

@@ -157,7 +157,7 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Settings window, live-applying, searchable | ✓ | ✓ | 0.4 |
 | Light and dark themes, UI font | ✓ | ✓ | 0.8 |
 | Interface languages | ✓ | ✓ | 0.8 |
-| Control a remote daemon (Transmission RPC as a second `Engine`) | ✓ (remote GUI) | ✗ | 0.9 |
+| Control a remote daemon (Transmission RPC as a second `Engine`) | ✓ (remote GUI) | ✗ | ✓ 0.9 |
 | Serve a web UI / RPC of its own | ✓ | ✓ | later |
 | Headless daemon mode | ✓ | ✓ (`-nox`) | later |
 
@@ -327,9 +327,20 @@ Asked for by adl on 2026-10-20, each its own PR, taken from Editora so the famil
 The interface font (Inter, as Editora's, #14) and the command palette's look (Editora's, #23) are in.
 
 ### 0.9 — Remote
+**0.9 is feature-complete.**
 
-1. **Transmission RPC `Engine`**: the same window driving a transmission-daemon on a seedbox or NAS;
+1. ✓ **Transmission RPC `Engine`**: the same window driving a transmission-daemon on a seedbox or NAS;
    session profiles in Settings; capabilities the daemon lacks are hidden, not faked.
+   (`engine.transmission.TransmissionEngine` + `RpcClient` + `Bencode` for `inspect`;
+   `Engine.Capabilities` read by the window through `ui.CapabilityRules`; `EngineProfile`,
+   `store.ProfileStore` (`profiles.json`, owner-only, never synced), `engine.profile`; Settings →
+   Engine with Test connection, Use at next start and Switch now; File → Switch engine profile…;
+   `TransmissionDaemonTest` against the real daemon where it is installed. Not mapped, since the
+   RPC has no word for them: torrent creation, the metadata fetch before adding, an IP filter from
+   ranges, first-and-last pieces, seed mode and stop conditions on add, upload slots, the proxy,
+   interface binding, anonymous mode, overhead counting, per-torrent storage choices, the total
+   active limit; the daemon's own session settings are shown as this machine's file and only a
+   changed key is sent.)
 
 ### 1.0 — Criteria
 

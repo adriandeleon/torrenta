@@ -406,6 +406,17 @@ public final class LibtorrentEngine implements Engine {
         return "libtorrent " + LibTorrent.version() + " (libtorrent4j " + LibTorrent.libtorrent4jVersion() + ")";
     }
 
+    /** Everything: the window was written against this engine. */
+    @Override
+    public Capabilities capabilities() {
+        return Capabilities.ALL;
+    }
+
+    @Override
+    public String downloadDir() {
+        return downloadDir.get().toString();
+    }
+
     @Override
     public synchronized Torrent add(String input) throws EngineException {
         AddRequest.Source source;

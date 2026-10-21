@@ -20,6 +20,7 @@ import java.util.logging.Logger;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.BooleanBinding;
+import javafx.beans.value.ObservableBooleanValue;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
@@ -71,6 +72,7 @@ import com.torrenta.engine.Category;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
+import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.Inputs;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
@@ -98,6 +100,7 @@ import com.torrenta.search.TorznabEndpoint;
 import com.torrenta.search.TorznabProvider;
 import com.torrenta.store.DefinitionStore;
 import com.torrenta.store.LabelStore;
+import com.torrenta.store.ProfileStore;
 import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
@@ -242,6 +245,31 @@ public final class MainWindow {
 
     private Engine engine;
     private String engineDescription = "";
+    /** What the engine can do; everything until one has started. Read by workers, set on the FX thread. */
+    private volatile Engine.Capabilities capabilities = Engine.Capabilities.ALL;
+    /**
+     * One switch per capability. A command behind a missing one is disabled as well as hidden, so
+     * its chord and its palette entry are dead too, not only its menu item.
+     */
+    private final java.util.Map<Engine.Capability, javafx.beans.property.BooleanProperty> capabilityOn =
+            new java.util.EnumMap<>(Engine.Capability.class);
+    /** Every menu item made for a command, by id, so a missing capability can hide them all. */
+    private final java.util.Map<String, List<MenuItem>> commandItems = new java.util.HashMap<>();
+
+    private final java.util.Map<String, Button> commandButtons = new java.util.HashMap<>();
+    /** The profile the engine is built from; the local one until App says otherwise. */
+    private EngineProfile profile = EngineProfile.LOCAL;
+
+    private EngineFactory engineFactory;
+    private final ProfileStore profiles;
+    /** The engine could not start: the empty state says why and offers Retry and another profile. */
+    private final javafx.beans.property.BooleanProperty engineDown = new javafx.beans.property.SimpleBooleanProperty();
+
+    private VBox engineProblem;
+    private Label engineProblemText;
+    /** What the daemon's own blocklist fetch last said, for the IP filter page of a remote engine. */
+    private volatile String blocklistStatus = "";
+
     private final List<String> pendingInputs = new ArrayList<>();
     /** Opened when the engine is up: a rule's add from a feed fetched before then waits on it. */
     private final java.util.concurrent.CountDownLatch engineUp = new java.util.concurrent.CountDownLatch(1);
@@ -283,6 +311,11 @@ public final class MainWindow {
         this.settings = settings;
         this.opener = opener;
         this.ipFilter = new IpFilterController(settings, configDir);
+        for (Engine.Capability c : Engine.Capability.values()) {
+            capabilityOn.put(c, new javafx.beans.property.SimpleBooleanProperty(true));
+        }
+        this.profiles = new ProfileStore(configDir);
+        profiles.load();
         this.labels = new LabelStore(configDir);
         labels.load();
         this.watchStore = new WatchFolderStore(configDir);
@@ -344,6 +377,7 @@ public final class MainWindow {
         settingsWindow.setOnTrayChanged(this::applyTraySetting);
         settingsWindow.setOnHandlerChanged(() -> applyHandlerSetting(true));
         settingsWindow.setOnBadgeChanged(this::applyBadgeSetting);
+        settingsWindow.setProfiles(profiles, new ProfilesHost());
         applyAppearance();
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
         settingsWindow.setSearchProviders(searchStore, searchPane::reloadProviders);
@@ -380,7 +414,7 @@ public final class MainWindow {
         Fonts.installUiFont(scene);
         scene.getAccelerators().put(chord(KeyCode.F), this::focusFilter);
         scene.getAccelerators().put(chord(KeyCode.K), this::focusFilter);
-        scene.getAccelerators().put(paletteChord, () -> palette.show(commands));
+        scene.getAccelerators().put(paletteChord, () -> palette.show(CapabilityRules.commands(commands, capabilities)));
         scene.getAccelerators().put(shiftChord(KeyCode.L), logWindow::show);
         scene.getAccelerators().put(shiftChord(KeyCode.T), statsWindow::show);
         scene.getAccelerators().put(shiftChord(KeyCode.M), messagePopup::toggle);
@@ -762,6 +796,10 @@ public final class MainWindow {
             out.add("stats-graph=" + statsWindow.graph().summaryForCapture());
         }
         if (detailWanted && detail.activeTab().equals("speed")) out.add("speed-tab=" + detail.speedSummaryForCapture());
+        if (!settingsWindow.profileDialogStatusForCapture().isEmpty()) {
+            out.add("dialog=" + settingsWindow.dialogTitle());
+            out.add("profile-test=" + settingsWindow.profileDialogStatusForCapture());
+        }
         if (!settingsWindow.ruleMatchesForCapture().isEmpty()) {
             out.add("dialog=" + settingsWindow.dialogTitle());
             out.add("rule-matches=" + settingsWindow.ruleMatchesForCapture());
@@ -818,6 +856,18 @@ public final class MainWindow {
             settingsWindow.show(stage);
             settingsWindow.chooseLayoutForCapture(ids[0], ids.length > 1 ? ids[1] : "");
             settingsWindow.hideForCapture();
+        } else if (action.startsWith("settings-profile-add")) {
+            // settings-profile-add, settings-profile-add:<url>; the Add Profile dialog, URL filled in
+            settingsWindow.show(stage);
+            int colon = action.indexOf(':');
+            settingsWindow.openProfileDialogForCapture(colon < 0 ? "" : action.substring(colon + 1), false);
+        } else if (action.startsWith("settings-profile-dialog-test:")) {
+            settingsWindow.show(stage);
+            settingsWindow.openProfileDialogForCapture(
+                    action.substring("settings-profile-dialog-test:".length()), true);
+        } else if (action.startsWith("switch-profile:")) {
+            // The profile by id, switched in place, as the Settings page's Switch now does.
+            profiles.byId(action.substring("switch-profile:".length())).ifPresent(this::switchProfile);
         } else if (action.equals("settings-watch-add")) {
             settingsWindow.show(stage);
             settingsWindow.openWatchDialogForCapture();
@@ -959,9 +1009,9 @@ public final class MainWindow {
             // The list's context menu, as a right-click on it would open it.
             table.getContextMenu().show(table, javafx.geometry.Side.BOTTOM, 0, 0);
         } else if (action.equals("palette")) {
-            palette.show(commands);
+            palette.show(CapabilityRules.commands(commands, capabilities));
         } else if (action.startsWith("palette:")) {
-            palette.show(commands);
+            palette.show(CapabilityRules.commands(commands, capabilities));
             palette.setQueryForCapture(action.substring("palette:".length()));
         } else {
             commands.stream()
@@ -1062,6 +1112,9 @@ public final class MainWindow {
     public void engineReady(Engine engine) {
         this.engine = engine;
         this.engineDescription = engine.description();
+        applyCapabilities(engine.capabilities());
+        showEngineProblem(null);
+        applyTitle();
         engineUp.countDown();
         globalShareLimit = settings.shareLimit();
         setStatus(engineDescription);
@@ -1077,12 +1130,18 @@ public final class MainWindow {
         poller.scheduleAtFixedRate(this::poll, 0, POLL_MS, TimeUnit.MILLISECONDS);
         maybeCheckForUpdates();
         // The filter from disk first, so no peer slips in while a download runs; the schedule next.
-        ipFilter.setEngine(engine);
-        Thread.ofVirtual().name("ip-filter").start(() -> {
-            ipFilter.applyStored(this::reportIpFilter);
-            ipFilter.refresh(false, this::reportIpFilter);
-        });
-        poller.scheduleAtFixedRate(() -> ipFilter.refresh(false, this::reportIpFilter), 1, 1, TimeUnit.HOURS);
+        // An engine that fetches its own blocklist (a daemon) is told the URL instead.
+        if (capabilities.has(Engine.Capability.IP_FILTER)) {
+            ipFilter.setEngine(engine);
+            Thread.ofVirtual().name("ip-filter").start(() -> {
+                ipFilter.applyStored(this::reportIpFilter);
+                ipFilter.refresh(false, this::reportIpFilter);
+            });
+            poller.scheduleAtFixedRate(() -> ipFilter.refresh(false, this::reportIpFilter), 1, 1, TimeUnit.HOURS);
+        } else if (capabilities.has(Engine.Capability.BLOCKLIST_URL) && settings.ipFilterEnabled()) {
+            // Only when a blocklist is wanted: the daemon's own state is not worth a status line otherwise.
+            refreshBlocklist();
+        }
         // The schedule is checked every minute; a change of state applies the other pair.
         poller.scheduleAtFixedRate(this::refreshLimits, 0, 60, TimeUnit.SECONDS);
         watcher = new WatchFolders(engine, new WatcherHost());
@@ -1211,7 +1270,35 @@ public final class MainWindow {
     // ---- IP filter ------------------------------------------------------------------------------
 
     private void refreshIpFilter(boolean force) {
-        Thread.ofVirtual().name("ip-filter").start(() -> ipFilter.refresh(force, this::reportIpFilter));
+        if (capabilities.has(Engine.Capability.IP_FILTER)) {
+            Thread.ofVirtual().name("ip-filter").start(() -> ipFilter.refresh(force, this::reportIpFilter));
+        } else if (capabilities.has(Engine.Capability.BLOCKLIST_URL)) {
+            refreshBlocklist();
+        }
+    }
+
+    /**
+     * Any thread. An engine that fetches its own blocklist is told the URL and the switch from the
+     * IP filter page, and asked to fetch now; what it says lands in the page's status line.
+     */
+    private void refreshBlocklist() {
+        Engine e = engine;
+        if (e == null) return;
+        String url = settings.ipFilterUrl();
+        boolean on = settings.ipFilterEnabled();
+        Thread.ofVirtual().name("blocklist").start(() -> {
+            String text;
+            try {
+                long ranges = e.setBlocklist(url, on);
+                text = !on || url.isBlank()
+                        ? tr("status.blocklist.off")
+                        : tr("status.blocklist.applied", ranges < 0 ? 0 : ranges, ranges < 0 ? 0 : 1);
+            } catch (EngineException ex) {
+                text = tr("status.blocklist.failed", ex.getMessage());
+            }
+            blocklistStatus = text;
+            reportIpFilter(text);
+        });
     }
 
     private void reportIpFilter(String text) {
@@ -1222,6 +1309,7 @@ public final class MainWindow {
     }
 
     private String ipFilterStatusText() {
+        if (capabilities.lacks(Engine.Capability.IP_FILTER)) return blocklistStatus;
         IpFilterController.Status s = ipFilter.status();
         long blocked = engine == null ? 0 : engine.blockedPeers();
         if (s.loadedAt() == 0) return s.note().isEmpty() ? tr("status.ipFilter.nothingLoaded") : s.note();
@@ -1342,7 +1430,160 @@ public final class MainWindow {
 
     /** FX thread. The engine could not start; the window stays up so the message can be read. */
     public void engineFailed(EngineException failure) {
-        setStatus(failure.getMessage(), EngineEvent.Level.ERROR);
+        String message = failure.getMessage() == null ? failure.toString() : failure.getMessage();
+        setStatus(message, EngineEvent.Level.ERROR);
+        showEngineProblem(message);
+    }
+
+    /** FX thread. The empty state says why the engine is not there, or nothing when it is. */
+    private void showEngineProblem(String message) {
+        boolean down = message != null;
+        engineDown.set(down);
+        if (engineProblem == null) return;
+        engineProblemText.setText(down ? message : "");
+        engineProblem.setVisible(down);
+        engineProblem.setManaged(down);
+    }
+
+    // ---- the engine's life ----------------------------------------------------------------------
+
+    /** Builds the engine for a profile; App's, since the stores and the settings are its to hand over. */
+    public interface EngineFactory {
+        Engine create(EngineProfile profile);
+    }
+
+    public void setEngineFactory(EngineFactory factory) {
+        this.engineFactory = factory;
+    }
+
+    /** The profile in use; the local engine's until {@link #startEngine} says otherwise. */
+    public EngineProfile profile() {
+        return profile;
+    }
+
+    /**
+     * FX thread. Builds the engine for {@code next} and starts it on a worker (loading a native
+     * library or reaching a daemon takes longer than a frame should wait); the status bar says so
+     * meanwhile and the title names a remote profile. {@link #engineReady} or {@link #engineFailed}
+     * follows on the FX thread.
+     */
+    public void startEngine(EngineProfile next) {
+        if (engineFactory == null) throw new IllegalStateException("no engine factory");
+        profile = next;
+        applyTitle();
+        showEngineProblem(null);
+        setStatus(
+                next.isLocal() ? tr("status.starting") : tr("status.connecting", next.displayName(), next.hostLine()));
+        Engine fresh;
+        try {
+            fresh = engineFactory.create(next);
+        } catch (RuntimeException e) {
+            engineFailed(new EngineException(e.getMessage() == null ? e.toString() : e.getMessage(), e));
+            return;
+        }
+        listenTo(fresh);
+        Thread starter = new Thread(
+                () -> {
+                    try {
+                        fresh.start();
+                        Platform.runLater(() -> engineReady(fresh));
+                    } catch (EngineException e) {
+                        Platform.runLater(() -> engineFailed(e));
+                    } catch (RuntimeException e) {
+                        LOG.log(java.util.logging.Level.WARNING, "The engine failed to start", e);
+                        Platform.runLater(() -> engineFailed(
+                                new EngineException(e.getMessage() == null ? e.toString() : e.getMessage(), e)));
+                    }
+                },
+                "engine-start");
+        starter.setDaemon(true);
+        starter.start();
+    }
+
+    /** Any thread, from App.stop after the poll: stops the engine in use, if one came up. */
+    public void stopEngine() {
+        Engine e = engine;
+        engine = null;
+        if (e != null) e.stop();
+    }
+
+    /**
+     * FX thread. Another profile was chosen: remembered for the next start, and the engine is
+     * replaced in place when it is not the one running. The list empties while the new one comes
+     * up; the poll, the watcher and the old engine stop first, on their own threads.
+     */
+    private void switchProfile(EngineProfile next) {
+        settings.setEngineProfile(next.id());
+        settings.saveQuietly();
+        settingsWindow.refreshProfiles();
+        if (next.id().equals(profile.id()) && engine != null) {
+            setStatus(tr("status.profileInUse", next.displayName()));
+            return;
+        }
+        Engine old = engine;
+        engine = null;
+        engineDescription = "";
+        stopPolling();
+        poller = null;
+        stopWatching();
+        watcher = null;
+        fetchWatch = null;
+        long now = System.currentTimeMillis() / 1000;
+        rows.apply(List.of(), now);
+        refreshSidebar(List.of());
+        detail.clear();
+        rates.setText(ratesText(Engine.Rates.ZERO));
+        if (old != null) Thread.ofVirtual().name("engine-stop").start(old::stop);
+        startEngine(next);
+    }
+
+    /** FX thread. A list of the profiles to pick from; the choice switches at once. */
+    private void chooseProfile() {
+        record Choice(EngineProfile profile) {
+            @Override
+            public String toString() {
+                return profile.displayName();
+            }
+        }
+        List<Choice> choices = profiles.all().stream().map(Choice::new).toList();
+        Choice current = choices.stream()
+                .filter(c -> c.profile().id().equals(profile.id()))
+                .findFirst()
+                .orElse(choices.get(0));
+        javafx.scene.control.ChoiceDialog<Choice> dialog = new javafx.scene.control.ChoiceDialog<>(current, choices);
+        dialog.initOwner(stage);
+        Fonts.installUiFont(dialog.getDialogPane());
+        dialog.setTitle(tr("dialog.switchProfile.title"));
+        dialog.setHeaderText(tr("dialog.switchProfile.header"));
+        dialog.setContentText(tr("dialog.switchProfile.content"));
+        promptDialog = dialog;
+        Optional<Choice> picked = dialog.showAndWait();
+        promptDialog = null;
+        picked.ifPresent(c -> switchProfile(c.profile()));
+    }
+
+    /** The window title: the app's name, and the profile's when the engine is a remote daemon. */
+    private void applyTitle() {
+        stage.setTitle(
+                profile.isLocal() ? AppInfo.NAME : tr("window.title.remote", AppInfo.NAME, profile.displayName()));
+    }
+
+    /** What the Settings → Engine page needs of the window; FX thread. */
+    private final class ProfilesHost implements SettingsWindow.ProfilesHost {
+        @Override
+        public void switchTo(EngineProfile next) {
+            switchProfile(next);
+        }
+
+        @Override
+        public EngineProfile inUse() {
+            return profile;
+        }
+
+        @Override
+        public String engineLine() {
+            return engineDescription;
+        }
     }
 
     /**
@@ -1354,6 +1595,21 @@ public final class MainWindow {
         addInput(input, null);
     }
 
+    /**
+     * The Add dialog's defaults: the settings', with the engine's own folder in place of this
+     * machine's when the files are not here (a daemon's download folder is a path on its machine).
+     * Any thread.
+     */
+    private AddDialog.Defaults addDefaults() {
+        AddDialog.Defaults d = AddDialog.Defaults.from(settings);
+        Engine e = engine;
+        if (e != null && capabilities.lacks(Engine.Capability.LOCAL_FILES)) {
+            String remote = e.downloadDir();
+            if (!remote.isEmpty()) return d.withSavePath(Path.of(remote));
+        }
+        return d;
+    }
+
     /** {@code via} is for the dialog's header; null reads it off the input itself. */
     private void addInput(String input, AddDialog.Via via) {
         if (engine == null) {
@@ -1363,7 +1619,7 @@ public final class MainWindow {
         String text = input.trim();
         Engine e = engine;
         boolean withoutAsking = settings.addWithoutAsking();
-        AddDialog.Defaults defaults = AddDialog.Defaults.from(settings);
+        AddDialog.Defaults defaults = addDefaults();
         Thread.ofVirtual().name("engine-inspect").start(() -> {
             try {
                 Inputs.Kind kind = Inputs.classify(text);
@@ -1422,7 +1678,7 @@ public final class MainWindow {
         String fetching = SearchAdd.fetchingText(result);
         if (!fetching.isEmpty()) setStatus(fetching);
         boolean withoutAsking = settings.addWithoutAsking();
-        AddDialog.Defaults defaults = AddDialog.Defaults.from(settings);
+        AddDialog.Defaults defaults = addDefaults();
         Thread.ofVirtual().name("search-add").start(() -> {
             try {
                 AddRequest.Source source = SearchAdd.sourceOf(result, new TorrentFetch()::fetch);
@@ -1448,7 +1704,7 @@ public final class MainWindow {
         String fetching = RssAdd.fetchingText(article);
         if (!fetching.isEmpty()) setStatus(fetching);
         boolean withoutAsking = settings.addWithoutAsking();
-        AddDialog.Defaults defaults = AddDialog.Defaults.from(settings);
+        AddDialog.Defaults defaults = addDefaults();
         Thread.ofVirtual().name("rss-add").start(() -> {
             try {
                 AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
@@ -1516,8 +1772,8 @@ public final class MainWindow {
             queuedDialogs.add(() -> openDialog(source, preview, via));
             return;
         }
-        AddDialog dialog =
-                new AddDialog(stage, source, preview, via, AddDialog.Defaults.from(settings), labels.categories());
+        AddDialog dialog = new AddDialog(stage, source, preview, via, addDefaults(), labels.categories());
+        dialog.applyCapabilities(capabilities);
         FetchSlot slot = new FetchSlot();
         if (preview == null && source instanceof AddRequest.Magnet magnet) startFetch(magnet, slot, dialog);
         currentDialog = dialog;
@@ -1571,6 +1827,11 @@ public final class MainWindow {
     /** Worker: asks the engine for the magnet's metadata and hands the dialog the files. */
     private void startFetch(AddRequest.Magnet magnet, FetchSlot slot, AddDialog dialog) {
         Engine e = engine;
+        if (capabilities.lacks(Engine.Capability.METADATA_FETCH)) {
+            // A daemon lists a magnet's files once it has them; the dialog says so and adds blind.
+            dialog.noFetch(tr("dialog.add.filesAfterAdd"));
+            return;
+        }
         Thread.ofVirtual().name("engine-fetch").start(() -> {
             Engine.MetadataFetch fetch;
             try {
@@ -2063,6 +2324,7 @@ public final class MainWindow {
                         settings.shareOverride(first.id()).orElse(null),
                         settings.shareLimit(),
                         first.size() > 0);
+                dialog.applyCapabilities(capabilities);
                 limitsDialog = dialog;
                 Optional<LimitsDialog.Result> result = dialog.showAndWait();
                 limitsDialog = null;
@@ -2352,7 +2614,13 @@ public final class MainWindow {
         BooleanBinding selection = Bindings.isNotEmpty(table.getSelectionModel().getSelectedItems());
         BooleanBinding always = Bindings.createBooleanBinding(() -> true);
         List<Command> all = new ArrayList<>(List.of(
-                new Command("create", tr("command.create"), chord(KeyCode.N), null, always, this::createTorrent),
+                new Command(
+                        "create",
+                        tr("command.create"),
+                        chord(KeyCode.N),
+                        null,
+                        gate("create", always),
+                        this::createTorrent),
                 new Command("add-file", tr("command.addFile"), chord(KeyCode.O), null, always, this::addTorrentFile),
                 new Command("add-magnet", tr("command.addMagnet"), chord(KeyCode.M), null, always, this::addMagnetLink),
                 // The chord is a scene accelerator, not a menu one: Ctrl+V in a text field must paste.
@@ -2390,7 +2658,7 @@ public final class MainWindow {
                         tr("command.sequential"),
                         shiftChord(KeyCode.S),
                         null,
-                        selection,
+                        gate("sequential", selection),
                         this::toggleSequential),
                 new Command("limits", tr("command.limits"), chord(KeyCode.L), null, selection, this::editLimits),
                 new Command(
@@ -2431,7 +2699,7 @@ public final class MainWindow {
                         tr("command.openFolder"),
                         shiftChord(KeyCode.O),
                         null,
-                        selection,
+                        gate("open-folder", selection),
                         this::openFolder),
                 new Command("remove", tr("command.remove"), null, "Delete", selection, () -> remove(false)),
                 new Command(
@@ -2445,6 +2713,9 @@ public final class MainWindow {
                         null,
                         always,
                         () -> settingsWindow.show(stage)),
+                new Command("switch-profile", tr("command.switchProfile"), null, null, always, this::chooseProfile),
+                new Command(
+                        "retry-engine", tr("command.retryEngine"), null, null, engineDown, () -> startEngine(profile)),
                 new Command("search", tr("command.search"), shiftChord(KeyCode.F), null, always, this::showSearch),
                 new Command("rss", tr("command.rss"), chord(KeyCode.R), null, always, this::showRss),
                 new Command("rss-run-rules", tr("command.rssRunRules"), null, null, always, rss::runRulesNow),
@@ -2545,7 +2816,10 @@ public final class MainWindow {
     private ToolBar buildToolbar() {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        paletteButton = Icons.toolbarButton(Icons.palette(), paletteButtonName(), () -> palette.show(commands));
+        paletteButton = Icons.toolbarButton(
+                Icons.palette(),
+                paletteButtonName(),
+                () -> palette.show(CapabilityRules.commands(commands, capabilities)));
         // Settings alone at the right end, as Editora keeps it; the palette with the other views.
         toolbar = new ToolBar(
                 toolButton("create", Icons.newFile()),
@@ -2581,6 +2855,7 @@ public final class MainWindow {
         if (!c.hint().isEmpty()) name = tr("toolbar.withChord", name, c.hint());
         Button b = Icons.toolbarButton(icon, name, c.run());
         b.disableProperty().bind(Bindings.not(c.enabled()));
+        commandButtons.put(id, b);
         return b;
     }
 
@@ -2588,16 +2863,60 @@ public final class MainWindow {
         return commands.stream().filter(c -> c.id().equals(id)).findFirst().orElseThrow();
     }
 
-    /** A menu item for a command, with the command's glyph beside it (see {@link Icons#forCommand}). */
+    /**
+     * A menu item for a command, with the command's glyph beside it (see {@link Icons#forCommand}),
+     * remembered so a missing capability can hide every copy of it.
+     */
     private MenuItem menuItem(String id) {
         MenuItem item = command(id).menuItem();
         item.setGraphic(menuIcon(Icons.forCommand(id)));
+        commandItems.computeIfAbsent(id, k -> new ArrayList<>()).add(item);
         return item;
     }
 
     /** A glyph at the menus' size, or null for none. */
     private static javafx.scene.Node menuIcon(Icons.Glyph glyph) {
         return glyph == null ? null : glyph.at(Icons.MENU_SIZE);
+    }
+
+    /**
+     * A command's enabled state behind its capability, when it needs one: off for an engine that
+     * lacks it, so the menu item, the toolbar button, the chord and the palette entry are all dead.
+     */
+    private ObservableBooleanValue gate(String id, ObservableBooleanValue enabled) {
+        return CapabilityRules.forCommand(id)
+                .<ObservableBooleanValue>map(c -> Bindings.and(enabled, capabilityOn.get(c)))
+                .orElse(enabled);
+    }
+
+    /**
+     * FX thread. Hides what the engine cannot do: commands (menus, toolbar, chords, palette), the
+     * dialogs' choices, the Settings rows and pages. Hidden, never greyed, never imitated.
+     */
+    private void applyCapabilities(Engine.Capabilities caps) {
+        capabilities = caps;
+        capabilityOn.forEach((c, on) -> on.set(caps.has(c)));
+        commandItems.forEach((id, items) -> {
+            boolean shown = CapabilityRules.commandShown(id, caps);
+            for (MenuItem item : items) item.setVisible(shown);
+        });
+        commandButtons.forEach((id, button) -> {
+            boolean shown = CapabilityRules.commandShown(id, caps);
+            button.setVisible(shown);
+            button.setManaged(shown);
+        });
+        detail.applyCapabilities(caps);
+        settingsWindow.applyCapabilities(caps);
+    }
+
+    /** The capabilities the engine lacks, one line, for the capture hook; empty for libtorrent. */
+    public String capabilitiesLine() {
+        return CapabilityRules.missingLine(capabilities);
+    }
+
+    /** The profile in use, without its password; for the capture hook. */
+    public String profileDescription() {
+        return profile.toString();
     }
 
     /** Space and Delete: on the table only, never as scene accelerators a text field could fire. */
@@ -2636,6 +2955,7 @@ public final class MainWindow {
                         menuItem("rss"),
                         menuItem("rss-run-rules"),
                         menuItem("settings"),
+                        menuItem("switch-profile"),
                         new SeparatorMenuItem(),
                         quit);
 
@@ -2645,7 +2965,7 @@ public final class MainWindow {
         paletteItem = new MenuItem(tr("menu.view.commandPalette"));
         paletteItem.setGraphic(menuIcon(Icons.palette()));
         paletteItem.setAccelerator(paletteChord);
-        paletteItem.setOnAction(e -> palette.show(commands));
+        paletteItem.setOnAction(e -> palette.show(CapabilityRules.commands(commands, capabilities)));
         CheckMenuItem toolbarItem = new CheckMenuItem(tr("menu.view.toolbar"));
         toolbarItem.setGraphic(menuIcon(Icons.toolbar()));
         toolbarItem.selectedProperty().bindBidirectional(toolbar.visibleProperty());
@@ -2940,7 +3260,7 @@ public final class MainWindow {
         AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
         Optional<Path> categoryFolder = labels.category(rule.category()).flatMap(Category::path);
         try {
-            e.add(RuleAdd.request(rule, source, AddDialog.Defaults.from(settings), categoryFolder));
+            e.add(RuleAdd.request(rule, source, addDefaults(), categoryFolder));
         } catch (EngineException ex) {
             throw new IOException(ex.getMessage() == null ? ex.toString() : ex.getMessage(), ex);
         }
@@ -2963,7 +3283,7 @@ public final class MainWindow {
         }
         String fetching = RssAdd.fetchingText(article);
         if (!fetching.isEmpty()) setStatus(fetching);
-        AddDialog.Defaults defaults = AddDialog.Defaults.from(settings);
+        AddDialog.Defaults defaults = addDefaults();
         Thread.ofVirtual().name("rss-download").start(() -> {
             try {
                 AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
@@ -3163,7 +3483,7 @@ public final class MainWindow {
         if (next.mode() == Omnibox.Mode.COMMAND) {
             // The prefix typed: the palette is the command box, and takes what followed it.
             setOmnibox(next.withText(""));
-            palette.show(commands, next.commandQuery());
+            palette.show(CapabilityRules.commands(commands, capabilities), next.commandQuery());
             return;
         }
         if (next.mode() == Omnibox.Mode.ADD && Omnibox.pasted(was, text)) {
@@ -3397,7 +3717,7 @@ public final class MainWindow {
         Scene scene = host.getScene();
         if (scene != null) {
             scene.getAccelerators().remove(paletteChord);
-            scene.getAccelerators().put(wanted, () -> palette.show(commands));
+            scene.getAccelerators().put(wanted, () -> palette.show(CapabilityRules.commands(commands, capabilities)));
         }
         paletteChord = wanted;
         paletteItem.setAccelerator(wanted);
@@ -3616,7 +3936,27 @@ public final class MainWindow {
         hint.setWrapText(true);
         hint.setTextAlignment(javafx.scene.text.TextAlignment.CENTER);
         hint.setMaxWidth(560);
-        VBox box = new VBox(8, title, hint);
+        // When the engine could not start: the reason, and the two ways out. Hidden otherwise, so
+        // the empty state keeps its shape; the palette offers both as commands as well.
+        engineProblemText = new Label();
+        engineProblemText.getStyleClass().addAll("empty-hint", "engine-problem");
+        engineProblemText.setWrapText(true);
+        engineProblemText.setTextAlignment(javafx.scene.text.TextAlignment.CENTER);
+        engineProblemText.setMaxWidth(560);
+        Button retry = new Button(tr("window.engine.retry"));
+        retry.setFocusTraversable(false);
+        retry.setOnAction(e -> startEngine(profile));
+        Button other = new Button(tr("window.engine.switch"));
+        other.setFocusTraversable(false);
+        other.setOnAction(e -> chooseProfile());
+        HBox ways = new HBox(8, retry, other);
+        ways.setAlignment(Pos.CENTER);
+        engineProblem = new VBox(10, engineProblemText, ways);
+        engineProblem.setAlignment(Pos.CENTER);
+        engineProblem.setPadding(new Insets(12, 0, 0, 0));
+        engineProblem.setVisible(false);
+        engineProblem.setManaged(false);
+        VBox box = new VBox(8, title, hint, engineProblem);
         box.setAlignment(Pos.CENTER);
         box.getStyleClass().add("empty-state");
         return box;
