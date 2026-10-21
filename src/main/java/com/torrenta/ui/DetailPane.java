@@ -75,11 +75,11 @@ final class DetailPane extends VBox {
         tabs.setFocusTraversable(false);
         tabs.getTabs()
                 .addAll(
-                        tab("General", buildGeneral()),
-                        tab("Files", buildFiles()),
-                        tab("Peers", buildPeers()),
-                        tab("Trackers", buildTrackers()),
-                        tab("Pieces", buildPieces()));
+                        tab("General", Icons.info(), buildGeneral()),
+                        tab("Files", Icons.files(), buildFiles()),
+                        tab("Peers", Icons.peers(), buildPeers()),
+                        tab("Trackers", Icons.broadcast(), buildTrackers()),
+                        tab("Pieces", Icons.pieces(), buildPieces()));
         VBox.setVgrow(tabs, Priority.ALWAYS);
         empty.getStyleClass().add("empty-hint");
         empty.setPadding(new Insets(12));
@@ -181,8 +181,10 @@ final class DetailPane extends VBox {
         for (Label value : generalValues) value.setText("—");
     }
 
-    private static Tab tab(String title, javafx.scene.Node content) {
+    /** A tab with its glyph before the title, at the menus' size. */
+    private static Tab tab(String title, Icons.Glyph glyph, javafx.scene.Node content) {
         Tab tab = new Tab(title, content);
+        tab.setGraphic(glyph.at(Icons.MENU_SIZE));
         return tab;
     }
 
@@ -279,6 +281,7 @@ final class DetailPane extends VBox {
         Headers.uppercase(files);
 
         MenuItem open = new MenuItem("Open File");
+        open.setGraphic(Icons.open().at(Icons.MENU_SIZE));
         open.setOnAction(e -> {
             var item = files.getSelectionModel().getSelectedItem();
             if (item != null && item.getValue().isFile()) onOpenFile.accept(item.getValue());

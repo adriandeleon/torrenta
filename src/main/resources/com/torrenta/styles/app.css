@@ -182,6 +182,30 @@
     -fx-fill: -color-fg-subtle;
 }
 
+/* A glyph beside a menu item: the muted ink, the item's own ink while it is the one under the
+   cursor. Disabled items fade whole (AtlantaFX's opacity), so the glyph needs no rule of its own. */
+.menu-item .icon-line {
+    -fx-stroke: -color-fg-muted;
+}
+
+.menu-item:focused .icon-line {
+    -fx-stroke: -color-fg-default;
+}
+
+/* The detail pane's tabs: a glyph before each title, in the title's ink. */
+.detail-pane .tab-pane > .tab-header-area > .headers-region > .tab > .tab-container > .tab-label {
+    -fx-graphic-text-gap: 6;
+}
+
+.detail-pane .tab .icon-line {
+    -fx-stroke: -color-fg-muted;
+}
+
+.detail-pane .tab:selected .icon-line,
+.detail-pane .tab:hover .icon-line {
+    -fx-stroke: -color-fg-default;
+}
+
 .filter-bar {
     -fx-background-color: -color-bg-default;
     -fx-border-color: transparent transparent -color-border-default transparent;

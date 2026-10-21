@@ -17,7 +17,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `TORRENTA_CAPTURE=/tmp/shot.png ./mvnw javafx:run`) renders the real window, writes a PNG, prints
   `capture:` lines (title, focus, engine, status bar) and exits. `-Dtorrenta.captureAction=` runs
   window actions first: `select-all`, `palette`, `palette:<query>`, or a command id such as
-  `pause-resume`, `dialog-add` to press Add on an open Add dialog (`dialog-press:now|wait|paused`
+  `pause-resume`, `menu:<File|Torrent|View|Help>` or `context-menu` (opens that menu; the PNG is
+  then of the popup and `menu=` lines list its items, `[icon]` after those with a glyph),
+  `dialog-add` to press Add on an open Add dialog (`dialog-press:now|wait|paused`
 for the others, `dialog-key:<KeyCode>` for a key in its file tree), `choose-files` for the
 selected torrent, `select-first`,
   `detail:<tab>` to show the detail pane on a tab, `search` / `search:<query>` / `search-keys:<KEY+KEY>`
@@ -303,6 +305,11 @@ release process with the names changed; Termina's README and memory hold the war
   row: re-setting each column's cell factory makes new ones. The Name column's value is a
   `RowView` (name, sentence, progress), not the name, so the comfortable cell redraws when its
   second line changes.
+- **Every glyph is `Icons.Glyph`, a Group that knows its box**: made at the toolbar's 17 px,
+  `at(Icons.MENU_SIZE)` for a menu item or a tab. `Icons.forCommand(id)` is the rule for which
+  command shows which glyph; `MainWindow.menuItem(id)` applies it, so a command added to a menu
+  through `command(id).menuItem()` directly would be the one item without an icon (`IconsTest`
+  lists the menus' ids). macOS's system menu bar takes only `ImageView` graphics, so it shows none.
 - **Rows are `TorrentRow` objects, never `Torrent` snapshots.** The list has an extractor on the
   row's torrent property, which is what makes the `SortedList` re-sort on an in-place update.
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
