@@ -30,7 +30,8 @@ window or limits yet; see [docs/ROADMAP.md](docs/ROADMAP.md).
 ./mvnw javafx:run
 ```
 
-Requires JDK 25. Everything else — including Maven itself, via the wrapper — is fetched on demand.
+Requires JDK 25 (the build refuses another and says so). Everything else — including Maven itself,
+via the wrapper — is fetched on demand.
 
 ```bash
 ./mvnw verify
