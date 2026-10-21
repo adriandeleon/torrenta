@@ -152,11 +152,18 @@ presses Download on it (both once the feeds are fetched), `settings:rules` photo
 section, and the capture prints `rss-rule=` lines for the table and, after the shot, the open
 dialog's `rule-matches=` and `rule-problem=` lines; a `rules.json` under `rss/` in the config
 folder, with `rss.autoDownload=true` in the settings, makes the rules run on the first fetch.
+`stats` photographs the Statistics window and prints its rows and its graph's state after the
+shot (`stats=`, `stats-graph=`), `detail:speed` shows the Speed tab and prints `speed-tab=`; for a
+line that moves, `java scripts/peer-stub.java <file.torrent> <save dir> 6881 1048576 127.0.0.2`
+(with `target/deps` and the unpacked native on the path, as its header says) downloads from the
+running app at 1 MiB/s, so a seeding torrent in the config folder shows an upload.
 
 ## Files
 
 Everything lives in one folder, `~/.torrenta` (`--config-dir DIR` or `TORRENTA_CONFIG_DIR` to move
-it): `settings.properties`, hand-editable; `torrents/<info-hash>.fastresume`, one per torrent,
+it): `settings.properties`, hand-editable; `stats.properties`, the all-time totals (bytes down and
+up, seconds active) the Statistics window adds this session to, written every five minutes and
+at quit, this machine's and never synced; `torrents/<info-hash>.fastresume`, one per torrent,
 libtorrent's resume data with the info dictionary inside, so deleting one file forgets one torrent;
 `native/<version>/`, the unpacked engine. Downloads go to `~/Downloads` until changed in
 Settings (`Ctrl+,`), which writes the same file. Three more choices sit under the download folder
@@ -228,8 +235,9 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+K` | Search: the Search tab in place of the transfers, with the query focused. A category chip row and a provider chip row (`Tab` walks them, `Space` toggles), `Enter` asks every chosen provider at once and the results land as each answers; `Down` enters the results, `Enter` or a double-click opens the Add dialog for one, `Ctrl+C` copies its link, the context menu opens its detail page; `Esc` returns to the transfers |
 | `Ctrl+R` | RSS: the RSS tab in place of the transfers. Arrows walk the feeds and the articles (`Left`/`Right` between them, `Down` from the filter box into the articles), `Enter` or a double-click on an article with a torrent opens the Add dialog for it, `M` toggles read, `Shift+M` marks the feed read, `N` or `Ctrl+N` adds a feed, `F5` refreshes it (`Shift+F5` every feed), `Delete` in the feed list removes one after a confirm, `Ctrl+C` copies the torrent or the page link; the context menus mirror the keys and add Download (at once, with the defaults) and Create rule from title…; `Esc` returns to the transfers |
 | `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Categories and tags (names, save paths, delete), Watch folders, Automation (a command per event with placeholders, desktop notifications), Search (Torznab providers), RSS (the refresh interval, the feeds, the auto-download switch and rules), Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
-| `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces |
+| `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces, Speed (the selected torrent's graph, the same windows as the Statistics window's) |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
+| `Ctrl+Shift+T` | Statistics: this session's and all-time downloaded, uploaded, share ratio and active time, bytes with overhead and wasted, peers and DHT nodes, disk reads, writes and buffers, torrents by state, refreshed every second; under them the session speed graph (download and upload over the last minute, ten minutes, hour or day, the rate now and the peak in the legend) |
 | `Ctrl+Shift+M` | Messages: what the status bar has said this session, newest first (a click on the status bar does the same) |
 | `Space` | Pause the selected torrents, or resume them if all are paused |
 | `Ctrl+Shift+U` | Force resume (ignore the queue) |

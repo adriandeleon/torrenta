@@ -26,6 +26,19 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **The Statistics window** (`Ctrl+Shift+T`, View → Statistics, the palette), the last step of
+  the RSS, creation and statistics milestone: this session's and all-time downloaded, uploaded,
+  share ratio and active time, bytes with protocol overhead, wasted bytes, connected and
+  connecting peers, DHT nodes, disk reads, writes, buffers and queued jobs, and the torrents by
+  state, every one from libtorrent's own `session_stats` counters, refreshed each second while
+  the window shows. Under them the session speed graph: download and upload over the last
+  minute, ten minutes, hour or day (a chip each; the choice is `stats.window` in the settings
+  file and syncs), the rate now and the window's peak in the legend, drawn in the theme's
+  colours. The all-time totals are `stats.properties` in the config folder, written every five
+  minutes and at quit, this machine's and never synced.
+- **A Speed tab in the detail pane**: the selected torrent's download and upload graph, the
+  same windows, kept for every torrent that has been selected while it is in the list; nothing
+  more is asked of the engine, the rates come with the snapshot the list already gets.
 - **The status bar keeps what it said.** A click on the status text, `Ctrl+Shift+M` or View →
   Messages shows this session's status lines newest first, each with its time, warnings and
   errors in colour; a filter box leads the list, Copy takes the selected lines or all of them,

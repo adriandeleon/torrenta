@@ -45,7 +45,7 @@ import com.torrenta.engine.TorrentDetail;
  */
 final class DetailPane extends VBox {
 
-    static final List<String> TABS = List.of("general", "files", "peers", "trackers", "pieces");
+    static final List<String> TABS = List.of("general", "files", "peers", "trackers", "pieces", "speed");
 
     private final TabPane tabs = new TabPane();
     private final GridPane general = new GridPane();
@@ -56,6 +56,11 @@ final class DetailPane extends VBox {
     private final ObservableList<TorrentDetail.Tracker> trackerItems = FXCollections.observableArrayList();
     private final TableView<TorrentDetail.Tracker> trackers = new TableView<>(trackerItems);
     private final Canvas pieces = new Canvas();
+    /** The selected torrent's graph; fed every tick, painted only while its tab shows. */
+    private final SpeedGraph speed = new SpeedGraph(600, false);
+
+    private SpeedHistory speedHistory;
+    private long speedNow;
     private final Label empty = new Label("Select one torrent to see its details");
     private boolean[] lastPieces = new boolean[0];
     private String shownId;
@@ -79,7 +84,11 @@ final class DetailPane extends VBox {
                         tab("Files", buildFiles()),
                         tab("Peers", buildPeers()),
                         tab("Trackers", buildTrackers()),
-                        tab("Pieces", buildPieces()));
+                        tab("Pieces", buildPieces()),
+                        tab("Speed", speed));
+        tabs.getSelectionModel().selectedIndexProperty().addListener(o -> {
+            if (speedShowing()) speed.show(speedHistory, speedNow);
+        });
         VBox.setVgrow(tabs, Priority.ALWAYS);
         empty.getStyleClass().add("empty-hint");
         empty.setPadding(new Insets(12));
@@ -109,6 +118,34 @@ final class DetailPane extends VBox {
 
     void setOnBanPeer(Consumer<String> handler) {
         onBanPeer = handler;
+    }
+
+    /** The Speed tab's window, shared with the Statistics window through the settings. */
+    void setSpeedWindow(int seconds) {
+        speed.setWindow(seconds);
+    }
+
+    void setOnSpeedWindowChanged(java.util.function.IntConsumer handler) {
+        speed.setOnWindowChanged(handler);
+    }
+
+    /**
+     * FX thread. The selected torrent's history as of {@code nowSeconds}, with each snapshot; the
+     * graph is painted only while the Speed tab is the one showing, and when it becomes so.
+     */
+    void showSpeed(SpeedHistory history, long nowSeconds) {
+        speedHistory = history;
+        speedNow = nowSeconds;
+        if (speedShowing()) speed.show(history, nowSeconds);
+    }
+
+    private boolean speedShowing() {
+        return "speed".equals(activeTab());
+    }
+
+    /** The graph's state, for the capture hook. */
+    String speedSummaryForCapture() {
+        return speed.summaryForCapture();
     }
 
     /** The active tab's name, one of {@link #TABS}; remembered by the window. */
@@ -178,6 +215,8 @@ final class DetailPane extends VBox {
         trackerItems.clear();
         lastPieces = new boolean[0];
         drawPieces();
+        speedHistory = null;
+        speed.clear();
         for (Label value : generalValues) value.setText("—");
     }
 
