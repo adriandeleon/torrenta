@@ -3,6 +3,8 @@ package com.torrenta.engine;
 import java.nio.file.Path;
 import java.util.List;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Everything the Create Torrent dialog decides, in one engine-neutral request.
  *
@@ -62,9 +64,9 @@ public record CreateRequest(
 
     /** Which piece hashes the torrent carries. */
     public enum Format {
-        HYBRID("Hybrid (v1 + v2)"),
-        V1("v1 only"),
-        V2("v2 only");
+        HYBRID("hybrid"),
+        V1("v1"),
+        V2("v2");
 
         private final String label;
 
@@ -73,7 +75,7 @@ public record CreateRequest(
         }
 
         public String label() {
-            return label;
+            return tr("createFormat." + label);
         }
 
         /** Files start on piece boundaries: always for v2, so for a hybrid too. */

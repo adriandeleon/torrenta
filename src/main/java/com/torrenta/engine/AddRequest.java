@@ -3,6 +3,8 @@ package com.torrenta.engine;
 import java.nio.file.Path;
 import java.util.Map;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Everything the Add dialog can decide, in one engine-neutral request.
  *
@@ -87,9 +89,9 @@ public record AddRequest(
     public record Magnet(String uri) implements Source {}
 
     public enum StopCondition {
-        NONE("Never"),
-        METADATA_RECEIVED("Metadata arrives"),
-        FILES_CHECKED("Files are checked");
+        NONE("never"),
+        METADATA_RECEIVED("metadataReceived"),
+        FILES_CHECKED("filesChecked");
 
         private final String label;
 
@@ -98,7 +100,7 @@ public record AddRequest(
         }
 
         public String label() {
-            return label;
+            return tr("stopCondition." + label);
         }
     }
 

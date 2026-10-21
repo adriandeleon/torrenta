@@ -8,6 +8,8 @@ import java.util.Locale;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentState;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /** Column text. Pure, so every rule here is tested rather than eyeballed. */
 public final class Format {
 
@@ -28,8 +30,30 @@ public final class Format {
      * seen to), then a user pause outranks whatever the engine's state machine says.
      */
     public static String stateLabel(Torrent t) {
-        if (!t.error().isEmpty()) return "Error";
-        return t.paused() ? "Paused" : t.state().label();
+        if (!t.error().isEmpty()) return errorLabel();
+        return t.paused() ? pausedLabel() : stateLabel(t.state());
+    }
+
+    /** The State column's word for an engine state, in the UI language. */
+    public static String stateLabel(TorrentState state) {
+        return switch (state) {
+            case CHECKING -> tr("format.state.checking");
+            case FETCHING_METADATA -> tr("format.state.fetchingMetadata");
+            case DOWNLOADING -> tr("format.state.downloading");
+            case FINISHED -> tr("format.state.finished");
+            case SEEDING -> tr("format.state.seeding");
+            case UNKNOWN -> tr("common.unknown");
+        };
+    }
+
+    /** The State column's word for a torrent the user paused. */
+    public static String pausedLabel() {
+        return tr("format.state.paused");
+    }
+
+    /** The State column's word for a torrent in error. */
+    public static String errorLabel() {
+        return tr("format.state.error");
     }
 
     /** The Tags column: comma-separated, as the dialogs take them. */
@@ -72,10 +96,10 @@ public final class Format {
 
     /** {@code 45s}, {@code 3m 4s}, {@code 2h 10m}, {@code 3d 2h}: two units, the two that matter. */
     public static String duration(long seconds) {
-        if (seconds < 60) return seconds + "s";
-        if (seconds < 3600) return (seconds / 60) + "m " + (seconds % 60) + "s";
-        if (seconds < 86400) return (seconds / 3600) + "h " + (seconds % 3600 / 60) + "m";
-        return (seconds / 86400) + "d " + (seconds % 86400 / 3600) + "h";
+        if (seconds < 60) return tr("format.duration.seconds", seconds);
+        if (seconds < 3600) return tr("format.duration.minutesSeconds", seconds / 60, seconds % 60);
+        if (seconds < 86400) return tr("format.duration.hoursMinutes", seconds / 3600, seconds % 3600 / 60);
+        return tr("format.duration.daysHours", seconds / 86400, seconds % 86400 / 3600);
     }
 
     /**
@@ -83,13 +107,15 @@ public final class Format {
      * {@code 2 h 10 min}, {@code 3 d}. Under a minute is {@code under a minute}.
      */
     public static String coarse(long seconds) {
-        if (seconds < 60) return "under a minute";
-        if (seconds < 3600) return (seconds / 60) + " min";
+        if (seconds < 60) return tr("format.coarse.underMinute");
+        if (seconds < 3600) return tr("format.coarse.minutes", seconds / 60);
         if (seconds < 86400) {
             long minutes = seconds % 3600 / 60;
-            return (seconds / 3600) + " h" + (minutes == 0 ? "" : " " + minutes + " min");
+            return minutes == 0
+                    ? tr("format.coarse.hours", seconds / 3600)
+                    : tr("format.coarse.hoursMinutes", seconds / 3600, minutes);
         }
-        return (seconds / 86400) + " d";
+        return tr("format.coarse.days", seconds / 86400);
     }
 
     /** Uploaded over downloaded; -1 when nothing has moved either way, infinity when only up. */

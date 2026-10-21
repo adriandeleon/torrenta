@@ -18,6 +18,8 @@ import com.torrenta.engine.IpRange;
 import com.torrenta.net.BlocklistFetch;
 import com.torrenta.store.Settings;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Keeps the engine's IP filter in step with the settings: the downloaded blocklist (cached beside
  * the settings, refreshed on a schedule), a local list file, and the manual bans.
@@ -36,7 +38,7 @@ final class IpFilterController {
     private final Settings settings;
     private final Path cache;
     private volatile Engine engine;
-    private volatile Status status = new Status(0, 0, 0, "Off");
+    private volatile Status status = new Status(0, 0, 0, tr("settings.ipFilter.status.off"));
 
     IpFilterController(Settings settings, Path configDir) {
         this.settings = settings;
@@ -77,7 +79,7 @@ final class IpFilterController {
             } catch (EngineException ex) {
                 report.accept(ex.getMessage());
             }
-            status = new Status(0, 0, 0, "Off");
+            status = new Status(0, 0, 0, tr("settings.ipFilter.status.off"));
             return;
         }
         List<IpRange> ranges = new ArrayList<>();
@@ -93,9 +95,11 @@ final class IpFilterController {
                 Files.move(tmp, cache, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
                 settings.setIpFilterLastRefresh(System.currentTimeMillis());
                 settings.saveQuietly();
-                note.append("downloaded");
+                note.append(tr("settings.ipFilter.status.downloaded"));
             } catch (IOException | RuntimeException ex) {
-                note.append("download failed: ").append(ex.getMessage() == null ? ex.toString() : ex.getMessage());
+                note.append(tr(
+                        "settings.ipFilter.status.downloadFailed",
+                        ex.getMessage() == null ? ex.toString() : ex.getMessage()));
             }
         }
         if (!url.isEmpty() && Files.isRegularFile(cache)) {
@@ -108,7 +112,8 @@ final class IpFilterController {
         String file = settings.ipFilterFile();
         if (!file.isEmpty()) {
             Blocklist.Parsed parsed = read(Path.of(file));
-            if (parsed == null) note.append(note.isEmpty() ? "" : "; ").append("local file unreadable");
+            if (parsed == null)
+                note.append(note.isEmpty() ? "" : "; ").append(tr("settings.ipFilter.status.localUnreadable"));
             else {
                 ranges.addAll(parsed.ranges());
                 skipped += parsed.skipped();
@@ -123,10 +128,11 @@ final class IpFilterController {
             e.setIpFilter(ranges);
             status = new Status(ranges.size(), skipped, System.currentTimeMillis(), note.toString());
             report.accept(
-                    "IP filter: " + ranges.size() + " ranges" + (skipped > 0 ? ", " + skipped + " lines skipped" : "")
-                            + (note.isEmpty() ? "" : " (" + note + ")"));
+                    note.isEmpty()
+                            ? tr("settings.ipFilter.applied", ranges.size(), skipped)
+                            : tr("settings.ipFilter.appliedNote", ranges.size(), skipped, note.toString()));
         } catch (EngineException ex) {
-            report.accept("IP filter not applied: " + ex.getMessage());
+            report.accept(tr("settings.ipFilter.notApplied", ex.getMessage()));
         }
     }
 

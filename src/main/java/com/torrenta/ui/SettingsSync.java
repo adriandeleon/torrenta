@@ -33,6 +33,8 @@ import com.torrenta.sync.SyncEngine;
 import com.torrenta.sync.SyncReport;
 import com.torrenta.sync.SyncTarget;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Settings sync for the application, as Editora runs it: decides when a {@link SyncEngine} round
  * happens, runs it off the FX thread, writes what it brings into the live settings, and says what
@@ -186,7 +188,7 @@ final class SettingsSync {
     /** "Sync now". */
     void syncNow() {
         if (!active()) {
-            host.reportStatus("Settings sync is not set up: Settings → Sync");
+            host.reportStatus(tr("settings.sync.notSetUp"));
             return;
         }
         request(true);
@@ -229,7 +231,7 @@ final class SettingsSync {
     void createOnGitHub(String name, Consumer<GitHubCli.Created> done) {
         worker.execute(() -> {
             GitHubCli.Created created =
-                    GitHubCli.createPrivateRepo(GitHubCli.COMMAND, name, "Torrenta settings, kept in sync");
+                    GitHubCli.createPrivateRepo(GitHubCli.COMMAND, name, tr("settings.sync.repoDescription"));
             Platform.runLater(() -> done.accept(created));
         });
     }

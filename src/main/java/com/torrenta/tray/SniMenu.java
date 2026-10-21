@@ -12,6 +12,8 @@ import org.freedesktop.dbus.messages.DBusSignal;
 import org.freedesktop.dbus.types.UInt32;
 import org.freedesktop.dbus.types.Variant;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The exported com.canonical.dbusmenu object backing the SNI tray menu: the protocol KDE and
  * GNOME's AppIndicator extension pull menus through. The layout is {@link SniMenuModel}'s.
@@ -60,7 +62,7 @@ public interface SniMenu extends DBusInterface {
         private final Runnable onOpen;
         private final Runnable onQuit;
         private final AtomicInteger revision = new AtomicInteger(1);
-        private volatile String statusLine = "Starting…";
+        private volatile String statusLine = tr("tray.menu.starting");
 
         Impl(Runnable onOpen, Runnable onQuit) {
             this.onOpen = onOpen;

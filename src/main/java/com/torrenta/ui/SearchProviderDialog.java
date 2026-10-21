@@ -28,6 +28,8 @@ import com.torrenta.search.SearchException;
 import com.torrenta.search.TorznabEndpoint;
 import com.torrenta.search.TorznabProvider;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * One Torznab endpoint, added or edited: name, URL, API key, enabled, and a Test that asks the
  * server who it is.
@@ -49,12 +51,12 @@ final class SearchProviderDialog {
     private final TextField url = new TextField();
     private final PasswordField apiKey = new PasswordField();
     private final TextField apiKeyShown = new TextField();
-    private final CheckBox show = new CheckBox("Show");
-    private final CheckBox enabled = new CheckBox("Enabled: asked when searching");
+    private final CheckBox show = new CheckBox(tr("dialog.provider.show"));
+    private final CheckBox enabled = new CheckBox(tr("dialog.provider.enabled"));
     private final Label problem = new Label();
     private final Label status = new Label();
-    private final Button test = new Button("Test");
-    private final Button save = new Button("Save");
+    private final Button test = new Button(tr("dialog.provider.test"));
+    private final Button save = new Button(tr("common.save"));
     private final Tester tester;
     private int categories;
     private TorznabEndpoint result;
@@ -68,7 +70,7 @@ final class SearchProviderDialog {
         this.tester = tester;
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
-        stage.setTitle(existing == null ? "Add Search Provider" : "Edit Search Provider");
+        stage.setTitle(existing == null ? tr("dialog.provider.title.add") : tr("dialog.provider.title.edit"));
 
         GridPane form = new GridPane();
         form.setHgap(10);
@@ -80,11 +82,11 @@ final class SearchProviderDialog {
         form.getColumnConstraints().addAll(labels, fields);
 
         int row = 0;
-        name.setPromptText("what to call it; left blank, Test fills it in");
-        form.addRow(row++, muted("Name"), name);
+        name.setPromptText(tr("dialog.provider.name.prompt"));
+        form.addRow(row++, muted(tr("common.name")), name);
         url.setPromptText("http://localhost:9696/1/api");
-        form.addRow(row++, muted("URL"), url);
-        apiKey.setPromptText("the server's API key; blank when it asks none");
+        form.addRow(row++, muted(tr("dialog.common.url")), url);
+        apiKey.setPromptText(tr("dialog.provider.apiKey.prompt"));
         apiKeyShown.setPromptText(apiKey.getPromptText());
         apiKeyShown.textProperty().bindBidirectional(apiKey.textProperty());
         apiKeyShown.visibleProperty().bind(show.selectedProperty());
@@ -93,7 +95,7 @@ final class SearchProviderDialog {
         apiKey.managedProperty().bind(show.selectedProperty().not());
         StackPane keys = new StackPane(apiKey, apiKeyShown);
         HBox.setHgrow(keys, Priority.ALWAYS);
-        form.addRow(row++, muted("API key"), new HBox(8, keys, show));
+        form.addRow(row++, muted(tr("dialog.provider.apiKey")), new HBox(8, keys, show));
         form.addRow(row++, new Label(), enabled);
 
         problem.getStyleClass().add("dialog-hint");
@@ -106,10 +108,7 @@ final class SearchProviderDialog {
                         url.textProperty()));
         form.add(problem, 1, row++);
 
-        Label hint = hint("Prowlarr: the URL is http://host:9696/1/api and the key is under Settings → General."
-                + " Jackett: http://host:9117/api/v2.0/indexers/all/results/torznab/api asks every indexer at once"
-                + " (put an indexer's id in place of \"all\" for one of them); the key is on its dashboard."
-                + " The key is kept in search-providers.json beside the settings, this machine's, never synced.");
+        Label hint = hint(tr("dialog.provider.hint"));
         hint.setMaxWidth(Double.MAX_VALUE);
 
         status.getStyleClass().add("dialog-hint");
@@ -124,7 +123,7 @@ final class SearchProviderDialog {
         save.setDefaultButton(true);
         save.setOnAction(e -> confirm());
         save.disableProperty().bind(test.disableProperty());
-        Button cancel = new Button("Cancel");
+        Button cancel = new Button(tr("common.cancel"));
         cancel.setCancelButton(true);
         cancel.setOnAction(e -> cancel());
         Region spacer = new Region();
@@ -204,7 +203,7 @@ final class SearchProviderDialog {
     void runTest() {
         if (test.isDisabled()) return;
         TorznabEndpoint endpoint = endpoint();
-        status.setText("Testing…");
+        status.setText(tr("dialog.provider.testing"));
         test.disableProperty().unbind();
         test.setDisable(true);
         Consumer<String> done = text -> Platform.runLater(() -> {
@@ -225,15 +224,15 @@ final class SearchProviderDialog {
             } catch (SearchException e) {
                 done.accept(e.getMessage());
             } catch (RuntimeException e) {
-                done.accept("failed: " + e);
+                done.accept(tr("dialog.common.failed", e.toString()));
             }
         });
     }
 
     /** "Prowlarr · 42 categories", the line Test and the page both show. */
     static String categoriesLine(String title, int categories) {
-        String count = categories == 1 ? "1 category" : categories + " categories";
-        return title.isEmpty() ? count : title + " · " + count;
+        String count = tr("dialog.provider.categories", categories);
+        return title.isEmpty() ? count : tr("dialog.provider.categoriesLine", title, count);
     }
 
     private TorznabEndpoint endpoint() {

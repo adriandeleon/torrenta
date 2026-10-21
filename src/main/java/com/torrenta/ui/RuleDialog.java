@@ -46,6 +46,8 @@ import com.torrenta.rss.Feed;
 import com.torrenta.rss.Rule;
 import com.torrenta.rss.RuleMatcher;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * One auto-download rule, added or edited: the form on the left (name, what the title must and
  * must not contain, regex or phrases, the episode filter with its help line, the smart filter,
@@ -68,12 +70,12 @@ final class RuleDialog {
 
     private final Stage stage = new Stage();
     private final TextField name = new TextField();
-    private final CheckBox enabled = new CheckBox("Enabled");
+    private final CheckBox enabled = new CheckBox(tr("common.enabled"));
     private final TextField mustContain = new TextField();
     private final TextField mustNotContain = new TextField();
-    private final CheckBox useRegex = new CheckBox("Regular expressions");
+    private final CheckBox useRegex = new CheckBox(tr("dialog.rule.useRegex"));
     private final TextField episodeFilter = new TextField();
-    private final CheckBox smartFilter = new CheckBox("Smart episode filter: an episode taken once is not taken again");
+    private final CheckBox smartFilter = new CheckBox(tr("dialog.rule.smartFilter"));
     private final Spinner<Integer> ignoreDays = new Spinner<>();
     private final List<CheckBox> feedBoxes = new ArrayList<>();
     private final ChoiceBox<Rule.AddPaused> addPaused = new ChoiceBox<>();
@@ -82,7 +84,7 @@ final class RuleDialog {
     private final Label problem = new Label();
     private final Label matchesHeading = new Label();
     private final ListView<String> matches = new ListView<>();
-    private final Button save = new Button("Save");
+    private final Button save = new Button(tr("common.save"));
     private final PauseTransition settle = new PauseTransition(SETTLE);
     private final AtomicInteger generation = new AtomicInteger();
     private final Articles articles;
@@ -111,7 +113,7 @@ final class RuleDialog {
         this.articles = articles;
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
-        stage.setTitle(existing == null ? "Add RSS Rule" : "Edit RSS Rule");
+        stage.setTitle(existing == null ? tr("dialog.rule.title.add") : tr("dialog.rule.title.edit"));
 
         GridPane form = new GridPane();
         form.setHgap(10);
@@ -123,19 +125,19 @@ final class RuleDialog {
         form.getColumnConstraints().addAll(labels, fields);
 
         int row = 0;
-        name.setPromptText("what to call it");
+        name.setPromptText(tr("dialog.rule.name.prompt"));
         HBox.setHgrow(name, Priority.ALWAYS);
         HBox nameRow = new HBox(10, name, enabled);
         nameRow.setAlignment(Pos.CENTER_LEFT);
-        form.addRow(row++, muted("Name"), nameRow);
-        mustContain.setPromptText("words that must all appear; | between alternatives; blank for every title");
-        form.addRow(row++, muted("Must contain"), mustContain);
-        mustNotContain.setPromptText("words that rule a title out; blank for none");
-        form.addRow(row++, muted("Must not contain"), mustNotContain);
+        form.addRow(row++, muted(tr("common.name")), nameRow);
+        mustContain.setPromptText(tr("dialog.rule.mustContain.prompt"));
+        form.addRow(row++, muted(tr("dialog.rule.mustContain")), mustContain);
+        mustNotContain.setPromptText(tr("dialog.rule.mustNotContain.prompt"));
+        form.addRow(row++, muted(tr("dialog.rule.mustNotContain")), mustNotContain);
         form.add(useRegex, 1, row++);
-        episodeFilter.setPromptText("1x2-;  1x1-4;2x1  (blank for every episode)");
-        form.addRow(row++, muted("Episode filter"), episodeFilter);
-        Label episodeHelp = hint(EpisodeFilter.HELP);
+        episodeFilter.setPromptText(tr("dialog.rule.episodeFilter.prompt"));
+        form.addRow(row++, muted(tr("dialog.rule.episodeFilter")), episodeFilter);
+        Label episodeHelp = hint(EpisodeFilter.help());
         form.add(episodeHelp, 1, row++);
         smartFilter.setWrapText(true);
         smartFilter.setMinHeight(Region.USE_PREF_SIZE);
@@ -144,11 +146,11 @@ final class RuleDialog {
         ignoreDays.setEditable(true);
         ignoreDays.setPrefWidth(90);
         ignoreDays.setMinWidth(90);
-        Label daysHint = hint("days; an article published longer ago is left alone, 0 for no limit");
+        Label daysHint = hint(tr("dialog.rule.days.hint"));
         HBox.setHgrow(daysHint, Priority.ALWAYS);
         HBox daysRow = new HBox(8, ignoreDays, daysHint);
         daysRow.setAlignment(Pos.CENTER_LEFT);
-        form.addRow(row++, muted("Ignore older than"), daysRow);
+        form.addRow(row++, muted(tr("dialog.rule.ignoreOlderThan")), daysRow);
 
         VBox feedList = new VBox(4);
         for (Feed f : feeds) {
@@ -157,10 +159,7 @@ final class RuleDialog {
             feedBoxes.add(box);
             feedList.getChildren().add(box);
         }
-        Label feedsHint = hint(
-                feeds.isEmpty()
-                        ? "No feeds yet: the rule reads every feed added later."
-                        : "None ticked: every feed, those added later included.");
+        Label feedsHint = hint(feeds.isEmpty() ? tr("dialog.rule.feeds.none") : tr("dialog.rule.feeds.hint"));
         feedList.getChildren().add(feedsHint);
         ScrollPane feedScroll = new ScrollPane(feedList);
         feedScroll.setFitToWidth(true);
@@ -168,7 +167,7 @@ final class RuleDialog {
         feedScroll.getStyleClass().add("rule-feeds");
         feedScroll.setPrefHeight(Math.clamp(26 * (feeds.size() + 1) + 12, 70, 110));
         feedScroll.setMinHeight(70);
-        form.addRow(row++, muted("Feeds"), feedScroll);
+        form.addRow(row++, muted(tr("dialog.rule.feeds")), feedScroll);
 
         addPaused.getItems().addAll(Rule.AddPaused.values());
         addPaused.setConverter(new StringConverter<>() {
@@ -182,14 +181,14 @@ final class RuleDialog {
                 return null;
             }
         });
-        form.addRow(row++, muted("Start"), addPaused);
+        form.addRow(row++, muted(tr("dialog.rule.start")), addPaused);
 
         category.getItems().add("");
         for (Category c : categories) category.getItems().add(c.name());
         category.setConverter(new StringConverter<>() {
             @Override
             public String toString(String n) {
-                return n == null || n.isEmpty() ? "None" : n;
+                return n == null || n.isEmpty() ? tr("common.none") : n;
             }
 
             @Override
@@ -197,13 +196,13 @@ final class RuleDialog {
                 return null;
             }
         });
-        form.addRow(row++, muted("Category"), category);
+        form.addRow(row++, muted(tr("dialog.common.category")), category);
 
-        savePath.setPromptText("blank: the category's folder, else the download folder");
+        savePath.setPromptText(tr("dialog.rule.savePath.prompt"));
         HBox.setHgrow(savePath, Priority.ALWAYS);
-        Button browse = new Button("Browse…");
+        Button browse = new Button(tr("common.browse"));
         browse.setOnAction(e -> browse());
-        form.addRow(row++, muted("Save to"), new HBox(6, savePath, browse));
+        form.addRow(row++, muted(tr("dialog.common.saveTo")), new HBox(6, savePath, browse));
 
         problem.getStyleClass().add("dialog-problem");
         problem.setWrapText(true);
@@ -213,11 +212,10 @@ final class RuleDialog {
 
         matchesHeading.getStyleClass().add("rule-matches-heading");
         matches.getStyleClass().add("rule-matches");
-        matches.setPlaceholder(new Label("Nothing matches yet"));
+        matches.setPlaceholder(new Label(tr("dialog.rule.matches.placeholder")));
         matches.setFocusTraversable(false);
         VBox.setVgrow(matches, Priority.ALWAYS);
-        Label matchesHint = hint("Every article the feeds hold that the rule would take, re-read as you type."
-                + " Those already downloaded are listed too; the rule skips them.");
+        Label matchesHint = hint(tr("dialog.rule.matches.hint"));
         VBox right = new VBox(6, matchesHeading, matches, matchesHint);
         right.setMinWidth(220);
         SplitPane split = new SplitPane(left, right);
@@ -227,7 +225,7 @@ final class RuleDialog {
 
         save.setDefaultButton(true);
         save.setOnAction(e -> confirm());
-        Button cancel = new Button("Cancel");
+        Button cancel = new Button(tr("common.cancel"));
         cancel.setCancelButton(true);
         cancel.setOnAction(e -> cancel());
         Region spacer = new Region();
@@ -316,7 +314,7 @@ final class RuleDialog {
     /** The problem line as it reads now; empty when the rule is fine. */
     String problemText() {
         Rule r = rule();
-        if (otherNames.contains(r.name())) return "A rule named \"" + r.name() + "\" exists already";
+        if (otherNames.contains(r.name())) return tr("dialog.rule.problem.nameTaken", r.name());
         return RuleMatcher.problem(r).orElse("");
     }
 
@@ -401,7 +399,7 @@ final class RuleDialog {
 
     private void browse() {
         DirectoryChooser chooser = new DirectoryChooser();
-        chooser.setTitle("Save path");
+        chooser.setTitle(tr("dialog.common.savePathChooser"));
         File current = new File(savePath.getText().trim());
         while (current != null && !current.isDirectory()) current = current.getParentFile();
         if (current != null) chooser.setInitialDirectory(current);

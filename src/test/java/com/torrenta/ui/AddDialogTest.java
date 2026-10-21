@@ -9,6 +9,7 @@ import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentPreview.FileEntry;
+import com.torrenta.i18n.Messages;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,7 +40,7 @@ class AddDialogTest {
         assertEquals("ADD TORRENT · FROM MAGNET LINK", AddDialog.kicker(AddDialog.Via.MAGNET, false));
         assertEquals("ADD TORRENT · FROM SEARCH", AddDialog.kicker(AddDialog.Via.SEARCH, false));
         assertEquals("ADD TORRENT · FROM CLIPBOARD", AddDialog.kicker(AddDialog.Via.CLIPBOARD, false));
-        assertEquals("CHOOSE FILES", AddDialog.kicker(AddDialog.Via.CLIPBOARD, true));
+        assertEquals(Messages.tr("dialog.add.kicker.chooseFiles"), AddDialog.kicker(AddDialog.Via.CLIPBOARD, true));
     }
 
     @Test

@@ -62,6 +62,7 @@ to try one on purpose).
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
 | Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
+| i18n | Termina's: `Messages.tr(key)` / `tr(key, args…)` (MessageFormat in the active locale), English `messages.properties` as base and fallback, `messages_<de|es|fr|it|pt>.properties` as overlays, UTF-8 through `getResourceAsStream`; `ui.language` (`system` by default) chosen in `App.start` after the settings load, before any window, applied on restart; a missing key shows itself and is logged once | `com.torrenta.i18n` |
 
 **Persistence is the engine's job, the store's format is not the engine's business.** `TorrentStore`
 holds bytes by info-hash and never looks inside; `LibtorrentEngine` decides that the bytes are
@@ -414,6 +415,12 @@ release process with the names changed; Termina's README and memory hold the war
 - **A new setting is a key, two accessors, a row with keywords, a line in `reload()` and in
   `OWNED_KEYS`** (for Reset). Keywords are what the search box finds; the title leads them.
 - **Version comes from the pom** through `build-info.properties`; nothing else states it.
+- **Every string a user reads goes through `tr()`**, including enum display names (`label()` /
+  `toString()` read the catalogue at call time, never in a static field: the language is chosen
+  after classes load). `UiStringSweepTest` fails on a literal in a text position, on a `tr` key the
+  English catalogue lacks, and on a dead key; `MessagesTest` keeps the six catalogues to one key
+  set with matching placeholders. In a choice limb that carries a `{0}` an apostrophe needs four
+  quotes (`''''`), in one without a brace two; a new key goes into all six files.
 
 ## Not done
 

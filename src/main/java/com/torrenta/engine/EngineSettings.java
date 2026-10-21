@@ -2,6 +2,8 @@ package com.torrenta.engine;
 
 import java.util.Locale;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The engine's connection settings, engine-neutral: what the Connection page edits.
  *
@@ -166,9 +168,9 @@ public record EngineSettings(
             java.util.List<String> defaultTrackers) {
 
         public enum Encryption {
-            REQUIRE("Require"),
-            PREFER("Prefer"),
-            OFF("Off");
+            REQUIRE("require"),
+            PREFER("prefer"),
+            OFF("off");
 
             private final String label;
 
@@ -177,7 +179,7 @@ public record EngineSettings(
             }
 
             public String label() {
-                return label;
+                return tr("encryption." + label);
             }
         }
 
@@ -187,9 +189,9 @@ public record EngineSettings(
     }
 
     public enum ProxyType {
-        NONE("None"),
-        SOCKS5("SOCKS5"),
-        HTTP("HTTP");
+        NONE("none"),
+        SOCKS5("socks5"),
+        HTTP("http");
 
         private final String label;
 
@@ -198,7 +200,7 @@ public record EngineSettings(
         }
 
         public String label() {
-            return label;
+            return tr("proxyType." + label);
         }
     }
 

@@ -19,6 +19,8 @@ import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.TextFlow;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Every command in the window, findable by typing part of its name. Editora's palette: the input
  * is the first row, led by a chip naming the chord that opened it; rows embolden the characters
@@ -40,7 +42,7 @@ final class CommandPalette {
     private final Label prefixChip = new Label();
     private final TextField query = new TextField();
     private final ListView<Command> results = new ListView<>();
-    private final Label hint = new Label("↵  run      ↑↓  move      Esc  close");
+    private final Label hint = new Label(tr("palette.legend"));
     private final VBox card = new VBox(6);
     private final Region backdrop = new Region();
     private List<Command> commands = List.of();
@@ -63,7 +65,7 @@ final class CommandPalette {
         prefixChip.setVisible(!prefixChip.getText().isEmpty());
         prefixChip.setManaged(prefixChip.isVisible());
         query.getStyleClass().add("palette-input");
-        query.setPromptText("Run command…");
+        query.setPromptText(tr("palette.prompt"));
         query.textProperty().addListener((o, was, now) -> refilter(now));
         HBox inputRow = new HBox(9, prefixChip, query);
         inputRow.setAlignment(Pos.CENTER_LEFT);
@@ -71,7 +73,7 @@ final class CommandPalette {
         HBox.setHgrow(query, Priority.ALWAYS);
 
         results.getStyleClass().add("palette-list");
-        results.setPlaceholder(new Label("No matching command"));
+        results.setPlaceholder(new Label(tr("palette.noMatch")));
         results.setCellFactory(view -> new CommandCell());
         // A whole number of rows: a fixed height cut the last row in half.
         results.setFixedCellSize(ROW_HEIGHT);

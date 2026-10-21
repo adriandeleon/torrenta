@@ -109,7 +109,7 @@ public record Definition(
     public String categoryValue(SearchCategory category) {
         SearchCategory c = category == null ? SearchCategory.ALL : category;
         for (Map.Entry<String, String> e : categories.entrySet()) {
-            if (e.getKey().equalsIgnoreCase(c.label()) || e.getKey().equalsIgnoreCase(c.name())) return e.getValue();
+            if (e.getKey().equalsIgnoreCase(c.id()) || e.getKey().equalsIgnoreCase(c.name())) return e.getValue();
         }
         return categories.getOrDefault(DEFAULT_CATEGORY, "");
     }
@@ -184,7 +184,7 @@ public record Definition(
             if (key.equalsIgnoreCase(DEFAULT_CATEGORY)) continue;
             boolean known = false;
             for (SearchCategory c : SearchCategory.values()) {
-                if (key.equalsIgnoreCase(c.label()) || key.equalsIgnoreCase(c.name())) known = true;
+                if (key.equalsIgnoreCase(c.id()) || key.equalsIgnoreCase(c.name())) known = true;
             }
             if (!known)
                 throw new DefinitionException(
@@ -287,7 +287,7 @@ public record Definition(
 
     private static String categoryNames() {
         List<String> names = new ArrayList<>();
-        for (SearchCategory c : SearchCategory.values()) names.add(c.label());
+        for (SearchCategory c : SearchCategory.values()) names.add(c.id());
         return String.join(", ", names);
     }
 

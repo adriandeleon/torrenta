@@ -38,6 +38,8 @@ import javafx.util.StringConverter;
 
 import com.torrenta.engine.TorrentDetail;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The detail pane under the list: General, Files, Peers, Trackers, Pieces for the one selected
  * torrent. Fed a {@link TorrentDetail} once a second by the window; shows nothing with no
@@ -61,7 +63,7 @@ final class DetailPane extends VBox {
 
     private SpeedHistory speedHistory;
     private long speedNow;
-    private final Label empty = new Label("Select one torrent to see its details");
+    private final Label empty = new Label(tr("detail.empty"));
     private boolean[] lastPieces = new boolean[0];
     private String shownId;
 
@@ -80,12 +82,12 @@ final class DetailPane extends VBox {
         tabs.setFocusTraversable(false);
         tabs.getTabs()
                 .addAll(
-                        tab("General", Icons.info(), buildGeneral()),
-                        tab("Files", Icons.files(), buildFiles()),
-                        tab("Peers", Icons.peers(), buildPeers()),
-                        tab("Trackers", Icons.broadcast(), buildTrackers()),
-                        tab("Pieces", Icons.pieces(), buildPieces()),
-                        tab("Speed", Icons.gauge(), speed));
+                        tab(tr("detail.tab.general"), Icons.info(), buildGeneral()),
+                        tab(tr("detail.tab.files"), Icons.files(), buildFiles()),
+                        tab(tr("detail.tab.peers"), Icons.peers(), buildPeers()),
+                        tab(tr("detail.tab.trackers"), Icons.broadcast(), buildTrackers()),
+                        tab(tr("detail.tab.pieces"), Icons.pieces(), buildPieces()),
+                        tab(tr("detail.tab.speed"), Icons.gauge(), speed));
         tabs.getSelectionModel().selectedIndexProperty().addListener(o -> {
             if (speedShowing()) speed.show(speedHistory, speedNow);
         });
@@ -180,7 +182,11 @@ final class DetailPane extends VBox {
         generalValues[2].setText(
                 g.pieceCount() == 0
                         ? "—"
-                        : g.piecesHave() + " of " + g.pieceCount() + " × " + Bytes.human(g.pieceLength()));
+                        : tr(
+                                "detail.general.pieces.value",
+                                String.valueOf(g.piecesHave()),
+                                String.valueOf(g.pieceCount()),
+                                Bytes.human(g.pieceLength())));
         generalValues[3].setText(
                 g.availability() < 0 ? "—" : String.format(java.util.Locale.ROOT, "%.2f", g.availability()));
         generalValues[4].setText(Bytes.human(g.downloaded()));
@@ -191,7 +197,7 @@ final class DetailPane extends VBox {
         generalValues[9].setText(g.nextAnnounceSeconds() <= 0 ? "—" : Format.duration(g.nextAnnounceSeconds()));
         generalValues[10].setText(String.valueOf(g.connections()));
         generalValues[11].setText(Format.host(g.currentTracker()));
-        generalValues[12].setText(g.isPrivate() ? "Yes" : "No");
+        generalValues[12].setText(g.isPrivate() ? tr("common.yes") : tr("common.no"));
 
         if (another) fileRows.clear();
         if (fileRows.apply(detail.files())) {
@@ -244,19 +250,19 @@ final class DetailPane extends VBox {
             general.getColumnConstraints().add(cc);
         }
         String[] names = {
-            "Info-hash",
-            "Save path",
-            "Pieces",
-            "Availability",
-            "Downloaded",
-            "Uploaded",
-            "Wasted",
-            "Active",
-            "Seeding",
-            "Next announce",
-            "Connections",
-            "Tracker",
-            "Private"
+            tr("detail.general.infoHash"),
+            tr("detail.general.savePath"),
+            tr("detail.general.pieces"),
+            tr("detail.general.availability"),
+            tr("detail.general.downloaded"),
+            tr("detail.general.uploaded"),
+            tr("detail.general.wasted"),
+            tr("detail.general.active"),
+            tr("detail.general.seeding"),
+            tr("detail.general.nextAnnounce"),
+            tr("detail.general.connections"),
+            tr("detail.general.tracker"),
+            tr("detail.general.private")
         };
         // Two columns of pairs, so the tab is a glance rather than a scroll.
         for (int i = 0; i < names.length; i++) {
@@ -281,18 +287,19 @@ final class DetailPane extends VBox {
         files.setShowRoot(false);
         files.setEditable(true);
         files.setColumnResizePolicy(TreeTableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        files.setPlaceholder(new Label("No files until the metadata arrives"));
-        TreeTableColumn<FileRows.Row, String> name = treeColumn("Name", 320, FileRows.Row::name);
-        TreeTableColumn<FileRows.Row, String> size = new TreeTableColumn<>("Size");
+        files.setPlaceholder(new Label(tr("detail.files.empty")));
+        TreeTableColumn<FileRows.Row, String> name = treeColumn(tr("common.name"), 320, FileRows.Row::name);
+        TreeTableColumn<FileRows.Row, String> size = new TreeTableColumn<>(tr("common.size"));
         size.setPrefWidth(90);
         size.setCellValueFactory(p -> p.getValue().getValue().sizeProperty().map(n -> Bytes.human(n.longValue())));
-        TreeTableColumn<FileRows.Row, String> progress = new TreeTableColumn<>("Progress");
+        TreeTableColumn<FileRows.Row, String> progress = new TreeTableColumn<>(tr("detail.files.column.progress"));
         progress.setPrefWidth(90);
         progress.setCellValueFactory(p -> {
             FileRows.Row row = p.getValue().getValue();
             return row.doneProperty().map(d -> Format.percent(row.progress()));
         });
-        TreeTableColumn<FileRows.Row, com.torrenta.engine.Priority> priority = new TreeTableColumn<>("Priority");
+        TreeTableColumn<FileRows.Row, com.torrenta.engine.Priority> priority =
+                new TreeTableColumn<>(tr("detail.files.column.priority"));
         priority.setPrefWidth(100);
         priority.setCellValueFactory(
                 p -> p.getValue().getValue().isFile() ? p.getValue().getValue().priorityProperty() : null);
@@ -319,7 +326,7 @@ final class DetailPane extends VBox {
         files.getColumns().addAll(List.of(name, size, progress, priority));
         Headers.uppercase(files);
 
-        MenuItem open = new MenuItem("Open File");
+        MenuItem open = new MenuItem(tr("detail.files.openFile"));
         open.setGraphic(Icons.open().at(Icons.MENU_SIZE));
         open.setOnAction(e -> {
             var item = files.getSelectionModel().getSelectedItem();
@@ -332,38 +339,38 @@ final class DetailPane extends VBox {
     private javafx.scene.Node buildPeers() {
         TableView<TorrentDetail.Peer> peers = new TableView<>(peerItems);
         peers.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        peers.setPlaceholder(new Label("No peers connected"));
+        peers.setPlaceholder(new Label(tr("detail.peers.empty")));
         peers.getColumns()
                 .addAll(List.of(
-                        column("Address", 170, TorrentDetail.Peer::address),
-                        column("Client", 170, TorrentDetail.Peer::client),
-                        column("Flags", 70, TorrentDetail.Peer::flags),
-                        column("Progress", 80, p -> Format.percent(p.progress())),
-                        column("Down", 90, p -> Bytes.rate(p.downRate())),
-                        column("Up", 90, p -> Bytes.rate(p.upRate())),
-                        column("Downloaded", 100, p -> Bytes.human(p.downloaded())),
-                        column("Uploaded", 100, p -> Bytes.human(p.uploaded()))));
+                        column(tr("detail.peers.column.address"), 170, TorrentDetail.Peer::address),
+                        column(tr("detail.peers.column.client"), 170, TorrentDetail.Peer::client),
+                        column(tr("detail.peers.column.flags"), 70, TorrentDetail.Peer::flags),
+                        column(tr("detail.peers.column.progress"), 80, p -> Format.percent(p.progress())),
+                        column(tr("detail.peers.column.down"), 90, p -> Bytes.rate(p.downRate())),
+                        column(tr("detail.peers.column.up"), 90, p -> Bytes.rate(p.upRate())),
+                        column(tr("detail.peers.column.downloaded"), 100, p -> Bytes.human(p.downloaded())),
+                        column(tr("detail.peers.column.uploaded"), 100, p -> Bytes.human(p.uploaded()))));
         Headers.uppercase(peers);
         return peers;
     }
 
     private javafx.scene.Node buildTrackers() {
         trackers.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        trackers.setPlaceholder(new Label("No trackers; DHT and PEX still find peers"));
+        trackers.setPlaceholder(new Label(tr("detail.trackers.empty")));
         trackers.getColumns()
                 .addAll(List.of(
-                        column("URL", 360, TorrentDetail.Tracker::url),
-                        column("Tier", 50, t -> String.valueOf(t.tier())),
-                        column("Status", 100, TorrentDetail.Tracker::status),
-                        column("Message", 240, TorrentDetail.Tracker::message)));
-        Button add = new Button("Add Trackers…");
+                        column(tr("detail.trackers.column.url"), 360, TorrentDetail.Tracker::url),
+                        column(tr("detail.trackers.column.tier"), 50, t -> String.valueOf(t.tier())),
+                        column(tr("detail.trackers.column.status"), 100, TorrentDetail.Tracker::status),
+                        column(tr("detail.trackers.column.message"), 240, TorrentDetail.Tracker::message)));
+        Button add = new Button(tr("detail.trackers.add"));
         add.setOnAction(e -> askTrackers());
-        Button remove = new Button("Remove");
+        Button remove = new Button(tr("common.remove"));
         remove.disableProperty()
                 .bind(trackers.getSelectionModel().selectedItemProperty().isNull());
         remove.setOnAction(e -> onRemoveTracker.accept(
                 trackers.getSelectionModel().getSelectedItem().url()));
-        Button reannounce = new Button("Reannounce");
+        Button reannounce = new Button(tr("detail.trackers.reannounce"));
         reannounce.setOnAction(e -> onReannounce.run());
         HBox bar = new HBox(8, add, remove, reannounce);
         bar.setPadding(new Insets(6));
@@ -376,9 +383,9 @@ final class DetailPane extends VBox {
         TextInputDialog prompt = new TextInputDialog();
         prompt.initOwner(getScene() == null ? null : getScene().getWindow());
         Fonts.installUiFont(prompt.getDialogPane());
-        prompt.setTitle("Add Trackers");
-        prompt.setHeaderText("Tracker URLs, separated by spaces");
-        prompt.setContentText("URLs:");
+        prompt.setTitle(tr("detail.trackers.addDialog.title"));
+        prompt.setHeaderText(tr("detail.trackers.addDialog.header"));
+        prompt.setContentText(tr("detail.trackers.addDialog.prompt"));
         prompt.getEditor().setPrefColumnCount(48);
         Optional<String> text = prompt.showAndWait();
         text.ifPresent(t -> {

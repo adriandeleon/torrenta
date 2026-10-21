@@ -96,6 +96,18 @@ public final class App extends Application {
         settings.load();
         com.torrenta.ui.DebugLog.attachFile(configDir);
 
+        // The catalogue before any text is built: the window, the dialogs and the palette read it as
+        // they are made, so a change in Settings relabels on restart (Termina's rule). Only an
+        // explicit choice moves the JVM's default locale, so JavaFX's own OK/Cancel and the number
+        // formats follow; "System" keeps the OS locale whole, country and all.
+        String language = com.torrenta.i18n.Messages.resolve(
+                com.torrenta.i18n.Messages.isAutomatic(settings.uiLanguage()) ? null : settings.uiLanguage(),
+                com.torrenta.i18n.Messages.available().keySet(),
+                java.util.Locale.getDefault().getLanguage());
+        com.torrenta.i18n.Messages.init(language);
+        java.util.Locale.setDefault(com.torrenta.i18n.Messages.defaultLocale(
+                settings.uiLanguage(), language, java.util.Locale.getDefault()));
+
         // Applied before any window is built, so the first frame is already themed.
         Application.setUserAgentStylesheet(
                 Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
@@ -108,8 +120,8 @@ public final class App extends Application {
         // built, goes through the same add path as a dropped file; the window hops to its thread.
         if (instance != null) {
             window.setInstanceDescription("primary, port " + instance.port());
-            instance.deliverTo(
-                    inputs -> Platform.runLater(() -> window.openFromOutside(inputs, "another " + AppInfo.NAME)));
+            instance.deliverTo(inputs -> Platform.runLater(() -> window.openFromOutside(
+                    inputs, com.torrenta.i18n.Messages.tr("app.origin.anotherInstance", AppInfo.NAME))));
         }
 
         // The unpacked engine lives beside the settings unless a -D says otherwise (the tests do).

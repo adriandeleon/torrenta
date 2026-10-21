@@ -2,6 +2,8 @@ package com.torrenta.sync;
 
 import java.util.List;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /** What one sync round did, or why it stopped. */
 public record SyncReport(
         Status status, List<String> received, List<String> sent, List<String> conflicts, String detail) {
@@ -33,21 +35,23 @@ public record SyncReport(
         return switch (status) {
             case OK ->
                 received.isEmpty() && sent.isEmpty()
-                        ? "Settings in sync"
-                        : "Settings synced: " + received.size() + " received, " + sent.size() + " sent"
-                                + (conflicts.isEmpty() ? "" : ", " + conflicts.size() + " kept from this machine");
-            case NO_GIT -> "Settings sync needs git on the PATH";
-            case FETCH_FAILED -> "Settings sync could not reach the repository" + detailSuffix();
-            case PUSH_FAILED -> "Settings sync could not push" + detailSuffix();
-            case NEWER_FORMAT -> "Settings sync: the repository was written by a newer Torrenta";
-            case LOCAL_BUSY -> "Settings sync: settings changed during the sync; trying again";
-            case FAILED -> "Settings sync failed" + detailSuffix();
+                        ? tr("sync.report.inSync")
+                        : conflicts.isEmpty()
+                                ? tr("sync.report.synced", received.size(), sent.size())
+                                : tr("sync.report.syncedKept", received.size(), sent.size(), conflicts.size());
+            case NO_GIT -> tr("sync.report.noGit");
+            case FETCH_FAILED -> withDetail("sync.report.fetchFailed");
+            case PUSH_FAILED -> withDetail("sync.report.pushFailed");
+            case NEWER_FORMAT -> tr("sync.report.newerFormat");
+            case LOCAL_BUSY -> tr("sync.report.localBusy");
+            case FAILED -> withDetail("sync.report.failed");
         };
     }
 
-    private String detailSuffix() {
-        if (detail.isBlank()) return "";
-        String first = detail.strip().lines().findFirst().orElse("");
-        return first.isEmpty() ? "" : ": " + first;
+    /** The sentence, with the first line of the detail after a colon when there is one. */
+    private String withDetail(String key) {
+        String first =
+                detail.isBlank() ? "" : detail.strip().lines().findFirst().orElse("");
+        return first.isEmpty() ? tr(key) : tr("sync.report.withDetail", tr(key), first);
     }
 }

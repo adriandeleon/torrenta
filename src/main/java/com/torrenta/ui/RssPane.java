@@ -47,6 +47,8 @@ import com.torrenta.rss.Feed;
 import com.torrenta.rss.RssService;
 import com.torrenta.store.Settings;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The RSS tab: the feeds on the left (All feeds first; name, unread count, a glyph while
  * refreshing or after a failure), the articles of the chosen feed on the right (title in bold
@@ -100,7 +102,7 @@ final class RssPane extends VBox {
     private final Settings settings;
     private final ListView<FeedEntry> feedList = new ListView<>();
     private final TextField filter = new TextField();
-    private final ToggleButton unreadOnly = new ToggleButton("Unread only");
+    private final ToggleButton unreadOnly = new ToggleButton(tr("rss.unreadOnly"));
     private final Label status = new Label();
     private final ArticleRows rows = new ArticleRows();
     private final FilteredList<ArticleRow> filtered = new FilteredList<>(rows.list());
@@ -127,11 +129,11 @@ final class RssPane extends VBox {
         getStyleClass().add("rss-pane");
         table = buildTable();
 
-        Button add = new Button("Add feed…");
+        Button add = new Button(tr("rss.addFeed"));
         add.setOnAction(e -> addFeed(""));
-        Button refresh = new Button("Refresh");
+        Button refresh = new Button(tr("rss.refresh"));
         refresh.setOnAction(e -> refreshSelected());
-        filter.setPromptText("Filter articles — Esc returns to the transfers");
+        filter.setPromptText(tr("rss.filterPrompt"));
         filter.textProperty().addListener(o -> refilter());
         filter.setOnKeyPressed(e -> {
             if (e.getCode() == KeyCode.DOWN) {
@@ -252,10 +254,11 @@ final class RssPane extends VBox {
         t.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
         t.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
         t.setTableMenuButtonVisible(true);
-        t.setPlaceholder(new Label("No articles"));
+        t.setPlaceholder(new Label(tr("rss.articles.empty")));
         t.getStyleClass().addAll("torrent-table", "rss-table");
 
-        TableColumn<ArticleRow, String> title = column("title", "Title", 400, Article::displayTitle, s -> s);
+        TableColumn<ArticleRow, String> title =
+                column("title", tr("rss.column.title"), 400, Article::displayTitle, s -> s);
         title.setComparator(String.CASE_INSENSITIVE_ORDER);
         // A glyph before the title of an article whose torrent has been added.
         title.setCellFactory(c -> new TableCell<>() {
@@ -283,11 +286,11 @@ final class RssPane extends VBox {
                         title,
                         column(
                                 "date",
-                                "Date",
+                                tr("rss.column.date"),
                                 150,
                                 a -> a.published() == null ? -1L : a.published().getEpochSecond(),
                                 Format::dateTime),
-                        column("feed", "Feed", 160, a -> names.getOrDefault(a.feedId(), ""), s -> s)));
+                        column("feed", tr("rss.column.feed"), 160, a -> names.getOrDefault(a.feedId(), ""), s -> s)));
         ColumnMemory.apply(t, ColumnLayout.parse(settings.get(Settings.RSS_COLUMNS, "")));
         ColumnMemory.watch(t, () -> {
             settings.set(Settings.RSS_COLUMNS, ColumnLayout.format(ColumnMemory.capture(t)));
@@ -375,7 +378,7 @@ final class RssPane extends VBox {
     private void showDetail(Article a) {
         if (a == null) {
             detailTitle.setText("");
-            detailMeta.setText("Choose an article to read it here");
+            detailMeta.setText(tr("rss.detail.empty"));
             detailLink.setText("");
             detailLink.setVisible(false);
             detailText.setText("");
@@ -390,13 +393,13 @@ final class RssPane extends VBox {
     }
 
     private ContextMenu buildArticleMenu(TableView<ArticleRow> t) {
-        MenuItem add = new MenuItem("Add…");
-        MenuItem download = new MenuItem("Download");
-        MenuItem open = new MenuItem("Open Link");
-        MenuItem copy = new MenuItem("Copy Link");
-        MenuItem rule = new MenuItem("Create Rule from Title…");
-        MenuItem toggle = new MenuItem("Mark Unread");
-        MenuItem feedRead = new MenuItem("Mark Feed Read");
+        MenuItem add = new MenuItem(tr("rss.menu.add"));
+        MenuItem download = new MenuItem(tr("rss.menu.download"));
+        MenuItem open = new MenuItem(tr("rss.menu.openLink"));
+        MenuItem copy = new MenuItem(tr("rss.menu.copyLink"));
+        MenuItem rule = new MenuItem(tr("rss.menu.createRule"));
+        MenuItem toggle = new MenuItem(tr("rss.menu.markUnread"));
+        MenuItem feedRead = new MenuItem(tr("rss.menu.markFeedRead"));
         add.setOnAction(e -> selected(t).ifPresent(this::addArticle));
         download.setOnAction(e -> selected(t).ifPresent(this::downloadArticle));
         open.setOnAction(e -> selected(t).ifPresent(a -> host.openLink(a.link())));
@@ -410,24 +413,25 @@ final class RssPane extends VBox {
             Optional<Article> a = selected(t);
             add.setDisable(a.map(x -> !x.hasTorrent()).orElse(true));
             download.setDisable(a.map(x -> !x.hasTorrent()).orElse(true));
-            download.setText(
-                    a.map(x -> x.downloaded() ? "Download Again" : "Download").orElse("Download"));
+            download.setText(a.map(x -> x.downloaded() ? tr("rss.menu.downloadAgain") : tr("rss.menu.download"))
+                    .orElse(tr("rss.menu.download")));
             rule.setDisable(a.isEmpty());
             open.setDisable(a.map(x -> x.link().isEmpty()).orElse(true));
             copy.setDisable(a.map(x -> RssAdd.copyText(x).isEmpty()).orElse(true));
-            copy.setText(a.map(RssAdd::copyLabel).orElse("Copy Link"));
+            copy.setText(a.map(RssAdd::copyLabel).orElse(tr("rss.menu.copyLink")));
             toggle.setDisable(a.isEmpty());
-            toggle.setText(a.map(x -> x.read() ? "Mark Unread" : "Mark Read").orElse("Mark Read"));
+            toggle.setText(a.map(x -> x.read() ? tr("rss.menu.markUnread") : tr("rss.menu.markRead"))
+                    .orElse(tr("rss.menu.markRead")));
         });
         return menu;
     }
 
     private ContextMenu buildFeedMenu() {
-        MenuItem refresh = new MenuItem("Refresh");
-        MenuItem read = new MenuItem("Mark Read");
-        MenuItem edit = new MenuItem("Edit…");
-        MenuItem remove = new MenuItem("Remove…");
-        MenuItem add = new MenuItem("Add Feed…");
+        MenuItem refresh = new MenuItem(tr("rss.refresh"));
+        MenuItem read = new MenuItem(tr("rss.menu.markRead"));
+        MenuItem edit = new MenuItem(tr("common.edit"));
+        MenuItem remove = new MenuItem(tr("rss.feedMenu.remove"));
+        MenuItem add = new MenuItem(tr("rss.feedMenu.addFeed"));
         refresh.setOnAction(e -> refreshSelected());
         read.setOnAction(e -> markFeedRead());
         edit.setOnAction(e -> editFeed());
@@ -438,8 +442,8 @@ final class RssPane extends VBox {
         menu.setOnShowing(e -> {
             FeedEntry entry = feedList.getSelectionModel().getSelectedItem();
             boolean one = entry != null && !entry.all();
-            refresh.setText(one ? "Refresh" : "Refresh All");
-            read.setText(one ? "Mark Feed Read" : "Mark All Read");
+            refresh.setText(one ? tr("rss.refresh") : tr("rss.feedMenu.refreshAll"));
+            read.setText(one ? tr("rss.menu.markFeedRead") : tr("rss.feedMenu.markAllRead"));
             edit.setDisable(!one);
             remove.setDisable(!one);
         });
@@ -508,9 +512,9 @@ final class RssPane extends VBox {
                 entries.add(new FeedEntry(f.id(), f.displayName(), s.unread(), s.failed(), s.refreshing()));
                 unreadTotal += s.unread();
                 if (s.refreshing()) refreshing++;
-                if (s.failed()) failed.add(f.displayName() + ": " + s.error());
+                if (s.failed()) failed.add(tr("rss.status.feedFailed", f.displayName(), s.error()));
             }
-            entries.add(0, new FeedEntry("", "All feeds", unreadTotal, false, false));
+            entries.add(0, new FeedEntry("", tr("rss.allFeeds"), unreadTotal, false, false));
             feedList.getItems().setAll(entries);
             int at = 0;
             for (int i = 0; i < entries.size(); i++) if (entries.get(i).id().equals(keep)) at = i;
@@ -585,12 +589,16 @@ final class RssPane extends VBox {
 
     private void addArticle(Article a) {
         if (a.hasTorrent()) host.add(a);
-        else host.say("No torrent in this article" + (a.link().isEmpty() ? "" : "; its link is in the pane below"));
+        else host.say(noTorrentText(a));
     }
 
     private void downloadArticle(Article a) {
         if (a.hasTorrent()) host.download(a);
-        else host.say("No torrent in this article" + (a.link().isEmpty() ? "" : "; its link is in the pane below"));
+        else host.say(noTorrentText(a));
+    }
+
+    private static String noTorrentText(Article a) {
+        return a.link().isEmpty() ? tr("rss.noTorrentInArticle") : tr("rss.noTorrentInArticle.withLink");
     }
 
     private void toggleRead() {
@@ -626,7 +634,7 @@ final class RssPane extends VBox {
         try {
             service.addFeed(made.get());
         } catch (IOException e) {
-            host.say("Could not save the feed: " + e.getMessage());
+            host.say(tr("rss.couldNotSave", e.getMessage()));
             return;
         }
         selectFeed(made.get().id());
@@ -644,7 +652,7 @@ final class RssPane extends VBox {
             try {
                 service.updateFeed(edited.get());
             } catch (IOException e) {
-                host.say("Could not save the feed: " + e.getMessage());
+                host.say(tr("rss.couldNotSave", e.getMessage()));
             }
         }
         focusFeeds();
@@ -654,20 +662,18 @@ final class RssPane extends VBox {
         String id = selectedFeedId();
         Feed feed = id.isEmpty() ? null : service.feed(id);
         if (feed == null) return;
-        Alert confirm = new Alert(
-                Alert.AlertType.CONFIRMATION,
-                "Remove the feed “" + feed.displayName() + "” and its articles? The torrents already added stay.");
-        confirm.setHeaderText("Remove feed");
+        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, tr("rss.removeFeed.text", feed.displayName()));
+        confirm.setHeaderText(tr("rss.removeFeed.header"));
         confirm.initOwner(getScene().getWindow());
         Fonts.installUiFont(confirm.getDialogPane());
-        ButtonType yes = new ButtonType("Remove", ButtonType.OK.getButtonData());
+        ButtonType yes = new ButtonType(tr("common.remove"), ButtonType.OK.getButtonData());
         confirm.getButtonTypes().setAll(yes, ButtonType.CANCEL);
         Optional<ButtonType> answer = confirm.showAndWait();
         if (answer.isPresent() && answer.get() == yes) {
             try {
                 service.removeFeed(id);
             } catch (IOException e) {
-                host.say("Could not remove the feed: " + e.getMessage());
+                host.say(tr("rss.couldNotRemove", e.getMessage()));
             }
         }
         focusFeeds();

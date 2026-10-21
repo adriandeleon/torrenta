@@ -6,6 +6,8 @@ import java.util.Map;
 
 import org.freedesktop.dbus.types.Variant;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The pure model of the tray menu: fixed ids and each item's dbusmenu properties. A disabled live
  * status line (rates and counts), "Show Torrenta", a separator, "Quit".
@@ -32,9 +34,9 @@ final class SniMenuModel {
                 Map.of(
                         "label", new Variant<>(statusLine),
                         "enabled", new Variant<>(false));
-            case OPEN -> Map.of("label", new Variant<>("Show Torrenta"));
+            case OPEN -> Map.of("label", new Variant<>(tr("tray.menu.show")));
             case SEPARATOR -> Map.of("type", new Variant<>("separator"));
-            case QUIT -> Map.of("label", new Variant<>("Quit"));
+            case QUIT -> Map.of("label", new Variant<>(tr("tray.menu.quit")));
             default -> Map.of();
         };
     }
