@@ -47,6 +47,8 @@ public final class Settings {
     public static final String TABLE_COLUMNS = "table.columns";
     /** The Search tab's results columns, the same shape. */
     public static final String SEARCH_COLUMNS = "search.columns";
+    /** The declarative search providers switched off, by id, space-separated; syncs. */
+    public static final String SEARCH_DISABLED = "search.disabled";
     /** The detail pane: shown, which tab, and the divider position (0..1 of the window). */
     public static final String DETAIL_VISIBLE = "detail.visible";
 
@@ -508,6 +510,21 @@ public final class Settings {
 
     public void setIpFilterBans(java.util.List<String> bans) {
         properties.setProperty(IPFILTER_BANS, String.join(" ", bans));
+    }
+
+    /** The ids of the definition-file providers switched off in Settings → Search. */
+    public java.util.Set<String> disabledSearchDefinitions() {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        for (String id : properties.getProperty(SEARCH_DISABLED, "").trim().split("\\s+")) {
+            if (!id.isEmpty()) out.add(id);
+        }
+        return out;
+    }
+
+    public void setDisabledSearchDefinitions(java.util.Collection<String> ids) {
+        String joined = String.join(" ", new java.util.TreeSet<>(ids)).trim();
+        if (joined.isEmpty()) properties.remove(SEARCH_DISABLED);
+        else properties.setProperty(SEARCH_DISABLED, joined);
     }
 
     /** The connection settings as stored, each clamped to a sane range. */
