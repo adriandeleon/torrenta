@@ -262,7 +262,12 @@ Everything in Settings that the engine already knows how to do.
    folders (`torrent-rename-path`); a name of its own and the layout are libtorrent's
    (`RENAME_TORRENT`, `CONTENT_LAYOUT`).
 
-**0.4 is feature-complete** but for web seeds shown and editable in the detail pane.
+11. ✓ **Web seeds** in the Trackers tab, under the trackers: listed for both engines, added and
+   removed on libtorrent's (`Capability.WEB_SEEDS`; Transmission's `torrent-set` cannot change
+   them). The change is in the resume data, so a seed removed from a `.torrent`'s `url-list`
+   stays removed, and Export writes the list as it is now.
+
+**0.4 is feature-complete.**
 
 ### 0.5 — Organisation and automation
 **0.5 is feature-complete.**

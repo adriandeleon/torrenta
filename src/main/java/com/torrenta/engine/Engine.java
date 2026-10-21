@@ -179,6 +179,19 @@ public interface Engine extends AutoCloseable {
 
     void removeTracker(String id, String url) throws EngineException;
 
+    /** The torrent's web seeds (BEP 19 HTTP sources), in the order the engine keeps them. */
+    List<String> webSeeds(String id) throws EngineException;
+
+    /**
+     * Adds the web seeds the torrent does not have yet ({@link WebSeeds#fresh}); kept with its
+     * resume data. Refuses the whole batch, adding none, when one is not a web seed
+     * ({@link WebSeeds#invalid}). Needs {@link Capability#WEB_SEEDS}.
+     */
+    void addWebSeeds(String id, List<String> urls) throws EngineException;
+
+    /** Removes one web seed, as written; nothing happens when the torrent has no such seed. */
+    void removeWebSeed(String id, String url) throws EngineException;
+
     /** A snapshot of every torrent in the session. */
     List<Torrent> torrents();
 
@@ -337,7 +350,9 @@ public interface Engine extends AutoCloseable {
         /** A name of the person's own for a torrent, the files keeping theirs (Rename…, F2). */
         RENAME_TORRENT,
         /** The content layout on add: in a folder of its own, or without the torrent's root folder. */
-        CONTENT_LAYOUT;
+        CONTENT_LAYOUT,
+        /** Adding and removing a torrent's web seeds; any engine lists them. */
+        WEB_SEEDS;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

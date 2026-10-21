@@ -144,7 +144,8 @@ class TransmissionEngineTest {
                 Capability.SUPER_SEEDING,
                 Capability.EXPORT_TORRENT,
                 Capability.RENAME_TORRENT,
-                Capability.CONTENT_LAYOUT)) {
+                Capability.CONTENT_LAYOUT,
+                Capability.WEB_SEEDS)) {
             assertTrue(caps.lacks(missing), missing + " is not Transmission's");
         }
         assertThrows(EngineException.class, () -> e.create(null, null));
@@ -153,6 +154,8 @@ class TransmissionEngineTest {
         assertThrows(EngineException.class, () -> e.setSuperSeeding(MAGNET_ID, true));
         assertThrows(EngineException.class, () -> e.exportTorrent(MAGNET_ID));
         assertThrows(EngineException.class, () -> e.rename(MAGNET_ID, "x"));
+        assertThrows(EngineException.class, () -> e.addWebSeeds(MAGNET_ID, List.of("http://a.example.org/")));
+        assertThrows(EngineException.class, () -> e.removeWebSeed(MAGNET_ID, "http://a.example.org/"));
         e.stop();
         assertTrue(e.torrents().isEmpty(), "a stopped engine lists nothing");
     }
@@ -773,7 +776,9 @@ class TransmissionEngineTest {
                         true,
                         "lastAnnounceSucceeded",
                         true)));
+        t.put("webseeds", List.of("http://mirror.example.org/pub/", ""));
         TorrentDetail d = TransmissionEngine.detailOf(t, 1_000_000L);
+        assertEquals(List.of("http://mirror.example.org/pub/"), d.webSeeds(), "a blank entry is no seed");
         assertEquals("abcd", d.general().id(), "ids are lower-case hex");
         assertEquals("10.0.0.5:51413", d.peers().get(0).address());
         assertEquals("[2001:db8::5]:51413", TransmissionEngine.peerAddress("2001:db8::5", 51413));

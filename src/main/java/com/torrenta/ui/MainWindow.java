@@ -1055,6 +1055,8 @@ public final class MainWindow {
             out.add("stats-graph=" + statsWindow.graph().summaryForCapture());
         }
         if (detailWanted && detail.activeTab().equals("speed")) out.add("speed-tab=" + detail.speedSummaryForCapture());
+        if (detailWanted && detail.activeTab().equals("trackers"))
+            out.add("web-seeds=" + detail.webSeedLineForCapture());
         if (detailWanted && detail.activeTab().equals("files"))
             for (String line : detail.fileLinesForCapture()) out.add("file=" + line);
         if (detailWanted && detail.activeTab().equals("overview"))
@@ -1318,6 +1320,15 @@ public final class MainWindow {
             showDetail();
             detail.pressRemedyForCapture(
                     action.equals("remedy") ? null : Diagnosis.Remedy.valueOf(action.substring("remedy:".length())));
+        } else if (action.startsWith("web-seeds-add:")) {
+            // web-seeds-add:<urls>: the Trackers tab's Add Web Seeds dialog, filled and confirmed
+            // ("~" is a space, between URLs).
+            showDetail();
+            detail.addWebSeedsForCapture(
+                    action.substring("web-seeds-add:".length()).replace('~', ' '));
+        } else if (action.startsWith("web-seed-remove:")) {
+            showDetail();
+            detail.removeWebSeedForCapture(Integer.parseInt(action.substring("web-seed-remove:".length())));
         } else if (action.startsWith("files-rename:")) {
             // files-rename:<row>:<name>: that visible row of the Files tab renamed ("~" is a space).
             String[] parts = action.substring("files-rename:".length()).split(":", 2);
@@ -3938,6 +3949,14 @@ public final class MainWindow {
         detail.setOnAddTrackers(urls -> {
             String id = detailId;
             if (id != null) onTorrent("status.trackersAdded", id, (e, t) -> e.addTrackers(t, urls));
+        });
+        detail.setOnAddWebSeeds(urls -> {
+            String id = detailId;
+            if (id != null) onTorrent("status.webSeedsAdded", id, (e, t) -> e.addWebSeeds(t, urls));
+        });
+        detail.setOnRemoveWebSeed(url -> {
+            String id = detailId;
+            if (id != null) onTorrent("status.webSeedRemoved", id, (e, t) -> e.removeWebSeed(t, url));
         });
         detail.setOnRemoveTracker(url -> {
             String id = detailId;
