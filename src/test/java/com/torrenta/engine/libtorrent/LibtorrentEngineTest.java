@@ -46,6 +46,12 @@ class LibtorrentEngineTest {
             "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Torrenta%20test";
     private static final String MAGNET_ID = "0123456789abcdef0123456789abcdef01234567";
 
+    /**
+     * How long a loopback transfer or metadata fetch may take before the test gives up. It takes
+     * a fraction of a second; the margin is for CI runners that get little CPU.
+     */
+    private static final int LOOPBACK_SECONDS = 120;
+
     @Test
     void startsAddsAMagnetAndStops(@TempDir Path dir) throws EngineException {
         try (LibtorrentEngine engine = engine(dir)) {
@@ -276,24 +282,25 @@ class LibtorrentEngineTest {
     void aMagnetsFileListIsFetchedFromAPeerWithoutAddingIt(@TempDir Path dir) throws Exception {
         Path seeds = dir.resolve("seeds");
         byte[] torrent = twoFileTorrent(seeds, "pair");
-        int seedPort = freePort();
         try (LibtorrentEngine seeder = new LibtorrentEngine(
-                        () -> seeds, new TorrentStore(dir.resolve("seed-store")), onPort(seedPort));
+                        () -> seeds, new TorrentStore(dir.resolve("seed-store")), isolated(freePort()));
                 LibtorrentEngine engine = new LibtorrentEngine(
-                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), onPort(freePort()))) {
+                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(freePort()))) {
             seeder.start();
             Torrent seeded = seeder.add(AddRequest.defaults(new AddRequest.TorrentFile(torrent, "pair"), seeds));
             await("seeding", () -> seeder.torrents().get(0).state() == TorrentState.SEEDING);
-            String magnet = seeder.magnetLink(seeded.id()) + "&x.pe=127.0.0.1:" + seedPort;
+            // The port asked for is not always the one bound (libtorrent moves on when it is taken).
+            String magnet = seeder.magnetLink(seeded.id()) + "&x.pe=127.0.0.1:" + seeder.listenPortForTest();
 
             engine.start();
+            engine.reconnectQuicklyForTest();
             List<EngineEvent> events = new CopyOnWriteArrayList<>();
             engine.addListener(events::add);
             com.torrenta.engine.Engine.MetadataFetch fetch = engine.fetchMetadata(magnet);
             assertTrue(engine.torrents().isEmpty(), "a fetch is not a torrent in the list");
             assertThrows(EngineException.class, () -> engine.fetchMetadata(magnet), "one fetch per magnet");
 
-            byte[] fetched = fetch.torrent().get(30, java.util.concurrent.TimeUnit.SECONDS);
+            byte[] fetched = fetch.torrent().get(LOOPBACK_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
             TorrentPreview preview = engine.inspect(fetched);
             assertEquals("pair", preview.name());
             assertEquals(
@@ -319,9 +326,8 @@ class LibtorrentEngineTest {
     void addingAfterTheFileListArrivedStartsWithThePeersTheFetchFound(@TempDir Path dir) throws Exception {
         Path seeds = dir.resolve("seeds");
         byte[] torrent = twoFileTorrent(seeds, "pair");
-        int seedPort = freePort();
         try (LibtorrentEngine seeder = new LibtorrentEngine(
-                        () -> seeds, new TorrentStore(dir.resolve("seed-store")), isolated(seedPort));
+                        () -> seeds, new TorrentStore(dir.resolve("seed-store")), isolated(freePort()));
                 LibtorrentEngine engine = new LibtorrentEngine(
                         () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(freePort()));
                 LibtorrentEngine control = new LibtorrentEngine(
@@ -336,9 +342,10 @@ class LibtorrentEngineTest {
             String magnet = seeder.magnetLink(seeded.id());
 
             engine.start();
+            engine.reconnectQuicklyForTest();
             Engine.MetadataFetch fetch = engine.fetchMetadata(magnet);
-            engine.connectFetchForTest(fetch, seedPort);
-            byte[] fetched = fetch.torrent().get(30, java.util.concurrent.TimeUnit.SECONDS);
+            engine.connectFetchForTest(fetch, seeder.listenPortForTest());
+            byte[] fetched = fetch.torrent().get(LOOPBACK_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
 
             // Once the metadata is in, the fetch is upload-only and the seed drops it at once; the
             // torrent still knows where the seed is, and downloads all of it from there.
@@ -361,9 +368,10 @@ class LibtorrentEngineTest {
 
     @Test
     void addingNowStartsWithThePeersTheFetchFound(@TempDir Path dir) throws Exception {
-        int otherPort = freePort();
         try (LibtorrentEngine other = new LibtorrentEngine(
-                        () -> dir.resolve("other"), new TorrentStore(dir.resolve("other-store")), isolated(otherPort));
+                        () -> dir.resolve("other"),
+                        new TorrentStore(dir.resolve("other-store")),
+                        isolated(freePort()));
                 LibtorrentEngine engine = new LibtorrentEngine(
                         () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(freePort()))) {
             // Another peer after the same magnet, without its metadata either: the fetch stays a
@@ -371,8 +379,9 @@ class LibtorrentEngineTest {
             other.start();
             other.add(MAGNET);
             engine.start();
+            engine.reconnectQuicklyForTest();
             Engine.MetadataFetch fetch = engine.fetchMetadata(MAGNET);
-            engine.connectFetchForTest(fetch, otherPort);
+            engine.connectFetchForTest(fetch, other.listenPortForTest());
             await("the fetch is connected", () -> fetch.peers() > 0);
 
             AddRequest now = new AddRequest(
@@ -442,7 +451,15 @@ class LibtorrentEngineTest {
         }
     }
 
-    /** {@link #onPort}, with no way to find a peer but being told: no DHT, no local discovery. */
+    /**
+     * {@link #onPort}, with no way to find a peer but being told (no DHT, no local discovery) and
+     * TCP only: this is both ends of every loopback transfer in these tests. Left to its defaults,
+     * libtorrent dials a new peer over uTP first, a UDP protocol whose handshake and congestion
+     * control run on timers a starved CI runner misses, and an attempt that fails is not retried
+     * for a minute ({@code min_reconnect_time}); a TCP connect to a listening loopback socket
+     * cannot fail. Discovery off also keeps the test's fixed info hash out of the public DHT,
+     * where every CI run of this suite would otherwise find the others.
+     */
     private static com.torrenta.engine.EngineSettings isolated(int port) {
         com.torrenta.engine.EngineSettings d = onPort(port);
         com.torrenta.engine.EngineSettings.Protocol p = d.protocol();
@@ -462,7 +479,7 @@ class LibtorrentEngineTest {
                 d.proxyPassword(),
                 d.proxyPeers(),
                 new com.torrenta.engine.EngineSettings.Protocol(
-                        false, p.pex(), false, p.utp(), p.encryption(), false, List.of()),
+                        false, p.pex(), false, false, p.encryption(), false, List.of()),
                 d.speed(),
                 d.queue());
     }
@@ -1073,7 +1090,8 @@ class LibtorrentEngineTest {
      * write files, rather than find them. The seeder has the data under {@code dir/seed/pair}.
      */
     private static LibtorrentEngine seeder(Path dir, byte[] torrent) throws Exception {
-        LibtorrentEngine seed = new LibtorrentEngine(dir.resolve("seed"), new TorrentStore(dir.resolve("seedstore")));
+        LibtorrentEngine seed = new LibtorrentEngine(
+                () -> dir.resolve("seed"), new TorrentStore(dir.resolve("seedstore")), isolated(freePort()));
         seed.start();
         seed.add(new AddRequest(
                 new AddRequest.TorrentFile(torrent, "pair.torrent"),
@@ -1088,16 +1106,29 @@ class LibtorrentEngineTest {
         return seed;
     }
 
+    /** The other end of a loopback transfer from {@link #seeder}: {@link #isolated} too. */
+    private static LibtorrentEngine downloader(Path dir) throws Exception {
+        return downloader(dir, new TorrentStore(dir.resolve("store")));
+    }
+
+    private static LibtorrentEngine downloader(Path dir, TorrentStore store) throws Exception {
+        return new LibtorrentEngine(() -> dir.resolve("downloads"), store, isolated(freePort()));
+    }
+
     /**
      * Waits for the condition while telling the torrent about the seeder whenever it has no peer,
      * at most once a second: a second connection from the same address makes the seeder drop
-     * one as a duplicate, which stalls the transfer.
+     * one as a duplicate, which stalls the transfer. A failed attempt is dialled again a second
+     * later rather than a minute ({@link LibtorrentEngine#reconnectQuicklyForTest}); without that
+     * the repeated {@code connect_peer} does nothing. The deadline is long because CI runners
+     * are slow, not because the transfer is: it takes well under a second.
      */
     private static void awaitDownload(
             String what, LibtorrentEngine engine, String id, LibtorrentEngine seed, Condition condition)
             throws Exception {
+        engine.reconnectQuicklyForTest();
         int port = seed.listenPortForTest();
-        long deadline = System.currentTimeMillis() + 20_000;
+        long deadline = System.currentTimeMillis() + LOOPBACK_SECONDS * 1000;
         long nextConnect = 0;
         while (!condition.test()) {
             if (System.currentTimeMillis() > deadline) {
@@ -1135,7 +1166,7 @@ class LibtorrentEngineTest {
         TorrentStore store = new TorrentStore(dir.resolve("store"));
         List<EngineEvent> events = new CopyOnWriteArrayList<>();
         try (LibtorrentEngine seed = seeder(dir, torrent);
-                LibtorrentEngine engine = engine(dir, store)) {
+                LibtorrentEngine engine = downloader(dir, store)) {
             engine.addListener(events::add);
             engine.start();
             Torrent t = engine.add(
@@ -1202,7 +1233,7 @@ class LibtorrentEngineTest {
 
         List<EngineEvent> events = new CopyOnWriteArrayList<>();
         try (LibtorrentEngine seed = seeder(dir, torrent);
-                LibtorrentEngine again = engine(dir, store)) {
+                LibtorrentEngine again = downloader(dir, store)) {
             again.addListener(events::add);
             again.start();
             assertEquals(owed, again.storageForTest(id), "read back with the resume data");
@@ -1252,7 +1283,7 @@ class LibtorrentEngineTest {
         byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
         Path downloads = dir.resolve("downloads");
         try (LibtorrentEngine seed = seeder(dir, torrent);
-                LibtorrentEngine engine = engine(dir)) {
+                LibtorrentEngine engine = downloader(dir)) {
             engine.start();
             AddRequest sequential = new AddRequest(
                     new AddRequest.TorrentFile(torrent, "pair.torrent"),
@@ -1756,11 +1787,8 @@ class LibtorrentEngineTest {
         StatsStore statsStore = new StatsStore(dir.resolve("config").resolve(StatsStore.FILE_NAME));
         long size;
         try (LibtorrentEngine seed = seeder(dir, torrent);
-                LibtorrentEngine engine = new LibtorrentEngine(
-                        () -> dir.resolve("downloads"),
-                        store,
-                        com.torrenta.engine.EngineSettings.defaults(),
-                        statsStore)) {
+                LibtorrentEngine engine =
+                        new LibtorrentEngine(() -> dir.resolve("downloads"), store, isolated(freePort()), statsStore)) {
             engine.start();
             SessionStats fresh = engine.stats();
             assertEquals(0, fresh.sessionDownload());
@@ -1799,6 +1827,112 @@ class LibtorrentEngineTest {
             assertTrue(back.allTimeSeconds() >= saved.activeSeconds());
         }
         assertTrue(statsStore.load().activeSeconds() >= saved.activeSeconds(), "the second stop wrote again");
+    }
+
+    // ---- queue order and set location ---------------------------------------------------------------
+
+    /**
+     * Three torrents without their files, added paused, stand in the download queue in the order
+     * they were added; each move shifts the others, as the positions in the snapshots then show.
+     */
+    @Test
+    void queueMovesShiftTheOthers(@TempDir Path dir) throws Exception {
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            List<String> ids = new java.util.ArrayList<>();
+            for (String name : List.of("q1", "q2", "q3")) {
+                byte[] torrent = twoFileTorrent(dir.resolve("seed"), name);
+                ids.add(engine.add(new AddRequest(
+                                new AddRequest.TorrentFile(torrent, name + ".torrent"),
+                                dir.resolve("downloads"),
+                                true,
+                                false,
+                                false,
+                                AddRequest.StopCondition.NONE,
+                                Map.of(),
+                                TorrentLabels.NONE))
+                        .id());
+            }
+            await(
+                    "three in the queue, in add order",
+                    () -> positions(engine, ids).equals(List.of(0, 1, 2)));
+
+            engine.queueMove(ids.get(2), Engine.QueueMove.TOP);
+            await("q3 to the top", () -> positions(engine, ids).equals(List.of(1, 2, 0)));
+            engine.queueMove(ids.get(0), Engine.QueueMove.DOWN);
+            await("q1 one down, past q2", () -> positions(engine, ids).equals(List.of(2, 1, 0)));
+            engine.queueMove(ids.get(2), Engine.QueueMove.BOTTOM);
+            await("q3 to the bottom", () -> positions(engine, ids).equals(List.of(1, 0, 2)));
+            engine.queueMove(ids.get(2), Engine.QueueMove.UP);
+            await("q3 one up, past q1", () -> positions(engine, ids).equals(List.of(2, 0, 1)));
+            engine.queueMove(ids.get(1), Engine.QueueMove.UP);
+            await("the first cannot go higher", () -> positions(engine, ids).equals(List.of(2, 0, 1)));
+            assertThrows(EngineException.class, () -> engine.queueMove("ff".repeat(20), Engine.QueueMove.TOP));
+        }
+    }
+
+    /** The torrents' queue positions in the order of {@code ids}. */
+    private static List<Integer> positions(LibtorrentEngine engine, List<String> ids) {
+        Map<String, Integer> byId = new java.util.HashMap<>();
+        for (Torrent t : engine.torrents()) byId.put(t.id(), t.queuePosition());
+        return ids.stream().map(id -> byId.getOrDefault(id, -2)).toList();
+    }
+
+    /**
+     * Set Location on a seed: the files land in the new folder, the torrent seeds on from there
+     * without a recheck and the move is in the log; a second move into a folder that already holds
+     * the files keeps those and leaves the source where it was.
+     */
+    @Test
+    void setLocationMovesASeedsFilesAndNeverReplacesOnesAlreadyThere(@TempDir Path dir) throws Exception {
+        byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine engine = seeder(dir, torrent)) {
+            engine.addListener(events::add);
+            String id = engine.torrents().get(0).id();
+            assertEquals(-1, engine.torrents().get(0).queuePosition(), "a seed is outside the download queue");
+            Path moved = dir.resolve("moved");
+            int before = events.size();
+
+            engine.moveStorage(id, moved.toString(), true);
+            await(
+                    "the move is in the log",
+                    () -> events.stream().skip(before).anyMatch(e -> e.message().equals("Moved pair to " + moved)));
+            Torrent now = engine.torrents().get(0);
+            assertEquals(moved.toString(), now.savePath());
+            assertEquals(TorrentState.SEEDING, now.state(), "seeding on from the new folder");
+            assertEquals(1.0, now.progress(), 1e-9);
+            assertFalse(now.moving());
+            assertTrue(Files.isRegularFile(moved.resolve("pair").resolve("a.bin")));
+            assertTrue(Files.isRegularFile(moved.resolve("pair").resolve("sub").resolve("b.bin")));
+            assertFalse(Files.exists(dir.resolve("seed").resolve("pair").resolve("a.bin")), "moved, not copied");
+            assertTrue(
+                    events.stream().skip(before).noneMatch(e -> e.message().contains("checked")),
+                    "a plain move needs no recheck: " + events.subList(before, events.size()));
+            assertEquals(moved.toString(), engine.detail(id).general().savePath());
+
+            // The same files already at the next destination: kept as they are, the source left alone.
+            Path other = dir.resolve("other");
+            Files.createDirectories(other.resolve("pair").resolve("sub"));
+            Files.copy(
+                    moved.resolve("pair").resolve("a.bin"),
+                    other.resolve("pair").resolve("a.bin"));
+            Files.copy(
+                    moved.resolve("pair").resolve("sub").resolve("b.bin"),
+                    other.resolve("pair").resolve("sub").resolve("b.bin"));
+            java.nio.file.attribute.FileTime old = java.nio.file.attribute.FileTime.fromMillis(1_000_000_000_000L);
+            Files.setLastModifiedTime(other.resolve("pair").resolve("a.bin"), old);
+            engine.moveStorage(id, other.toString(), true);
+            await("moved again", () -> engine.torrents().get(0).savePath().equals(other.toString()));
+            assertEquals(old, Files.getLastModifiedTime(other.resolve("pair").resolve("a.bin")), "not replaced");
+            assertTrue(Files.isRegularFile(moved.resolve("pair").resolve("a.bin")), "the source stays");
+            await("seeding from the kept files", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+
+            // Where it already is: nothing to do, no error.
+            engine.moveStorage(id, other.toString(), true);
+            assertThrows(EngineException.class, () -> engine.moveStorage(id, "", true));
+            assertThrows(EngineException.class, () -> engine.moveStorage("ff".repeat(20), other.toString(), true));
+        }
     }
 
     private static LibtorrentEngine engine(Path dir) {

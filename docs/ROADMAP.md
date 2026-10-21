@@ -238,12 +238,12 @@ Everything in Settings that the engine already knows how to do.
 6. **Queue and share limits** — done: active downloads, seeds and total (0 for none; libtorrent's
    -1), the slow-torrent rule, and a global ratio and seeding-time limit with its action (pause or
    remove). libtorrent reads `share_ratio_limit`/`seed_time_limit` only to rank seeds for the queue,
-   so the window applies the rule from its poll (`ShareLimit.decide`, pure). Queue positions and
-   super seeding are not in; they go with 0.5's organisation work or a later PR.
+   so the window applies the rule from its poll (`ShareLimit.decide`, pure). Queue positions are in
+   (Torrent → Queue, the Queue column); super seeding is not.
 7. **Per-torrent limits dialog** — done (Torrent → Limits…, `Ctrl+L`): rate caps, connections,
    upload slots, first and last pieces first (edge-piece priorities, in the resume data), and a
-   share limit of the torrent's own kept as `torrent.<hash>.share`. Set location, rename torrent and
-   files, export `.torrent` are still to come.
+   share limit of the torrent's own kept as `torrent.<hash>.share`. Set location is in (Torrent →
+   Set Location…); rename torrent and files, export `.torrent` are still to come.
 
 ### 0.5 — Organisation and automation
 **0.5 is feature-complete.**

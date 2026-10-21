@@ -9,9 +9,9 @@ import static com.torrenta.i18n.Messages.tr;
  * its own divider, since a fraction of the height means nothing as a fraction of the width.
  */
 public enum DetailPlace {
-    BOTTOM("bottom", 0.62),
+    BOTTOM("bottom", DetailSplit.DEFAULT),
     RIGHT("right", 0.58),
-    HIDDEN("hidden", 0.62);
+    HIDDEN("hidden", DetailSplit.DEFAULT);
 
     private final String id;
     private final double defaultDivider;
@@ -50,16 +50,11 @@ public enum DetailPlace {
     }
 
     /**
-     * The divider as written, the list's share of the split; one the pane could vanish behind, or
-     * that is not a number, is this place's default.
+     * The divider as written, the list's share of the split, by {@link DetailSplit}'s rule; none,
+     * or one that would leave the pane its tabs alone, is this place's default.
      */
     public double divider(String written) {
-        try {
-            double d = Double.parseDouble(written == null ? "" : written.trim());
-            return d > 0.1 && d < 0.95 ? d : defaultDivider;
-        } catch (NumberFormatException e) {
-            return defaultDivider;
-        }
+        return DetailSplit.position(written, defaultDivider);
     }
 
     /** The name the ChoiceBox shows, in the UI language ({@code detailPlace.<id>}); read at call time. */

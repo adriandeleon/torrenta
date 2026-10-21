@@ -147,6 +147,7 @@ final class SettingsWindow {
     private static final String[] OWNED_KEYS = concat(
             new String[] {
                 Settings.UI_LANGUAGE,
+                Settings.THEME,
                 Settings.UPDATE_CHECK,
                 Settings.ADD_START_PAUSED,
                 Settings.ADD_SEQUENTIAL,
@@ -884,12 +885,7 @@ final class SettingsWindow {
         pageHost.setAlignment(Pos.TOP_LEFT);
 
         Button reset = new Button(tr("settings.reset"));
-        reset.setOnAction(e -> {
-            settings.reset(OWNED_KEYS);
-            settings.saveQuietly();
-            reload();
-            onAppearanceChanged.run();
-        });
+        reset.setOnAction(e -> resetToDefaults());
         Button close = new Button(tr("common.close"));
         close.setOnAction(e -> stage.hide());
         Region spacer = new Region();
@@ -993,6 +989,61 @@ final class SettingsWindow {
                 return;
             }
         }
+    }
+
+    // ---------------------------------------------------------------- reset
+
+    /** What a Reset re-applies only when its key changed, since each one acts on the desktop. */
+    enum ResetHook {
+        THEME,
+        TRAY,
+        HANDLER,
+        BADGE
+    }
+
+    /** The hooks a Reset must run, from the owned keys' values before and after it (null: unset). */
+    static Set<ResetHook> resetHooks(Map<String, String> before, Map<String, String> after) {
+        Set<ResetHook> hooks = java.util.EnumSet.noneOf(ResetHook.class);
+        java.util.function.Predicate<String> changed =
+                key -> !java.util.Objects.equals(before.get(key), after.get(key));
+        if (changed.test(Settings.THEME)) hooks.add(ResetHook.THEME);
+        if (changed.test(Settings.UI_TRAY) || changed.test(Settings.UI_CLOSE_TO_TRAY)) hooks.add(ResetHook.TRAY);
+        if (changed.test(Settings.OS_HANDLER)) hooks.add(ResetHook.HANDLER);
+        if (changed.test(Settings.OS_BADGE)) hooks.add(ResetHook.BADGE);
+        return hooks;
+    }
+
+    private Map<String, String> ownedValues() {
+        Map<String, String> values = new java.util.HashMap<>();
+        for (String key : OWNED_KEYS) values.put(key, settings.get(key, null));
+        return values;
+    }
+
+    /**
+     * Footer's Reset, after a confirm: every owned key back to its default, the controls
+     * reloaded, and everything those keys drive re-applied, as a live edit of each would have.
+     */
+    private void resetToDefaults() {
+        Alert ask = new Alert(Alert.AlertType.CONFIRMATION, tr("settings.reset.question"));
+        ask.setHeaderText(tr("settings.reset.header"));
+        ask.initOwner(stage);
+        Fonts.installUiFont(ask.getDialogPane());
+        if (ask.showAndWait().filter(b -> b == ButtonType.OK).isEmpty()) return;
+        Map<String, String> before = ownedValues();
+        settings.reset(OWNED_KEYS);
+        settings.saveQuietly();
+        Set<ResetHook> hooks = resetHooks(before, ownedValues());
+        reload();
+        if (hooks.contains(ResetHook.THEME)) {
+            javafx.application.Application.setUserAgentStylesheet(
+                    Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
+        }
+        onAppearanceChanged.run();
+        onEngineSettingsChanged.run();
+        onIpFilterChanged.accept(false);
+        if (hooks.contains(ResetHook.TRAY)) onTrayChanged.run();
+        if (hooks.contains(ResetHook.HANDLER)) onHandlerChanged.run();
+        if (hooks.contains(ResetHook.BADGE)) onBadgeChanged.run();
     }
 
     // ---------------------------------------------------------------- search

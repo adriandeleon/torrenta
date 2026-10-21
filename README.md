@@ -255,7 +255,7 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 
 | Chord | Action |
 |---|---|
-| `Ctrl+N` | New torrent: the Create Torrent dialog (a file or folder, hybrid/v1/v2, piece size, private, trackers by tier, web seeds, comment, source; Save as…, then hashed on a worker with a Cancel; the info-hashes and magnet link with Copy buttons once made; seeds at once when asked). In the RSS tab the chord adds a feed instead |
+| `Ctrl+N` | New torrent: the Create Torrent dialog (a file or folder, hybrid/v1/v2, piece size, private, trackers by tier, web seeds, comment, source; Save as…, then hashed on a worker with a Cancel; the info-hashes and magnet link with Copy buttons once made; seeds at once when asked). The RSS tab included (`N` adds a feed there) |
 | `Ctrl+O` (`Cmd+O` on macOS) | Add `.torrent` files, through the Add dialog |
 | `Ctrl+M` | Add a magnet link or a link to a `.torrent` (the clipboard's, if it holds one) |
 | `Ctrl+V` | Add whatever magnet or torrent link is on the clipboard; the status bar says when there is one |
@@ -263,7 +263,7 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+B` / `Ctrl+Shift+B` | Focus the sidebar (All, then Status, Categories, Tags and Trackers, every entry with a count; arrows walk every section, `Space` makes the entry the section's choice, `Enter` chooses and returns to the list, `Esc` returns without choosing; `Left`/`Right` fold a section) / show or hide it |
 | `Alt+X` (`M-x`, as in Editora; Settings → General → Keyboard can make it `Ctrl+Shift+P`) | Command palette: every command, found by typing part of its name |
 | `Ctrl+Shift+F` | Search: the Search tab in place of the transfers, with the query focused. A category chip row and a provider chip row (`Tab` walks them, `Space` toggles), `Enter` asks every chosen provider at once and the results land as each answers; `Down` enters the results, `Enter` or a double-click opens the Add dialog for one, `Ctrl+C` copies its link, the context menu opens its detail page; `Esc` returns to the transfers |
-| `Ctrl+R` | RSS: the RSS tab in place of the transfers. Arrows walk the feeds and the articles (`Left`/`Right` between them, `Down` from the filter box into the articles), `Enter` or a double-click on an article with a torrent opens the Add dialog for it, `M` toggles read, `Shift+M` marks the feed read, `N` or `Ctrl+N` adds a feed, `F5` refreshes it (`Shift+F5` every feed), `Delete` in the feed list removes one after a confirm, `Ctrl+C` copies the torrent or the page link; the context menus mirror the keys and add Download (at once, with the defaults) and Create rule from title…; `Esc` returns to the transfers |
+| `Ctrl+R` | RSS: the RSS tab in place of the transfers. Arrows walk the feeds and the articles (`Left`/`Right` between them, `Down` from the filter box into the articles), `Enter` or a double-click on an article with a torrent opens the Add dialog for it, `M` toggles read, `Shift+M` marks the feed read, `N` adds a feed, `F5` refreshes it (`Shift+F5` every feed), `Delete` in the feed list removes one after a confirm, `Ctrl+C` copies the torrent or the page link; the context menus mirror the keys and add Download (at once, with the defaults) and Create rule from title…; `Esc` returns to the transfers |
 | `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Categories and tags (names, save paths, delete), Watch folders, Automation (a command per event with placeholders, desktop notifications), Search (Torznab providers), RSS (the refresh interval, the feeds, the auto-download switch and rules), Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
 | `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces, Speed (the selected torrent's graph, the same windows as the Statistics window's) |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
@@ -274,6 +274,8 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+Shift+R` / `Ctrl+Shift+A` | Force recheck / force reannounce |
 | `Ctrl+Shift+S` | Sequential download on or off |
 | `Ctrl+L` | Limits for the selection: download and upload caps, connections, upload slots, first and last pieces first, and a ratio or seeding-time limit of its own in place of the global one |
+| `Ctrl+Shift+Home` / `Ctrl+Shift+Up` / `Ctrl+Shift+Down` / `Ctrl+Shift+End` | Queue: move the selection to the top, up one, down one, to the bottom; the selected torrents keep their order among themselves (the Torrent and context menus hold them as a Queue submenu; the hidden Queue column shows the positions) |
+| `Ctrl+Shift+D` | Set Location: move the selection's files to another folder (typed or browsed, with the volume's free space); a file already at the destination is kept, never replaced, and a torrent still on its way through the incomplete folder gets the new destination instead of a move now. For a Transmission daemon the folder is a path on its machine |
 | `Ctrl+Shift+G` | Set the selection's category: one that exists, none, or a new one (the Torrent and context menus list them as a submenu) |
 | `Ctrl+T` | Edit the selection's tags: a checkbox per tag that exists, a field for new ones |
 | `Ctrl+C` / `Ctrl+Shift+H` / `Ctrl+Shift+C` | Copy name / info-hash / magnet link |
@@ -297,8 +299,8 @@ shows are remembered. The status bar's "Alt speed" switches the
 alternative speed limits by hand; the schedule in Settings switches them by the clock. The status bar shows the latest event; an error count appears there while
 there are errors, and a click on it opens the log.
 
-The list's columns (seventeen, from the header's ⋮ menu, Category and Tags among them) keep their
-order, widths and visibility in `settings.properties`.
+The list's columns (eighteen, from the header's ⋮ menu, Category, Tags and Queue among them) keep
+their order, widths and visibility in `settings.properties`.
 
 ## BitTorrent engine
 
@@ -391,8 +393,8 @@ scripts/render-icon.py            branding/torrenta-icon.svg → torrenta.png (P
   `torrent_info::rename_file`, and renaming through the handle after adding is confirmed by
   libtorrent's alerts yet a recheck never finds the files under their new names.
 - **A port test** in Settings → Connection: libtorrent has none, it needs an outside service.
-- **Queue moves, changing a torrent's location and renaming paths** for a Transmission daemon:
-  the RPC has them, the `Engine` interface does not yet.
+- **Renaming a torrent or its paths** for a Transmission daemon: the RPC has it, the `Engine`
+  interface does not yet.
 - **A first release.** The pipeline (JReleaser, Homebrew cask, winget) is in place and dry-run
   pending; the 1.0 criteria in [docs/ROADMAP.md](docs/ROADMAP.md) (a week of daily use on each
   platform, resume data proven across upgrades, signed installers) are what stands between the

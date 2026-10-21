@@ -692,6 +692,19 @@ public final class LibtorrentEngine implements Engine {
                 .connect_peer(new tcp_endpoint(Address.parseIp("127.0.0.1").swig(), port));
     }
 
+    /**
+     * Retries a failed peer connection after a second instead of libtorrent's minute, for the
+     * loopback tests: {@code connect_peer} only adds the address to the peer list, and an address
+     * whose last attempt failed is not dialled again for {@code min_reconnect_time}, so one early
+     * refusal would otherwise outlast any test deadline.
+     */
+    void reconnectQuicklyForTest() throws EngineException {
+        SettingsPack pack = new SettingsPack();
+        pack.setInteger(settings_pack.int_types.min_reconnect_time.swigValue(), 1);
+        pack.setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 3);
+        running().applySettings(pack);
+    }
+
     @Override
     public synchronized String category(String id) throws EngineException {
         return labelsOf(id).category();
@@ -1146,6 +1159,53 @@ public final class LibtorrentEngine implements Engine {
         TorrentHandle h = handle(id);
         if (sequential) h.setFlags(Flags.SEQUENTIAL_DOWNLOAD);
         else h.unsetFlags(Flags.SEQUENTIAL_DOWNLOAD);
+    }
+
+    @Override
+    public synchronized void queueMove(String id, QueueMove move) throws EngineException {
+        TorrentHandle h = handle(id);
+        switch (move) {
+            case TOP -> h.queuePositionTop();
+            case UP -> h.queuePositionUp();
+            case DOWN -> h.queuePositionDown();
+            case BOTTOM -> h.queuePositionBottom();
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>A torrent still on its way through the incomplete folder is not moved now: its
+     * destination in the {@code .storage} sidecar is rewritten, and {@code maybeMove} takes the
+     * files there when it completes, as it would have. Otherwise {@code move_storage} runs with
+     * {@code dont_replace} (a file already at the destination is kept and used), or with {@code
+     * reset_save_path} when the files are said to be there already, which rechecks them; the
+     * {@code storage_moved} alert then writes the resume data, so the new path survives a restart.
+     */
+    @Override
+    public synchronized void moveStorage(String id, String destination, boolean moveFiles) throws EngineException {
+        TorrentHandle h = handle(id);
+        if (destination == null || destination.isBlank()) throw new EngineException("No destination folder");
+        Path target;
+        try {
+            target = Path.of(destination.trim()).toAbsolutePath().normalize();
+        } catch (RuntimeException e) {
+            throw new EngineException("Not a folder path: " + destination, e);
+        }
+        TorrentStorage owed = storage.get(id);
+        if (owed != null && !owed.destination().isEmpty()) {
+            TorrentStatus status = h.status(StatusQuery.FLAGS);
+            if (!status.isFinished()) {
+                writeStorage(id, owed.withDestination(target.toString()));
+                String name = status.name();
+                if (name == null || name.isEmpty()) name = id;
+                emit(EngineEvent.info(id, name, name + " will be moved to " + target + " when it completes"));
+                return;
+            }
+        }
+        if (samePath(h.status(StatusQuery.FLAGS).swig().getSave_path(), target.toString())) return;
+        if (!moving.add(id)) throw new EngineException("Its files are being moved already");
+        h.moveStorage(target.toString(), moveFiles ? MoveFlags.DONT_REPLACE : MoveFlags.RESET_SAVE_PATH);
     }
 
     @Override

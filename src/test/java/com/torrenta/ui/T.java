@@ -44,6 +44,11 @@ final class T {
         return this;
     }
 
+    T id(String value) {
+        id = value;
+        return this;
+    }
+
     T progress(double p) {
         progress = p;
         done = (long) (size * p);

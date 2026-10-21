@@ -211,11 +211,12 @@ public final class TransmissionEngine implements Engine {
 
     /**
      * What a daemon of this RPC version can do, of the things the window offers. Sequential
-     * download arrived with RPC 18 (Transmission 4.1); the files count as local when the daemon
-     * is on this machine, so Open folder works against it. Pure.
+     * download arrived with RPC 18 (Transmission 4.1); queue moves and set-location are older than
+     * any daemon still running; the files count as local when the daemon is on this machine, so
+     * Open folder works against it. Pure.
      */
     static Capabilities capabilitiesFor(int rpcVersion, boolean loopback) {
-        EnumSet<Capability> has = EnumSet.of(Capability.BLOCKLIST_URL);
+        EnumSet<Capability> has = EnumSet.of(Capability.BLOCKLIST_URL, Capability.QUEUE_ORDER, Capability.MOVE_STORAGE);
         if (rpcVersion >= RPC_SEQUENTIAL) has.add(Capability.SEQUENTIAL_DOWNLOAD);
         if (loopback) has.add(Capability.LOCAL_FILES);
         return new Capabilities(has);
@@ -448,6 +449,36 @@ public final class TransmissionEngine implements Engine {
             throw new EngineException("This daemon (RPC " + rpcVersion + ") has no sequential download; 4.1 does");
         }
         set(id, Map.of("sequential_download", sequential));
+    }
+
+    @Override
+    public void queueMove(String id, QueueMove move) throws EngineException {
+        action("queue-move-" + move.name().toLowerCase(Locale.ROOT), id);
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>{@code torrent-set-location}: the daemon moves the files on its own time and answers at
+     * once, and its list has no word for "moving", so the row shows nothing in between; the next
+     * poll shows the new folder.
+     */
+    @Override
+    public void moveStorage(String id, String destination, boolean moveFiles) throws EngineException {
+        checkRunning();
+        if (destination == null || destination.isBlank()) throw new EngineException("No destination folder");
+        String name = nameOf(id);
+        Map<String, Object> args = new LinkedHashMap<>();
+        args.put("ids", List.of(id));
+        args.put("location", destination.trim());
+        args.put("move", moveFiles);
+        rpc.call("torrent-set-location", args);
+        emit(EngineEvent.info(
+                id,
+                name,
+                moveFiles
+                        ? "Moving " + name + " to " + destination.trim()
+                        : "Pointed " + name + " at " + destination.trim()));
     }
 
     private void set(String id, Map<String, Object> fields) throws EngineException {
