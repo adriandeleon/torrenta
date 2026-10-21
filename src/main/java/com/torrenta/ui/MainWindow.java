@@ -134,6 +134,14 @@ public final class MainWindow {
     private final CommandPalette palette;
     private final EventLog log = new EventLog();
     private final LogWindow logWindow;
+    private final StatisticsWindow statsWindow;
+    /** Whether the poll should read the engine's counters: only while the Statistics window shows. */
+    private volatile boolean statsWanted;
+    /** The session rates, one sample per poll, for the Statistics window's graph. */
+    private final SpeedHistory sessionHistory = new SpeedHistory();
+    /** The rates of every torrent that has been selected, by id, for the Speed tab; gone with the torrent. */
+    private final java.util.concurrent.ConcurrentMap<String, SpeedHistory> torrentHistories =
+            new java.util.concurrent.ConcurrentHashMap<>();
     /** What the status bar has said; the popup over it shows the history. */
     private final MessageLog messages = new MessageLog();
 
@@ -279,6 +287,10 @@ public final class MainWindow {
         palette =
                 new CommandPalette(host, this::focusList, shiftChord(KeyCode.P).getDisplayText());
         logWindow = new LogWindow(stage, log);
+        statsWindow = new StatisticsWindow(stage, settings.statsWindowSeconds(), this::rememberStatsWindow);
+        statsWindow.showingProperty().addListener((o, was, now) -> statsWanted = now);
+        detail.setSpeedWindow(settings.statsWindowSeconds());
+        detail.setOnSpeedWindowChanged(this::rememberStatsWindow);
         messagePopup = new MessageLogPopup(host, statusBar, messages, this::focusList);
         settingsWindow = new SettingsWindow(settings);
         settingsWindow.setOnShowDebugLog(this::showDebugLog);
@@ -326,6 +338,7 @@ public final class MainWindow {
         scene.getAccelerators().put(chord(KeyCode.F), this::focusFilter);
         scene.getAccelerators().put(shiftChord(KeyCode.P), () -> palette.show(commands));
         scene.getAccelerators().put(shiftChord(KeyCode.L), logWindow::show);
+        scene.getAccelerators().put(shiftChord(KeyCode.T), statsWindow::show);
         scene.getAccelerators().put(shiftChord(KeyCode.M), messagePopup::toggle);
         scene.getAccelerators().put(chord(KeyCode.V), this::addFromClipboard);
         scene.setOnDragOver(this::onDragOver);
@@ -642,6 +655,7 @@ public final class MainWindow {
         if (rssPane != null && rssPane.dialogScene() != null) return rssPane.dialogScene();
         if (settingsWindow.dialogScene() != null) return settingsWindow.dialogScene();
         if (settingsWindow.isShowing()) return settingsWindow.scene();
+        if (statsWindow.isShowing()) return statsWindow.scene();
         if (logWindow.isShowing()) return logWindow.scene();
         if (debugLogWindow != null && debugLogWindow.isShowing()) return debugLogWindow.scene();
         return stage.getScene();
@@ -669,6 +683,12 @@ public final class MainWindow {
             out.add("dialog=" + createDialog.title());
             out.addAll(createDialog.linesForCapture());
         }
+        // After the shot: the window and the tab have had their ticks by then.
+        if (statsWindow.isShowing()) {
+            out.add("stats=" + statsWindow.summaryForCapture());
+            out.add("stats-graph=" + statsWindow.graph().summaryForCapture());
+        }
+        if (detailWanted && detail.activeTab().equals("speed")) out.add("speed-tab=" + detail.speedSummaryForCapture());
         if (!settingsWindow.ruleMatchesForCapture().isEmpty()) {
             out.add("dialog=" + settingsWindow.dialogTitle());
             out.add("rule-matches=" + settingsWindow.ruleMatchesForCapture());
@@ -702,6 +722,8 @@ public final class MainWindow {
             table.getSelectionModel().selectAll();
         } else if (action.equals("event-log")) {
             logWindow.show();
+        } else if (action.equals("stats")) {
+            statsWindow.show();
         } else if (action.equals("message-log")) {
             messagePopup.show();
         } else if (action.startsWith("message-log:")) {
@@ -1651,6 +1673,19 @@ public final class MainWindow {
         }
         List<Torrent> snapshot = engine.torrents();
         Engine.Rates current = engine.rates();
+        long nowSeconds = System.currentTimeMillis() / 1000;
+        sessionHistory.add(nowSeconds, current.download(), current.upload());
+        if (!torrentHistories.isEmpty()) {
+            Set<String> present = new java.util.HashSet<>();
+            for (Torrent t : snapshot) {
+                present.add(t.id());
+                SpeedHistory h = torrentHistories.get(t.id());
+                if (h != null) h.add(nowSeconds, t.downloadRate(), t.uploadRate());
+            }
+            torrentHistories.keySet().retainAll(present);
+        }
+        // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
+        com.torrenta.engine.SessionStats stats = statsWanted ? engine.stats() : null;
         enforceShareLimits(snapshot);
         // The detail pane costs a status with the pieces bitfield; only for one shown torrent.
         String id = detailWanted ? detailId : null;
@@ -1666,13 +1701,16 @@ public final class MainWindow {
         pushTray(TrayStatus.of(snapshot, current));
         pushBadge(BadgeState.of(snapshot, current.download()));
         Platform.runLater(() -> {
-            rows.apply(snapshot, System.currentTimeMillis() / 1000);
+            rows.apply(snapshot, nowSeconds);
             refreshSidebar(snapshot);
             rates.setText(ratesText(current));
             if (detailWanted) {
-                if (shown != null && shown.general().id().equals(detailId)) detail.show(shown);
-                else if (detailId == null) detail.clear();
+                if (shown != null && shown.general().id().equals(detailId)) {
+                    detail.show(shown);
+                    detail.showSpeed(torrentHistories.get(detailId), nowSeconds);
+                } else if (detailId == null) detail.clear();
             }
+            if (stats != null) statsWindow.update(stats, sessionHistory, nowSeconds);
         });
     }
 
@@ -1719,6 +1757,14 @@ public final class MainWindow {
                 if (removed) forgetOverride(t.id());
             });
         }
+    }
+
+    /** FX thread. A graph's window chip was chosen: remembered, and the other graph follows. */
+    private void rememberStatsWindow(int seconds) {
+        settings.setStatsWindowSeconds(seconds);
+        settings.saveQuietly();
+        statsWindow.graph().setWindow(seconds);
+        detail.setSpeedWindow(seconds);
     }
 
     /** FX thread: a removed torrent takes its own share limit with it. */
@@ -2229,6 +2275,13 @@ public final class MainWindow {
                         always,
                         () -> logWindow.show()),
                 new Command(
+                        "statistics",
+                        "Statistics",
+                        null,
+                        shiftChord(KeyCode.T).getDisplayText(),
+                        always,
+                        () -> statsWindow.show()),
+                new Command(
                         "message-log",
                         "Messages",
                         null,
@@ -2386,6 +2439,7 @@ public final class MainWindow {
                         command("focus-sidebar").menuItem(),
                         command("select-all").menuItem(),
                         command("event-log").menuItem(),
+                        command("statistics").menuItem(),
                         command("message-log").menuItem(),
                         command("debug-log").menuItem(),
                         paletteItem);
@@ -2491,6 +2545,8 @@ public final class MainWindow {
                 c -> {
                     var selected = table.getSelectionModel().getSelectedItems();
                     detailId = selected.size() == 1 ? selected.get(0).id() : null;
+                    // The Speed tab's history starts with the first selection and is fed from the next poll.
+                    if (detailId != null) torrentHistories.computeIfAbsent(detailId, k -> new SpeedHistory());
                     if (detailId == null && detailWanted) detail.clear();
                 });
         detail.selectTab(settings.get(Settings.DETAIL_TAB, "general"));

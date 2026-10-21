@@ -715,3 +715,51 @@
 .rule-matches .list-cell {
     -fx-padding: 3 8 3 8;
 }
+
+/*
+ * The speed graphs (the Statistics window, the detail pane's Speed tab). The canvas cannot read
+ * the theme's variables, so the graph keeps a zero-sized swatch per colour and reads the
+ * background the theme gave it: download is the accent, upload the ladder the seeding rows use.
+ */
+.speed-graph-plot {
+    -fx-background-color: -color-bg-subtle;
+}
+
+.speed-graph-down {
+    -fx-background-color: -color-accent-fg;
+}
+
+.speed-graph-up {
+    -fx-background-color: ladder(-color-bg-default, #9aa2d4 49%, #4f58a0 50%);
+}
+
+.speed-graph-grid {
+    -fx-background-color: -color-border-default;
+}
+
+.speed-graph-text {
+    -fx-background-color: -color-fg-muted;
+}
+
+.speed-graph-legend-down {
+    -fx-text-fill: -color-accent-fg;
+}
+
+.speed-graph-legend-up {
+    -fx-text-fill: ladder(-color-bg-default, #9aa2d4 49%, #4f58a0 50%);
+}
+
+.speed-graph-legend {
+    -fx-font-size: 0.95em;
+}
+
+/* The Statistics window: sections of label/value pairs above the session's graph. */
+.stats-section {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-weight: bold;
+    -fx-padding: 6 0 2 0;
+}
+
+.stats-value {
+    -fx-text-fill: -color-fg-default;
+}

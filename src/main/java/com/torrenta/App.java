@@ -15,6 +15,7 @@ import com.torrenta.os.AwtUse;
 import com.torrenta.os.SingleInstance;
 import com.torrenta.store.ConfigDir;
 import com.torrenta.store.Settings;
+import com.torrenta.store.StatsStore;
 import com.torrenta.store.TorrentStore;
 import com.torrenta.ui.MainWindow;
 import com.torrenta.ui.Theme;
@@ -122,7 +123,8 @@ public final class App extends Application {
         engine = new LibtorrentEngine(
                 settings::downloadDir,
                 new TorrentStore(configDir.resolve(TorrentStore.FOLDER)),
-                settings.engineSettings());
+                settings.engineSettings(),
+                new StatsStore(configDir.resolve(StatsStore.FILE_NAME)));
         window.listenTo(engine);
         Thread starter = new Thread(
                 () -> {

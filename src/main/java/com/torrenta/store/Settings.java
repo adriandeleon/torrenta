@@ -58,6 +58,8 @@ public final class Settings {
 
     public static final String DETAIL_TAB = "detail.tab";
     public static final String DETAIL_DIVIDER = "detail.divider";
+    /** The speed graphs' span in seconds: 60, 600, 3600 or 86400; shared by the Statistics window and the Speed tab. */
+    public static final String STATS_WINDOW = "stats.window";
     /** Ask GitHub for a newer release after startup, at most once a day. */
     public static final String UPDATE_CHECK = "updates.check";
     /** Settings sync: machine-local, never synced themselves (see {@code SyncKeys}). */
@@ -353,6 +355,19 @@ public final class Settings {
 
     public void setSyncIntervalMinutes(int minutes) {
         properties.setProperty(SYNC_INTERVAL, String.valueOf(Math.clamp(minutes, 1, 1440)));
+    }
+
+    /** The speed graphs' window: the step at or above what the file says, ten minutes by default. */
+    public int statsWindowSeconds() {
+        int w = readInt(STATS_WINDOW, 600, 1, 86400);
+        if (w <= 60) return 60;
+        if (w <= 600) return 600;
+        if (w <= 3600) return 3600;
+        return 86400;
+    }
+
+    public void setStatsWindowSeconds(int seconds) {
+        properties.setProperty(STATS_WINDOW, String.valueOf(seconds));
     }
 
     /** Minutes between feed refreshes; 5 to 1440, 30 by default. */
