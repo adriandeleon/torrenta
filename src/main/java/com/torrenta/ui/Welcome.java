@@ -14,6 +14,7 @@ import javafx.scene.control.Button;
 import javafx.scene.control.ContentDisplay;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.layout.ColumnConstraints;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
@@ -35,12 +36,15 @@ import static com.torrenta.i18n.Messages.tr;
  * rules are {@link WelcomeText}; this only lays them out. Nothing here takes focus: the keys are the
  * way in, and a click on a key's row runs it for the mouse.
  */
-final class Welcome extends VBox {
+final class Welcome extends ScrollPane {
 
     /** One row of the key table: the chord as the menus show it, what it does, and the doing. */
     record Key(String chord, String text, Runnable run) {}
 
     private static final PseudoClass DRAGGING = PseudoClass.getPseudoClass("dragging");
+
+    /** The column itself; the scroll pane around it is for a window too short to hold it. */
+    private final VBox body = new VBox(24);
 
     private final VBox dropZone;
     private final List<Key> keys;
@@ -52,12 +56,20 @@ final class Welcome extends VBox {
     private String folder = "";
 
     Welcome(List<Key> keys, Runnable addClipboard, String addChord, Runnable changeFolder) {
-        super(24);
         this.keys = List.copyOf(keys);
         this.changeFolder = changeFolder;
-        getStyleClass().add("welcome");
-        setAlignment(Pos.CENTER);
-        setFillWidth(false);
+        // Centred while it fits; scrolled, top first, when the window (or a details pane beside
+        // or under the list) leaves it less room than it needs. Never sizes the split itself.
+        getStyleClass().add("welcome-scroll");
+        setFitToWidth(true);
+        setFitToHeight(true);
+        setFocusTraversable(false);
+        setHbarPolicy(ScrollBarPolicy.NEVER);
+        setMinSize(0, 0);
+        body.getStyleClass().add("welcome");
+        body.setAlignment(Pos.CENTER);
+        body.setFillWidth(false);
+        body.setMinHeight(Region.USE_PREF_SIZE);
 
         Label title = new Label(tr("welcome.title"));
         title.getStyleClass().add("welcome-title");
@@ -103,7 +115,8 @@ final class Welcome extends VBox {
         footer.getStyleClass().add("welcome-footer");
         footer.setMaxWidth(560);
 
-        getChildren().addAll(dropZone, offerCard, footer);
+        body.getChildren().addAll(dropZone, offerCard, footer);
+        setContent(body);
     }
 
     /** The clipboard's text as it is now; the card shows for a magnet or a link and hides otherwise. */
@@ -153,7 +166,7 @@ final class Welcome extends VBox {
 
     /** A panel under the drop zone (the window's "engine did not start" and its ways out). */
     void setProblem(Node problem) {
-        getChildren().add(1, problem);
+        body.getChildren().add(1, problem);
     }
 
     /** A folder on the engine's own machine: named, with no "change" (that is the daemon's setting). */

@@ -64,6 +64,10 @@ public final class Settings {
 
     public static final String DETAIL_TAB = "detail.tab";
     public static final String DETAIL_DIVIDER = "detail.divider";
+    /** Where the detail pane shows, {@code bottom} or {@code right}; kept while it is collapsed. */
+    public static final String DETAIL_SIDE = "detail.side";
+    /** The divider while the pane is on the right: the list's share of the width. */
+    public static final String DETAIL_DIVIDER_RIGHT = "detail.dividerRight";
     /** The speed graphs' span in seconds: 60, 600, 3600 or 86400; shared by the Statistics window and the Speed tab. */
     public static final String STATS_WINDOW = "stats.window";
     /** Ask GitHub for a newer release after startup, at most once a day. */
@@ -79,6 +83,11 @@ public final class Settings {
     public static final String UI_TOOLBAR = "ui.toolbar";
     /** Whether the sidebar of filters shows beside the list; View → Sidebar flips it. */
     public static final String UI_SIDEBAR = "ui.sidebar";
+    /**
+     * The sidebar's side, {@code left} or {@code right}; kept while it is hidden. Not under
+     * {@code ui.sidebar.}, which is the sidebar's choices and never syncs: this is a preference.
+     */
+    public static final String UI_SIDEBAR_SIDE = "ui.sidebarSide";
     /**
      * The sidebar's choices, one key per section ({@code ui.sidebar.status}, {@code .category},
      * {@code .tag}, {@code .tracker}), each as {@code ui.SidebarFilter} formats it; this machine's.
@@ -568,6 +577,32 @@ public final class Settings {
 
     public void setSidebar(boolean shown) {
         properties.setProperty(UI_SIDEBAR, String.valueOf(shown));
+    }
+
+    /** The sidebar's side as written, trimmed; empty when unset. The UI maps it and falls back. */
+    public String sidebarSide() {
+        return properties.getProperty(UI_SIDEBAR_SIDE, "").trim();
+    }
+
+    public void setSidebarSide(String side) {
+        properties.setProperty(UI_SIDEBAR_SIDE, side);
+    }
+
+    public boolean detailVisible() {
+        return readBoolean(DETAIL_VISIBLE, true);
+    }
+
+    public void setDetailVisible(boolean shown) {
+        properties.setProperty(DETAIL_VISIBLE, String.valueOf(shown));
+    }
+
+    /** The detail pane's place as written, trimmed; empty when unset. The UI maps it and falls back. */
+    public String detailSide() {
+        return properties.getProperty(DETAIL_SIDE, "").trim();
+    }
+
+    public void setDetailSide(String side) {
+        properties.setProperty(DETAIL_SIDE, side);
     }
 
     /**

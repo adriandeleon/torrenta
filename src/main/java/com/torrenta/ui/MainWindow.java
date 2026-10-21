@@ -247,7 +247,18 @@ public final class MainWindow {
     private SettingsSync sync;
     private final Label syncBadge = new Label(tr("status.syncProblem"));
     private Alert aboutDialog;
+    /** On the sidebar when it sits on the right: the rule faces the list. */
+    private static final javafx.css.PseudoClass BESIDE = javafx.css.PseudoClass.getPseudoClass("right");
+
     private SplitPane split;
+    /** The sidebar's frame: it sits on this pane's left or right. */
+    private BorderPane transfersFrame;
+    /** Where the detail pane is now; {@link #setDetailPlace} moves it. */
+    private DetailPlace detailPlace = DetailPlace.HIDDEN;
+
+    private CheckMenuItem detailItem;
+    private CheckMenuItem detailRightItem;
+    private CheckMenuItem sidebarRightItem;
     private volatile String detailId;
     private volatile boolean detailWanted;
     /** The global share limit as the poll thread applies it; refreshed with the engine settings. */
@@ -913,6 +924,12 @@ public final class MainWindow {
         } else if (action.startsWith("settings:")) {
             settingsWindow.show(stage);
             settingsWindow.searchForCapture(action.substring("settings:".length()));
+        } else if (action.startsWith("settings-layout:")) {
+            // settings-layout:<sidebar>/<detail>, e.g. right/hidden: the General page's two rows.
+            String[] ids = action.substring("settings-layout:".length()).split("/", 2);
+            settingsWindow.show(stage);
+            settingsWindow.chooseLayoutForCapture(ids[0], ids.length > 1 ? ids[1] : "");
+            settingsWindow.hideForCapture();
         } else if (action.startsWith("settings-profile-add")) {
             // settings-profile-add, settings-profile-add:<url>; the Add Profile dialog, URL filled in
             settingsWindow.show(stage);
@@ -1057,7 +1074,7 @@ public final class MainWindow {
         } else if (action.equals("select-first")) {
             table.getSelectionModel().clearAndSelect(0);
         } else if (action.startsWith("detail:")) {
-            setDetailVisible(true);
+            showDetail();
             detail.selectTab(action.substring("detail:".length()));
         } else if (action.startsWith("menu:")) {
             // Open a menu of the bar by its title (menu:File); the PNG is then of the popup.
@@ -1135,6 +1152,8 @@ public final class MainWindow {
             StatusLine line = StatusLine.of(t, row.quietSeconds(), shareLimitFor(t));
             System.out.println("capture: row=" + line.state().glyph() + " " + t.name() + " | " + line.text());
         }
+        System.out.println("capture: layout=sidebar:"
+                + SidebarPlace.of(sidebar.isVisible(), settings.sidebarSide()).id() + " detail:" + detailPlace.id());
         if (detailWanted) System.out.println("capture: detail=" + detail.summary());
         if (settingsWindow.isShowing())
             System.out.println("capture: settings=" + settingsWindow.visibleRowsForCapture());
@@ -2253,22 +2272,62 @@ public final class MainWindow {
         settings.saveQuietly();
     }
 
-    private void setDetailVisible(boolean visible) {
-        detailWanted = visible;
-        detail.setVisible(visible);
-        detail.setManaged(visible);
-        if (visible) {
+    /**
+     * Puts the detail pane under the list, beside it, or away, and remembers it: whether it shows
+     * and where are two keys, so a collapse keeps the place. The divider of the place being left is
+     * saved first, and the new place's comes back.
+     */
+    private void setDetailPlace(DetailPlace place) {
+        rememberDivider();
+        detailPlace = place;
+        detailWanted = place.shown();
+        detail.setVisible(place.shown());
+        detail.setManaged(place.shown());
+        detail.setBeside(place.beside());
+        split.setOrientation(
+                place.beside() ? javafx.geometry.Orientation.HORIZONTAL : javafx.geometry.Orientation.VERTICAL);
+        if (place.shown()) {
             if (!split.getItems().contains(detail)) split.getItems().add(detail);
             split.setDividerPositions(dividerFromSettings());
+            settings.setDetailSide(place.id());
         } else {
             split.getItems().remove(detail);
         }
-        settings.set(Settings.DETAIL_VISIBLE, String.valueOf(visible));
+        settings.setDetailVisible(place.shown());
         settings.saveQuietly();
+        if (detailItem != null) {
+            detailItem.setSelected(place.shown());
+            detailRightItem.setSelected(
+                    DetailPlace.of(true, settings.detailSide()).beside());
+        }
     }
 
+    /** The place the settings describe, applied: at start, and when Settings changes it. */
+    private void applyDetailPlace() {
+        DetailPlace wanted = DetailPlace.of(settings.detailVisible(), settings.detailSide());
+        if (wanted != detailPlace) setDetailPlace(wanted);
+    }
+
+    private void showDetail() {
+        if (!detailPlace.shown()) setDetailPlace(DetailPlace.of(true, settings.detailSide()));
+    }
+
+    private void toggleDetail() {
+        setDetailPlace(detailPlace.shown() ? DetailPlace.HIDDEN : DetailPlace.of(true, settings.detailSide()));
+    }
+
+    /** Under the list or beside it; a collapsed pane comes back in the other place. */
+    private void switchDetailSide() {
+        setDetailPlace(DetailPlace.of(true, settings.detailSide()).otherSide());
+    }
+
+    private static String dividerKey(DetailPlace place) {
+        return place.beside() ? Settings.DETAIL_DIVIDER_RIGHT : Settings.DETAIL_DIVIDER;
+    }
+
+    /** The saved divider of the place the pane is in; see {@link DetailSplit} for what is not restored. */
     private double dividerFromSettings() {
-        return DetailSplit.position(settings.get(Settings.DETAIL_DIVIDER, null));
+        return detailPlace.divider(settings.get(dividerKey(detailPlace), null));
     }
 
     /**
@@ -2279,7 +2338,7 @@ public final class MainWindow {
         if (split.getDividers().isEmpty() || !detailWanted) return;
         if (!rows.list().isEmpty()) {
             settings.set(
-                    Settings.DETAIL_DIVIDER,
+                    dividerKey(detailPlace),
                     String.format(java.util.Locale.ROOT, "%.3f", split.getDividerPositions()[0]));
         }
         settings.set(Settings.DETAIL_TAB, detail.activeTab());
@@ -2646,6 +2705,36 @@ public final class MainWindow {
         filtered.setPredicate(rowFilter(omnibox.query(), sidebarSelection));
     }
 
+    /**
+     * Puts the sidebar on the left of the transfers or their right; the rule beside it moves to
+     * the side that faces the list. Hiding it is {@link #setSidebarVisible}, and keeps the side.
+     */
+    private void placeSidebar(SidebarPlace side) {
+        boolean right = side == SidebarPlace.RIGHT;
+        // Out of both slots first: a node in one slot cannot be put in the other.
+        transfersFrame.setLeft(null);
+        transfersFrame.setRight(null);
+        if (right) transfersFrame.setRight(sidebar);
+        else transfersFrame.setLeft(sidebar);
+        sidebar.pseudoClassStateChanged(BESIDE, right);
+        if (sidebarRightItem != null) sidebarRightItem.setSelected(right);
+    }
+
+    /** The side the settings name, applied; and whether it shows, when Settings changed that. */
+    private void applySidebarPlace() {
+        placeSidebar(SidebarPlace.of(true, settings.sidebarSide()));
+        if (sidebar.isVisible() != settings.sidebar()) sidebar.setVisible(settings.sidebar());
+    }
+
+    /** Left to right and back; a hidden sidebar shows, on the new side. */
+    private void switchSidebarSide() {
+        SidebarPlace next = SidebarPlace.of(true, settings.sidebarSide()).otherSide();
+        settings.setSidebarSide(next.id());
+        settings.saveQuietly();
+        placeSidebar(next);
+        if (!sidebar.isVisible()) setSidebarVisible(true);
+    }
+
     private void setSidebarVisible(boolean visible) {
         sidebar.setVisible(visible);
     }
@@ -2933,7 +3022,16 @@ public final class MainWindow {
                         chord(KeyCode.B),
                         null,
                         always,
-                        this::focusSidebar)));
+                        this::focusSidebar),
+                new Command("sidebar-side", tr("command.sidebarSide"), null, null, always, this::switchSidebarSide),
+                new Command(
+                        "toggle-detail",
+                        tr("command.toggleDetail"),
+                        shiftChord(KeyCode.D),
+                        null,
+                        always,
+                        this::toggleDetail),
+                new Command("detail-side", tr("command.detailSide"), null, null, always, this::switchDetailSide)));
         // One "Show: …" per status, and Show: All, so a filter is picked without the mouse.
         all.add(new Command(
                 "show-all", tr("command.showAll"), null, null, always, () -> chooseFilter(SidebarFilter.ALL)));
@@ -3131,6 +3229,17 @@ public final class MainWindow {
         sidebarItem.setGraphic(menuIcon(Icons.sidebar()));
         sidebarItem.setAccelerator(shiftChord(KeyCode.B));
         sidebarItem.selectedProperty().bindBidirectional(sidebar.visibleProperty());
+        sidebarRightItem = new CheckMenuItem(tr("menu.view.sidebarRight"));
+        sidebarRightItem.setSelected(SidebarPlace.of(true, settings.sidebarSide()) == SidebarPlace.RIGHT);
+        sidebarRightItem.setOnAction(e -> switchSidebarSide());
+        detailItem = new CheckMenuItem(tr("menu.view.detail"));
+        detailItem.setGraphic(menuIcon(Icons.detailPane()));
+        detailItem.setAccelerator(shiftChord(KeyCode.D));
+        detailItem.setSelected(detailPlace.shown());
+        detailItem.setOnAction(e -> toggleDetail());
+        detailRightItem = new CheckMenuItem(tr("menu.view.detailRight"));
+        detailRightItem.setSelected(DetailPlace.of(true, settings.detailSide()).beside());
+        detailRightItem.setOnAction(e -> switchDetailSide());
         for (Density d : Density.values()) {
             javafx.scene.control.RadioMenuItem item =
                     new javafx.scene.control.RadioMenuItem(tr("menu.view.densityRows", d.toString()));
@@ -3145,6 +3254,9 @@ public final class MainWindow {
                 .addAll(
                         toolbarItem,
                         sidebarItem,
+                        sidebarRightItem,
+                        detailItem,
+                        detailRightItem,
                         new SeparatorMenuItem(),
                         densityItems.get(Density.COMFORTABLE),
                         densityItems.get(Density.COMPACT),
@@ -3263,9 +3375,18 @@ public final class MainWindow {
             if (now && !filter.isFocused() && !searchShowing() && !rssShowing()) table.requestFocus();
         });
         centre = new StackPane(table);
-        split = new SplitPane(centre);
-        split.setOrientation(javafx.geometry.Orientation.VERTICAL);
-        VBox.setVgrow(split, Priority.ALWAYS);
+        // The filter bar heads the list's side of the split, so a detail pane on the right runs
+        // the full height beside both, and one at the bottom sits under both as it always did.
+        VBox listColumn = new VBox(buildFilterBar(), centre);
+        VBox.setVgrow(centre, Priority.ALWAYS);
+        split = new SplitPane(listColumn);
+        split.getStyleClass().add("transfers-split");
+        split.getDividers().addListener((javafx.collections.ListChangeListener<SplitPane.Divider>) c -> {
+            while (c.next()) {
+                for (SplitPane.Divider d : c.getAddedSubList())
+                    d.positionProperty().addListener(o -> rememberDivider());
+            }
+        });
 
         // The pane follows the selection: one torrent shows it, anything else clears it.
         table.getSelectionModel().getSelectedItems().addListener((javafx.collections.ListChangeListener<TorrentRow>)
@@ -3301,13 +3422,10 @@ public final class MainWindow {
             String id = detailId;
             if (id != null) onTorrent("status.reannounced", id, (e, t) -> e.reannounce(t));
         });
-        Platform.runLater(() -> {
-            setDetailVisible(Boolean.parseBoolean(settings.get(Settings.DETAIL_VISIBLE, "true")));
-            split.getDividers().forEach(d -> d.positionProperty().addListener(o -> rememberDivider()));
-        });
-        VBox listAndDetail = new VBox(buildFilterBar(), split);
-        // The sidebar runs the full height on the left of the filter bar, the list and the detail
-        // pane; hidden and unmanaged together, so View → Sidebar gives the width back to the list.
+        Platform.runLater(this::applyDetailPlace);
+        // The sidebar runs the full height beside the filter bar, the list and the detail pane, on
+        // the side the settings name; hidden and unmanaged together, so View → Sidebar gives the
+        // width back to the list.
         sidebar = new Sidebar(this::onSidebarChoice, this::onSidebarCollapse, () -> table.requestFocus());
         sidebar.managedProperty().bind(sidebar.visibleProperty());
         sidebar.setVisible(settings.sidebar());
@@ -3327,14 +3445,14 @@ public final class MainWindow {
                 settings.sidebarChoice("tracker"));
         sidebar.select(sidebarSelection);
         applyFilters();
-        BorderPane centreWithSidebar = new BorderPane(listAndDetail);
-        centreWithSidebar.setLeft(sidebar);
-        transfersView = centreWithSidebar;
+        transfersFrame = new BorderPane(split);
+        placeSidebar(SidebarPlace.of(true, settings.sidebarSide()));
+        transfersView = transfersFrame;
         // The Search tab shares the centre with the transfers: one is shown and managed, the
         // other neither, so the transfers look exactly as they did while Search is away.
         searchPane = new SearchPane(new SearchHost(), settings);
         rssPane = new RssPane(new RssHost(), rss, settings);
-        StackPane centre2 = new StackPane(centreWithSidebar, searchPane, rssPane);
+        StackPane centre2 = new StackPane(transfersFrame, searchPane, rssPane);
         VBox.setVgrow(centre2, Priority.ALWAYS);
         return new VBox(centre2);
     }
@@ -3828,6 +3946,8 @@ public final class MainWindow {
     /** Everything Settings → Appearance drives in this window. */
     private void applyAppearance() {
         applyStateColors();
+        applySidebarPlace();
+        applyDetailPlace();
         applyDensity(Density.byId(settings.density(), Density.DEFAULT));
         applyWindowStyle();
         applyPaletteKey();
@@ -4112,6 +4232,7 @@ public final class MainWindow {
         // The welcome never sizes the split: its height would push the divider down (see
         // DetailSplit). The list appearing puts the saved position back.
         welcome.setMinHeight(0);
+        welcome.setMinWidth(0); // and its width, with the pane beside the list
         welcome.visibleProperty().addListener((o, was, now) -> {
             if (!now && detailWanted && !split.getDividers().isEmpty())
                 split.setDividerPositions(dividerFromSettings());

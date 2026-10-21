@@ -25,12 +25,17 @@ final class DetailSplit {
 
     /** The saved position as a fraction of the split, or {@link #DEFAULT} for none or a bad one. */
     static double position(String saved) {
-        if (saved == null) return DEFAULT;
+        return position(saved, DEFAULT);
+    }
+
+    /** The same with another fallback: the pane beside the list has a default of its own. */
+    static double position(String saved, double fallback) {
+        if (saved == null) return fallback;
         try {
             double d = Double.parseDouble(saved.trim());
-            return d > MIN && d < MAX ? d : DEFAULT;
+            return d > MIN && d < MAX ? d : fallback;
         } catch (NumberFormatException e) {
-            return DEFAULT;
+            return fallback;
         }
     }
 }
