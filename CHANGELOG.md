@@ -26,6 +26,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **The status bar keeps what it said.** A click on the status text, `Ctrl+Shift+M` or View →
+  Messages shows this session's status lines newest first, each with its time, warnings and
+  errors in colour; a filter box leads the list, Copy takes the selected lines or all of them,
+  Esc closes. The line a torrent finishing replaced is no longer gone. Editora's message log.
+- **A debug log for bug reports.** View → Debug Log (also Settings → General → Diagnostics)
+  shows every warning and error the application logged this session and every uncaught
+  exception, with its stack trace, in a window with Copy; the same lines are written to
+  `torrenta-session.log` beside the settings, truncated each run, so a crash leaves its story
+  behind. A packaged app has no console; this is where its stderr went. Termina's.
 - **The Create Torrent dialog** (`Ctrl+N`, File → New Torrent…, the toolbar's page glyph), the
   third step of the RSS, creation and statistics milestone: a file or folder (browsed, typed or
   dropped on the dialog), hybrid, v1-only or v2-only, a piece size from 16 KiB to 32 MiB or

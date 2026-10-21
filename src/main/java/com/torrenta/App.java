@@ -54,6 +54,9 @@ public final class App extends Application {
         early.load();
         boolean awtTray = Trays.usesAwt(early.tray(), System.getProperty("os.name"));
         System.setProperty("java.awt.headless", String.valueOf(!awtTray));
+        // Before the toolkit: a packaged app has no console, so whatever is logged or thrown from
+        // here on is kept for the Debug Log window and the session file.
+        com.torrenta.ui.DebugLog.install();
         launch(args);
     }
 
@@ -68,6 +71,7 @@ public final class App extends Application {
         Path configDir = ConfigDir.resolve(cli.configDir());
         Settings settings = new Settings(configDir.resolve(Settings.FILE_NAME));
         settings.load();
+        com.torrenta.ui.DebugLog.attachFile(configDir);
 
         // Applied before any window is built, so the first frame is already themed.
         Application.setUserAgentStylesheet(

@@ -36,6 +36,12 @@ final class DevCapture {
     static final String DELAY_PROPERTY = "torrenta.captureAfterMs";
     /** Comma-separated window actions run halfway through the delay; see MainWindow.runForCapture. */
     static final String ACTION_PROPERTY = "torrenta.captureAction";
+    /**
+     * {@code -Dtorrenta.captureLogProbe=true} pushes a warning and an uncaught exception through
+     * the real logging path before the shot, to check the debug log is capturing rather than
+     * merely present.
+     */
+    static final String LOG_PROBE_PROPERTY = "torrenta.captureLogProbe";
 
     private DevCapture() {}
 
@@ -117,5 +123,28 @@ final class DevCapture {
         System.out.println("capture: showing=" + stage.isShowing());
         // What a dialog opened on a later pulse than the action shows now, for the hook to read.
         for (String line : window.lateLinesForCapture()) System.out.println("capture: " + line);
+        if (Boolean.getBoolean(LOG_PROBE_PROPERTY)) probeDebugLog();
+    }
+
+    private static void probeDebugLog() {
+        java.util.logging.Logger.getLogger("com.torrenta.probe.Fake")
+                .log(java.util.logging.Level.WARNING, "probe warning", new IllegalStateException("probe cause"));
+        Thread thread = new Thread(
+                () -> {
+                    throw new IllegalArgumentException("probe uncaught");
+                },
+                "probe-thread");
+        thread.start();
+        try {
+            thread.join(1000);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        String captured = com.torrenta.ui.DebugLog.text();
+        System.out.println("capture: debug-log chars=" + captured.length()
+                + " warning=" + captured.contains("probe warning")
+                + " cause=" + captured.contains("probe cause")
+                + " uncaught=" + captured.contains("probe uncaught")
+                + " file=" + com.torrenta.ui.DebugLog.file());
     }
 }
