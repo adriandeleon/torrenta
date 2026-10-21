@@ -233,9 +233,8 @@ public final class SingleInstance implements AutoCloseable {
                     LOG.log(System.Logger.Level.INFO, "Refused a connection on the instance port");
                     continue; // no answer: the sender treats silence as nobody home
                 }
-                // Taken in (queued, or handed to the window) before the answer: once the sender
-                // reads "ok" it may report the hand-off done, and the batch must be here by then.
-                // The window's handler only posts to the FX thread, so the sender waits no longer.
+                // Queued (or handed to the window) before the answer goes out: the sender returns
+                // on the answer, and whoever drains the queue right after must find the batch.
                 deliver(message.get().inputs());
                 OutputStream out = socket.getOutputStream();
                 out.write((InstanceMessage.OK + "\n").getBytes(StandardCharsets.UTF_8));

@@ -14,7 +14,7 @@
 
 A keyboard-first, cross-platform BitTorrent client built on JavaFX.
 
-Status: **early**. A themed window with a menu bar, an icon toolbar, a torrent list, a status bar that keeps its history, an event log, a debug log,
+Status: **feature-complete against the roadmap (0.2 through 0.9), not yet released**. A themed window with a menu bar, an icon toolbar, a torrent list, a status bar that keeps its history, an event log, a debug log,
 on a real engine: libtorrent, through [libtorrent4j](https://github.com/aldenml/libtorrent4j).
 Torrents arrive from a file, a magnet link, a URL, a drop or the clipboard through an Add dialog
 (file selection and priorities, save path with what the torrent leaves free, category, tags, stop
@@ -387,10 +387,16 @@ scripts/render-icon.py            branding/torrenta-icon.svg → torrenta.png (P
 
 ## Not done
 
-Add-torrent and add-magnet dialogs (the chords only say so in the status bar; pass inputs on the
-command line), pause/resume/remove in the window, speed limits, a settings window, per-torrent
-detail (files, peers, trackers), a native app image (`-Pdist`, to be taken from Termina, plus the
-native library in the image), installers, releases. The order is in [docs/ROADMAP.md](docs/ROADMAP.md).
+- **Content layout without a root folder** in the Add dialog: libtorrent4j 2.1.0-39 has no
+  `torrent_info::rename_file`, and renaming through the handle after adding is confirmed by
+  libtorrent's alerts yet a recheck never finds the files under their new names.
+- **A port test** in Settings → Connection: libtorrent has none, it needs an outside service.
+- **Queue moves, changing a torrent's location and renaming paths** for a Transmission daemon:
+  the RPC has them, the `Engine` interface does not yet.
+- **A first release.** The pipeline (JReleaser, Homebrew cask, winget) is in place and dry-run
+  pending; the 1.0 criteria in [docs/ROADMAP.md](docs/ROADMAP.md) (a week of daily use on each
+  platform, resume data proven across upgrades, signed installers) are what stands between the
+  code and a tag.
 
 ## License
 
