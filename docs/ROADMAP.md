@@ -174,9 +174,8 @@ The point at which Torrenta can be left running.
    file; `TorrentStore` as the one owner of what is on disk; `--config-dir`.
 2. **Stable table** — done. Rows keyed by info-hash and updated in place; selection, sort and
    scroll survive a tick. Column chooser, column order and widths remembered. Filter box.
-3. **Actions and chords** — done, except first/last piece first, which libtorrent has no flag
-   for (qBittorrent raises the priority of each file's edge pieces itself); it moves to 0.4 with the
-   per-torrent limits dialog. Pause, resume, force resume, remove, remove with data, recheck,
+3. **Actions and chords** — done. First/last piece first has no libtorrent flag; it landed with
+   0.4's per-torrent limits dialog (#24), raising each file's edge pieces as qBittorrent does. Pause, resume, force resume, remove, remove with data, recheck,
    reannounce, sequential, copy name/hash/magnet, open folder. Context menu, menu bar, command
    palette. Multi-select.
 4. **Engine alerts** — done. libtorrent alerts become engine-neutral `EngineEvent`s: added,
