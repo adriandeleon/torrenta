@@ -125,9 +125,11 @@ public final class MainWindow {
     private final TextField filter = new TextField();
     /** The omnibox as a value: chips and text; the field and the chip row draw it. */
     private Omnibox omnibox = Omnibox.EMPTY;
+
     private final HBox chipRow = new HBox(4);
     /** Set while the field's text is being written from the value, so the listener stays quiet. */
     private boolean settingFilter;
+
     private ToolBar toolbar;
     private final StackPane host = new StackPane();
     private final CommandPalette palette;
@@ -2616,7 +2618,8 @@ public final class MainWindow {
 
     /** Escape on the list peels one layer: the filter first, then the selection. */
     private boolean escapeOnList() {
-        return switch (Actions.escape(!omnibox.isEmpty(), !table.getSelectionModel().isEmpty())) {
+        return switch (Actions.escape(
+                !omnibox.isEmpty(), !table.getSelectionModel().isEmpty())) {
             case CLEAR_FILTER -> {
                 setOmnibox(Omnibox.EMPTY);
                 yield true;
