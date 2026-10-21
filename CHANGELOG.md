@@ -5,6 +5,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Changed
+
+- **A magnet added from the Add dialog starts with the peers its file-list fetch found**, both
+  with "Add now, pick files when ready" and after the files arrived, instead of looking for the
+  swarm again from nothing.
+
 ### Fixed
 
 - **A crash at quit with a torrent in the list** (exit 139, no error file, every few runs): the

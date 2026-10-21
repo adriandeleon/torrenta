@@ -55,6 +55,7 @@ import org.libtorrent4j.SessionManager;
 import org.libtorrent4j.SessionParams;
 import org.libtorrent4j.SettingsPack;
 import org.libtorrent4j.StorageMode;
+import org.libtorrent4j.TcpEndpoint;
 import org.libtorrent4j.TorrentFlags;
 import org.libtorrent4j.TorrentHandle;
 import org.libtorrent4j.TorrentInfo;
@@ -69,6 +70,7 @@ import org.libtorrent4j.alerts.FileRenameFailedAlert;
 import org.libtorrent4j.alerts.FileRenamedAlert;
 import org.libtorrent4j.alerts.ListenFailedAlert;
 import org.libtorrent4j.alerts.ListenSucceededAlert;
+import org.libtorrent4j.alerts.PeerConnectAlert;
 import org.libtorrent4j.alerts.PortmapAlert;
 import org.libtorrent4j.alerts.PortmapErrorAlert;
 import org.libtorrent4j.alerts.SaveResumeDataAlert;
@@ -81,6 +83,7 @@ import org.libtorrent4j.alerts.TrackerAlert;
 import org.libtorrent4j.alerts.TrackerErrorAlert;
 import org.libtorrent4j.alerts.TrackerWarningAlert;
 import org.libtorrent4j.swig.add_torrent_params;
+import org.libtorrent4j.swig.address;
 import org.libtorrent4j.swig.announce_entry;
 import org.libtorrent4j.swig.announce_entry_vector;
 import org.libtorrent4j.swig.error_code;
@@ -88,6 +91,7 @@ import org.libtorrent4j.swig.info_hash_t;
 import org.libtorrent4j.swig.ip_filter;
 import org.libtorrent4j.swig.libtorrent;
 import org.libtorrent4j.swig.load_torrent_limits;
+import org.libtorrent4j.swig.peer_flags_t;
 import org.libtorrent4j.swig.peer_info;
 import org.libtorrent4j.swig.peer_info_vector;
 import org.libtorrent4j.swig.resume_data_flags_t;
@@ -96,6 +100,7 @@ import org.libtorrent4j.swig.settings_pack;
 import org.libtorrent4j.swig.sha1_hash;
 import org.libtorrent4j.swig.status_flags_t;
 import org.libtorrent4j.swig.tcp_endpoint;
+import org.libtorrent4j.swig.tcp_endpoint_vector;
 import org.libtorrent4j.swig.torrent_flags_t;
 import org.libtorrent4j.swig.torrent_handle;
 import org.libtorrent4j.swig.torrent_handle_vector;
@@ -132,6 +137,9 @@ public final class LibtorrentEngine implements Engine {
 
     private static final long PERIODIC_FLUSH_SECONDS = 120;
     private static final long STOP_FLUSH_TIMEOUT_MS = 5000;
+
+    /** Peers a fetch hands to its torrent at most; libtorrent's own peer list does the rest. */
+    private static final int MAX_HANDED_OVER = 50;
 
     /*
      * Every public method that reaches the session is synchronized, and so is stop(): a call in
@@ -373,6 +381,18 @@ public final class LibtorrentEngine implements Engine {
 
     @Override
     public synchronized Torrent add(AddRequest request) throws EngineException {
+        return add(request, (Fetch) null);
+    }
+
+    @Override
+    public synchronized Torrent add(AddRequest request, MetadataFetch from) throws EngineException {
+        if (!(from instanceof Fetch fetch)) return Engine.super.add(request, from);
+        fetch.cancel();
+        return add(request, fetch);
+    }
+
+    /** {@code from}: an ended fetch whose peers the torrent starts with, if it is the same one. */
+    private Torrent add(AddRequest request, Fetch from) throws EngineException {
         SessionManager s = running();
         AddTorrentParams params;
         TorrentInfo info = null;
@@ -425,9 +445,21 @@ public final class LibtorrentEngine implements Engine {
         }
 
         String id = params.getInfoHashes().getBest().toHex();
+        String v1 =
+                params.getInfoHashes().hasV1() ? params.getInfoHashes().getV1().toHex() : id;
         endedFetches.remove(id);
-        if (params.getInfoHashes().hasV1())
-            endedFetches.remove(params.getInfoHashes().getV1().toHex());
+        endedFetches.remove(v1);
+        // The fetch is keyed by the link's hash: the v1 one for a v1 link of a hybrid torrent.
+        tcp_endpoint_vector known = null;
+        if (from != null && (from.id.equals(id) || from.id.equals(v1)) && !from.found.isEmpty()) {
+            known = new tcp_endpoint_vector();
+            for (Endpoint peer : from.found) {
+                error_code bad = new error_code();
+                address ip = address.from_string(peer.address(), bad);
+                if (bad.value() == 0) known.add(new tcp_endpoint(ip, peer.port()));
+            }
+            params.swig().setPeers(known);
+        }
         if (info == null && request.stopCondition() == AddRequest.StopCondition.METADATA_RECEIVED)
             stopAfterMetadata.add(id);
         rememberTrackers(id, params.getTrackers());
@@ -436,6 +468,7 @@ public final class LibtorrentEngine implements Engine {
         // add_torrent_alert that follows is what writes the first resume data.
         error_code ec = new error_code();
         torrent_handle raw = s.swig().add_torrent(params.swig(), ec);
+        Reference.reachabilityFence(known);
         if (ec.value() != 0) {
             stopAfterMetadata.remove(id);
             throw new EngineException(ec.message());
@@ -585,6 +618,18 @@ public final class LibtorrentEngine implements Engine {
         return running().swig().listen_port();
     }
 
+    /** Tells a fetch about a peer on this machine, for the test that hands its peers over. */
+    void connectFetchForTest(MetadataFetch fetch, int port) throws EngineException {
+        TorrentHandle h = ((Fetch) fetch).handle(running());
+        if (h == null) throw new EngineException("The fetch has ended");
+        h.swig().connect_peer(new tcp_endpoint(Address.parseIp("127.0.0.1").swig(), port));
+    }
+
+    /** How many of the torrent's peers it dialled itself, for the same test. */
+    int dialledPeersForTest(String id) throws EngineException {
+        return dialledPeers(handle(id)).size();
+    }
+
     /** Tells the torrent about a peer on this machine, for the same test. */
     void connectPeerForTest(String id, int port) throws EngineException {
         handle(id)
@@ -707,18 +752,34 @@ public final class LibtorrentEngine implements Engine {
         private final String magnet;
         private final java.util.concurrent.CompletableFuture<byte[]> torrent =
                 new java.util.concurrent.CompletableFuture<>();
+        /**
+         * The peers it dialled, as each connection succeeds (a {@code peer_connect_alert}), for
+         * {@link #add(AddRequest, MetadataFetch)}. Recorded as they come rather than read at the
+         * end: once the metadata is in, the fetch is upload-only and a seed drops it at once.
+         */
+        private final Set<Endpoint> dialled = ConcurrentHashMap.newKeySet();
+
+        /** What the new torrent starts with; fixed when the fetch ends. */
+        private volatile List<Endpoint> found = List.of();
+
+        void dialled(Endpoint peer) {
+            if (dialled.size() < MAX_HANDED_OVER) dialled.add(peer);
+        }
 
         Fetch(String id, String magnet) {
             this.id = id;
             this.magnet = magnet;
         }
 
+        /** Under the engine's lock, like every call from outside that reaches the session. */
         @Override
         public int peers() {
-            SessionManager s = session;
-            if (torrent.isDone() || s == null || !s.isRunning()) return 0;
-            TorrentHandle h = handle(s);
-            return h == null ? 0 : h.status().numPeers();
+            synchronized (LibtorrentEngine.this) {
+                SessionManager s = session;
+                if (torrent.isDone() || s == null || !s.isRunning()) return 0;
+                TorrentHandle h = handle(s);
+                return h == null ? 0 : h.status().numPeers();
+            }
         }
 
         @Override
@@ -728,7 +789,9 @@ public final class LibtorrentEngine implements Engine {
 
         @Override
         public void cancel() {
-            end(null, new java.util.concurrent.CancellationException("Cancelled"));
+            synchronized (LibtorrentEngine.this) {
+                end(null, new java.util.concurrent.CancellationException("Cancelled"));
+            }
         }
 
         /** Alert thread: the metadata is in. The .torrent is the info plus the link's trackers. */
@@ -776,10 +839,12 @@ public final class LibtorrentEngine implements Engine {
                 TorrentHandle h = handle(s);
                 if (h != null) {
                     endedFetches.add(id(h));
+                    dialledPeers(h).forEach(this::dialled);
                     s.remove(h);
                 }
             }
             fetches.remove(id, this);
+            found = List.copyOf(dialled);
             if (bytes != null) torrent.complete(bytes);
             else torrent.completeExceptionally(failure);
         }
@@ -1059,6 +1124,31 @@ public final class LibtorrentEngine implements Engine {
             List<AnnounceEntry> out = new ArrayList<>(vector.size());
             for (int i = 0; i < vector.size(); i++) out.add(new AnnounceEntry(new announce_entry(vector.get(i))));
             return out;
+        } finally {
+            Reference.reachabilityFence(vector);
+        }
+    }
+
+    /** A peer to dial again: the address as libtorrent writes it, and its listening port. */
+    private record Endpoint(String address, int port) {}
+
+    /**
+     * The peers this torrent connected out to. A peer that connected in did so from a port it
+     * does not listen on, so only the dialled ones can be dialled again. Read while the vector
+     * is fenced: each element points into it.
+     */
+    private static List<Endpoint> dialledPeers(TorrentHandle h) {
+        peer_info_vector vector = new peer_info_vector();
+        h.swig().get_peer_info(vector);
+        try {
+            List<Endpoint> out = new ArrayList<>();
+            for (int i = 0; i < vector.size(); i++) {
+                peer_info p = vector.get(i);
+                if (!p.getFlags().and_(PeerConstants.LOCAL_CONNECTION).non_zero()) continue;
+                tcp_endpoint remote = p.remote_endpoint();
+                out.add(new Endpoint(remote.address().to_string(), remote.port()));
+            }
+            return List.copyOf(out);
         } finally {
             Reference.reachabilityFence(vector);
         }
@@ -1540,6 +1630,11 @@ public final class LibtorrentEngine implements Engine {
                 FLAGS.or_(TorrentHandle.QUERY_PIECES).or_(TorrentHandle.QUERY_DISTRIBUTED_COPIES);
     }
 
+    /** Same rule as {@link StatusQuery}: {@code peer_info}'s flag constants are SWIG objects. */
+    private static final class PeerConstants {
+        static final peer_flags_t LOCAL_CONNECTION = peer_info.local_connection;
+    }
+
     /** Same rule as {@link StatusQuery}: {@code TorrentFlags}' constants are SWIG objects. */
     private static final class Flags {
         static final torrent_flags_t PAUSED = TorrentFlags.PAUSED;
@@ -1634,6 +1729,7 @@ public final class LibtorrentEngine implements Engine {
             AlertType.PORTMAP.swig(),
             AlertType.PORTMAP_ERROR.swig(),
             AlertType.PEER_BLOCKED.swig(),
+            AlertType.PEER_CONNECT.swig(),
             AlertType.STORAGE_MOVED.swig(),
             AlertType.STORAGE_MOVED_FAILED.swig(),
             AlertType.SAVE_RESUME_DATA.swig(),
@@ -1797,6 +1893,7 @@ public final class LibtorrentEngine implements Engine {
                     }
                     // Counted, not logged: a busy blocklist refuses peers by the hundred.
                     case PEER_BLOCKED -> blockedPeers.incrementAndGet();
+                    case PEER_CONNECT -> onPeerConnected((PeerConnectAlert) alert);
                     case SAVE_RESUME_DATA -> onSaved((SaveResumeDataAlert) alert);
                     case SAVE_RESUME_DATA_FAILED -> onSaveFailed((SaveResumeDataFailedAlert) alert);
                     default -> {}
@@ -1850,6 +1947,16 @@ public final class LibtorrentEngine implements Engine {
                 Set<String> errors = trackerErrors.get(id);
                 if (errors != null) errors.remove(alert.trackerUrl());
             }
+        }
+
+        /** A fetch's outgoing connections are remembered for the torrent it becomes; nothing else. */
+        private void onPeerConnected(PeerConnectAlert alert) {
+            if (fetches.isEmpty() || alert.direction() != PeerConnectAlert.Direction.OUT) return;
+            TorrentHandle handle = alert.handle();
+            Fetch fetch = handle.isValid() ? fetchOf(handle.swig()) : null;
+            if (fetch == null) return;
+            TcpEndpoint peer = alert.endpoint();
+            fetch.dialled(new Endpoint(peer.address().toString(), peer.port()));
         }
 
         /** {@code template} has one {@code %s}, the torrent's name. */

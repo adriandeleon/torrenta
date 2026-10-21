@@ -39,6 +39,17 @@ public interface Engine extends AutoCloseable {
      */
     MetadataFetch fetchMetadata(String magnet) throws EngineException;
 
+    /**
+     * Adds what a fetch was fetching, taking over the peers it found: the fetch is ended first
+     * (the session holds one torrent per info-hash), and the peers it had dialled are handed to
+     * the new torrent, which connects to them as it starts rather than looking for the swarm
+     * again. A fetch of another torrent is only ended.
+     */
+    default Torrent add(AddRequest request, MetadataFetch from) throws EngineException {
+        from.cancel();
+        return add(request);
+    }
+
     /** Removes the torrent and forgets it; with {@code deleteFiles}, its data on disk too. */
     void remove(String id, boolean deleteFiles) throws EngineException;
 

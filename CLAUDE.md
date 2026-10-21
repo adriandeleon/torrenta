@@ -232,9 +232,13 @@ release process with the names changed; Termina's README and memory hold the war
   flush or settings walk sees it), its events are dropped, and its add alert is swallowed by id
   (`fetchAddAlerts`) so no blob is written even if it was cancelled before the alert came. On
   metadata it writes the `.torrent` (`write_torrent_file` with the link's trackers,
-  `allow_missing_piece_layer` for v2) and leaves the session. It must be cancelled before the same
-  magnet is added for real (duplicate otherwise): the window's add worker closes the `FetchSlot`
-  first. A v1 magnet of a hybrid torrent gets a new best hash (the v2 one) when its metadata
+  `allow_missing_piece_layer` for v2) and leaves the session. The real add goes through
+  `Engine.add(request, fetch)`, which ends the fetch first (libtorrent hands back the existing
+  handle for a duplicate, silently) and gives the new torrent the peers the fetch dialled, in
+  `add_torrent_params.peers`. Those are recorded from `peer_connect_alert` (direction out) as they
+  connect, not read at the end: once the metadata is in, the fetch is upload-only and a seed
+  drops it at once. A loopback test of this has to look at progress, not at peers: the new
+  torrent downloads the test payload in a moment and the two seeds part. A v1 magnet of a hybrid torrent gets a new best hash (the v2 one) when its metadata
   arrives, so the fetch is matched by either hash (`fetchOf`), never by `id()`.
 - **"Add now, pick files when ready"** adds with stop-after-metadata and marks
   `torrent.<hash>.pickFiles` in the settings; `MainWindow.chooseFiles(id)` opens the dialog's
