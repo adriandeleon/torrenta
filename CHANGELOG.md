@@ -7,6 +7,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Changed
 
+- **The filter box is an omnibox** (`Ctrl+K`, `Ctrl+F` still works): a `key:value` term becomes a
+  chip the moment the space after it is typed, one the box cannot read becomes a red chip saying
+  why, `Backspace` on an empty box hands the last chip back for editing and a click removes one;
+  `>` then a name runs a command through the palette; a pasted magnet, `.torrent` link or path
+  opens the Add dialog; `Enter` selects every match and returns to the list, so the next key acts
+  on all of them. `Esc` peels one layer at a time: the box, then the list's filter, then its
+  selection. The Search tab moved from `Ctrl+K` to `Ctrl+Shift+F`.
+
 - **A magnet added from the Add dialog starts with the peers its file-list fetch found**, both
   with "Add now, pick files when ready" and after the files arrived, instead of looking for the
   swarm again from nothing.
@@ -26,6 +34,11 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Icons in the menus and on the detail tabs.** Every item of the File, Torrent, View and Help
+  menus and of the list's right-click menu shows its glyph before its name, the same line glyph
+  the toolbar uses for the same command (`Icons.forCommand` is the one rule), at 16 px; the
+  detail pane's General, Files, Peers, Trackers and Pieces tabs carry one each, and so do the
+  Files tab's and the Search results' right-click menus.
 - **Interface languages: English, Deutsch, Español, Français, Italiano and Português**, Termina's
   `i18n` package ported. Settings → General → Language picks one or follows the operating system
   (the default; English when the system's language is not bundled), in force after a restart;
@@ -140,6 +153,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   articles are `rss/feeds.json` and `rss/articles/<id>.json` beside the settings, this machine's,
   never synced. The columns are remembered as `rss.columns`. The auto-download switch on the
   Settings page is there and off: the rules come next.
+- **The menu bar can share the window's title bar.** Off by default, under Settings → General →
+  Appearance, experimental; it applies on restart, since a window's style is fixed once it has
+  been shown, and the status bar says so when the setting and the window disagree. With it on, the
+  window is drawn without a system title bar and the menus, the window title and the system
+  buttons share that one row: a full bar of vertical space back for the list. Minimise, maximise,
+  close, drag-to-move, double-click-to-maximise, edge resize and snapping all remain the
+  platform's own, so nothing about how the window behaves changes; only where the menus sit. The
+  window buttons follow the app theme, not the desktop's, so a dark theme on a light desktop does
+  not hide them. Not offered on macOS, where the menu belongs to the system menu bar.
 - **A tray icon**, on by default under Settings → General → System tray: the application's own
   arrow-in-a-tray mark, teal while something downloads, red while a torrent has an error, muted
   otherwise, with the rates and a count of what the torrents are doing as its tooltip and as the

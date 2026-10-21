@@ -16,6 +16,26 @@
     -fx-text-fill: -color-fg-muted;
 }
 
+/* The row that replaces the system title bar when the menu bar is merged into it
+   (ui.ExtendedWindow): menus on the left, the title in the middle, the window buttons where the
+   platform puts them. One ground with the rule under it, so the menu bar's own bottom line (which
+   would stop where the menus end) is not drawn. */
+.window-header {
+    -fx-background-color: -color-border-muted, -color-bg-subtle;
+    -fx-background-insets: 0, 0 0 1 0;
+    -fx-padding: 0 4 0 0;
+}
+
+.window-header > .menu-bar {
+    -fx-background-color: transparent;
+}
+
+/* The window title. The OS is no longer painting one, so this is it: muted, it is only the name. */
+.window-header .window-header-title {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 12px;
+}
+
 .status-bar {
     -fx-background-color: -color-bg-subtle;
     -fx-border-color: -color-border-default transparent transparent transparent;
@@ -23,12 +43,78 @@
 
 .status-bar .label {
     -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 0.95em;
+    -fx-font-size: 12px;
 }
 
-.torrent-table {
+/*
+ * Tables, as the redesign draws them: no vertical lines anywhere, column headers in small
+ * capitals (Headers.uppercase) on one rule, rows parted by a faint rule, no frame. The transfer
+ * list, the Search results and the detail pane's Files, Peers and Trackers all take this; the
+ * theme's bordered look stays for the Settings and the log, which are read differently.
+ */
+.torrent-table,
+.detail-pane .table-view,
+.detail-pane .tree-table-view {
     -fx-background-insets: 0;
     -fx-padding: 0;
+    -fx-border-width: 0;
+    -fx-background-color: -color-bg-default;
+}
+
+.torrent-table > .column-header-background,
+.detail-pane .table-view > .column-header-background,
+.detail-pane .tree-table-view > .column-header-background {
+    -fx-background-color: -color-border-muted, -color-bg-default;
+    -fx-background-insets: 0, 0 0 1 0;
+}
+
+.torrent-table > .column-header-background .column-header,
+.detail-pane .table-view > .column-header-background .column-header,
+.detail-pane .tree-table-view > .column-header-background .column-header {
+    -fx-size: 28px;
+    -fx-border-width: 0;
+    -fx-background-color: transparent;
+}
+
+.torrent-table > .column-header-background .column-header .label,
+.detail-pane .table-view > .column-header-background .column-header .label,
+.detail-pane .tree-table-view > .column-header-background .column-header .label {
+    -fx-font-size: 11px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -color-fg-muted;
+    -fx-padding: 0 0.6em 0 0.6em;
+}
+
+.torrent-table > .column-header-background > .filler,
+.torrent-table > .column-header-background > .show-hide-columns-button,
+.detail-pane .table-view > .column-header-background > .filler,
+.detail-pane .tree-table-view > .column-header-background > .filler {
+    -fx-border-width: 0;
+}
+
+.torrent-table .table-row-cell,
+.detail-pane .table-view .table-row-cell,
+.detail-pane .tree-table-view .tree-table-row-cell {
+    -fx-background-color: -color-border-subtle, -color-cell-bg;
+    -fx-background-insets: 0, 0 0 1 0;
+}
+
+.torrent-table .table-row-cell:empty,
+.detail-pane .table-view .table-row-cell:empty,
+.detail-pane .tree-table-view .tree-table-row-cell:empty {
+    -fx-background-color: transparent;
+}
+
+/* The chosen row: a quiet fill with a hairline of the accent inside its edge, not a block. */
+.torrent-table > .virtual-flow > .clipped-container > .sheet > .table-row-cell:filled:selected,
+.torrent-table:focused > .virtual-flow > .clipped-container > .sheet > .table-row-cell:filled:selected,
+.detail-pane .table-view > .virtual-flow > .clipped-container > .sheet > .table-row-cell:filled:selected,
+.detail-pane .table-view:focused > .virtual-flow > .clipped-container > .sheet > .table-row-cell:filled:selected,
+.detail-pane .tree-table-view > .virtual-flow > .clipped-container > .sheet > .tree-table-row-cell:filled:selected,
+.detail-pane .tree-table-view:focused > .virtual-flow > .clipped-container > .sheet > .tree-table-row-cell:filled:selected {
+    -fx-background-color: -color-accent-muted, -torrenta-sel;
+    -fx-background-insets: 0, 1;
+    -color-cell-fg: -color-fg-default;
 }
 
 /*
@@ -41,7 +127,7 @@
     -fx-background-color: -color-bg-subtle;
     -fx-background-insets: 0;
     -fx-border-color: transparent transparent -color-border-default transparent;
-    -fx-padding: 3 6 3 6;
+    -fx-padding: 4 8 4 8;
     -fx-spacing: 2;
 }
 
@@ -52,8 +138,12 @@
 .toolbar-button {
     -fx-background-color: transparent;
     -fx-background-insets: 0;
-    -fx-background-radius: 4;
-    -fx-padding: 3 5 3 5;
+    -fx-background-radius: 6;
+    -fx-padding: 0;
+    -fx-min-width: 32;
+    -fx-min-height: 32;
+    -fx-pref-width: 32;
+    -fx-pref-height: 32;
 }
 
 .toolbar-button:hover {
@@ -66,8 +156,8 @@
 
 .icon-line {
     -fx-fill: transparent;
-    -fx-stroke: -color-fg-muted;
-    -fx-stroke-width: 1.3;
+    -fx-stroke: -torrenta-icon;
+    -fx-stroke-width: 1.5;
     -fx-stroke-line-cap: round;
     -fx-stroke-line-join: round;
 }
@@ -92,13 +182,99 @@
     -fx-fill: -color-fg-subtle;
 }
 
+/* A glyph beside a menu item: the muted ink, the item's own ink while it is the one under the
+   cursor. Disabled items fade whole (AtlantaFX's opacity), so the glyph needs no rule of its own. */
+.menu-item .icon-line {
+    -fx-stroke: -color-fg-muted;
+}
+
+.menu-item:focused .icon-line {
+    -fx-stroke: -color-fg-default;
+}
+
+/* The detail pane's tabs: a glyph before each title, in the title's ink. */
+.detail-pane .tab-pane > .tab-header-area > .headers-region > .tab > .tab-container > .tab-label {
+    -fx-graphic-text-gap: 6;
+}
+
+.detail-pane .tab .icon-line {
+    -fx-stroke: -color-fg-muted;
+}
+
+.detail-pane .tab:selected .icon-line,
+.detail-pane .tab:hover .icon-line {
+    -fx-stroke: -color-fg-default;
+}
+
 .filter-bar {
     -fx-background-color: -color-bg-default;
     -fx-border-color: transparent transparent -color-border-default transparent;
 }
 
+/* The filter box: an inset field with a lens and the chord as a badge; the field has no chrome. */
+.filter-box {
+    -fx-background-color: -color-border-default, -color-bg-inset;
+    -fx-background-insets: 0, 1;
+    -fx-background-radius: 8, 7;
+    -fx-min-height: 32;
+    -fx-pref-height: 32;
+    -fx-max-height: 32;
+    -fx-padding: 0 8 0 10;
+    -fx-spacing: 8;
+}
+
+.filter-box:focus-within {
+    -fx-background-color: -color-accent-emphasis, -color-bg-inset;
+}
+
+.filter-box .text-field,
+.filter-box .text-field:focused {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-border-width: 0;
+    -fx-padding: 0;
+    -fx-prompt-text-fill: -color-fg-muted;
+}
+
+.filter-box .icon-line {
+    -fx-stroke: -color-fg-muted;
+}
+
+/* The omnibox's chips: a committed term in the keyboard's periwinkle, an unreadable one in red. */
+.filter-chip {
+    -fx-background-color: -torrenta-up-chip;
+    -fx-background-radius: 5;
+    -fx-padding: 1 7 1 7;
+    -fx-font-size: 12px;
+    -fx-text-fill: -torrenta-up;
+    -fx-cursor: hand;
+}
+
+.filter-chip.invalid {
+    -fx-background-color: -torrenta-error-chip;
+    -fx-text-fill: -torrenta-error;
+}
+
+.key-badge {
+    -fx-font-size: 11px;
+    -fx-text-fill: -color-fg-muted;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 4;
+    -fx-padding: 0 6 0 6;
+}
+
+/* Progress in a compact row: the same thin bar as under a comfortable row's name. */
 .torrent-table .progress-bar {
-    -fx-pref-height: 12;
+    -fx-pref-height: 4;
+    -fx-min-height: 4;
+    -fx-max-height: 4;
+}
+
+.torrent-table .progress-bar > .track,
+.torrent-table .progress-bar > .bar {
+    -fx-background-radius: 2;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
 }
 
 /*
@@ -114,10 +290,33 @@
     -torrenta-error: -color-danger-fg;
     -torrenta-done: -color-success-fg;
     -torrenta-idle: -color-fg-muted;
+    /* The glyph's disc: the state's colour at a sixth, on either ground. */
+    -torrenta-down-chip: ladder(-color-bg-default, rgba(67, 222, 197, 0.16) 49%, rgba(14, 133, 119, 0.12) 50%);
+    -torrenta-up-chip: ladder(-color-bg-default, rgba(154, 162, 212, 0.16) 49%, rgba(79, 88, 160, 0.12) 50%);
+    -torrenta-stall-chip: ladder(-color-bg-default, rgba(227, 169, 60, 0.16) 49%, rgba(150, 105, 10, 0.12) 50%);
+    -torrenta-error-chip: ladder(-color-bg-default, rgba(238, 122, 110, 0.16) 49%, rgba(192, 52, 52, 0.12) 50%);
+    -torrenta-done-chip: ladder(-color-bg-default, rgba(91, 201, 138, 0.16) 49%, rgba(46, 125, 79, 0.12) 50%);
+    -torrenta-idle-chip: ladder(-color-bg-default, rgba(155, 161, 181, 0.16) 49%, rgba(87, 93, 110, 0.12) 50%);
+    /* The selected row's fill and the sidebar's chosen row: quiet, never the accent block. */
+    -torrenta-sel: ladder(-color-bg-default, #262b3c 49%, #d9f0ec 50%);
+    -torrenta-chosen: ladder(-color-bg-default, #2b3042 49%, #eceef5 50%);
+    /* Toolbar glyphs: a shade brighter than the muted ink, as the redesign has them. */
+    -torrenta-icon: ladder(-color-bg-default, #c6cad8 49%, #575d6e 50%);
 }
 
+/* The state glyph sits in a 22px disc tinted with its colour. */
 .torrent-table .state-glyph {
-    -fx-min-width: 1.5em;
+    -fx-min-width: 22;
+    -fx-pref-width: 22;
+    -fx-max-width: 22;
+    -fx-min-height: 22;
+    -fx-pref-height: 22;
+    -fx-max-height: 22;
+    -fx-alignment: center;
+    -fx-background-radius: 11;
+    -fx-background-color: -torrenta-idle-chip;
+    -fx-font-size: 11.5px;
+    -fx-font-weight: bold;
     -fx-text-fill: -color-cell-fg;
 }
 
@@ -133,35 +332,20 @@
  * Comfortable rows (ui.Density): the glyph beside two lines, the name over a thin bar and the
  * status sentence. The bar takes the state colours below like the Progress column's does.
  */
-.torrent-table.comfortable .row-glyph {
-    -fx-min-width: 1.6em;
-    -fx-alignment: center;
-    -fx-font-size: 1.1em;
-}
-
 .torrent-table.comfortable .row-name {
+    -fx-font-size: 13.5px;
     -fx-text-fill: -color-cell-fg;
 }
 
 .torrent-table.comfortable .state-lead,
 .torrent-table.comfortable .state-rest {
-    -fx-font-size: 0.92em;
+    -fx-font-size: 12px;
 }
 
 .torrent-table .row-bar {
     -fx-min-width: 120;
     -fx-pref-width: 120;
     -fx-max-width: 120;
-    -fx-pref-height: 4;
-    -fx-max-height: 4;
-    -fx-min-height: 4;
-}
-
-.torrent-table .row-bar > .track,
-.torrent-table .row-bar > .bar {
-    -fx-background-radius: 2;
-    -fx-background-insets: 0;
-    -fx-padding: 0;
 }
 
 /* Paused, queued and done rows recede: nothing is happening and nothing is wrong. */
@@ -179,6 +363,23 @@
 
 .state-colors .torrent-table .table-row-cell:st-downloading .state-glyph {
     -fx-text-fill: -torrenta-down;
+    -fx-background-color: -torrenta-down-chip;
+}
+
+.state-colors .torrent-table .table-row-cell:st-seeding .state-glyph {
+    -fx-background-color: -torrenta-up-chip;
+}
+
+.state-colors .torrent-table .table-row-cell:st-stalled .state-glyph {
+    -fx-background-color: -torrenta-stall-chip;
+}
+
+.state-colors .torrent-table .table-row-cell:st-error .state-glyph {
+    -fx-background-color: -torrenta-error-chip;
+}
+
+.state-colors .torrent-table .table-row-cell:st-done .state-glyph {
+    -fx-background-color: -torrenta-done-chip;
 }
 
 .state-colors .torrent-table .table-row-cell:st-seeding .state-glyph,
@@ -435,15 +636,56 @@
 
 .sidebar .tree-cell {
     -fx-background-color: transparent;
-    -fx-padding: 4 10 4 6;
+    -fx-padding: 6 14 6 14;
+    -fx-indent: 0;
 }
 
+/* Sections are small capitals in the muted ink, with room above; no disclosure triangle (a
+   click, Enter or Space still folds them). */
 .sidebar .tree-cell:section {
+    -fx-font-size: 11px;
     -fx-font-weight: bold;
+    -fx-padding: 12 14 4 14;
 }
 
-.sidebar .tree-cell:section > .tree-disclosure-node > .arrow {
-    -fx-background-color: -color-fg-muted;
+.sidebar .tree-cell:section .label {
+    -fx-text-fill: -color-fg-muted;
+}
+
+.sidebar .tree-cell > .tree-disclosure-node {
+    -fx-padding: 0;
+    -fx-min-width: 0;
+    -fx-pref-width: 0;
+    -fx-max-width: 0;
+}
+
+.sidebar .tree-cell > .tree-disclosure-node > .arrow {
+    -fx-background-color: transparent;
+    -fx-padding: 0;
+}
+
+/* The mark before a title: a dot in the state's colour, or a small folder. */
+.sidebar .sidebar-dot {
+    -fx-min-width: 8;
+    -fx-pref-width: 8;
+    -fx-max-width: 8;
+    -fx-min-height: 8;
+    -fx-pref-height: 8;
+    -fx-max-height: 8;
+    -fx-background-radius: 4;
+    -fx-background-color: -color-fg-default;
+}
+
+.sidebar .sidebar-dot.dot-down { -fx-background-color: -torrenta-down; }
+.sidebar .sidebar-dot.dot-up { -fx-background-color: -torrenta-up; }
+.sidebar .sidebar-dot.dot-done { -fx-background-color: -torrenta-done; }
+.sidebar .sidebar-dot.dot-stall { -fx-background-color: -torrenta-stall; }
+.sidebar .sidebar-dot.dot-error { -fx-background-color: -torrenta-error; }
+.sidebar .sidebar-dot.dot-idle { -fx-background-color: -torrenta-idle; }
+
+.sidebar .sidebar-folder .icon-line {
+    -fx-stroke: -color-fg-muted;
+    -fx-stroke-width: 1.4;
 }
 
 .sidebar .tree-cell:filled:selected,
@@ -454,42 +696,40 @@
 .sidebar .tree-view:focused .tree-cell:filled:selected {
     -fx-background-color: -color-border-default, -color-bg-subtle;
     -fx-background-radius: 6, 5;
-    -fx-background-insets: 0 4 0 4, 1 5 1 5;
+    -fx-background-insets: 0 6 0 6, 1 7 1 7;
 }
 
 .sidebar .tree-cell:filled:chosen,
 .sidebar .tree-view:focused .tree-cell:filled:chosen,
 .sidebar .tree-view:focused .tree-cell:filled:chosen:selected {
-    -fx-background-color: -color-accent-subtle;
+    -fx-background-color: -torrenta-chosen;
     -fx-background-radius: 6;
-    -fx-background-insets: 0 4 0 4;
+    -fx-background-insets: 0 6 0 6;
 }
 
 .sidebar .tree-view:focused .tree-cell:filled:chosen:selected {
-    -fx-background-color: -color-accent-emphasis, -color-accent-subtle;
+    -fx-background-color: -color-accent-emphasis, -torrenta-chosen;
     -fx-background-radius: 6, 5;
-    -fx-background-insets: 0 4 0 4, 1 5 1 5;
+    -fx-background-insets: 0 6 0 6, 1 7 1 7;
 }
 
-.sidebar .tree-cell:filled:selected .label {
-    -fx-text-fill: -color-fg-default;
+.sidebar .tree-cell:filled .label {
+    -fx-text-fill: -color-fg-muted;
 }
 
+.sidebar .tree-cell:filled:selected .label,
 .sidebar .tree-cell:filled:chosen .label {
-    -fx-text-fill: -color-accent-fg;
+    -fx-text-fill: -color-fg-default;
 }
 
 .sidebar .sidebar-count {
     -fx-text-fill: -color-fg-muted;
-    -fx-font-size: 0.9em;
+    -fx-font-size: 11.5px;
 }
 
-.sidebar .tree-cell:filled:selected .sidebar-count {
-    -fx-text-fill: -color-fg-muted;
-}
-
+.sidebar .tree-cell:filled:selected .sidebar-count,
 .sidebar .tree-cell:filled:chosen .sidebar-count {
-    -fx-text-fill: -color-accent-fg;
+    -fx-text-fill: -color-fg-muted;
 }
 
 /* The Edit Tags dialog's list of checkboxes. */

@@ -422,6 +422,7 @@ final class SearchPane extends VBox {
                                 r -> r.published() == null ? -1L : r.published().getEpochSecond(),
                                 Format::dateTime),
                         column("provider", tr("search.column.provider"), 120, SearchResult::provider, s -> s)));
+        Headers.uppercase(t);
         // Seeds first by default; a click cycles the column, and no sort at all is the ranked order.
         seeds.setSortType(TableColumn.SortType.DESCENDING);
         t.getSortOrder().add(seeds);
@@ -459,8 +460,11 @@ final class SearchPane extends VBox {
 
     private ContextMenu buildContextMenu(TableView<SearchRow> t) {
         MenuItem add = new MenuItem(tr("search.menu.add"));
+        add.setGraphic(Icons.plus().at(Icons.MENU_SIZE));
         MenuItem copy = new MenuItem(tr("search.menu.copyLink"));
+        copy.setGraphic(Icons.copy().at(Icons.MENU_SIZE));
         MenuItem detail = new MenuItem(tr("search.menu.openDetail"));
+        detail.setGraphic(Icons.external().at(Icons.MENU_SIZE));
         add.setOnAction(e -> selected(t).ifPresent(host::add));
         copy.setOnAction(e -> selected(t).ifPresent(r -> host.copy(r.link().value())));
         detail.setOnAction(e -> selected(t).ifPresent(r -> host.openDetail(r.detailUrl())));

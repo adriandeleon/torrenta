@@ -82,12 +82,12 @@ final class DetailPane extends VBox {
         tabs.setFocusTraversable(false);
         tabs.getTabs()
                 .addAll(
-                        tab(tr("detail.tab.general"), buildGeneral()),
-                        tab(tr("detail.tab.files"), buildFiles()),
-                        tab(tr("detail.tab.peers"), buildPeers()),
-                        tab(tr("detail.tab.trackers"), buildTrackers()),
-                        tab(tr("detail.tab.pieces"), buildPieces()),
-                        tab(tr("detail.tab.speed"), speed));
+                        tab(tr("detail.tab.general"), Icons.info(), buildGeneral()),
+                        tab(tr("detail.tab.files"), Icons.files(), buildFiles()),
+                        tab(tr("detail.tab.peers"), Icons.peers(), buildPeers()),
+                        tab(tr("detail.tab.trackers"), Icons.broadcast(), buildTrackers()),
+                        tab(tr("detail.tab.pieces"), Icons.pieces(), buildPieces()),
+                        tab(tr("detail.tab.speed"), Icons.gauge(), speed));
         tabs.getSelectionModel().selectedIndexProperty().addListener(o -> {
             if (speedShowing()) speed.show(speedHistory, speedNow);
         });
@@ -226,8 +226,10 @@ final class DetailPane extends VBox {
         for (Label value : generalValues) value.setText("—");
     }
 
-    private static Tab tab(String title, javafx.scene.Node content) {
+    /** A tab with its glyph before the title, at the menus' size. */
+    private static Tab tab(String title, Icons.Glyph glyph, javafx.scene.Node content) {
         Tab tab = new Tab(title, content);
+        tab.setGraphic(glyph.at(Icons.MENU_SIZE));
         return tab;
     }
 
@@ -268,6 +270,8 @@ final class DetailPane extends VBox {
             name.getStyleClass().add("dialog-label");
             Label value = new Label("—");
             value.getStyleClass().add("detail-value");
+            // The hash and the path: the working face, as Editora sets them.
+            if (i < 2) value.getStyleClass().add("mono");
             generalValues[i] = value;
             int column = i < 7 ? 0 : 2;
             int row = i < 7 ? i : i - 7;
@@ -320,8 +324,10 @@ final class DetailPane extends VBox {
             }
         });
         files.getColumns().addAll(List.of(name, size, progress, priority));
+        Headers.uppercase(files);
 
         MenuItem open = new MenuItem(tr("detail.files.openFile"));
+        open.setGraphic(Icons.open().at(Icons.MENU_SIZE));
         open.setOnAction(e -> {
             var item = files.getSelectionModel().getSelectedItem();
             if (item != null && item.getValue().isFile()) onOpenFile.accept(item.getValue());
@@ -344,6 +350,7 @@ final class DetailPane extends VBox {
                         column(tr("detail.peers.column.up"), 90, p -> Bytes.rate(p.upRate())),
                         column(tr("detail.peers.column.downloaded"), 100, p -> Bytes.human(p.downloaded())),
                         column(tr("detail.peers.column.uploaded"), 100, p -> Bytes.human(p.uploaded()))));
+        Headers.uppercase(peers);
         return peers;
     }
 
