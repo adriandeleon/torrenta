@@ -628,6 +628,11 @@
     -fx-border-color: transparent -color-border-default transparent transparent;
 }
 
+/* On the right of the list (Settings → Appearance), the rule moves to the side that faces it. */
+.sidebar:right {
+    -fx-border-color: transparent transparent transparent -color-border-default;
+}
+
 .sidebar .sidebar-tree {
     -fx-background-color: transparent;
     -fx-background-insets: 0;

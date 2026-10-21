@@ -136,6 +136,10 @@ final class SettingsWindow {
                 Settings.ADD_WITHOUT_ASKING,
                 Settings.UI_STATE_COLORS,
                 Settings.UI_DENSITY,
+                Settings.UI_SIDEBAR,
+                Settings.UI_SIDEBAR_SIDE,
+                Settings.DETAIL_VISIBLE,
+                Settings.DETAIL_SIDE,
                 Settings.UI_EXTENDED_WINDOW,
                 Settings.UI_PALETTE_KEY,
                 Settings.UI_TRAY,
@@ -306,6 +310,16 @@ final class SettingsWindow {
     String rssStatus() {
         if (rssDialog != null && rssDialog.isShowing()) return rssDialog.statusText();
         return rssStatusLabel == null ? "" : rssStatusLabel.getText();
+    }
+
+    /** Chooses the two layout rows as a person would, by id ({@code right/bottom}); the listeners write and apply. */
+    void chooseLayoutForCapture(String sidebarId, String detailId) {
+        for (SidebarPlace p : SidebarPlace.values()) if (p.id().equals(sidebarId)) sidebarPlace.setValue(p);
+        for (DetailPlace p : DetailPlace.values()) if (p.id().equals(detailId)) detailPlace.setValue(p);
+    }
+
+    void hideForCapture() {
+        stage.hide();
     }
 
     /** Opens the Add Feed dialog from the RSS page, on the next pulse, with the URL typed in. */
@@ -480,6 +494,8 @@ final class SettingsWindow {
     private CheckBox updateCheck;
     private CheckBox stateColors;
     private ChoiceBox<Density> density;
+    private ChoiceBox<SidebarPlace> sidebarPlace;
+    private ChoiceBox<DetailPlace> detailPlace;
     private CheckBox extendedWindow;
     private ChoiceBox<PaletteKey> paletteKey;
     private CheckBox tray;
@@ -1124,6 +1140,39 @@ final class SettingsWindow {
                 tr("settings.general.density.desc"),
                 density,
                 tr("settings.general.density.keywords"));
+        // Each a pair of keys: whether it shows and where, so hiding keeps the side.
+        sidebarPlace = new ChoiceBox<>();
+        sidebarPlace.getItems().addAll(SidebarPlace.values());
+        sidebarPlace.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setSidebar(now.shown());
+            if (now.shown()) settings.setSidebarSide(now.id());
+            settings.saveQuietly();
+            onAppearanceChanged.run();
+        });
+        row(
+                Category.GENERAL,
+                appearance,
+                tr("settings.general.sidebarPlace"),
+                tr("settings.general.sidebarPlace.desc"),
+                sidebarPlace,
+                tr("settings.general.sidebarPlace.keywords"));
+        detailPlace = new ChoiceBox<>();
+        detailPlace.getItems().addAll(DetailPlace.values());
+        detailPlace.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setDetailVisible(now.shown());
+            if (now.shown()) settings.setDetailSide(now.id());
+            settings.saveQuietly();
+            onAppearanceChanged.run();
+        });
+        row(
+                Category.GENERAL,
+                appearance,
+                tr("settings.general.detailPlace"),
+                tr("settings.general.detailPlace.desc"),
+                detailPlace,
+                tr("settings.general.detailPlace.keywords"));
         stateColors = new CheckBox();
         stateColors.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -3023,6 +3072,8 @@ final class SettingsWindow {
             updateCheck.setSelected(settings.updateCheck());
             stateColors.setSelected(settings.stateColors());
             density.setValue(Density.byId(settings.density(), Density.DEFAULT));
+            sidebarPlace.setValue(SidebarPlace.of(settings.sidebar(), settings.sidebarSide()));
+            detailPlace.setValue(DetailPlace.of(settings.detailVisible(), settings.detailSide()));
             extendedWindow.setSelected(settings.extendedWindow());
             paletteKey.setValue(PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT));
             tray.setSelected(settings.tray());

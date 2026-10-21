@@ -7,6 +7,13 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Changed
 
+- **The sidebar and the details pane go where you want them.** The sidebar sits on the left or
+  the right of the list, or is hidden; the details pane sits under the list, beside it on the
+  right (running the full height, General in one column), or is collapsed. View has "Sidebar on
+  the Right", "Details Pane" (`Ctrl+Shift+D`) and "Details Pane on the Right", the palette has
+  the same, and Settings → General → Appearance has both as choices. Hiding either keeps its
+  place, and each place of the details pane keeps its own size.
+
 - **The filter box is an omnibox** (`Ctrl+K`, `Ctrl+F` still works): a `key:value` term becomes a
   chip the moment the space after it is typed, one the box cannot read becomes a red chip saying
   why, `Backspace` on an empty box hands the last chip back for editing and a click removes one;
