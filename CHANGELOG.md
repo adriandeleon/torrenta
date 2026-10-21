@@ -5,6 +5,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Fixed
+
+- **A crash at quit with a torrent in the list** (exit 139, no error file, every few runs): the
+  window's poll could still be reading the torrents while the engine deleted the native session
+  under it. Every engine call now finishes before the session goes, and a later one is refused.
+
 ### Added
 
 - **Search providers** (Settings → Search), the first of the search milestone. A Torznab server,

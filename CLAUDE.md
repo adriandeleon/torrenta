@@ -26,7 +26,8 @@ selected torrent, `select-first`,
   open dialog's title and the log window's state are printed, and when a dialog is open the PNG is
   of the dialog.
 
-Run Maven from the project root with a JDK 25.
+Run Maven from the project root with a JDK 25; the enforcer plugin refuses any other (`-Denforcer.skip`
+to try one on purpose).
 
 ## Architecture
 
@@ -152,6 +153,13 @@ release process with the names changed; Termina's README and memory hold the war
 - **`settings_pack` enum constants are SWIG objects**, like every other libtorrent4j constant:
   `toPack` runs only after the native has loaded. Keys are set by `swigValue()` through the pack's
   generic `setBoolean`/`setInteger`/`setString`; the typed setters cover only a few.
+- **Every public engine method that reaches the session is `synchronized`, like `stop()`.**
+  `SessionManager.stop()` deletes the native session; a poll, a flush or an action in flight on
+  another thread then reads freed memory, which corrupted the heap and killed the JVM at quit
+  (exit 139, no hs_err) every few runs. The lock makes a call in flight finish first and a later
+  one find no session. The alert thread never takes it (the listener uses the alert's own handle),
+  so `stop()` waiting for resume-data alerts cannot deadlock; keep it that way. The test
+  `stopWaitsForACallInFlightAndRefusesTheNext` hammers the race under `MALLOC_PERTURB_`.
 - **A SWIG vector element is a pointer into the vector, and the vector's finalizer frees it.**
   `torrent_handle_vector.get(i)`, `announce_entry_vector.get(i)`, `peer_info_vector.get(i)` (and
   libtorrent4j's own `SessionHandle.torrents()`, `TorrentHandle.trackers()`/`peerInfo()`, which are
@@ -242,7 +250,9 @@ release process with the names changed; Termina's README and memory hold the war
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
   write under `~/.torrenta`. `LibtorrentEngineTest` starts a real session on purpose: it is the one
   test that proves the native loads on each CI platform.
-- **Palantir 2.92 does not run on JDK 27.** Build with a JDK 25.
+- **Palantir 2.92 does not run on JDK 27.** Build with a JDK 25. The enforcer rule in the pom says so
+  at `validate`, so `mvn javafx:run` under the sdkman default of 27 stops with the reason instead of
+  running a mix the project never tests (one such run crashed at quit).
 - **A Torznab answer is parsed as a stream with entities and DTDs off** (`TorznabProvider.factory`):
   it comes from the network. `torznab:attr` is matched by local name, since not every server
   declares the namespace the same way; `peers` is seeders plus leechers, so leechers is the

@@ -114,6 +114,29 @@
             </resource>
         </resources>
         <plugins>
+            <!-- The JDK this project is built, tested, packaged and run on. Everything else here is
+                 pinned to it (the formatter breaks on 27, the native image is cut from it), and a
+                 run under the sdkman default of 27 crashed at quit with a torrent in the list.
+                 Pass -Denforcer.skip to try another on purpose. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.6.3</version>
+                <executions>
+                    <execution>
+                        <id>jdk-25</id>
+                        <goals><goal>enforce</goal></goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>[25,26)</version>
+                                    <message>Torrenta builds and runs on JDK 25: set JAVA_HOME to a 25 (sdkman: 25.0.4-tem). JDK 27 breaks the formatter and crashed the app at quit.</message>
+                                </requireJavaVersion>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>com.diffplug.spotless</groupId>
                 <artifactId>spotless-maven-plugin</artifactId>

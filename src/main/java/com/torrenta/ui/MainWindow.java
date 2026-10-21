@@ -287,14 +287,17 @@ public final class MainWindow {
     }
 
     /**
-     * Drives the window from the capture hook, by name: {@code select-all}, {@code palette},
+     * Drives the window from the capture hook, by name: {@code close-window} (the quit path a
+     * person takes, where the hook itself exits through Platform.exit), {@code select-all}, {@code palette},
      * {@code palette:<query>}, {@code sidebar:<filter>} (as {@link SidebarFilter#parse} reads it),
      * {@code sidebar-keys:<KEY+KEY+…>} (focus the sidebar and press them),
      * {@code dialog-category:<name>} on an open Add dialog, or a command id. Prints what a
      * screenshot cannot show.
      */
     public void runForCapture(String action) {
-        if (action.equals("select-all")) {
+        if (action.equals("close-window")) {
+            stage.close();
+        } else if (action.equals("select-all")) {
             table.getSelectionModel().selectAll();
         } else if (action.equals("event-log")) {
             logWindow.show();
@@ -1168,7 +1171,15 @@ public final class MainWindow {
      * torrents, and the sidebar would take that for the choices' entries having gone.
      */
     public void stopPolling() {
-        if (poller != null) poller.shutdownNow();
+        if (poller == null) return;
+        poller.shutdownNow();
+        // A poll in flight finishes before the engine is stopped behind it; the engine's own lock
+        // guards that too, this just keeps the quit orderly.
+        try {
+            poller.awaitTermination(3, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     // ---- commands -------------------------------------------------------------------------------
