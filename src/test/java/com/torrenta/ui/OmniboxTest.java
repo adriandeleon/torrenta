@@ -6,7 +6,6 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OmniboxTest {
@@ -65,16 +64,6 @@ class OmniboxTest {
         Omnibox back = box.backspaceOnEmpty();
         assertEquals(List.of("state:seeding"), back.chips());
         assertEquals("tag:keep", back.text());
-        assertSame(
-                back,
-                back.withText("tag:keep")
-                                        .backspaceOnEmpty()
-                                        .withText("tag:keep")
-                                        .backspaceOnEmpty()
-                                == back
-                        ? back
-                        : back,
-                "with text in the field, backspace is the field's own");
         assertEquals(back, back.backspaceOnEmpty(), "text present: nothing to hand back");
         assertEquals(Omnibox.EMPTY, Omnibox.EMPTY.backspaceOnEmpty());
     }

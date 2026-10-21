@@ -528,8 +528,10 @@ public final class MainWindow {
                 sidebar.pressForCapture(
                         javafx.scene.input.KeyCode.valueOf(key.trim().toUpperCase(java.util.Locale.ROOT)));
         } else if (action.startsWith("omnibox:")) {
+            // The action list is split on commas and trimmed, so a trailing space (what commits
+            // a chip) could not be passed; a tilde stands for one.
             filter.requestFocus();
-            filter.setText(action.substring("omnibox:".length()));
+            filter.setText(action.substring("omnibox:".length()).replace('~', ' '));
         } else if (action.startsWith("omnibox-key:")) {
             filter.requestFocus();
             KeyCode code = KeyCode.valueOf(action.substring("omnibox-key:".length()));

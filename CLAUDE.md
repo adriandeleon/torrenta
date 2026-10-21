@@ -121,7 +121,7 @@ release process with the names changed; Termina's README and memory hold the war
   A new Stage or Dialog without the call shows the system face.
 - **Nothing in the chrome may be focus-traversable** (Termina's rule holds here). The filter box
   took initial focus on a fresh launch because the table is hidden until the first torrent, so it
-  was the first traversable node. It is `setFocusTraversable(false)`; Ctrl+F reaches it.
+  was the first traversable node. It is `setFocusTraversable(false)`; Ctrl+K (and Ctrl+F) reach it.
 - **Space and Delete are handled on the table, never as scene accelerators.** An accelerator fires
   on any unconsumed key press, and a text field does not consume Space — so a space typed into the
   filter would pause the selection. `Command.hint` carries the key's name for the menus.
@@ -272,6 +272,14 @@ release process with the names changed; Termina's README and memory hold the war
   duplicate seed add hands back the torrent already in the list, silently.
 - **A removed torrent's alert carries only the hash.** `remove()` reads the name first and raises
   the event itself; the `TORRENT_REMOVED` alert is not listened to.
+- **The omnibox is a value, `ui.Omnibox`, and the field is drawn from it.** Every keystroke goes
+  `omnibox.typed(text, now)` → `setOmnibox`, which rewrites the field under a `settingFilter`
+  guard, redraws the chips and re-applies the filter; the rules (a term chips on the space after
+  it, Backspace on empty hands it back, `>` means a command, a magnet means an add, Enter selects
+  the matches) are tested there, not in the window. Escape on the list is `Actions.escape`: the
+  filter first, then the selection. The capture hook takes `omnibox:<text>` (`~` for a space, since
+  the action list is trimmed), `omnibox-key:<KeyCode>` and `table-key:<KeyCode>`, and prints an
+  `omnibox=` line. Ctrl+K is the omnibox's; the Search tab moved to Ctrl+Shift+F.
 - **A row's state is computed, not stored**: `RowState.of(torrent, quietSeconds)` and
   `StatusLine.of(…)` are pure; `TorrentRow` keeps only the stall clock, set *before* its torrent
   property fires so every cell of a tick reads the same number. The row's `st-*` pseudo-class

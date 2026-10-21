@@ -7,6 +7,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Changed
 
+- **The filter box is an omnibox** (`Ctrl+K`, `Ctrl+F` still works): a `key:value` term becomes a
+  chip the moment the space after it is typed, one the box cannot read becomes a red chip saying
+  why, `Backspace` on an empty box hands the last chip back for editing and a click removes one;
+  `>` then a name runs a command through the palette; a pasted magnet, `.torrent` link or path
+  opens the Add dialog; `Enter` selects every match and returns to the list, so the next key acts
+  on all of them. `Esc` peels one layer at a time: the box, then the list's filter, then its
+  selection. The Search tab moved from `Ctrl+K` to `Ctrl+Shift+F`.
+
 - **A magnet added from the Add dialog starts with the peers its file-list fetch found**, both
   with "Add now, pick files when ready" and after the files arrived, instead of looking for the
   swarm again from nothing.
