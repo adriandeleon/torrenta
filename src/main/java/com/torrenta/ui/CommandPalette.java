@@ -91,6 +91,13 @@ final class CommandPalette {
         card.addEventFilter(KeyEvent.KEY_PRESSED, this::onKey);
     }
 
+    /** A new opener chord for the chip, when the setting changes while the window is up. */
+    void setOpenerChord(String openerChord) {
+        prefixChip.setText(openerChord == null ? "" : openerChord);
+        prefixChip.setVisible(!prefixChip.getText().isEmpty());
+        prefixChip.setManaged(prefixChip.isVisible());
+    }
+
     /** The list height for {@link #VISIBLE_ROWS} rows, or fewer when there are fewer, inside {@code insets}. */
     double listHeight(double insets) {
         int rows = Math.min(VISIBLE_ROWS, Math.max(1, results.getItems().size()));

@@ -47,6 +47,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   launcher that honours Unity's LauncherEntry signal (KDE's task manager, Dash to Dock), pushed
   from the poll only when it changed and cleared when nothing downloads. Windows gets none: AWT
   badges only windows of its own. The tray icon's line carries the rates everywhere.
+- **The command palette opens on `Alt+X`**, Editora's `M-x`; Settings → General → Keyboard offers
+  the `Ctrl+Shift+P` of the first releases instead, applied at once, and the View menu, the toolbar
+  tooltip and the palette's own chip say whichever is in force. In the toolbar the palette now sits
+  with the views and Settings alone at the right end, as Editora keeps them.
 - **The Statistics window** (`Ctrl+Shift+T`, View → Statistics, the palette), the last step of
   the RSS, creation and statistics milestone: this session's and all-time downloaded, uploaded,
   share ratio and active time, bytes with protocol overhead, wasted bytes, connected and
