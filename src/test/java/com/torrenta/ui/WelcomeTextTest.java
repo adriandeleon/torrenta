@@ -50,15 +50,20 @@ class WelcomeTextTest {
         assertEquals(Optional.empty(), WelcomeText.offer("magnet:?xt=urn:btih:" + HASH + "\nsecond line"));
     }
 
+    /** A path outside home as the platform writes it: {@code C:\srv\torrents} on Windows. */
+    private static String abs(String path) {
+        return Path.of(path).toAbsolutePath().normalize().toString();
+    }
+
     @Test
     void theFolderIsShortenedUnderHomeWhereThatIsTheCustom() {
         Path home = Path.of("/home/me");
         assertEquals("~/Downloads", WelcomeText.folder(Path.of("/home/me/Downloads"), home, true));
         assertEquals("~/a/b", WelcomeText.folder(Path.of("/home/me/x/../a/b"), home, true));
         assertEquals("~", WelcomeText.folder(home, home, true));
-        assertEquals("/home/meat/Downloads", WelcomeText.folder(Path.of("/home/meat/Downloads"), home, true));
-        assertEquals("/srv/torrents", WelcomeText.folder(Path.of("/srv/torrents"), home, true));
-        assertEquals("/home/me/Downloads", WelcomeText.folder(Path.of("/home/me/Downloads"), home, false));
+        assertEquals(abs("/home/meat/Downloads"), WelcomeText.folder(Path.of("/home/meat/Downloads"), home, true));
+        assertEquals(abs("/srv/torrents"), WelcomeText.folder(Path.of("/srv/torrents"), home, true));
+        assertEquals(abs("/home/me/Downloads"), WelcomeText.folder(Path.of("/home/me/Downloads"), home, false));
     }
 
     @Test
