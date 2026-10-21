@@ -141,13 +141,15 @@ class TransmissionEngineTest {
                 Capability.ACTIVE_TOTAL_LIMIT,
                 Capability.SEED_MODE,
                 Capability.STOP_CONDITION,
-                Capability.SUPER_SEEDING)) {
+                Capability.SUPER_SEEDING,
+                Capability.EXPORT_TORRENT)) {
             assertTrue(caps.lacks(missing), missing + " is not Transmission's");
         }
         assertThrows(EngineException.class, () -> e.create(null, null));
         assertThrows(EngineException.class, () -> e.fetchMetadata("magnet:?xt=urn:btih:" + MAGNET_ID));
         assertThrows(EngineException.class, () -> e.setIpFilter(List.of()));
         assertThrows(EngineException.class, () -> e.setSuperSeeding(MAGNET_ID, true));
+        assertThrows(EngineException.class, () -> e.exportTorrent(MAGNET_ID));
         e.stop();
         assertTrue(e.torrents().isEmpty(), "a stopped engine lists nothing");
     }

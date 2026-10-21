@@ -226,6 +226,50 @@ class LibtorrentEngineTest {
         }
     }
 
+    /** An exported torrent is the same torrent: same hash, its trackers in their tiers, its web seed. */
+    @Test
+    void anExportedTorrentReadsBackAsTheSameTorrent(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        Files.createDirectories(downloads);
+        Path payload = downloads.resolve("export.bin");
+        byte[] bytes = new byte[48 * 1024];
+        new Random(11).nextBytes(bytes);
+        Files.write(payload, bytes);
+        NativeLibrary.ensureAvailable();
+        Path torrentFile = dir.resolve("export.torrent");
+        Files.write(
+                torrentFile,
+                new TorrentBuilder()
+                        .path(payload.toFile())
+                        .addTracker("udp://one.example.org:6969/announce", 0)
+                        .addUrlSeed("http://seed.example.org/files/")
+                        .generate()
+                        .entry()
+                        .bencode());
+
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            String id = engine.add(torrentFile.toString()).id();
+            engine.addTrackers(id, List.of("udp://two.example.org:6969/announce"));
+            byte[] exported = engine.exportTorrent(id);
+
+            TorrentPreview back = engine.inspect(exported);
+            assertEquals(id, back.id(), "the info dictionary is the one that was added");
+            assertEquals(
+                    List.of("udp://one.example.org:6969/announce", "udp://two.example.org:6969/announce"),
+                    back.trackers());
+            String text = new String(exported, java.nio.charset.StandardCharsets.ISO_8859_1);
+            assertTrue(text.contains("url-list"), "the web seed goes along");
+            assertTrue(text.contains("http://seed.example.org/files/"));
+            assertTrue(
+                    text.contains("ll35:udp://one.example.org:6969/announceel35:udp://two"),
+                    "two tiers, one tracker each: " + text.substring(0, Math.min(200, text.length())));
+
+            engine.add(MAGNET);
+            assertThrows(EngineException.class, () -> engine.exportTorrent(MAGNET_ID), "no file list yet");
+        }
+    }
+
     @Test
     void eventsForTheLifeOfATorrent(@TempDir Path dir) throws Exception {
         Path downloads = dir.resolve("downloads");

@@ -1305,6 +1305,35 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
+    public synchronized byte[] exportTorrent(String id) throws EngineException {
+        TorrentHandle h = handle(id);
+        if (!h.status(StatusQuery.FLAGS).hasMetadata()) throw new EngineException(tr("engine.error.exportNoMetadata"));
+        TorrentInfo info = h.torrentFile();
+        try {
+            AddTorrentParams params = new AddTorrentParams();
+            // write_torrent_file writes the info section as it was loaded, so renames (the .part
+            // suffix, a file renamed by hand) never reach the exported file and the hash holds.
+            params.setTorrentInfo(info);
+            List<String> urls = new ArrayList<>();
+            List<Integer> tiers = new ArrayList<>();
+            for (AnnounceEntry tracker : trackers(h)) {
+                urls.add(tracker.url());
+                tiers.add(tracker.tier());
+            }
+            params.setTrackers(urls);
+            params.setTrackerTiers(tiers);
+            params.setUrlSeeds(h.urlSeeds());
+            return Vectors.byte_vector2bytes(libtorrent
+                    .write_torrent_file(params.swig(), libtorrent.getAllow_missing_piece_layer())
+                    .bencode());
+        } catch (RuntimeException e) {
+            throw new EngineException(tr("engine.error.exportWrite", e.getMessage()), e);
+        } finally {
+            Reference.reachabilityFence(info);
+        }
+    }
+
+    @Override
     public synchronized String magnetLink(String id) throws EngineException {
         return handle(id).makeMagnetUri();
     }

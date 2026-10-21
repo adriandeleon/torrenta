@@ -66,6 +66,16 @@ class ActionsTest {
     }
 
     @Test
+    void anExportIsNamedAfterTheTorrentSafelyAndNeverOverAnotherFile() {
+        assertEquals("Big Buck Bunny.torrent", Actions.exportFileName("Big Buck Bunny"));
+        assertEquals("a_b_c_.torrent", Actions.exportFileName("a/b:c?"));
+        assertEquals("hidden.torrent", Actions.exportFileName("..hidden. "));
+        assertEquals("torrent.torrent", Actions.exportFileName("..."));
+        assertEquals("a.torrent", Actions.unusedName("a.torrent", java.util.Set.of("b.torrent")));
+        assertEquals("a (3).torrent", Actions.unusedName("a.torrent", java.util.Set.of("a.torrent", "a (2).torrent")));
+    }
+
+    @Test
     void outcomes() {
         assertEquals("Paused 1 torrent", Actions.outcome("Paused", 1, List.of()));
         assertEquals("Paused 3 torrents", Actions.outcome("Paused", 3, List.of()));

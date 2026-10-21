@@ -34,6 +34,7 @@ selected torrent, `select-first`, `message-log` / `message-log:<query>` (the sta
   `overview-diagnosis=`, `overview-pieces=`, `overview-graph=`, `overview-facts=` after the shot;
   every capture prints `status-bar=`), `remedy` / `remedy:<NAME>` to press the diagnosis card's first remedy or a named one (`SKIP_FILE`
   …), waiting for a card that offers it (prints `remedy-pressed=`),
+  `export-to:<folder>` for Export .torrent past its native chooser,
   `files-menu[:<row>]` for the Files tab's context menu on that visible row (it waits for the
   rows, which arrive with the first detail poll; on the Files tab a `file=` line per row shown
   names its `FileKind`, the glyph's rule by extension), `welcome-clipboard:<text>` (the welcome's

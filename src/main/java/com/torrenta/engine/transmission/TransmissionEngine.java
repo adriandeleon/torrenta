@@ -458,6 +458,15 @@ public final class TransmissionEngine implements Engine {
         throw new EngineException(tr("engine.error.transmissionSuperSeed"));
     }
 
+    /**
+     * The RPC gives the {@code .torrent}'s path on the daemon's machine ({@code torrentFile}),
+     * never its bytes; the capability is missing and the window hides the command.
+     */
+    @Override
+    public byte[] exportTorrent(String id) throws EngineException {
+        throw new EngineException(tr("engine.error.transmissionExport"));
+    }
+
     @Override
     public void queueMove(String id, QueueMove move) throws EngineException {
         action("queue-move-" + move.name().toLowerCase(Locale.ROOT), id);

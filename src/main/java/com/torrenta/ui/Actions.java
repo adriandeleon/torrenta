@@ -26,6 +26,33 @@ public final class Actions {
         return !selected.stream().allMatch(Torrent::sequential);
     }
 
+    /**
+     * The file a torrent exports to: its name with the characters no file system takes (and
+     * control characters) as {@code _}, leading dots and trailing dots and spaces dropped (a
+     * hidden file, Windows' rule), never empty, with {@code .torrent} after it.
+     */
+    public static String exportFileName(String name) {
+        String safe = name == null ? "" : name.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_");
+        safe = safe.replaceAll("^\\.+", "").replaceAll("[. ]+$", "").strip();
+        if (safe.isEmpty()) safe = "torrent";
+        return safe + ".torrent";
+    }
+
+    /**
+     * A name among {@code taken} that is not one of them: {@code a.torrent}, then {@code a
+     * (2).torrent}, {@code a (3).torrent}…, so exporting a selection never writes over a file.
+     */
+    public static String unusedName(String file, java.util.Set<String> taken) {
+        if (!taken.contains(file)) return file;
+        int dot = file.lastIndexOf('.');
+        String stem = dot > 0 ? file.substring(0, dot) : file;
+        String ext = dot > 0 ? file.substring(dot) : "";
+        for (int n = 2; ; n++) {
+            String candidate = stem + " (" + n + ")" + ext;
+            if (!taken.contains(candidate)) return candidate;
+        }
+    }
+
     /** The torrents super seeding can apply to: the complete ones. */
     public static List<Torrent> superSeedTargets(List<Torrent> selected) {
         return selected.stream()

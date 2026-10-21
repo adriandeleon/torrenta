@@ -64,6 +64,8 @@ class CapabilitiesTest {
                 CapabilityRules.forCommand("super-seed").orElseThrow());
         Capabilities daemon = Capabilities.ALL.without(Capability.SUPER_SEEDING);
         assertFalse(CapabilityRules.commandShown("super-seed", daemon));
+        assertFalse(
+                CapabilityRules.commandShown("export-torrent", Capabilities.ALL.without(Capability.EXPORT_TORRENT)));
         assertEquals(List.of(ShareLimit.Action.values()), CapabilityRules.shareActions(Capabilities.ALL));
         assertEquals(
                 List.of(ShareLimit.Action.PAUSE, ShareLimit.Action.REMOVE, ShareLimit.Action.REMOVE_DATA),

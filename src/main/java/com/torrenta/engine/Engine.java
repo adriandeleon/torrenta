@@ -145,6 +145,13 @@ public interface Engine extends AutoCloseable {
     /** Replaces the torrent's tags; normalised as {@link TorrentLabels} does. */
     void setTags(String id, List<String> tags) throws EngineException;
 
+    /**
+     * The torrent as a {@code .torrent} file: its own info dictionary, byte for byte (so the hash
+     * is the same), with the trackers in their tiers and the web seeds it has now. Fails for a
+     * magnet whose file list has not arrived. Needs {@link Capability#EXPORT_TORRENT}.
+     */
+    byte[] exportTorrent(String id) throws EngineException;
+
     /** A magnet link for the torrent, with its trackers, as the engine would build it. */
     String magnetLink(String id) throws EngineException;
 
@@ -310,7 +317,9 @@ public interface Engine extends AutoCloseable {
         /** Changing where a torrent's files live (Set Location). */
         MOVE_STORAGE,
         /** Super seeding a complete torrent, from the menu or as a share limit's action. */
-        SUPER_SEEDING;
+        SUPER_SEEDING,
+        /** The torrent as a {@code .torrent} file, its info dictionary as it was loaded. */
+        EXPORT_TORRENT;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

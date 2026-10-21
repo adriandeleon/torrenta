@@ -6,6 +6,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -1299,6 +1301,9 @@ public final class MainWindow {
                             parts.contains("CTRL"),
                             parts.contains("ALT"),
                             parts.contains("META")));
+        } else if (action.startsWith("export-to:")) {
+            // The selection exported into a folder, as Export does past its (native) chooser.
+            export(exportTargets(selectedTorrents(), Path.of(action.substring("export-to:".length()))));
         } else if (action.equals("select-first")) {
             table.getSelectionModel().clearAndSelect(0);
         } else if (action.startsWith("detail:")) {
@@ -3072,6 +3077,58 @@ public final class MainWindow {
         });
     }
 
+    /**
+     * Torrent → Export .torrent…: one torrent to a file chosen in a save dialog, several into a
+     * folder under their own names, never over a file already there. The bytes come from the
+     * engine on a worker and are written beside their final name, then moved into place.
+     */
+    private void exportTorrents() {
+        List<Torrent> selected = selectedTorrents();
+        if (selected.isEmpty() || engine == null) return;
+        Map<Torrent, Path> targets = new LinkedHashMap<>();
+        if (selected.size() == 1) {
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle(tr("window.export.title"));
+            chooser.getExtensionFilters()
+                    .add(new FileChooser.ExtensionFilter(tr("window.addFile.filter"), "*.torrent"));
+            chooser.setInitialFileName(Actions.exportFileName(selected.get(0).name()));
+            java.io.File file = chooser.showSaveDialog(stage);
+            if (file == null) return;
+            targets.put(selected.get(0), file.toPath());
+        } else {
+            javafx.stage.DirectoryChooser chooser = new javafx.stage.DirectoryChooser();
+            chooser.setTitle(tr("window.export.folderTitle", selected.size()));
+            java.io.File dir = chooser.showDialog(stage);
+            if (dir == null) return;
+            targets.putAll(exportTargets(selected, dir.toPath()));
+        }
+        export(targets);
+    }
+
+    /** Each torrent's file in {@code dir}: its own name, made unique against what is there. */
+    private static Map<Torrent, Path> exportTargets(List<Torrent> torrents, Path dir) {
+        Set<String> taken = new HashSet<>();
+        String[] present = dir.toFile().list();
+        if (present != null) taken.addAll(List.of(present));
+        Map<Torrent, Path> targets = new LinkedHashMap<>();
+        for (Torrent t : torrents) {
+            String name = Actions.unusedName(Actions.exportFileName(t.name()), taken);
+            taken.add(name);
+            targets.put(t, dir.resolve(name));
+        }
+        return targets;
+    }
+
+    private void export(Map<Torrent, Path> targets) {
+        onTorrents(tr("actions.verb.exported"), List.copyOf(targets.keySet()), (e, t) -> {
+            try {
+                CreateDialog.write(targets.get(t), e.exportTorrent(t.id()));
+            } catch (IOException ex) {
+                throw new EngineException(tr("status.export.writeFailed", targets.get(t), ex.getMessage()), ex);
+            }
+        });
+    }
+
     private void openFolder() {
         List<Torrent> selected = selectedTorrents();
         if (selected.isEmpty()) return;
@@ -3255,6 +3312,13 @@ public final class MainWindow {
                         null,
                         selection,
                         this::copyMagnetLinks),
+                new Command(
+                        "export-torrent",
+                        tr("command.exportTorrent"),
+                        shiftChord(KeyCode.E),
+                        null,
+                        gate("export-torrent", selection),
+                        this::exportTorrents),
                 new Command(
                         "open-folder",
                         tr("command.openFolder"),
@@ -3677,7 +3741,7 @@ public final class MainWindow {
         items.add(categoryMenu());
         items.add(menuItem("edit-tags"));
         items.add(new SeparatorMenuItem());
-        for (String id : List.of("copy-name", "copy-hash", "copy-magnet", "open-folder")) {
+        for (String id : List.of("copy-name", "copy-hash", "copy-magnet", "export-torrent", "open-folder")) {
             items.add(menuItem(id));
         }
         items.add(new SeparatorMenuItem());
