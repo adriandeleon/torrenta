@@ -76,6 +76,8 @@ import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.WatchFolders;
 import com.torrenta.net.TorrentFetch;
+import com.torrenta.search.SearchResult;
+import com.torrenta.search.TorznabEndpoint;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
@@ -131,6 +133,10 @@ public final class MainWindow {
     private SidebarSelection sidebarSelection = SidebarSelection.ALL;
     private String lastClipboardOffer = "";
     private final DetailPane detail = new DetailPane();
+    private SearchPane searchPane;
+    /** The transfers (sidebar, filter, list, detail) and the Search tab share the centre. */
+    private javafx.scene.Node transfersView;
+
     private final UpdateService updates = new UpdateService();
     private final SettingsWindow settingsWindow;
     private final IpFilterController ipFilter;
@@ -180,8 +186,8 @@ public final class MainWindow {
         ToolBar bar = buildToolbar();
         root.setTop(new VBox(buildMenuBar(), bar));
         table.setContextMenu(buildContextMenu());
-        palette = new CommandPalette(
-                host, () -> table.requestFocus(), shiftChord(KeyCode.P).getDisplayText());
+        palette =
+                new CommandPalette(host, this::focusList, shiftChord(KeyCode.P).getDisplayText());
         logWindow = new LogWindow(stage, log);
         settingsWindow = new SettingsWindow(settings);
         settingsWindow.setOnEngineSettingsChanged(this::applyEngineSettings);
@@ -190,8 +196,7 @@ public final class MainWindow {
         settingsWindow.setOnAppearanceChanged(this::applyStateColors);
         applyStateColors();
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
-        // The Search tab (next) will reread the list from here; until then there is nothing to tell.
-        settingsWindow.setSearchProviders(searchStore, () -> {});
+        settingsWindow.setSearchProviders(searchStore, searchPane::reloadProviders);
         settingsWindow.setOnTestNotification(() -> {
             Automation a = automation;
             if (a != null) a.testNotification();
@@ -323,6 +328,19 @@ public final class MainWindow {
         } else if (action.equals("settings-search-test")) {
             settingsWindow.show(stage);
             settingsWindow.testSearchProviderForCapture();
+        } else if (action.equals("search")) {
+            showSearch();
+        } else if (action.startsWith("search:")) {
+            showSearch();
+            searchPane.setQuery(action.substring("search:".length()));
+            searchPane.runSearch();
+        } else if (action.startsWith("search-keys:")) {
+            // Keys pressed in the results table (DOWN+ENTER): the keyboard path to the Add dialog.
+            showSearch();
+            searchPane.pressForCapture(java.util.Arrays.stream(
+                            action.substring("search-keys:".length()).split("\\+"))
+                    .map(key -> KeyCode.valueOf(key.trim().toUpperCase(java.util.Locale.ROOT)))
+                    .toList());
         } else if (action.equals("dialog-add")) {
             if (currentDialog != null && currentDialog.isShowing()) currentDialog.confirm();
         } else if (action.startsWith("dialog-press:")) {
@@ -391,6 +409,14 @@ public final class MainWindow {
         if (!settingsWindow.searchStatus().isEmpty())
             System.out.println("capture: search=" + settingsWindow.searchStatus());
         if (watcher != null) System.out.println("capture: watch=" + watchStatusText());
+        System.out.println("capture: search-tab=" + (searchShowing() ? "showing" : "hidden"));
+        if (searchShowing()) {
+            System.out.println("capture: search-query=" + searchPane.queryText());
+            System.out.println("capture: search-chips=" + searchPane.chipsForCapture());
+            System.out.println("capture: search-status=" + searchPane.statusText()
+                    + (searchPane.searching() ? " (searching)" : ""));
+            for (String row : searchPane.rowsForCapture()) System.out.println("capture: search-row=" + row);
+        }
     }
 
     /**
@@ -741,13 +767,49 @@ public final class MainWindow {
                             }
                             case URL -> new AddRequest.TorrentFile(new TorrentFetch().fetch(URI.create(text)), text);
                         };
-                if (withoutAsking) {
-                    Torrent added = e.add(AddDialog.withoutAsking(source, defaults));
-                    Platform.runLater(() -> setStatus("Added " + added.name()));
-                    return;
-                }
-                TorrentPreview preview = source instanceof AddRequest.TorrentFile file ? e.inspect(file.bytes()) : null;
-                Platform.runLater(() -> openDialog(source, preview, shownVia));
+                addSource(e, source, shownVia, withoutAsking, defaults);
+            } catch (EngineException | IOException | RuntimeException ex) {
+                String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                Platform.runLater(() -> setStatus(message));
+            }
+        });
+    }
+
+    /**
+     * Worker. A source that is ready: added at once when the setting says so, else inspected and
+     * handed to the Add dialog on the FX thread.
+     */
+    private void addSource(
+            Engine e, AddRequest.Source source, AddDialog.Via via, boolean withoutAsking, AddDialog.Defaults defaults)
+            throws EngineException {
+        if (withoutAsking) {
+            Torrent added = e.add(AddDialog.withoutAsking(source, defaults));
+            Platform.runLater(() -> setStatus("Added " + added.name()));
+            return;
+        }
+        TorrentPreview preview = source instanceof AddRequest.TorrentFile file ? e.inspect(file.bytes()) : null;
+        Platform.runLater(() -> openDialog(source, preview, via));
+    }
+
+    /**
+     * FX thread. A search result into the Add dialog: a magnet as it is, a {@code .torrent} link
+     * fetched first, the status bar saying so meanwhile.
+     */
+    private void addFromSearch(SearchResult result) {
+        Engine e = engine;
+        if (e == null) {
+            setStatus("The engine is still starting");
+            return;
+        }
+        String fetching = SearchAdd.fetchingText(result);
+        if (!fetching.isEmpty()) setStatus(fetching);
+        boolean withoutAsking = settings.addWithoutAsking();
+        AddDialog.Defaults defaults = AddDialog.Defaults.from(settings);
+        Thread.ofVirtual().name("search-add").start(() -> {
+            try {
+                AddRequest.Source source = SearchAdd.sourceOf(result, new TorrentFetch()::fetch);
+                if (!fetching.isEmpty()) Platform.runLater(() -> setStatus("Fetched " + result.name()));
+                addSource(e, source, AddDialog.Via.SEARCH, withoutAsking, defaults);
             } catch (EngineException | IOException | RuntimeException ex) {
                 String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
                 Platform.runLater(() -> setStatus(message));
@@ -808,7 +870,7 @@ public final class MainWindow {
         Optional<AddDialog.Choice> choice = dialog.showAndWait();
         currentDialog = null;
         fetchWatch = null;
-        table.requestFocus();
+        focusList();
         if (!queuedDialogs.isEmpty()) Platform.runLater(queuedDialogs.remove(0));
         Engine e = engine;
         if (choice.isEmpty() || e == null) {
@@ -953,7 +1015,7 @@ public final class MainWindow {
         currentDialog = dialog;
         Optional<AddDialog.Choice> choice = dialog.showAndWait();
         currentDialog = null;
-        table.requestFocus();
+        focusList();
         if (!queuedDialogs.isEmpty()) Platform.runLater(queuedDialogs.remove(0));
         Engine e = engine;
         if (choice.isEmpty() || e == null) return;
@@ -1602,14 +1664,8 @@ public final class MainWindow {
                 new Command("about", "About " + AppInfo.NAME, null, null, always, this::showAbout),
                 new Command(
                         "settings", "Settings…", chord(KeyCode.COMMA), null, always, () -> settingsWindow.show(stage)),
-                // Opens the provider list until the Search tab exists; the chord is the tab's.
-                new Command(
-                        "search",
-                        "Search…",
-                        chord(KeyCode.K),
-                        null,
-                        always,
-                        () -> settingsWindow.showSearchProviders(stage)),
+                new Command("search", "Search…", chord(KeyCode.K), null, always, this::showSearch),
+                new Command("transfers", "Show Transfers", null, "Esc", always, this::showTransfers),
                 new Command(
                         "filter",
                         "Filter Torrents",
@@ -1682,6 +1738,7 @@ public final class MainWindow {
                 toolButton("remove", Icons.trash()),
                 new Separator(),
                 toolButton("filter", Icons.find()),
+                toolButton("search", Icons.search()),
                 toolButton("event-log", Icons.history()),
                 toolButton("settings", Icons.settings()),
                 spacer,
@@ -1760,6 +1817,7 @@ public final class MainWindow {
                         sidebarItem,
                         new SeparatorMenuItem(),
                         command("filter").menuItem(),
+                        command("transfers").menuItem(),
                         command("focus-sidebar").menuItem(),
                         command("select-all").menuItem(),
                         command("event-log").menuItem(),
@@ -1854,7 +1912,7 @@ public final class MainWindow {
         // The first torrent makes the table appear; it takes the focus then, unless the person is
         // typing a filter at that moment.
         table.visibleProperty().addListener((o, was, now) -> {
-            if (now && !filter.isFocused()) table.requestFocus();
+            if (now && !filter.isFocused() && !searchShowing()) table.requestFocus();
         });
         StackPane centre = new StackPane(table, empty);
         split = new SplitPane(centre);
@@ -1921,8 +1979,83 @@ public final class MainWindow {
         applyFilters();
         BorderPane centreWithSidebar = new BorderPane(listAndDetail);
         centreWithSidebar.setLeft(sidebar);
-        VBox.setVgrow(centreWithSidebar, Priority.ALWAYS);
-        return new VBox(centreWithSidebar);
+        transfersView = centreWithSidebar;
+        // The Search tab shares the centre with the transfers: one is shown and managed, the
+        // other neither, so the transfers look exactly as they did while Search is away.
+        searchPane = new SearchPane(new SearchHost(), settings);
+        StackPane centre2 = new StackPane(centreWithSidebar, searchPane);
+        VBox.setVgrow(centre2, Priority.ALWAYS);
+        return new VBox(centre2);
+    }
+
+    // ---- the Search tab -------------------------------------------------------------------------
+
+    /** What the Search tab asks of the window. */
+    private final class SearchHost implements SearchPane.Host {
+        @Override
+        public List<TorznabEndpoint> enabledProviders() {
+            return searchStore.enabled();
+        }
+
+        @Override
+        public void openProviderSettings() {
+            settingsWindow.showSearchProviders(stage);
+        }
+
+        @Override
+        public void add(SearchResult result) {
+            addFromSearch(result);
+        }
+
+        @Override
+        public void openDetail(String url) {
+            if (!url.isEmpty()) opener.accept(url);
+        }
+
+        @Override
+        public void copy(String text) {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(text);
+            Clipboard.getSystemClipboard().setContent(content);
+            setStatus("Copied " + (text.startsWith("magnet:") ? "the magnet link" : "the link"));
+        }
+
+        @Override
+        public void leave() {
+            showTransfers();
+        }
+    }
+
+    private boolean searchShowing() {
+        return searchPane != null && searchPane.isVisible();
+    }
+
+    /** Ctrl+K: the Search tab in place of the transfers, the query field focused. */
+    private void showSearch() {
+        if (!searchShowing()) {
+            transfersView.setVisible(false);
+            transfersView.setManaged(false);
+            searchPane.setVisible(true);
+            searchPane.setManaged(true);
+        }
+        searchPane.focusQuery();
+    }
+
+    /** Escape in the query: the transfers back, as they were. */
+    private void showTransfers() {
+        if (searchShowing()) {
+            searchPane.setVisible(false);
+            searchPane.setManaged(false);
+            transfersView.setVisible(true);
+            transfersView.setManaged(true);
+        }
+        table.requestFocus();
+    }
+
+    /** The list that is showing takes the focus back: after a dialog, after the palette. */
+    private void focusList() {
+        if (searchShowing()) searchPane.focusResults();
+        else table.requestFocus();
     }
 
     /** An engine action on one torrent by id. */
