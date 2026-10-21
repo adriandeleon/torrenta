@@ -138,7 +138,9 @@ release process with the names changed; Termina's README and memory hold the war
   was the first traversable node. It is `setFocusTraversable(false)`; Ctrl+K (and Ctrl+F) reach it.
 - **Space and Delete are handled on the table, never as scene accelerators.** An accelerator fires
   on any unconsumed key press, and a text field does not consume Space — so a space typed into the
-  filter would pause the selection. `Command.hint` carries the key's name for the menus.
+  filter would pause the selection. `Command.hint` carries the key's name for the menus, where it
+  is the item's accelerator as a `HintCombination`: drawn in the accelerator column, never
+  matching a key, equal only to itself (KeyCombination's own equality compares modifiers alone).
 - **"Paused" means paused by a person.** libtorrent's queue pauses auto-managed torrents too;
   `Torrent.paused` is `PAUSED && !AUTO_MANAGED`, and `pause()` clears `AUTO_MANAGED` first so the
   queue does not resume what the user stopped.
@@ -267,7 +269,9 @@ release process with the names changed; Termina's README and memory hold the war
   arrives, so the fetch is matched by either hash (`fetchOf`), never by `id()`.
 - **"Add now, pick files when ready"** adds with stop-after-metadata and marks
   `torrent.<hash>.pickFiles` in the settings; `MainWindow.chooseFiles(id)` opens the dialog's
-  tree for a torrent in the list and clears the mark. Nothing shows the mark on the row yet.
+  tree for a torrent in the list and clears the mark. Torrent → Choose Files… (`choose-files`) is
+  live for one marked torrent (`Actions.canChooseFiles`); the settings are not observable, so
+  setting or clearing a mark bumps `pickFilesMarks`. Nothing shows the mark on the row yet.
 - **libtorrent's mmap disk I/O takes the JVM's SIGSEGV handler.** Once a file of
   `mmap_file_size_cutoff` pieces (40 by default) is mapped, libtorrent installs a SIGSEGV/SIGBUS
   guard of its own in place of the JVM's (`sigaction`, no chaining); a fault that is not its own,

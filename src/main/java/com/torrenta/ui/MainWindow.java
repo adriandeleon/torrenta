@@ -235,7 +235,12 @@ public final class MainWindow {
     /** Per-torrent share limits as of the last poll, for the status sentences ("ratio 1.2 of 2"). */
     private volatile java.util.Map<String, ShareLimit> shareOverrides = java.util.Map.of();
 
-    private Engine engine;
+    /**
+     * Set on the FX thread, read by the poll thread and workers: volatile, and copied to a local
+     * before use, since a profile switch sets it to null while a poll may still be running.
+     */
+    private volatile Engine engine;
+
     private String engineDescription = "";
     /** What the engine can do; everything until one has started. Read by workers, set on the FX thread. */
     private volatile Engine.Capabilities capabilities = Engine.Capabilities.ALL;
@@ -256,6 +261,9 @@ public final class MainWindow {
     private final ProfileStore profiles;
     /** The engine could not start: the empty state says why and offers Retry and another profile. */
     private final javafx.beans.property.BooleanProperty engineDown = new javafx.beans.property.SimpleBooleanProperty();
+    /** Bumped on the FX thread whenever a "pick files when ready" mark is set or cleared. */
+    private final javafx.beans.property.IntegerProperty pickFilesMarks =
+            new javafx.beans.property.SimpleIntegerProperty();
 
     private VBox engineProblem;
     private Label engineProblemText;
@@ -411,6 +419,8 @@ public final class MainWindow {
         scene.getAccelerators().put(shiftChord(KeyCode.T), statsWindow::show);
         scene.getAccelerators().put(shiftChord(KeyCode.M), messagePopup::toggle);
         scene.getAccelerators().put(chord(KeyCode.V), this::addFromClipboard);
+        // Set Category is a submenu, and a submenu carries no accelerator: the chord is the scene's.
+        scene.getAccelerators().put(shiftChord(KeyCode.G), this::chooseCategoryByChord);
         scene.setOnDragOver(this::onDragOver);
         scene.setOnDragDropped(this::onDragDropped);
         // A magnet copied elsewhere is the commonest way a torrent arrives; say so when the window
@@ -1847,6 +1857,7 @@ public final class MainWindow {
                     Platform.runLater(() -> {
                         settings.setFilesToPick(id, true);
                         settings.saveQuietly();
+                        pickFilesMarks.set(pickFilesMarks.get() + 1);
                     });
                 }
             } catch (EngineException ex) {
@@ -1969,6 +1980,7 @@ public final class MainWindow {
         AddRequest request = choice.get().request();
         settings.setFilesToPick(id, false);
         settings.saveQuietly();
+        pickFilesMarks.set(pickFilesMarks.get() + 1);
         Thread.ofVirtual().name("engine-choose").start(() -> {
             String outcome;
             try {
@@ -2075,6 +2087,8 @@ public final class MainWindow {
     }
 
     private void poll() {
+        Engine engine = this.engine;
+        if (engine == null) return;
         FetchWatch watch = fetchWatch;
         Engine.MetadataFetch fetch = watch == null ? null : watch.slot().get();
         if (fetch != null) {
@@ -2096,7 +2110,7 @@ public final class MainWindow {
         }
         // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
         com.torrenta.engine.SessionStats stats = statsWanted ? engine.stats() : null;
-        enforceShareLimits(snapshot);
+        enforceShareLimits(engine, snapshot);
         // The detail pane costs a status with the pieces bitfield; only for one shown torrent.
         String id = detailWanted ? detailId : null;
         TorrentDetail detailSnapshot = null;
@@ -2130,7 +2144,7 @@ public final class MainWindow {
      * paused or removed, and the log says so. A paused one no longer qualifies, so it is done once;
      * resuming it by hand seeds it until the next tick, raising the limit seeds it for good.
      */
-    private void enforceShareLimits(List<Torrent> snapshot) {
+    private void enforceShareLimits(Engine engine, List<Torrent> snapshot) {
         ShareLimit global = globalShareLimit;
         java.util.Map<String, ShareLimit> overrides = settings.shareOverrides();
         shareOverrides = overrides;
@@ -2199,18 +2213,20 @@ public final class MainWindow {
     }
 
     private double dividerFromSettings() {
-        try {
-            double d = Double.parseDouble(settings.get(Settings.DETAIL_DIVIDER, "0.62"));
-            return d > 0.1 && d < 0.95 ? d : 0.62;
-        } catch (NumberFormatException e) {
-            return 0.62;
-        }
+        return DetailSplit.position(settings.get(Settings.DETAIL_DIVIDER, null));
     }
 
+    /**
+     * The divider and the detail pane's tab. The divider only beside a list: while the empty
+     * state stands in for it, the position is the layout's, not the person's (see DetailSplit).
+     */
     private void rememberDivider() {
         if (split.getDividers().isEmpty() || !detailWanted) return;
-        settings.set(
-                Settings.DETAIL_DIVIDER, String.format(java.util.Locale.ROOT, "%.3f", split.getDividerPositions()[0]));
+        if (!rows.list().isEmpty()) {
+            settings.set(
+                    Settings.DETAIL_DIVIDER,
+                    String.format(java.util.Locale.ROOT, "%.3f", split.getDividerPositions()[0]));
+        }
         settings.set(Settings.DETAIL_TAB, detail.activeTab());
         settings.saveQuietly();
     }
@@ -2414,6 +2430,12 @@ public final class MainWindow {
     private void chooseCategory() {
         if (selectedTorrents().isEmpty()) return;
         Platform.runLater(this::showCategoryChoice);
+    }
+
+    /** Ctrl+Shift+G: the chooser, when the command is live and no Add dialog is up. */
+    private void chooseCategoryByChord() {
+        if (currentDialog != null || !command("set-category").enabled().get()) return;
+        chooseCategory();
     }
 
     private void showCategoryChoice() {
@@ -2632,6 +2654,16 @@ public final class MainWindow {
     private List<Command> buildCommands() {
         BooleanBinding selection = Bindings.isNotEmpty(table.getSelectionModel().getSelectedItems());
         BooleanBinding always = Bindings.createBooleanBinding(() -> true);
+        // A torrent added with "Add now, pick files when ready" until its files have been chosen;
+        // the settings are not observable, so a change of mark bumps pickFilesMarks.
+        BooleanBinding filesToChoose = Bindings.createBooleanBinding(
+                () -> Actions.canChooseFiles(
+                        table.getSelectionModel().getSelectedItems().stream()
+                                .map(TorrentRow::id)
+                                .toList(),
+                        settings::filesToPick),
+                table.getSelectionModel().getSelectedItems(),
+                pickFilesMarks);
         List<Command> all = new ArrayList<>(List.of(
                 new Command(
                         "create",
@@ -2717,6 +2749,13 @@ public final class MainWindow {
                         null,
                         gate("set-location", selection),
                         this::setLocation),
+                new Command(
+                        "choose-files",
+                        tr("command.chooseFiles"),
+                        null,
+                        null,
+                        filesToChoose,
+                        () -> selectedTorrents().stream().findFirst().ifPresent(t -> chooseFiles(t.id()))),
                 new Command(
                         "set-category",
                         tr("command.setCategory"),
@@ -3095,6 +3134,7 @@ public final class MainWindow {
         }
         items.add(queueMenu());
         items.add(menuItem("set-location"));
+        items.add(menuItem("choose-files"));
         items.add(new SeparatorMenuItem());
         items.add(categoryMenu());
         items.add(menuItem("edit-tags"));
@@ -3164,6 +3204,13 @@ public final class MainWindow {
         // a filter that matches nothing shows the table's own placeholder instead.
         empty.visibleProperty().bind(Bindings.isEmpty(rows.list()));
         empty.managedProperty().bind(empty.visibleProperty());
+        // The empty state never sizes the split: its height would push the divider down (see
+        // DetailSplit). The list appearing puts the saved position back.
+        empty.setMinHeight(0);
+        empty.visibleProperty().addListener((o, was, now) -> {
+            if (!now && detailWanted && !split.getDividers().isEmpty())
+                split.setDividerPositions(dividerFromSettings());
+        });
         table.visibleProperty().bind(Bindings.isNotEmpty(rows.list()));
         table.managedProperty().bind(table.visibleProperty());
         // The first torrent makes the table appear; it takes the focus then, unless the person is

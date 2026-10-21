@@ -95,6 +95,7 @@ class IconsTest {
                 "queue-down",
                 "queue-bottom",
                 "set-location",
+                "choose-files",
                 "set-category",
                 "edit-tags",
                 "copy-name",
