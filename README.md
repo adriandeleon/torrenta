@@ -52,9 +52,13 @@ torrent is added, finishes or is done seeding (Settings → Automation, qBittorr
 `%D` … placeholders, no shell), and a desktop notification can be shown for each of those and for
 errors, through `notify-send`, `osascript` or a PowerShell toast.
 
-Search goes through a Torznab server of yours, Prowlarr or Jackett (Settings → Search): add it by
-URL and API key, press Test, and every enabled one is asked at once when the search tab (next)
-asks; the same torrent from two servers is shown once, the better-seeded copy first.
+Search (`Ctrl+K`) goes through a Torznab server of yours, Prowlarr or Jackett (Settings → Search):
+add it by URL and API key, press Test, and the Search tab asks every enabled one at once, each
+answer landing in the results as it arrives with a line per provider saying how many it found or
+why it could not answer; the same torrent from two servers is shown once, the better-seeded copy
+first, sorted by seeds unless a column is clicked. `Enter` on a result opens the Add dialog for it,
+a `.torrent` link fetched first. The results table's columns are remembered like the transfer
+list's.
 
 ### Building a native app image
 
@@ -82,6 +86,10 @@ TORRENTA_CAPTURE=/tmp/torrenta.png ./mvnw javafx:run
 
 Renders the real window, writes it to a PNG, prints a few `capture:` facts (size, title, focus owner,
 engine, status bar) and exits. CI runs the first form under Xvfb on Linux as a smoke test.
+`-Dtorrenta.captureAction=search:debian,search-keys:DOWN+ENTER` drives the Search tab; a stand-in
+Torznab server for it is `java scripts/torznab-stub.java 9696 <search.xml> [caps.xml]` with the
+fixtures under `src/test/resources/com/torrenta/search`, and a provider at
+`http://127.0.0.1:9696/api` in the config folder's `search-providers.json`.
 
 ## Files
 
@@ -146,7 +154,7 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+F` | Filter the list by name; `Esc` clears and returns to the list |
 | `Ctrl+B` / `Ctrl+Shift+B` | Focus the sidebar (All, then Status, Categories, Tags and Trackers, every entry with a count; arrows walk every section, `Space` makes the entry the section's choice, `Enter` chooses and returns to the list, `Esc` returns without choosing; `Left`/`Right` fold a section) / show or hide it |
 | `Ctrl+Shift+P` | Command palette: every command, found by typing part of its name |
-| `Ctrl+K` | Search providers (Settings → Search) until the search tab exists: Prowlarr or Jackett by URL and API key, Test |
+| `Ctrl+K` | Search: the Search tab in place of the transfers, with the query focused. A category chip row and a provider chip row (`Tab` walks them, `Space` toggles), `Enter` asks every chosen provider at once and the results land as each answers; `Down` enters the results, `Enter` or a double-click opens the Add dialog for one, `Ctrl+C` copies its link, the context menu opens its detail page; `Esc` returns to the transfers |
 | `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Categories and tags (names, save paths, delete), Watch folders, Automation (a command per event with placeholders, desktop notifications), Search (Torznab providers), Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
 | `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |

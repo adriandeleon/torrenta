@@ -49,6 +49,8 @@ public final class Settings {
     public static final String TABLE_COLUMNS_COMFORTABLE = "table.columns.comfortable";
     /** Row density, {@code comfortable} or {@code compact}; the UI maps it and falls back. */
     public static final String UI_DENSITY = "ui.density";
+    /** The Search tab's results columns, the same shape. */
+    public static final String SEARCH_COLUMNS = "search.columns";
     /** The detail pane: shown, which tab, and the divider position (0..1 of the window). */
     public static final String DETAIL_VISIBLE = "detail.visible";
 

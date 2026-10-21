@@ -113,6 +113,14 @@ final class Icons {
         return line("M2.5999999999999996 7.0a4.4 4.4 0 1 0 8.8 0a4.4 4.4 0 1 0 -8.8 0M10.4 10.4L14 14");
     }
 
+    /**
+     * Search: the kit's magnifier over three result lines, so it is not the filter's plain lens.
+     */
+    static Node search() {
+        return line("M8.2 6.2a3.6 3.6 0 1 0 7.2 0a3.6 3.6 0 1 0 -7.2 0M10.3 8.9L13.9 12.5"
+                + "M1.5 3.5H6M1.5 6.5H5.5M1.5 9.5H7.5M1.5 12.5H9");
+    }
+
     /** A clock face, for the event log. */
     static Node history() {
         return of("M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 "

@@ -30,6 +30,16 @@ class ColumnLayoutTest {
     }
 
     @Test
+    void theSearchTabsColumnsAreOrdinaryColumnsToo() {
+        // The same format under its own key, search.columns; the pane's ids round-trip with it.
+        String stored = "name:420,size:90,seeds:70,-leechers:80,date:150,provider:120";
+        List<Column> parsed = ColumnLayout.parse(stored);
+        assertEquals(SearchPane.columnIds(), parsed.stream().map(Column::id).toList());
+        assertEquals(new Column("leechers", 80, false), parsed.get(3));
+        assertEquals(stored, ColumnLayout.format(parsed));
+    }
+
+    @Test
     void emptyAndBlankMeanNoLayout() {
         assertTrue(ColumnLayout.parse(null).isEmpty());
         assertTrue(ColumnLayout.parse("  ").isEmpty());
