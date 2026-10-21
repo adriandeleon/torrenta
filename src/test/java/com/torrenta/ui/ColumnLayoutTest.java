@@ -40,6 +40,15 @@ class ColumnLayoutTest {
     }
 
     @Test
+    void theRssTabsColumnsAreOrdinaryColumnsToo() {
+        String stored = "title:460,date:150,-feed:160";
+        List<Column> parsed = ColumnLayout.parse(stored);
+        assertEquals(RssPane.columnIds(), parsed.stream().map(Column::id).toList());
+        assertEquals(new Column("feed", 160, false), parsed.get(2));
+        assertEquals(stored, ColumnLayout.format(parsed));
+    }
+
+    @Test
     void emptyAndBlankMeanNoLayout() {
         assertTrue(ColumnLayout.parse(null).isEmpty());
         assertTrue(ColumnLayout.parse("  ").isEmpty());

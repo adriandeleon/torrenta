@@ -60,6 +60,16 @@ first, sorted by seeds unless a column is clicked. `Enter` on a result opens the
 a `.torrent` link fetched first. The results table's columns are remembered like the transfer
 list's.
 
+RSS (`Ctrl+R`) is a third tab: feeds on the left (All feeds first, each with its unread count and
+a glyph while it refreshes or after it failed), the articles of the chosen feed on the right (bold
+while unread; a filter box and an Unread-only toggle above them), and the chosen article's text
+and link below. A feed is added by URL (`N`), fetched once to check it and named after itself,
+refreshed every half hour by default (Settings → RSS; a feed may have its own interval), and only
+re-read when it changed (`ETag` and `Last-Modified` are sent back). Choosing an article marks it
+read; `M` and `Shift+M` mark one or the whole feed by hand; `Enter` on an article that carries a
+torrent (an enclosure, a magnet in its link or text, a `<torrent:magnetURI>`) opens the Add dialog
+for it. Rules that add new articles' torrents by themselves are the next step.
+
 **Search providers without an API** are definition files: `search-providers/<id>.json` in the config
 folder, one per site, interpreted by one generic provider, so the app ships no site-specific code
 and a site change is a file edit. A file names the site (`id`, `name`, `homepage`), its `type`
@@ -110,7 +120,12 @@ fixtures under `src/test/resources/com/torrenta/search`, and a provider at
 recorded pages, so a file whose `search.url` is `http://127.0.0.1:9797/linuxtracker.html?q={query}`
 searches without asking the site; `settings-page:Search` and `settings:definition` photograph the
 page that lists the files, `settings-definitions-reload` presses Reload, and the capture prints a
-`definition=` line per file.
+`definition=` line per file. For the RSS tab, `java scripts/feed-stub.java 9898
+src/test/resources/com/torrenta/rss/rss2.xml` serves the fixture with an `ETag`;
+`rss:http://127.0.0.1:9898/feed.xml` adds it as a feed, `rss-keys:DOWN+ENTER` walks the articles
+once it is fetched, `rss-dialog[:<url>]` and `settings-rss-add[:<url>]` open the Add Feed dialog
+from the tab and from Settings → RSS, `settings-page:RSS` photographs the page, and the capture
+prints `rss-feed=`, `rss-row=`, `rss-status=` and `rss-detail=` lines.
 
 ## Files
 
@@ -135,7 +150,11 @@ not a torrent is renamed `.invalid` and left alone. Search providers are `search
 (name, URL, API key, enabled, the category count the last Test found), this machine's too and
 never synced, since the key is a secret. Definition-file providers are `search-providers/<id>.json`,
 one per site, read only (the shipped examples are copied in once and never written over); which are
-switched off is `search.disabled` in the settings file and syncs. The commands run on an event are
+switched off is `search.disabled` in the settings file and syncs. The RSS reader keeps its feeds in
+`rss/feeds.json` (id, URL, name, its own interval if any) and each feed's articles, read or not,
+with the last answer's `ETag`, `Last-Modified`, time and error, in `rss/articles/<id>.json`, at most
+500 per feed, the oldest dropped: machine data, this machine's, never synced; the refresh interval,
+`rss.refreshMinutes`, is in the settings file and does. The commands run on an event are
 `automation.onAdded`, `automation.onFinished` and `automation.onSeedingDone` in the settings file,
 this machine's too (they name its programs); the notification switches are `notify.added`,
 `notify.finished`, `notify.seedingDone` and `notify.error` and do sync. A torrent's own share limit (Torrent → Limits…)
@@ -178,7 +197,8 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+B` / `Ctrl+Shift+B` | Focus the sidebar (All, then Status, Categories, Tags and Trackers, every entry with a count; arrows walk every section, `Space` makes the entry the section's choice, `Enter` chooses and returns to the list, `Esc` returns without choosing; `Left`/`Right` fold a section) / show or hide it |
 | `Ctrl+Shift+P` | Command palette: every command, found by typing part of its name |
 | `Ctrl+K` | Search: the Search tab in place of the transfers, with the query focused. A category chip row and a provider chip row (`Tab` walks them, `Space` toggles), `Enter` asks every chosen provider at once and the results land as each answers; `Down` enters the results, `Enter` or a double-click opens the Add dialog for one, `Ctrl+C` copies its link, the context menu opens its detail page; `Esc` returns to the transfers |
-| `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Categories and tags (names, save paths, delete), Watch folders, Automation (a command per event with placeholders, desktop notifications), Search (Torznab providers), Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
+| `Ctrl+R` | RSS: the RSS tab in place of the transfers. Arrows walk the feeds and the articles (`Left`/`Right` between them, `Down` from the filter box into the articles), `Enter` or a double-click on an article with a torrent opens the Add dialog for it, `M` toggles read, `Shift+M` marks the feed read, `N` or `Ctrl+N` adds a feed, `F5` refreshes it (`Shift+F5` every feed), `Delete` in the feed list removes one after a confirm, `Ctrl+C` copies the torrent or the page link; the context menus mirror the keys; `Esc` returns to the transfers |
+| `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Categories and tags (names, save paths, delete), Watch folders, Automation (a command per event with placeholders, desktop notifications), Search (Torznab providers), RSS (the refresh interval, the feeds), Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
 | `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
 | `Space` | Pause the selected torrents, or resume them if all are paused |

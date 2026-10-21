@@ -121,6 +121,11 @@ final class Icons {
                 + "M1.5 3.5H6M1.5 6.5H5.5M1.5 9.5H7.5M1.5 12.5H9");
     }
 
+    /** RSS: the dot and two arcs, in the kit's line style. */
+    static Node rss() {
+        return line("M3 4a9 9 0 0 1 9 9M3 8a5 5 0 0 1 5 5M3 12.2a0.8 0.8 0 1 0 1.6 0a0.8 0.8 0 1 0 -1.6 0");
+    }
+
     /** A clock face, for the event log. */
     static Node history() {
         return of("M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 "

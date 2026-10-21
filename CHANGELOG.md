@@ -19,6 +19,26 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **The RSS reader** (`Ctrl+R`, File → RSS Feeds…, the toolbar's feed glyph), the first step of
+  the RSS milestone, a third tab beside the transfers and the search: the feeds on the left (All
+  feeds first, each with its unread count, a glyph while it refreshes or after it failed), the
+  articles of the chosen feed on the right (title in bold while unread, date, feed; a filter box
+  and an Unread-only toggle above them), and the chosen article's text, plain, with its link,
+  below. A feed is added by URL (`N`, `Ctrl+N`, the Add feed… button, or Settings → RSS), fetched
+  once to check it, a blank name taken from the feed's title; it may have its own interval. RSS
+  2.0 and Atom are read with the JDK's own parser, entities and DTDs off; an item's torrent is
+  its enclosure, a magnet in its link, guid or text, a `<torrent:magnetURI>` or an info-hash
+  element; dates in the shapes feeds use, missing ones allowed. Every feed is refreshed on its
+  schedule (Settings → RSS → Refresh every, 30 minutes by default, 5 to 1440, synced), on `F5`,
+  or on Refresh; an unchanged feed costs one request (`ETag` and `Last-Modified` go back and a
+  304 comes). New articles are merged by guid, read flags kept, at most 500 per feed; a failure is
+  the feed's status ("last error: the server answered 404"). Choosing an article marks it read,
+  `M` toggles it, `Shift+M` marks the feed; `Enter` or a double-click on an article with a torrent
+  opens the Add dialog for it ("FROM RSS"), a `.torrent` link fetched first; `Ctrl+C` copies the
+  link; `Delete` removes a feed after a confirm; the context menus mirror the keys. The feeds and
+  articles are `rss/feeds.json` and `rss/articles/<id>.json` beside the settings, this machine's,
+  never synced. The columns are remembered as `rss.columns`. The auto-download switch on the
+  Settings page is there and off: the rules come next.
 - **Search providers from definition files**, the last step of the search milestone. A site
   without an API is `search-providers/<id>.json` in the config folder: where to search (a URL
   template with `{query}` and `{category}`, the category mapped through the file's own table;

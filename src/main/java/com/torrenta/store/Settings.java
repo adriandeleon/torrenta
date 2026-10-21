@@ -220,6 +220,15 @@ public final class Settings {
     public static final String NOTIFY_SEEDING_DONE = "notify.seedingDone";
     public static final String NOTIFY_ERROR = "notify.error";
 
+    /** Minutes between feed refreshes, 5 to 1440, 30 by default; syncs (the feeds and articles do not). */
+    public static final String RSS_REFRESH_MINUTES = "rss.refreshMinutes";
+    /** Whether new articles' torrents are added without asking; off, and unused until the rules exist. */
+    public static final String RSS_AUTO_DOWNLOAD = "rss.autoDownload";
+    /** The RSS tab's article columns, the same format as {@link #TABLE_COLUMNS}. */
+    public static final String RSS_COLUMNS = "rss.columns";
+
+    public static final String[] RSS_KEYS = {RSS_REFRESH_MINUTES, RSS_AUTO_DOWNLOAD};
+
     public static final String[] AUTOMATION_KEYS = {
         AUTOMATION_ON_ADDED,
         AUTOMATION_ON_FINISHED,
@@ -327,6 +336,24 @@ public final class Settings {
 
     public void setSyncIntervalMinutes(int minutes) {
         properties.setProperty(SYNC_INTERVAL, String.valueOf(Math.clamp(minutes, 1, 1440)));
+    }
+
+    /** Minutes between feed refreshes; 5 to 1440, 30 by default. */
+    public int rssRefreshMinutes() {
+        return readInt(RSS_REFRESH_MINUTES, 30, 5, 1440);
+    }
+
+    public void setRssRefreshMinutes(int minutes) {
+        properties.setProperty(RSS_REFRESH_MINUTES, String.valueOf(Math.clamp(minutes, 5, 1440)));
+    }
+
+    /** Off until the auto-download rules exist; the key is kept for them. */
+    public boolean rssAutoDownload() {
+        return readBoolean(RSS_AUTO_DOWNLOAD, false);
+    }
+
+    public void setRssAutoDownload(boolean on) {
+        properties.setProperty(RSS_AUTO_DOWNLOAD, String.valueOf(on));
     }
 
     public long syncLastEpochMs() {

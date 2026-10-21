@@ -52,6 +52,8 @@ import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.WatchFolder;
+import com.torrenta.rss.Feed;
+import com.torrenta.rss.RssService;
 import com.torrenta.search.SearchException;
 import com.torrenta.search.TorznabEndpoint;
 import com.torrenta.search.TorznabProvider;
@@ -94,6 +96,7 @@ final class SettingsWindow {
         WATCH(Group.APPLICATION, "Watch folders"),
         AUTOMATION(Group.APPLICATION, "Automation"),
         SEARCH(Group.APPLICATION, "Search"),
+        RSS(Group.APPLICATION, "RSS"),
         SYNC(Group.APPLICATION, "Sync"),
         LABELS(Group.APPLICATION, "Categories and tags"),
         CONNECTION(Group.ENGINE, "Connection"),
@@ -128,7 +131,7 @@ final class SettingsWindow {
                 Settings.UI_DENSITY
             },
             concat(
-                    concat(Settings.DOWNLOAD_KEYS, Settings.AUTOMATION_KEYS),
+                    concat(Settings.DOWNLOAD_KEYS, concat(Settings.AUTOMATION_KEYS, Settings.RSS_KEYS)),
                     concat(
                             Settings.CONNECTION_KEYS,
                             concat(
@@ -256,6 +259,32 @@ final class SettingsWindow {
         reloadSearch();
     }
 
+    private RssService rssService;
+    private TableView<Feed> rssTable;
+    private Label rssStatusLabel;
+    private FeedDialog rssDialog;
+    private Spinner<Integer> rssMinutes;
+    private CheckBox rssAutoDownload;
+
+    /** The reader the RSS page edits; its changes come back through the service's listener (FX thread). */
+    void setRss(RssService service) {
+        this.rssService = service;
+        service.addListener(id -> reloadRss());
+        reloadRss();
+    }
+
+    /** The RSS page's status line, or the open feed dialog's, for a capture; empty when it says nothing. */
+    String rssStatus() {
+        if (rssDialog != null && rssDialog.isShowing()) return rssDialog.statusText();
+        return rssStatusLabel == null ? "" : rssStatusLabel.getText();
+    }
+
+    /** Opens the Add Feed dialog from the RSS page, on the next pulse, with the URL typed in. */
+    void openRssDialogForCapture(String url) {
+        selectPageForCapture("RSS");
+        javafx.application.Platform.runLater(() -> addRssFeed(url));
+    }
+
     private DefinitionStore definitionStore;
     private Runnable openDefinitionFolder = () -> {};
     private TableView<DefinitionStore.Entry> definitionTable;
@@ -305,6 +334,7 @@ final class SettingsWindow {
     Scene dialogScene() {
         if (watchDialog != null && watchDialog.isShowing()) return watchDialog.scene();
         if (searchDialog != null && searchDialog.isShowing()) return searchDialog.scene();
+        if (rssDialog != null && rssDialog.isShowing()) return rssDialog.scene();
         return null;
     }
 
@@ -312,6 +342,7 @@ final class SettingsWindow {
     String dialogTitle() {
         if (watchDialog != null && watchDialog.isShowing()) return watchDialog.title();
         if (searchDialog != null && searchDialog.isShowing()) return searchDialog.title();
+        if (rssDialog != null && rssDialog.isShowing()) return rssDialog.title();
         return "";
     }
 
@@ -319,6 +350,7 @@ final class SettingsWindow {
     void closeDialogsForCapture() {
         if (watchDialog != null && watchDialog.isShowing()) watchDialog.cancel();
         if (searchDialog != null && searchDialog.isShowing()) searchDialog.cancel();
+        if (rssDialog != null && rssDialog.isShowing()) rssDialog.cancel();
     }
 
     /**
@@ -873,6 +905,7 @@ final class SettingsWindow {
             case WATCH -> buildWatch(page);
             case AUTOMATION -> buildAutomation(page);
             case SEARCH -> buildSearch(page);
+            case RSS -> buildRss(page);
             case CONNECTION -> buildConnection(page);
             case PROTOCOL -> buildProtocol(page);
             case IP_FILTER -> buildIpFilter(page);
@@ -1383,6 +1416,178 @@ final class SettingsWindow {
         if (selected != null && watchTable.getItems().contains(selected))
             watchTable.getSelectionModel().select(selected);
         refreshWatchStatus();
+    }
+
+    private void buildRss(VBox page) {
+        VBox refresh = section(page, "Refreshing");
+        rssMinutes = new Spinner<>(Feed.MIN_MINUTES, Feed.MAX_MINUTES, 30, 5);
+        rssMinutes.setEditable(true);
+        rssMinutes.setPrefWidth(90);
+        rssMinutes.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setRssRefreshMinutes(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.RSS,
+                refresh,
+                "Refresh every (minutes)",
+                "How often every feed is asked again, 5 to 1440; a feed can have its own interval. An unchanged"
+                        + " feed costs one request (ETag and Last-Modified are sent back). Syncs.",
+                rssMinutes,
+                "rss feed interval refresh minutes schedule");
+        rssAutoDownload = new CheckBox();
+        rssAutoDownload.setDisable(true);
+        Node auto = row(
+                Category.RSS,
+                refresh,
+                "Download new articles' torrents automatically",
+                "Off for now: the rules that say which articles (a pattern, a category, a save path) come next.",
+                rssAutoDownload,
+                "rss auto download automatic rules filter");
+        auto.getStyleClass().add("settings-dimmed");
+
+        VBox feeds = section(page, "Feeds");
+        rssTable = new TableView<>();
+        rssTable.setPrefHeight(190);
+        rssTable.setPlaceholder(new Label("No feeds yet"));
+        rssTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        TableColumn<Feed, String> name = new TableColumn<>("Name");
+        name.setPrefWidth(130);
+        name.setCellValueFactory(c ->
+                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().displayName()));
+        TableColumn<Feed, String> url = new TableColumn<>("URL");
+        url.setPrefWidth(190);
+        url.setCellValueFactory(c ->
+                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().url()));
+        TableColumn<Feed, String> last = new TableColumn<>("Last refresh");
+        last.setPrefWidth(110);
+        last.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(rssLastRefresh(c.getValue())));
+        TableColumn<Feed, String> unread = new TableColumn<>("Unread");
+        unread.setPrefWidth(70);
+        unread.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                rssService == null
+                        ? ""
+                        : Integer.toString(rssService.unread(c.getValue().id()))));
+        TableColumn<Feed, String> status = new TableColumn<>("Status");
+        status.setPrefWidth(140);
+        status.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(rssFeedStatus(c.getValue())));
+        rssTable.getColumns().addAll(List.of(name, url, last, unread, status));
+        rssTable.setRowFactory(t -> {
+            javafx.scene.control.TableRow<Feed> row = new javafx.scene.control.TableRow<>();
+            row.setOnMouseClicked(e -> {
+                if (e.getClickCount() == 2 && !row.isEmpty()) editRssFeed();
+            });
+            return row;
+        });
+        Button add = new Button("Add…");
+        add.setOnAction(e -> addRssFeed(""));
+        Button edit = new Button("Edit…");
+        edit.disableProperty()
+                .bind(rssTable.getSelectionModel().selectedItemProperty().isNull());
+        edit.setOnAction(e -> editRssFeed());
+        Button remove = new Button("Remove");
+        remove.disableProperty()
+                .bind(rssTable.getSelectionModel().selectedItemProperty().isNull());
+        remove.setOnAction(e -> removeRssFeed());
+        Button refreshNow = new Button("Refresh");
+        refreshNow.setOnAction(e -> {
+            if (rssService == null) return;
+            Feed selected = rssTable.getSelectionModel().getSelectedItem();
+            if (selected == null) rssService.refreshAll();
+            else rssService.refresh(selected.id());
+        });
+        HBox buttons = new HBox(6, add, edit, remove, refreshNow);
+        buttons.setAlignment(Pos.CENTER_LEFT);
+        Label hint = new Label("The RSS tab (Ctrl+R) reads these. A feed is added by URL and fetched once to check it;"
+                + " a blank name takes the feed's title. The feeds and their articles, read or not, are rss/feeds.json"
+                + " and rss/articles/<id>.json beside the settings: this machine's, never synced.");
+        hint.setWrapText(true);
+        hint.getStyleClass().add("settings-row-description");
+        rssStatusLabel = new Label();
+        rssStatusLabel.setWrapText(true);
+        rssStatusLabel.getStyleClass().add("settings-row-description");
+        VBox box = new VBox(8, hint, rssTable, buttons, rssStatusLabel);
+        feeds.getChildren().add(box);
+        rows.add(new Row(
+                Category.RSS, box, "Feeds | rss atom feed url add edit remove refresh unread articles status", feeds));
+    }
+
+    private String rssLastRefresh(Feed feed) {
+        if (rssService == null) return "";
+        RssService.Status s = rssService.status(feed.id());
+        return s.refreshing()
+                ? "refreshing…"
+                : s.refreshedEpochMs() <= 0 ? "never" : RssText.ago(s.refreshedEpochMs(), System.currentTimeMillis());
+    }
+
+    private String rssFeedStatus(Feed feed) {
+        if (rssService == null) return "";
+        RssService.Status s = rssService.status(feed.id());
+        return s.failed() ? "last error: " + s.error() : s.refreshedEpochMs() <= 0 ? "" : "ok";
+    }
+
+    private void addRssFeed(String prefill) {
+        if (rssService == null || (rssDialog != null && rssDialog.isShowing())) return;
+        rssDialog = new FeedDialog(stage, null, rssService.source(), settings.rssRefreshMinutes());
+        if (!prefill.isEmpty()) rssDialog.prefillUrl(prefill);
+        Optional<Feed> made = rssDialog.showAndWait();
+        rssDialog = null;
+        if (made.isEmpty()) return;
+        try {
+            rssService.addFeed(made.get());
+        } catch (IOException e) {
+            report("Could not save the feed: " + e.getMessage());
+            return;
+        }
+        reloadRss();
+        rssTable.getSelectionModel().select(made.get());
+    }
+
+    private void editRssFeed() {
+        Feed selected = rssTable.getSelectionModel().getSelectedItem();
+        if (rssService == null || selected == null) return;
+        rssDialog = new FeedDialog(stage, selected, rssService.source(), settings.rssRefreshMinutes());
+        Optional<Feed> edited = rssDialog.showAndWait();
+        rssDialog = null;
+        if (edited.isEmpty()) return;
+        try {
+            rssService.updateFeed(edited.get());
+        } catch (IOException e) {
+            report("Could not save the feed: " + e.getMessage());
+            return;
+        }
+        reloadRss();
+        rssTable.getSelectionModel().select(edited.get());
+    }
+
+    private void removeRssFeed() {
+        Feed selected = rssTable.getSelectionModel().getSelectedItem();
+        if (rssService == null || selected == null) return;
+        try {
+            rssService.removeFeed(selected.id());
+        } catch (IOException e) {
+            report("Could not remove the feed: " + e.getMessage());
+        }
+        reloadRss();
+    }
+
+    /** The service's list into the table; keeps the selection where it can. */
+    private void reloadRss() {
+        if (rssService == null || rssTable == null) return;
+        Feed selected = rssTable.getSelectionModel().getSelectedItem();
+        List<Feed> feeds = rssService.feeds();
+        rssTable.getItems().setAll(feeds);
+        if (selected != null) {
+            for (Feed f : feeds)
+                if (f.id().equals(selected.id())) rssTable.getSelectionModel().select(f);
+        }
+        int unread = rssService.unreadTotal();
+        rssStatusLabel.setText(
+                feeds.isEmpty()
+                        ? ""
+                        : (feeds.size() == 1 ? "1 feed" : feeds.size() + " feeds") + ", "
+                                + (unread == 1 ? "1 unread article" : unread + " unread articles"));
     }
 
     private void buildSearch(VBox page) {
@@ -2404,6 +2609,9 @@ final class SettingsWindow {
             reloadLabels();
             reloadWatch();
             reloadDefinitions();
+            reloadRss();
+            rssMinutes.getValueFactory().setValue(settings.rssRefreshMinutes());
+            rssAutoDownload.setSelected(settings.rssAutoDownload());
             theme.setValue(Theme.byId(settings.theme(), Theme.DEFAULT));
             downloadDir.setText(settings.downloadDir().toString());
             incompleteEnabled.setSelected(settings.incompleteEnabled());
