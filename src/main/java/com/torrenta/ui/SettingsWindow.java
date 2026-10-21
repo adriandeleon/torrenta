@@ -1247,6 +1247,15 @@ final class SettingsWindow {
      * engine that has it all.
      */
     void applyCapabilities(Engine.Capabilities caps) {
+        boolean wasLoading = loading;
+        loading = true;
+        try {
+            ShareLimit.Action chosen = shareAction.getValue();
+            shareAction.getItems().setAll(CapabilityRules.shareActions(caps));
+            shareAction.setValue(chosen);
+        } finally {
+            loading = wasLoading;
+        }
         engineHiddenRows.clear();
         engineHiddenPages.clear();
         for (Row row : rows) {

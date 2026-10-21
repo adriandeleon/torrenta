@@ -195,6 +195,38 @@ class LibtorrentEngineTest {
     }
 
     @Test
+    void superSeedingIsAFlagOfTheSeedAndSurvivesARestart(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        Files.createDirectories(downloads);
+        Path payload = downloads.resolve("seed.bin");
+        byte[] bytes = new byte[64 * 1024];
+        new Random(7).nextBytes(bytes);
+        Files.write(payload, bytes);
+        NativeLibrary.ensureAvailable();
+        Path torrentFile = dir.resolve("seed.torrent");
+        Files.write(
+                torrentFile,
+                new TorrentBuilder().path(payload.toFile()).generate().entry().bencode());
+
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        String id;
+        try (LibtorrentEngine engine = new LibtorrentEngine(downloads, store)) {
+            engine.start();
+            id = engine.add(torrentFile.toString()).id();
+            await("seeding", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+            assertFalse(engine.torrents().get(0).superSeeding());
+            engine.setSuperSeeding(id, true);
+            await("super seeding", () -> engine.torrents().get(0).superSeeding());
+        }
+        try (LibtorrentEngine again = new LibtorrentEngine(downloads, store)) {
+            again.start();
+            assertTrue(again.torrents().get(0).superSeeding(), "kept in the resume data");
+            again.setSuperSeeding(id, false);
+            await("off again", () -> !again.torrents().get(0).superSeeding());
+        }
+    }
+
+    @Test
     void eventsForTheLifeOfATorrent(@TempDir Path dir) throws Exception {
         Path downloads = dir.resolve("downloads");
         Files.createDirectories(downloads);

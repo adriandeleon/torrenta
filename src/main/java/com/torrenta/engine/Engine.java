@@ -116,6 +116,13 @@ public interface Engine extends AutoCloseable {
      */
     void moveStorage(String id, String destination, boolean moveFiles) throws EngineException;
 
+    /**
+     * Super seeding: a seed offers each peer only pieces nobody else has yet, so a first seed's
+     * upload goes as far as it can. Meaningful for a complete torrent; kept in its resume data.
+     * Needs {@link Capability#SUPER_SEEDING}.
+     */
+    void setSuperSeeding(String id, boolean on) throws EngineException;
+
     /** The torrent's own limits, as it has them now. */
     TorrentLimits limits(String id) throws EngineException;
 
@@ -301,7 +308,9 @@ public interface Engine extends AutoCloseable {
         /** Moving a torrent in the queue: to the top, up, down, to the bottom. */
         QUEUE_ORDER,
         /** Changing where a torrent's files live (Set Location). */
-        MOVE_STORAGE;
+        MOVE_STORAGE,
+        /** Super seeding a complete torrent, from the menu or as a share limit's action. */
+        SUPER_SEEDING;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

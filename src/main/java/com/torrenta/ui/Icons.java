@@ -129,6 +129,7 @@ final class Icons {
             case "queue" -> queue();
             case "set-location" -> folderMove();
             case "choose-files" -> files();
+            case "super-seed" -> superSeed();
             case "limits" -> gauge();
             case "set-category" -> open();
             case "edit-tags" -> tag();
@@ -203,6 +204,11 @@ final class Icons {
     /** Recheck: an open arc with an arrowhead, in the line style like the rest of the row. */
     static Glyph refresh() {
         return line("M13.3 8A5.3 5.3 0 1 1 11.8 4.2M13.3 2.7V6H10");
+    }
+
+    /** Super seeding: an arrow up out of a seed's dot, fanning to three. */
+    static Glyph superSeed() {
+        return line("M8 13.5a1.5 1.5 0 1 0 0-3a1.5 1.5 0 1 0 0 3M8 10.5V4M8 4L4 7.5M8 4l4 3.5M5.5 2.5L8 4l2.5-1.5");
     }
 
     /** Remove: a lid over an outlined bin, in the line style. */

@@ -8,6 +8,7 @@ import javafx.beans.property.SimpleBooleanProperty;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.Engine.Capabilities;
 import com.torrenta.engine.Engine.Capability;
+import com.torrenta.engine.ShareLimit;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -54,6 +55,19 @@ class CapabilitiesTest {
                 CapabilityRules.forCommand("set-location").orElseThrow());
         assertFalse(CapabilityRules.commandShown("set-location", Capabilities.ALL.without(Capability.MOVE_STORAGE)));
         assertTrue(CapabilityRules.commandShown("set-location", Capabilities.ALL));
+    }
+
+    @Test
+    void superSeedingIsOfferedOnlyWhereTheEngineHasIt() {
+        assertEquals(
+                Capability.SUPER_SEEDING,
+                CapabilityRules.forCommand("super-seed").orElseThrow());
+        Capabilities daemon = Capabilities.ALL.without(Capability.SUPER_SEEDING);
+        assertFalse(CapabilityRules.commandShown("super-seed", daemon));
+        assertEquals(List.of(ShareLimit.Action.values()), CapabilityRules.shareActions(Capabilities.ALL));
+        assertEquals(
+                List.of(ShareLimit.Action.PAUSE, ShareLimit.Action.REMOVE, ShareLimit.Action.REMOVE_DATA),
+                CapabilityRules.shareActions(daemon));
     }
 
     @Test

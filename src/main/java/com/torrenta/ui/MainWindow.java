@@ -2484,7 +2484,7 @@ public final class MainWindow {
     /**
      * Poll thread. libtorrent ranks seeds by the share limits but pauses nothing by them, so the
      * rule is applied here, once a second: a finished torrent past its own or the global limit is
-     * paused or removed, and the log says so. A paused one no longer qualifies, so it is done once;
+     * paused, removed (with its files or without) or super seeded, and the log says so. A paused one no longer qualifies, so it is done once;
      * resuming it by hand seeds it until the next tick, raising the limit seeds it for good.
      */
     private void enforceShareLimits(Engine engine, List<Torrent> snapshot) {
@@ -2495,24 +2495,35 @@ public final class MainWindow {
         for (Torrent t : snapshot) {
             Optional<ShareLimit.Action> due = ShareLimit.decide(t, global, overrides.get(t.id()));
             if (due.isEmpty()) continue;
+            // A synced setting can ask a daemon for super seeding, which it lacks; failing that
+            // every second would fill the log, so the limit does nothing there.
+            if (due.get() == ShareLimit.Action.SUPER_SEED && capabilities.lacks(Engine.Capability.SUPER_SEEDING))
+                continue;
             String text;
             try {
-                switch (due.get()) {
+                text = switch (due.get()) {
                     case PAUSE -> {
                         engine.pause(t.id());
-                        text = tr("log.shareLimit.paused", t.name());
+                        yield tr("log.shareLimit.paused", t.name());
                     }
                     case REMOVE -> {
                         engine.remove(t.id(), false);
-                        text = tr("log.shareLimit.removed", t.name());
+                        yield tr("log.shareLimit.removed", t.name());
                     }
-                    default -> throw new IllegalStateException(due.get().name());
-                }
+                    case REMOVE_DATA -> {
+                        engine.remove(t.id(), true);
+                        yield tr("log.shareLimit.removedData", t.name());
+                    }
+                    case SUPER_SEED -> {
+                        engine.setSuperSeeding(t.id(), true);
+                        yield tr("log.shareLimit.superSeeding", t.name());
+                    }
+                };
             } catch (EngineException e) {
                 text = tr("log.shareLimit.failed", t.name(), e.getMessage());
             }
             String message = text;
-            boolean removed = due.get() == ShareLimit.Action.REMOVE;
+            boolean removed = due.get() == ShareLimit.Action.REMOVE || due.get() == ShareLimit.Action.REMOVE_DATA;
             EngineEvent event =
                     EngineEvent.of(EngineEvent.Kind.SEEDING_DONE, EngineEvent.Level.INFO, t.id(), t.name(), message);
             // The snapshot goes along: a removed torrent cannot be looked up for the placeholders.
@@ -2672,6 +2683,23 @@ public final class MainWindow {
         if (Actions.shouldResume(selectedTorrents()))
             onSelection(tr("actions.verb.resumed"), (e, t) -> e.resume(t.id()));
         else onSelection(tr("actions.verb.paused"), (e, t) -> e.pause(t.id()));
+    }
+
+    /**
+     * Super seeding on the complete torrents of the selection (it means nothing for one still
+     * downloading): on unless every one of them has it already.
+     */
+    private void toggleSuperSeeding() {
+        List<Torrent> seeds = Actions.superSeedTargets(selectedTorrents());
+        if (seeds.isEmpty()) {
+            setStatus(tr("status.superSeed.none"));
+            return;
+        }
+        boolean on = Actions.shouldEnableSuperSeeding(seeds);
+        onTorrents(
+                on ? tr("actions.verb.superSeedOn") : tr("actions.verb.superSeedOff"),
+                seeds,
+                (e, t) -> e.setSuperSeeding(t.id(), on));
     }
 
     private void toggleSequential() {
@@ -3142,6 +3170,13 @@ public final class MainWindow {
                         null,
                         gate("sequential", selection),
                         this::toggleSequential),
+                new Command(
+                        "super-seed",
+                        tr("command.superSeed"),
+                        null,
+                        null,
+                        gate("super-seed", selection),
+                        this::toggleSuperSeeding),
                 new Command("limits", tr("command.limits"), chord(KeyCode.L), null, selection, this::editLimits),
                 // The four chords are also taken on the table itself (onTableChord): its own
                 // Ctrl+Shift+arrow bindings would consume them before the accelerators saw them.
@@ -3631,7 +3666,8 @@ public final class MainWindow {
     /** The Torrent menu and the context menu show the same items in the same order. */
     private List<MenuItem> torrentItems() {
         List<MenuItem> items = new ArrayList<>();
-        for (String id : List.of("pause-resume", "force-resume", "recheck", "reannounce", "sequential", "limits")) {
+        for (String id : List.of(
+                "pause-resume", "force-resume", "recheck", "reannounce", "sequential", "super-seed", "limits")) {
             items.add(menuItem(id));
         }
         items.add(queueMenu());

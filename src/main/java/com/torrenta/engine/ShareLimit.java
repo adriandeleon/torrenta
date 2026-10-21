@@ -22,7 +22,10 @@ public record ShareLimit(double ratio, int seedingMinutes, Action action) {
 
     public enum Action {
         PAUSE("pause"),
-        REMOVE("remove");
+        REMOVE("remove"),
+        REMOVE_DATA("removeData"),
+        /** Keeps seeding, the way that spreads its pieces furthest; done once, then left alone. */
+        SUPER_SEED("superSeed");
 
         private final String label;
 
@@ -71,6 +74,8 @@ public record ShareLimit(double ratio, int seedingMinutes, Action action) {
         if (limit == null || !limit.limited()) return Optional.empty();
         boolean finished = torrent.state() == TorrentState.SEEDING || torrent.state() == TorrentState.FINISHED;
         if (!finished || torrent.paused()) return Optional.empty();
+        // Super seeding keeps it running, so it would qualify again every tick: once is the action.
+        if (limit.action() == Action.SUPER_SEED && torrent.superSeeding()) return Optional.empty();
         return limit.reached(torrent.uploaded(), torrent.downloaded(), torrent.size(), torrent.seedingTime())
                 ? Optional.of(limit.action())
                 : Optional.empty();

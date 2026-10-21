@@ -90,6 +90,7 @@ class IconsTest {
                 "recheck",
                 "reannounce",
                 "sequential",
+                "super-seed",
                 "limits",
                 "queue",
                 "queue-top",

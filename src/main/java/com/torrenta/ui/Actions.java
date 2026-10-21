@@ -26,6 +26,18 @@ public final class Actions {
         return !selected.stream().allMatch(Torrent::sequential);
     }
 
+    /** The torrents super seeding can apply to: the complete ones. */
+    public static List<Torrent> superSeedTargets(List<Torrent> selected) {
+        return selected.stream()
+                .filter(t -> t.size() > 0 && t.done() >= t.size())
+                .toList();
+    }
+
+    /** Super seeding on a selection: on unless every one already has it. */
+    public static boolean shouldEnableSuperSeeding(List<Torrent> seeds) {
+        return !seeds.stream().allMatch(Torrent::superSeeding);
+    }
+
     /**
      * {@code Paused 1 torrent}, {@code Paused 3 torrents}, {@code Paused 2 torrents, 1 failed: …}.
      * The verb arrives translated ({@code actions.verb.*}); the count and the failures are the

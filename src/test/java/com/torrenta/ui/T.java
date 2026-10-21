@@ -25,6 +25,7 @@ final class T {
     int queuePosition = -1;
     String error = "";
     boolean moving = false;
+    boolean superSeeding = false;
 
     static T downloading() {
         return new T();
@@ -97,6 +98,11 @@ final class T {
         return this;
     }
 
+    T superSeeding() {
+        superSeeding = true;
+        return this;
+    }
+
     T moving() {
         moving = true;
         return this;
@@ -130,6 +136,7 @@ final class T {
                 false,
                 queued,
                 queuePosition,
-                moving);
+                moving,
+                superSeeding);
     }
 }

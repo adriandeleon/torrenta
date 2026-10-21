@@ -56,6 +56,16 @@ class ActionsTest {
     }
 
     @Test
+    void superSeedingIsForTheCompleteOnesAndTurnsOnUnlessAllHaveIt() {
+        Torrent seed = T.seeding().build();
+        Torrent superSeed = T.seeding().superSeeding().build();
+        Torrent downloading = T.downloading().build();
+        assertEquals(List.of(seed), Actions.superSeedTargets(List.of(seed, downloading)));
+        assertTrue(Actions.shouldEnableSuperSeeding(List.of(seed, superSeed)));
+        assertFalse(Actions.shouldEnableSuperSeeding(List.of(superSeed)));
+    }
+
+    @Test
     void outcomes() {
         assertEquals("Paused 1 torrent", Actions.outcome("Paused", 1, List.of()));
         assertEquals("Paused 3 torrents", Actions.outcome("Paused", 3, List.of()));

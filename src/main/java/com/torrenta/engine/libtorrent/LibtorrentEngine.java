@@ -1171,6 +1171,14 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
+    public synchronized void setSuperSeeding(String id, boolean on) throws EngineException {
+        TorrentHandle h = handle(id);
+        if (on) h.setFlags(Flags.SUPER_SEEDING);
+        else h.unsetFlags(Flags.SUPER_SEEDING);
+        requestSave(h, false);
+    }
+
+    @Override
     public synchronized void queueMove(String id, QueueMove move) throws EngineException {
         TorrentHandle h = handle(id);
         switch (move) {
@@ -2059,6 +2067,7 @@ public final class LibtorrentEngine implements Engine {
         static final torrent_flags_t STOP_WHEN_READY = TorrentFlags.STOP_WHEN_READY;
         static final torrent_flags_t DISABLE_PEX = TorrentFlags.DISABLE_PEX;
         static final torrent_flags_t UPLOAD_MODE = TorrentFlags.UPLOAD_MODE;
+        static final torrent_flags_t SUPER_SEEDING = TorrentFlags.SUPER_SEEDING;
     }
 
     /**
@@ -2133,7 +2142,8 @@ public final class LibtorrentEngine implements Engine {
                 // Parked by the queue: paused, but auto-managed, so libtorrent resumes it itself.
                 has(flags, Flags.PAUSED) && has(flags, Flags.AUTO_MANAGED),
                 status.queuePosition(),
-                status.isMovingStorage());
+                status.isMovingStorage(),
+                has(flags, Flags.SUPER_SEEDING));
     }
 
     /** libtorrent's seven states folded into the list's six. Package-private for the test. */

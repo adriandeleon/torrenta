@@ -452,6 +452,12 @@ public final class TransmissionEngine implements Engine {
         set(id, Map.of("sequential_download", sequential));
     }
 
+    /** The RPC has no super seeding; the capability is missing and the window hides the command. */
+    @Override
+    public void setSuperSeeding(String id, boolean on) throws EngineException {
+        throw new EngineException(tr("engine.error.transmissionSuperSeed"));
+    }
+
     @Override
     public void queueMove(String id, QueueMove move) throws EngineException {
         action("queue-move-" + move.name().toLowerCase(Locale.ROOT), id);
@@ -822,6 +828,7 @@ public final class TransmissionEngine implements Engine {
                 error == ERROR_TRACKER_WARNING || error == ERROR_TRACKER,
                 status == DOWNLOAD_WAIT || status == SEED_WAIT,
                 Json.integer(t, "queuePosition", -1),
+                false,
                 false);
     }
 
