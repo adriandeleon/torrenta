@@ -52,6 +52,16 @@ torrent is added, finishes or is done seeding (Settings → Automation, qBittorr
 `%D` … placeholders, no shell), and a desktop notification can be shown for each of those and for
 errors, through `notify-send`, `osascript` or a PowerShell toast.
 
+A torrent of your own is made with `Ctrl+N` (File → New Torrent…, the toolbar's page glyph):
+drop a file or folder on the dialog or browse to it, choose hybrid (the default), v1 or v2, a
+piece size (Automatic aims at about 1,500 pieces; the header shows the count for the size chosen,
+live), private, the trackers one per line with a blank line between tiers (pre-filled from the
+last creation, else the Protocol page's default trackers), web seeds, a comment and a source tag,
+and press Create…: it asks where to save the `.torrent` (the folder is remembered), hashes on a
+worker with a progress bar and a Cancel, writes the file whole, and shows the v1 and v2
+info-hashes and the magnet link with Copy buttons. "Start seeding after creation" adds it to the
+list at once, trusted as complete, seeded from the folder the source is in.
+
 Search (`Ctrl+K`) goes through a Torznab server of yours, Prowlarr or Jackett (Settings → Search):
 add it by URL and API key, press Test, and the Search tab asks every enabled one at once, each
 answer landing in the results as it arrives with a line per provider saying how many it found or
@@ -208,6 +218,7 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 
 | Chord | Action |
 |---|---|
+| `Ctrl+N` | New torrent: the Create Torrent dialog (a file or folder, hybrid/v1/v2, piece size, private, trackers by tier, web seeds, comment, source; Save as…, then hashed on a worker with a Cancel; the info-hashes and magnet link with Copy buttons once made; seeds at once when asked). In the RSS tab the chord adds a feed instead |
 | `Ctrl+O` (`Cmd+O` on macOS) | Add `.torrent` files, through the Add dialog |
 | `Ctrl+M` | Add a magnet link or a link to a `.torrent` (the clipboard's, if it holds one) |
 | `Ctrl+V` | Add whatever magnet or torrent link is on the clipboard; the status bar says when there is one |

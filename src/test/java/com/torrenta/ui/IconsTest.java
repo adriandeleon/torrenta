@@ -40,6 +40,7 @@ class IconsTest {
         }
         assertTrue(
                 seen.containsAll(List.of(
+                        "newFile",
                         "open",
                         "magnet",
                         "pause",
