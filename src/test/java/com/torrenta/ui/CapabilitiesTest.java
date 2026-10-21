@@ -44,6 +44,19 @@ class CapabilitiesTest {
     }
 
     @Test
+    void queueMovesAndSetLocationHaveTheirOwnCapabilities() {
+        for (String id : List.of("queue-top", "queue-up", "queue-down", "queue-bottom")) {
+            assertEquals(Capability.QUEUE_ORDER, CapabilityRules.forCommand(id).orElseThrow(), id);
+            assertFalse(CapabilityRules.commandShown(id, Capabilities.ALL.without(Capability.QUEUE_ORDER)), id);
+        }
+        assertEquals(
+                Capability.MOVE_STORAGE,
+                CapabilityRules.forCommand("set-location").orElseThrow());
+        assertFalse(CapabilityRules.commandShown("set-location", Capabilities.ALL.without(Capability.MOVE_STORAGE)));
+        assertTrue(CapabilityRules.commandShown("set-location", Capabilities.ALL));
+    }
+
+    @Test
     void commandsBehindAMissingCapabilityAreNotOffered() {
         List<Command> all = List.of(
                 command("create"),

@@ -233,10 +233,12 @@ public final class SingleInstance implements AutoCloseable {
                     LOG.log(System.Logger.Level.INFO, "Refused a connection on the instance port");
                     continue; // no answer: the sender treats silence as nobody home
                 }
+                // Queued (or handed to the window) before the answer goes out: the sender returns
+                // on the answer, and whoever drains the queue right after must find the batch.
+                deliver(message.get().inputs());
                 OutputStream out = socket.getOutputStream();
                 out.write((InstanceMessage.OK + "\n").getBytes(StandardCharsets.UTF_8));
                 out.flush();
-                deliver(message.get().inputs());
             } catch (IOException | RuntimeException e) {
                 LOG.log(System.Logger.Level.INFO, "Instance hand-off failed: " + e.getMessage());
             }

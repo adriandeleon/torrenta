@@ -174,9 +174,8 @@ The point at which Torrenta can be left running.
    file; `TorrentStore` as the one owner of what is on disk; `--config-dir`.
 2. **Stable table** — done. Rows keyed by info-hash and updated in place; selection, sort and
    scroll survive a tick. Column chooser, column order and widths remembered. Filter box.
-3. **Actions and chords** — done, except first/last piece first, which libtorrent has no flag
-   for (qBittorrent raises the priority of each file's edge pieces itself); it moves to 0.4 with the
-   per-torrent limits dialog. Pause, resume, force resume, remove, remove with data, recheck,
+3. **Actions and chords** — done. First/last piece first has no libtorrent flag; it landed with
+   0.4's per-torrent limits dialog (#24), raising each file's edge pieces as qBittorrent does. Pause, resume, force resume, remove, remove with data, recheck,
    reannounce, sequential, copy name/hash/magnet, open folder. Context menu, menu bar, command
    palette. Multi-select.
 4. **Engine alerts** — done. libtorrent alerts become engine-neutral `EngineEvent`s: added,
@@ -239,12 +238,12 @@ Everything in Settings that the engine already knows how to do.
 6. **Queue and share limits** — done: active downloads, seeds and total (0 for none; libtorrent's
    -1), the slow-torrent rule, and a global ratio and seeding-time limit with its action (pause or
    remove). libtorrent reads `share_ratio_limit`/`seed_time_limit` only to rank seeds for the queue,
-   so the window applies the rule from its poll (`ShareLimit.decide`, pure). Queue positions and
-   super seeding are not in; they go with 0.5's organisation work or a later PR.
+   so the window applies the rule from its poll (`ShareLimit.decide`, pure). Queue positions are in
+   (Torrent → Queue, the Queue column); super seeding is not.
 7. **Per-torrent limits dialog** — done (Torrent → Limits…, `Ctrl+L`): rate caps, connections,
    upload slots, first and last pieces first (edge-piece priorities, in the resume data), and a
-   share limit of the torrent's own kept as `torrent.<hash>.share`. Set location, rename torrent and
-   files, export `.torrent` are still to come.
+   share limit of the torrent's own kept as `torrent.<hash>.share`. Set location is in (Torrent →
+   Set Location…); rename torrent and files, export `.torrent` are still to come.
 
 ### 0.5 — Organisation and automation
 **0.5 is feature-complete.**

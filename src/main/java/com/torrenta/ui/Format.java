@@ -61,6 +61,14 @@ public final class Format {
         return String.join(", ", tags);
     }
 
+    /**
+     * The Queue column: the position counted from 1, as the status line's "Queued #3" counts it;
+     * a dash for a torrent the engine keeps out of its queue (libtorrent's seeds answer -1).
+     */
+    public static String queuePosition(int position) {
+        return position < 0 ? "—" : String.valueOf(position + 1);
+    }
+
     /** A rate column: a dash for nothing moving, so the eye finds the rows that are. */
     public static String rate(long bytesPerSecond) {
         return bytesPerSecond <= 0 ? "—" : Bytes.rate(bytesPerSecond);

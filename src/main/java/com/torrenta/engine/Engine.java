@@ -96,6 +96,24 @@ public interface Engine extends AutoCloseable {
     /** Pieces in order rather than rarest first, for previewing while downloading. */
     void setSequential(String id, boolean sequential) throws EngineException;
 
+    /**
+     * Moves the torrent in the queue: to the top, one up, one down, to the bottom. The others
+     * shift to make room, as {@link Torrent#queuePosition()} then shows; a seed, which libtorrent
+     * keeps out of the download queue, is left where it is.
+     */
+    void queueMove(String id, QueueMove move) throws EngineException;
+
+    /**
+     * Changes where the torrent's files live. With {@code moveFiles} the files are moved there,
+     * never over a file already at the destination (one that is there is kept and used); without
+     * it the torrent is only pointed at the folder, where the files are expected to be already.
+     * The move itself is asynchronous: an event says when it landed or why it did not, and the
+     * snapshot's {@link Torrent#moving()} is on in between where the engine can tell. {@code
+     * destination} is a path on the engine's machine, so a {@code String}, as {@link
+     * #downloadDir()} is.
+     */
+    void moveStorage(String id, String destination, boolean moveFiles) throws EngineException;
+
     /** The torrent's own limits, as it has them now. */
     TorrentLimits limits(String id) throws EngineException;
 
@@ -227,6 +245,14 @@ public interface Engine extends AutoCloseable {
         void cancel();
     }
 
+    /** Where {@link #queueMove} puts the torrent. */
+    enum QueueMove {
+        TOP,
+        UP,
+        DOWN,
+        BOTTOM
+    }
+
     /** Bytes per second, session-wide. */
     record Rates(long download, long upload) {
         public static final Rates ZERO = new Rates(0, 0);
@@ -269,7 +295,11 @@ public interface Engine extends AutoCloseable {
         /** Stopping by itself once the metadata or the file check is in. */
         STOP_CONDITION,
         /** Pieces in order rather than rarest first. */
-        SEQUENTIAL_DOWNLOAD;
+        SEQUENTIAL_DOWNLOAD,
+        /** Moving a torrent in the queue: to the top, up, down, to the bottom. */
+        QUEUE_ORDER,
+        /** Changing where a torrent's files live (Set Location). */
+        MOVE_STORAGE;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

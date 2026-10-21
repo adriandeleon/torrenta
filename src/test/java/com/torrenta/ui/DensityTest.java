@@ -42,6 +42,9 @@ class DensityTest {
         for (String shown : List.of("size", "down", "up", "eta", "ratio")) {
             assertTrue(layout.stream().anyMatch(c -> c.id().equals(shown) && c.visible()), shown);
         }
+        assertTrue(
+                layout.stream().anyMatch(c -> c.id().equals("queue") && !c.visible()),
+                "the Queue column is carried hidden, so the header's menu can show it");
     }
 
     @Test
