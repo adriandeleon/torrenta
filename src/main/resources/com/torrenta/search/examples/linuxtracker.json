@@ -1,0 +1,22 @@
+{
+  "id": "linuxtracker",
+  "name": "LinuxTracker",
+  "homepage": "https://linuxtracker.org",
+  "type": "html",
+  "search": {
+    "url": "https://linuxtracker.org/torrents/?q={query}",
+    "page": "https://linuxtracker.org/torrents/?q={query}&page={page}",
+    "pages": 1,
+    "delayMs": 1000
+  },
+  "fields": {
+    "rows": "table.torrent-table tbody tr",
+    "name": "a.torrent-name",
+    "detailUrl": { "selector": "a.torrent-name", "attr": "href" },
+    "infoHash": { "selector": "a.torrent-name", "attr": "href", "regex": "([0-9a-fA-F]{40})" },
+    "date": { "selector": "td:nth-of-type(3)", "format": "MMM d, uuuu" },
+    "size": "td:nth-of-type(4)",
+    "seeds": "td.seeds",
+    "leechers": "td.leeches"
+  }
+}

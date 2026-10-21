@@ -55,6 +55,7 @@ import com.torrenta.engine.WatchFolder;
 import com.torrenta.search.SearchException;
 import com.torrenta.search.TorznabEndpoint;
 import com.torrenta.search.TorznabProvider;
+import com.torrenta.store.DefinitionStore;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
@@ -252,6 +253,39 @@ final class SettingsWindow {
         this.searchStore = store;
         this.onSearchProvidersChanged = onChanged;
         reloadSearch();
+    }
+
+    private DefinitionStore definitionStore;
+    private Runnable openDefinitionFolder = () -> {};
+    private TableView<DefinitionStore.Entry> definitionTable;
+    private Label definitionStatusLabel;
+
+    /**
+     * The folder of definition files the Search page lists, and how to open it with the desktop;
+     * changes (a reload, a switch) are told through the same hook as the Torznab list's.
+     */
+    void setSearchDefinitions(DefinitionStore store, Runnable openFolder) {
+        this.definitionStore = store;
+        this.openDefinitionFolder = openFolder;
+        reloadDefinitions();
+    }
+
+    /** The definitions table's rows, "name | file | type | status | on", for a capture. */
+    List<String> definitionsForCapture() {
+        List<String> out = new ArrayList<>();
+        if (definitionTable == null) return out;
+        Set<String> off = settings.disabledSearchDefinitions();
+        for (DefinitionStore.Entry e : definitionTable.getItems()) {
+            out.add(e.name() + " | " + e.file().getFileName() + " | " + definitionType(e) + " | " + definitionStatus(e)
+                    + " | " + (!e.loaded() ? "" : off.contains(e.id()) ? "off" : "on"));
+        }
+        return out;
+    }
+
+    /** Presses Reload definitions, for a capture. */
+    void reloadDefinitionsForCapture() {
+        selectPageForCapture("SEARCH");
+        reloadDefinitionsPressed();
     }
 
     /** Shows the window on the Search page: the palette's "Search…" until the tab exists. */
@@ -1401,6 +1435,141 @@ final class SettingsWindow {
                 "Search providers | search torznab prowlarr jackett indexer api key url add edit remove test"
                         + " enabled categories",
                 providers));
+        buildDefinitions(page);
+    }
+
+    /** The definition files: listed read-only, switched on or off, reloaded, the folder opened. */
+    private void buildDefinitions(VBox page) {
+        VBox section = section(page, "Definition files");
+        definitionTable = new TableView<>();
+        definitionTable.setPrefHeight(160);
+        definitionTable.setPlaceholder(new Label("No definition files in the folder"));
+        definitionTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        TableColumn<DefinitionStore.Entry, String> name = new TableColumn<>("Name");
+        name.setPrefWidth(140);
+        name.setCellValueFactory(c ->
+                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().name()));
+        TableColumn<DefinitionStore.Entry, String> file = new TableColumn<>("File");
+        file.setPrefWidth(150);
+        file.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                c.getValue().file().getFileName().toString()));
+        TableColumn<DefinitionStore.Entry, String> type = new TableColumn<>("Type");
+        type.setPrefWidth(50);
+        type.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(definitionType(c.getValue())));
+        TableColumn<DefinitionStore.Entry, String> on = new TableColumn<>("Enabled");
+        on.setPrefWidth(60);
+        on.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                !c.getValue().loaded()
+                        ? ""
+                        : settings.disabledSearchDefinitions()
+                                        .contains(c.getValue().id())
+                                ? ""
+                                : "yes"));
+        TableColumn<DefinitionStore.Entry, String> status = new TableColumn<>("Status");
+        status.setPrefWidth(220);
+        status.setCellValueFactory(
+                c -> new javafx.beans.property.ReadOnlyStringWrapper(definitionStatus(c.getValue())));
+        definitionTable.getColumns().addAll(List.of(name, file, type, on, status));
+        definitionTable.setRowFactory(t -> {
+            javafx.scene.control.TableRow<DefinitionStore.Entry> row = new javafx.scene.control.TableRow<>();
+            row.setOnMouseClicked(e -> {
+                if (e.getClickCount() == 2 && !row.isEmpty()) toggleDefinition();
+            });
+            return row;
+        });
+        definitionTable.setOnKeyPressed(e -> {
+            if (e.getCode() == KeyCode.SPACE) {
+                toggleDefinition();
+                e.consume();
+            }
+        });
+        Button toggle = new Button("Enable / Disable");
+        toggle.disableProperty()
+                .bind(definitionTable.getSelectionModel().selectedItemProperty().isNull());
+        toggle.setOnAction(e -> toggleDefinition());
+        Button reload = new Button("Reload definitions");
+        reload.setOnAction(e -> reloadDefinitionsPressed());
+        Button open = new Button("Open folder");
+        open.setOnAction(e -> openDefinitionFolder.run());
+        HBox buttons = new HBox(6, toggle, reload, open);
+        buttons.setAlignment(Pos.CENTER_LEFT);
+        Label hint = new Label("A site without an API is a definition file: search-providers/<id>.json in the config"
+                + " folder says where to search and how to read the answer (JSON paths or CSS-like selectors;"
+                + " docs/search-providers.md has the format). The shipped examples are copied in once and never"
+                + " written over. Every file that loads is a provider chip in the Search tab unless switched off"
+                + " here (search.disabled, which syncs); a file that does not load says why. The folder is"
+                + " re-read when the Search tab opens, or on Reload.");
+        hint.setWrapText(true);
+        hint.getStyleClass().add("settings-row-description");
+        definitionStatusLabel = new Label();
+        definitionStatusLabel.setWrapText(true);
+        definitionStatusLabel.getStyleClass().add("settings-row-description");
+        VBox box = new VBox(8, hint, definitionTable, buttons, definitionStatusLabel);
+        section.getChildren().add(box);
+        rows.add(new Row(
+                Category.SEARCH,
+                box,
+                "Definition files | search definition declarative provider json html selector folder reload"
+                        + " example archive linuxtracker academic enable disable",
+                section));
+    }
+
+    private static String definitionType(DefinitionStore.Entry e) {
+        return e.loaded() ? e.definition().type().name().toLowerCase(Locale.ROOT) : "";
+    }
+
+    private static String definitionStatus(DefinitionStore.Entry e) {
+        if (e.loaded()) return "loaded";
+        String problem = e.problem();
+        String prefix = e.file().getFileName() + ": ";
+        return problem.startsWith(prefix) ? problem.substring(prefix.length()) : problem;
+    }
+
+    private void toggleDefinition() {
+        DefinitionStore.Entry selected = definitionTable.getSelectionModel().getSelectedItem();
+        if (selected == null || !selected.loaded()) return;
+        Set<String> off = new LinkedHashSet<>(settings.disabledSearchDefinitions());
+        if (!off.remove(selected.id())) off.add(selected.id());
+        settings.setDisabledSearchDefinitions(off);
+        settings.saveQuietly();
+        reloadDefinitions();
+        definitionTable.getSelectionModel().select(selected);
+        onSearchProvidersChanged.run();
+    }
+
+    private void reloadDefinitionsPressed() {
+        if (definitionStore == null) return;
+        definitionStore.load();
+        reloadDefinitions();
+        onSearchProvidersChanged.run();
+    }
+
+    /** The store's entries into the table; keeps the selection where it can. */
+    private void reloadDefinitions() {
+        if (definitionStore == null || definitionTable == null) return;
+        DefinitionStore.Entry selected = definitionTable.getSelectionModel().getSelectedItem();
+        List<DefinitionStore.Entry> entries = definitionStore.entries();
+        definitionTable.getItems().setAll(entries);
+        if (selected != null) {
+            for (DefinitionStore.Entry e : entries) {
+                if (e.file().equals(selected.file()))
+                    definitionTable.getSelectionModel().select(e);
+            }
+        }
+        definitionTable.refresh();
+        if (definitionStatusLabel != null) {
+            Set<String> off = settings.disabledSearchDefinitions();
+            long loaded = entries.stream().filter(DefinitionStore.Entry::loaded).count();
+            long on = entries.stream()
+                    .filter(e -> e.loaded() && !off.contains(e.id()))
+                    .count();
+            long broken = entries.size() - loaded;
+            definitionStatusLabel.setText(
+                    entries.isEmpty()
+                            ? "Folder: " + definitionStore.dir()
+                            : on + " of " + loaded + " enabled" + (broken == 0 ? "" : ", " + broken + " did not load")
+                                    + " · " + definitionStore.dir());
+        }
     }
 
     private void addSearchProvider() {
@@ -2215,6 +2384,7 @@ final class SettingsWindow {
         try {
             reloadLabels();
             reloadWatch();
+            reloadDefinitions();
             theme.setValue(Theme.byId(settings.theme(), Theme.DEFAULT));
             downloadDir.setText(settings.downloadDir().toString());
             incompleteEnabled.setSelected(settings.incompleteEnabled());

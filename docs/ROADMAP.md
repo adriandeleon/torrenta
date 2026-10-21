@@ -145,8 +145,8 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Feature | T | Q | Torrenta |
 |---|---|---|---|
 | Search tab across providers, merged results, sort by seeds/size/date, category filter, add from result | ✗ | ✓ | 0.6 |
-| Provider plugins | ✗ | ✓ (Python) | 0.6 (see below) |
-| Torznab indexers (Jackett, Prowlarr) | ✗ | ✗ | 0.6 |
+| Provider plugins | ✗ | ✓ (Python) | ✓ 0.6, as definition files (see below) |
+| Torznab indexers (Jackett, Prowlarr) | ✗ | ✗ | ✓ 0.6 |
 
 ### Remote and app
 
@@ -268,15 +268,17 @@ Everything in Settings that the engine already knows how to do.
    machine has none. The seeding-done event is the share-limit action, raised by the window.
 
 ### 0.6 — Search
-See "Search design" below.
+**0.6 is feature-complete.** See "Search design" below.
 
 1. ✓ **Provider API and Torznab client**, with a provider settings page: add an indexer by URL and API
    key, test it. (`search.SearchProvider`, `TorznabProvider`, `SearchService`, Settings → Search.)
 2. ✓ **Search tab**: query, category, provider selection; results merged and deduplicated by
    info-hash; sort; add to the Add dialog. (`ui.SearchPane`, `Ctrl+K`; `SearchService.Progress`
    streams each provider's answer in.)
-3. **Declarative providers**: a definition file format for sites without an API, loaded from the
+3. ✓ **Declarative providers**: a definition file format for sites without an API, loaded from the
    config dir; a handful of definitions for public, non-infringing indexes shipped as examples.
+   (`search.Definition` + `DeclarativeProvider`, `HtmlParser`/`Selector`/`JsonExtractor`,
+   `store.DefinitionStore`, Settings → Search → Definition files; `docs/search-providers.md`.)
 
 ### 0.7 — RSS, creation, statistics
 
