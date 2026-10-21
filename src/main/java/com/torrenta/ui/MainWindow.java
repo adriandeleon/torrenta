@@ -3375,7 +3375,7 @@ public final class MainWindow {
         if (next.mode() == Omnibox.Mode.COMMAND) {
             // The prefix typed: the palette is the command box, and takes what followed it.
             setOmnibox(next.withText(""));
-            palette.show(commands, next.commandQuery());
+            palette.show(CapabilityRules.commands(commands, capabilities), next.commandQuery());
             return;
         }
         if (next.mode() == Omnibox.Mode.ADD && Omnibox.pasted(was, text)) {
