@@ -188,6 +188,11 @@ jobs:
           grep -q "^StartupWMClass=com.torrenta.App$" "$entry" || {
             echo "::error::no StartupWMClass — the override was ignored, as it is when misnamed"; exit 1; }
           grep -q "^Categories=.*P2P" "$entry" || { echo "::error::not registered as a P2P application"; exit 1; }
+          grep -q "^MimeType=application/x-bittorrent;x-scheme-handler/magnet;$" "$entry" || {
+            echo "::error::the entry does not declare .torrent files and magnet links"; exit 1; }
+          grep -q "^Exec=.* %U$" "$entry" || { echo "::error::Exec takes no files or links (%U)"; exit 1; }
+          grep -q "MimeInfo.xml" "$RUNNER_TEMP/deb-contents.txt" || {
+            echo "::error::the package carries no MIME XML for .torrent (jpackage --file-associations)"; exit 1; }
           if grep -q "APPLICATION_" "$entry"; then
             echo "::error::an APPLICATION_* placeholder was not substituted"; exit 1
           fi

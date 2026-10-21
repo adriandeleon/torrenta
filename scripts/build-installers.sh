@@ -23,6 +23,9 @@ common=(--app-image "$image" --name Torrenta --app-version "$version" --dest "$d
         --vendor "Adrian De Leon"
         --description "A keyboard-first BitTorrent client"
         --copyright "Copyright 2026 Adrian De Leon")
+# The .torrent association: registry entries in the MSI, a MIME XML in the deb and rpm. The dmg
+# wraps a bundle whose Info.plist already carries it (scripts/add-mac-types.sh).
+association="$(dirname "$0")/../packaging/torrent-file.properties"
 [ -n "$icon" ] && [ -f "$icon" ] && common+=(--icon "$icon")
 
 build() {
@@ -52,18 +55,23 @@ case "$(uname -s)" in
             --linux-deb-maintainer "adrian.deleon@gmail.com" \
             --linux-menu-group "Network;P2P;FileTransfer" \
             --linux-shortcut \
+            --file-associations "$association" \
             --resource-dir "$resources"
         build rpm \
             --linux-package-name torrenta \
             --linux-rpm-license-type MIT \
             --linux-menu-group "Network;P2P;FileTransfer" \
             --linux-shortcut \
+            --file-associations "$association" \
             --resource-dir "$resources"
         ;;
     *)
         # A fixed upgrade UUID is what makes the next MSI replace this one rather than installing
         # beside it. Generated once for Torrenta and never changed.
+        # The magnet: protocol is not an installer matter (jpackage has no option for a URL
+        # scheme); the running program writes it under HKCU from Settings (os.Handlers).
         build msi \
+            --file-associations "$association" \
             --win-menu \
             --win-menu-group Torrenta \
             --win-shortcut \

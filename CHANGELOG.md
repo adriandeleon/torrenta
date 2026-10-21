@@ -26,6 +26,27 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Torrenta is the program for `.torrent` files and `magnet:` links, and runs once.** One
+  instance per settings folder: a second one started with files, magnets or URLs on its command
+  line hands them to the running one over a loopback socket (a lock on `instance.lock`, the port
+  and a random token in `instance.port` and `instance.token`, owner-readable; a stale pair from a
+  crash is taken over, a wrong token is refused), which comes to the front, out of the tray if
+  it was hidden there, and opens the Add dialog for each as for a dropped file; the second prints
+  nothing and is gone within a second. The packages declare both types: the Linux desktop entry's
+  `MimeType` and `%U` (plus jpackage's MIME XML in the deb and rpm), the macOS bundle's
+  `CFBundleDocumentTypes` and `CFBundleURLTypes` (both patched into `Info.plist` after jpackage
+  and re-signed), the Windows installer's `.torrent`
+  file association. On macOS a running Torrenta takes what the desktop opens through AWT's open
+  handlers. Settings → General → Operating system → "Register as handler for .torrent files and
+  magnet links" (`os.handler`, on by default, this machine's) makes it the default at each start:
+  `xdg-mime default` on Linux, the `magnet:` protocol and the `.torrent` default under
+  `HKCU\Software\Classes` on Windows (unticking removes them); on macOS the box explains that the
+  bundle declares both and Finder chooses. The fifth step of the app-polish milestone.
+- **A badge with the download activity** (`os.badge`, on by default, this machine's): the
+  download rate on the macOS dock icon (`1.2M`), the count of downloading torrents on a Linux
+  launcher that honours Unity's LauncherEntry signal (KDE's task manager, Dash to Dock), pushed
+  from the poll only when it changed and cleared when nothing downloads. Windows gets none: AWT
+  badges only windows of its own. The tray icon's line carries the rates everywhere.
 - **The status bar keeps what it said.** A click on the status text, `Ctrl+Shift+M` or View →
   Messages shows this session's status lines newest first, each with its time, warnings and
   errors in colour; a filter box leads the list, Copy takes the selected lines or all of them,

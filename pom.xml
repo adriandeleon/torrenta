@@ -583,6 +583,23 @@
                                 </configuration>
                             </execution>
                             <execution>
+                                <!-- Also edits the bundle: the .torrent document type (jpackage
+                                     takes file associations only for installer types, and the dmg
+                                     wraps the image as it is) and the magnet: URL scheme, which
+                                     jpackage cannot declare at all. -->
+                                <id>add-mac-types</id>
+                                <phase>package</phase>
+                                <goals><goal>exec</goal></goals>
+                                <configuration>
+                                    <executable>bash</executable>
+                                    <arguments>
+                                        <argument>${project.basedir}/scripts/add-mac-types.sh</argument>
+                                        <argument>${project.build.directory}/dist/Torrenta.app</argument>
+                                    </arguments>
+                                    <skip>${skip.mac.version.fix}</skip>
+                                </configuration>
+                            </execution>
+                            <execution>
                                 <!-- Last, so it wraps a finished image. -->
                                 <id>build-installers</id>
                                 <phase>package</phase>

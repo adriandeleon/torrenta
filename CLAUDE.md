@@ -51,6 +51,7 @@ to try one on purpose).
 | Search | `search.SearchProvider`/`SearchResult`/`SearchCategory`, `SearchService` (parallel providers, dedupe through `ResultRanker`, rate limit, session cache; `Progress` reports each provider as it answers, in arrival order, on the searching thread), `TorznabProvider` + `TorznabEndpoint`, `store.SearchProviderStore` (`search-providers.json`); `ui.SearchPane` (the tab: query, chips, status line, results table remembered as `search.columns`), `SearchRows` (in-place reconcile by identity), `SearchStatus` (the line), `SearchChips` (which providers are on), `SearchAdd` (result → `AddRequest.Source`) | `com.torrenta.search`, `store`, `ui` |
 | RSS rules | `rss.Rule` (the record; `recordMatch` caps the memory at 1000), `EpisodeFilter` (qBittorrent's `1x2;1x3-5;2x1-` parsed with the term at fault; `find` reads `S01E02`/`1x02`/`Season 1 Episode 2` off a title), `RuleMatcher` (compiled once per rule: feed, phrases or regex, episode filter, age, smart memory; `problem(rule)` is the dialog's rule), `RuleEngine` (`apply`: first enabled rule wins, one copy of an episode per batch; `record`: the memory after the adds that went through; the log lines), `RssService.setDownloader`/`runRulesNow`/`markDownloaded`, `Article.downloaded`; `RssStore` `rules.json`; `ui.RuleDialog` (live Matches on a 250 ms pause, matched on a virtual thread), `RuleAdd` (rule → `AddRequest`), `RuleText` (create-rule-from-title and the table's words) | `com.torrenta.rss`, `ui` |
 | Update | `update.UpdateCheck` (pure: payload, version rules, due), `UpdateService` (GitHub, off the FX thread, `-Dtorrenta.updateEndpoint` for a capture) — Termina's, verbatim | `com.torrenta.update` |
+| Desktop | `os.SingleInstance` (one per config dir: a `FileLock` on `instance.lock` decides, a loopback `ServerSocket` whose port and token are `instance.port`/`instance.token`, owner-only; `claim` hands off or binds, `deliverTo` flushes what arrived first), `InstanceMessage` (pure: token line, one input per line, blank line ends, caps, `absolute` against the sender's cwd), `Handlers` (pure argv: `xdgMimeDefault`, `windowsRegister/Unregister`, `desktopId` by `StartupWMClass`, `apply` with a `Runner`), `MacHandlers` (AWT `Desktop` open handlers), `Badge` + `BadgeState` (pure count + rate + short text) + `Badges.create` (`AwtBadge` dock text on macOS, `UnityBadge` LauncherEntry signal on Linux, none on Windows), `AwtUse.headful` (the one rule for `java.awt.headless`); `Settings.osHandler/osBadge` (`os.*`, never synced); `MainWindow.openFromOutside` | `com.torrenta.os`, `store`, `ui` |
 | Tray | Nux's and Modula's package, free of JavaFX: `TorrentaTray` (update + dispose), `Trays.create` picks `SniTray` (a StatusNotifierItem + `com.canonical.dbusmenu` on the session bus through dbus-java; Linux, no fallback) or `AwtTray` (Windows, macOS) and says why when neither; `TrayDisplay` (pure: what the arrow's colour means), `TrayIconRenderer` (the SVG mark's geometry in Java2D), `SniMenuModel` (pure: ids and properties); `ui.TrayStatus` (pure: snapshot + rates → display + line); `Settings.tray/closeToTray` (`ui.tray`, `ui.closeToTray`); `MainWindow.installTray/hideToTray/quit` | `com.torrenta.tray`, `ui` |
 | UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `MessageLog` + `MessageLogPopup` (the status bar's history: every `setStatus` with its level, a card over the bar in the palette's chrome, Editora's), `DebugLog` + `DebugLogWindow` (Termina's: j.u.l WARNING and above from every logger plus uncaught exceptions, mirrored to `torrenta-session.log`; View → Debug Log and Settings → General → Diagnostics), `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a vertical `SplitPane`, the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
@@ -328,6 +329,29 @@ release process with the names changed; Termina's README and memory hold the war
   (`close-window` is `stage.close()`, which skips the handler), so `showing=false` with `tray=sni`
   is close-to-tray working. `busctl --user` can read the item (`org.kde.StatusNotifierItem-<pid>-1`:
   `ToolTip`, `/MenuBar GetLayout`) and click its items (`Event isvu <id> clicked s "" 0`).
+
+- **The config folder is locked by the first instance, and the port file is not the arbiter.**
+  `SingleInstance.claim` runs in `App.main` before the toolkit: `tryLock` on `instance.lock`
+  (an `OverlappingFileLockException` means this JVM holds it already, which is the test's second
+  object), and only the loser reads `instance.port`/`instance.token` and connects, retrying for
+  up to 900 ms because the winner may still be binding (two processes launched by one
+  double-click). A stale pair left by a crash is taken over because the OS released the lock; a
+  listener that never answers `ok` (a reused port, the wrong token) counts as nobody. The accept
+  loop refuses silently on a bad token (the sender treats silence as nobody home) and queues
+  batches until `deliverTo`, since the window is built after the claim. `--config-dir` scopes
+  it all. The hand-off is proven headless by two `dev-run.sh` processes on one config dir, the
+  first with a 15 s capture delay and `dialog-add`, the second with a magnet: the first's
+  `event=` lines show "Received 1 item from another Torrenta" and the magnet added.
+- **`java.awt.headless` is one rule, `AwtUse.headful`**, which replaced `Trays.usesAwt` in
+  `App.main`: Linux never (D-Bus tray and badge, desktop-entry handlers); macOS when the tray,
+  the badge or the handler is wanted (`Taskbar` and `Desktop` both throw headless); Windows for
+  the tray alone (the badge is skipped there: `Taskbar.setWindowIconImage` wants an AWT window,
+  which the stage is not). Every AWT initialisation runs on a daemon thread (`tray-init`,
+  `badge-init`, `open-handlers`), never the FX thread, for the AppKit reason. jpackage takes
+  `--file-associations` for installer types only (the app-image step refuses it) and the dmg
+  wraps the image as it is, so on macOS `scripts/add-mac-types.sh` patches
+  `CFBundleDocumentTypes` and `CFBundleURLTypes` (`magnet`, which jpackage cannot declare at all)
+  into `Info.plist` with PlistBuddy and re-signs, as the version fix does. The capture prints `instance=`, `badge=`, `handler=` and `openHandlers=`.
 
 ## Conventions (carried from Termina)
 
