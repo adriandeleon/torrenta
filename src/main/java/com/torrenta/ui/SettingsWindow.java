@@ -277,7 +277,7 @@ final class SettingsWindow {
         Set<String> off = settings.disabledSearchDefinitions();
         for (DefinitionStore.Entry e : definitionTable.getItems()) {
             out.add(e.name() + " | " + e.file().getFileName() + " | " + definitionType(e) + " | " + definitionStatus(e)
-                    + " | " + (off.contains(e.id()) ? "off" : "on"));
+                    + " | " + (!e.loaded() ? "" : off.contains(e.id()) ? "off" : "on"));
         }
         return out;
     }

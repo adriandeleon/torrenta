@@ -166,8 +166,7 @@ class DeclarativeProviderTest {
                 "Topics in Mathematics with Applications in Finance (MIT 18.642) - Video lectures 2024", mit.name());
         assertEquals("e53507bbf0bc496e40ea17ebdf132eec35e560be", mit.infoHash());
         assertEquals(
-                new SearchResult.Link.TorrentUrl(
-                        base + "/download/e53507bbf0bc496e40ea17ebdf132eec35e560be.torrent"),
+                new SearchResult.Link.TorrentUrl(base + "/download/e53507bbf0bc496e40ea17ebdf132eec35e560be.torrent"),
                 mit.link());
         assertEquals(3770679296L, mit.size());
         assertEquals(

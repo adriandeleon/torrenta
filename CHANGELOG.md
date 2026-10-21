@@ -13,6 +13,27 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Search providers from definition files**, the last step of the search milestone. A site
+  without an API is `search-providers/<id>.json` in the config folder: where to search (a URL
+  template with `{query}` and `{category}`, the category mapped through the file's own table;
+  optional paging with `{page}`, a page count and a delay; headers) and how to read the answer
+  (`json`: a JSON-pointer path to the rows and one per field; `html`: a CSS-like selector for the
+  rows and one per field, with `attr` for an attribute, `regex` for a capture and `template` to
+  build a URL from other fields). Sizes ("1.4 GiB", "700 MB", "1,234,567") and dates (ISO,
+  RFC 1123, "Sep 13, 2026", "2 days ago", or a pattern of the file's own) are parsed; a missing
+  field is a dash, a row without a name or a link is skipped, a page with no rows is an empty
+  answer. One generic provider interprets every file; the HTML is read by a lenient tokeniser and
+  a small selector engine of our own (tag, `.class`, `#id`, `[attr=value]`, descendant and child
+  combinators, `:nth-of-type(n)`, `:contains`), no new dependency, documented for what it is. A
+  file that does not load is said once in the Event Log with the file and the key at fault, and
+  unknown keys are errors so a typo cannot pass. Settings → Search lists the files with their
+  type and status, switches each off (`search.disabled`, which syncs), reloads the folder and
+  opens it; the folder is also re-read when the Search tab opens. Every loaded file is a provider
+  chip in the tab beside the Torznab servers. Three examples ship and are copied in on the first
+  run, never written over (a `.example` beside yours if you changed one): the Internet Archive's
+  advanced search (JSON), LinuxTracker's listing (HTML) and Academic Torrents' feed (RSS read with
+  the same parser, filtered locally, since the site asks not to be scraped). The format in full is
+  `docs/search-providers.md`. This completes 0.6.
 - **The Search tab** (`Ctrl+K`, File → Search…, the toolbar's search glyph), the second step of
   the search milestone. It takes the place of the transfers, which come back as they were with
   `Esc`: a query field, a row of category chips (All by default), a row of provider chips (every
