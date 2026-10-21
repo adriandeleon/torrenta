@@ -15,16 +15,19 @@ import javafx.scene.shape.SVGPath;
  * and coloured through the {@code icon-line} style class; {@link #of} is a Material Design 24dp
  * single-path glyph, <b>filled</b> and coloured through {@code toolbar-icon}. They are not
  * interchangeable: one is coloured by {@code -fx-stroke}, the other by {@code -fx-fill}, so a glyph
- * moving between families needs its CSS moved too (see app.css).
+ * moving between families needs its CSS moved too (see app.css). The toolbar is all line glyphs,
+ * as the redesign draws it; the Material ones that used to sit among them were redrawn.
  *
  * <p>Each call returns a fresh node: a JavaFX node can only have one parent.
  */
 final class Icons {
 
-    /** Scale applied to every toolbar icon. */
-    private static final double ICON_SCALE = 0.8;
-    /** Scale for a kit line glyph: its 16-unit box rendered at the same visual size as a 24dp one. */
-    private static final double LINE_SCALE = ICON_SCALE * 24.0 / 16.0;
+    /** Every toolbar glyph is 17px tall, the redesign's size: a 16-unit kit box scaled up a hair. */
+    private static final double LINE_SCALE = 17.0 / 16.0;
+    /** A Material 24dp glyph at the same visual size. None is on the toolbar now; kept for dialogs. */
+    private static final double ICON_SCALE = 17.0 / 24.0;
+    /** A glyph beside a sidebar row: smaller than the toolbar's. */
+    private static final double SMALL_SCALE = 13.0 / 16.0;
 
     private Icons() {}
 
@@ -58,11 +61,15 @@ final class Icons {
 
     /** A UI Kit line glyph (16-unit box, stroked not filled); see {@code .icon-line} in app.css. */
     static Node line(String content) {
+        return line(content, LINE_SCALE);
+    }
+
+    private static Node line(String content, double scale) {
         SVGPath svg = new SVGPath();
         svg.setContent(content);
         svg.getStyleClass().add("icon-line");
-        svg.setScaleX(LINE_SCALE);
-        svg.setScaleY(LINE_SCALE);
+        svg.setScaleX(scale);
+        svg.setScaleY(scale);
         return new Group(svg);
     }
 
@@ -104,14 +111,24 @@ final class Icons {
         return line("M5.2 3.4v9.2l7.4-4.6z");
     }
 
-    static Node refresh() {
-        return of("M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 "
-                + "6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 "
-                + "3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z");
+    /** Force resume: the play triangle against a bar, which it ignores (the queue). */
+    static Node forceRun() {
+        return line("M3.4 3.4v9.2l6.2-4.6zM12.6 3.4v9.2");
     }
 
+    /** Recheck: an open arc with an arrowhead, in the line style like the rest of the row. */
+    static Node refresh() {
+        return line("M13.3 8A5.3 5.3 0 1 1 11.8 4.2M13.3 2.7V6H10");
+    }
+
+    /** Remove: a lid over an outlined bin, in the line style. */
     static Node trash() {
-        return of("M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z");
+        return line("M2.7 4.7h10.6M6 4.7V2.7h4v2M4 4.7l.7 8.6h6.6l.7-8.6");
+    }
+
+    /** A folder beside a category in the sidebar. */
+    static Node folderSmall() {
+        return line("M2 12.5V3.5h4.2l1.5 2h5.8v2M2 12.5l2.2-5h10.3l-2.2 5z", SMALL_SCALE);
     }
 
     static Node find() {
@@ -126,16 +143,18 @@ final class Icons {
                 + "M1.5 3.5H6M1.5 6.5H5.5M1.5 9.5H7.5M1.5 12.5H9");
     }
 
+<<<<<<< HEAD
     /** RSS: the dot and two arcs, in the kit's line style. */
     static Node rss() {
         return line("M3 4a9 9 0 0 1 9 9M3 8a5 5 0 0 1 5 5M3 12.2a0.8 0.8 0 1 0 1.6 0a0.8 0.8 0 1 0 -1.6 0");
     }
 
     /** A clock face, for the event log. */
+=======
+    /** A clock face, for the event log, in the line style. */
+>>>>>>> 068e025c0af03e27f8be45dfaa70e7f638fd832b
     static Node history() {
-        return of("M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 "
-                + "2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 "
-                + "3.15.75-1.23-4.5-2.67z");
+        return line("M2.8 8a5.2 5.2 0 1 0 10.4 0a5.2 5.2 0 1 0-10.4 0M8 5.2v2.9l2 1.3");
     }
 
     static Node settings() {

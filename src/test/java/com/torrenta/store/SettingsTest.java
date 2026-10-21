@@ -111,6 +111,19 @@ class SettingsTest {
     }
 
     @Test
+    void theMenuBarStaysUnderTheTitleBarUnlessAsked(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        assertFalse(settings.extendedWindow(), "off by default: it changes how the window is decorated");
+        settings.setExtendedWindow(true);
+        settings.save();
+        Settings read = new Settings(file);
+        read.load();
+        assertTrue(read.extendedWindow());
+    }
+
+    @Test
     void sidebarShowsUnlessTurnedOffAndItsFilterIsAStringTheUiParses(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Settings settings = new Settings(file);

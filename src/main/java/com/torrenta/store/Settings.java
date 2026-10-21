@@ -84,6 +84,12 @@ public final class Settings {
     public static final String UI_STATE_COLORS = "ui.stateColors";
     /** The theme id ({@code editora-dark}, {@code nord-light}, …); the UI maps it and falls back. */
     public static final String THEME = "ui.theme";
+    /**
+     * The menu bar drawn in the window's own title bar ({@code StageStyle.EXTENDED}); off by default,
+     * read once when the window is built, so it applies on restart. {@code ui.ExtendedWindow} says
+     * where it is allowed.
+     */
+    public static final String UI_EXTENDED_WINDOW = "ui.extendedWindow";
 
     public static final String LAST_UPDATE_CHECK = "updates.lastCheckEpochMs";
     /** The version the user chose to skip; a manual check still reports it. */
@@ -444,6 +450,14 @@ public final class Settings {
 
     public boolean sidebar() {
         return readBoolean(UI_SIDEBAR, true);
+    }
+
+    public boolean extendedWindow() {
+        return readBoolean(UI_EXTENDED_WINDOW, false);
+    }
+
+    public void setExtendedWindow(boolean on) {
+        properties.setProperty(UI_EXTENDED_WINDOW, String.valueOf(on));
     }
 
     public void setSidebar(boolean shown) {

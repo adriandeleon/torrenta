@@ -85,6 +85,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   articles are `rss/feeds.json` and `rss/articles/<id>.json` beside the settings, this machine's,
   never synced. The columns are remembered as `rss.columns`. The auto-download switch on the
   Settings page is there and off: the rules come next.
+- **The menu bar can share the window's title bar.** Off by default, under Settings → General →
+  Appearance, experimental; it applies on restart, since a window's style is fixed once it has
+  been shown, and the status bar says so when the setting and the window disagree. With it on, the
+  window is drawn without a system title bar and the menus, the window title and the system
+  buttons share that one row: a full bar of vertical space back for the list. Minimise, maximise,
+  close, drag-to-move, double-click-to-maximise, edge resize and snapping all remain the
+  platform's own, so nothing about how the window behaves changes; only where the menus sit. The
+  window buttons follow the app theme, not the desktop's, so a dark theme on a light desktop does
+  not hide them. Not offered on macOS, where the menu belongs to the system menu bar.
 - **Search providers from definition files**, the last step of the search milestone. A site
   without an API is `search-providers/<id>.json` in the config folder: where to search (a URL
   template with `{query}` and `{category}`, the category mapped through the file's own table;

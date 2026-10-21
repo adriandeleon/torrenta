@@ -228,22 +228,71 @@ final class Sidebar extends VBox {
         return out;
     }
 
+    /** The dot's colour class for a status, keyed to the same state colours the rows use. */
+    static String dotClass(SidebarStatus status) {
+        return switch (status) {
+            case DOWNLOADING, ACTIVE -> "dot-down";
+            case SEEDING -> "dot-up";
+            case COMPLETED -> "dot-done";
+            case STALLED -> "dot-stall";
+            case ERRORED -> "dot-error";
+            case PAUSED, INACTIVE, CHECKING -> "dot-idle";
+        };
+    }
+
     private String line(Entry e) {
         return e.title + (e.chosenIn(selection) ? "*" : "") + " (" + e.count.get() + ")";
     }
 
-    /** Title on the left, count on the right in the muted ink; a section is bold and has no count. */
+    /**
+     * A mark, the title, then the count at the right edge in the muted ink. The mark is a dot in
+     * the state's colour for a status, a small folder for a category, nothing otherwise; a section
+     * is small capitals with no count.
+     */
     private final class Cell extends TreeCell<Entry> {
         private final Label title = new Label();
         private final Label count = new Label();
+        private final Region dot = new Region();
+        private final javafx.scene.Node folder = Icons.folderSmall();
         private final HBox box;
 
         Cell() {
             Region spacer = new Region();
             HBox.setHgrow(spacer, Priority.ALWAYS);
             count.getStyleClass().add("sidebar-count");
-            box = new HBox(6, title, spacer, count);
+            dot.getStyleClass().add("sidebar-dot");
+            folder.getStyleClass().add("sidebar-folder");
+            box = new HBox(8, title, spacer, count);
             box.setAlignment(Pos.CENTER_LEFT);
+        }
+
+        private void mark(javafx.scene.Node node) {
+            if (node == null) {
+                if (box.getChildren().size() == 4) box.getChildren().removeFirst();
+            } else if (box.getChildren().size() == 3) {
+                box.getChildren().addFirst(node);
+            } else if (box.getChildren().getFirst() != node) {
+                box.getChildren().set(0, node);
+            }
+        }
+
+        private javafx.scene.Node markFor(Entry entry) {
+            if (entry.isHeading()) return null;
+            // Only the All above the sections gets a dot; a section's own All stands bare.
+            if (entry.axis == Axis.ALL) {
+                dot.getStyleClass().removeIf(c -> c.startsWith("dot-"));
+                dot.getStyleClass().add("dot-all");
+                return dot;
+            }
+            return switch (entry.filter.kind()) {
+                case STATUS -> {
+                    dot.getStyleClass().removeIf(c -> c.startsWith("dot-"));
+                    dot.getStyleClass().add(dotClass(entry.filter.status()));
+                    yield dot;
+                }
+                case CATEGORY, UNCATEGORISED -> folder;
+                default -> null;
+            };
         }
 
         @Override
@@ -257,8 +306,9 @@ final class Sidebar extends VBox {
                 return;
             }
             boolean section = entry.isHeading();
-            title.setText(entry.title);
+            title.setText(section ? entry.title.toUpperCase(java.util.Locale.ROOT) : entry.title);
             pseudoClassStateChanged(SECTION, section);
+            mark(markFor(entry));
             pseudoClassStateChanged(CHOSEN, entry.chosenIn(selection));
             count.setVisible(!section);
             if (!section) count.textProperty().bind(entry.count.asString());

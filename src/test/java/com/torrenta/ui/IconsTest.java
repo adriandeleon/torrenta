@@ -34,8 +34,11 @@ class IconsTest {
             boolean line = svg.getStyleClass().contains("icon-line");
             boolean filled = svg.getStyleClass().contains("toolbar-icon");
             assertTrue(line ^ filled, m.getName() + " is one family, not both or neither");
-            // The same visual size for both families: a 16-unit box scaled like a 24dp one.
-            assertEquals(line ? 1.2 : 0.8, svg.getScaleX(), 1e-9, m.getName());
+            // Every toolbar glyph is 17px (the redesign's), the sidebar's folder 13px; a Material
+            // glyph, were one left, would be 17px too.
+            double expected = m.getName().endsWith("Small") ? 13.0 / 16 : (line ? 17.0 / 16 : 17.0 / 24);
+            assertEquals(expected, svg.getScaleX(), 1e-9, m.getName());
+            if (!m.getName().endsWith("Small")) assertTrue(line, m.getName() + ": the toolbar is one line family");
             seen.add(m.getName());
         }
         assertTrue(
@@ -45,12 +48,14 @@ class IconsTest {
                         "magnet",
                         "pause",
                         "run",
+                        "forceRun",
                         "refresh",
                         "trash",
                         "find",
                         "history",
                         "settings",
-                        "palette")),
+                        "palette",
+                        "folderSmall")),
                 seen.toString());
     }
 }
