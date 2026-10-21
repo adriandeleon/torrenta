@@ -79,6 +79,11 @@ import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.WatchFolders;
 import com.torrenta.net.TorrentFetch;
+import com.torrenta.rss.Article;
+import com.torrenta.rss.Feed;
+import com.torrenta.rss.FeedFetcher;
+import com.torrenta.rss.RssService;
+import com.torrenta.rss.RssStore;
 import com.torrenta.search.DeclarativeProvider;
 import com.torrenta.search.SearchProvider;
 import com.torrenta.search.SearchResult;
@@ -148,6 +153,11 @@ public final class MainWindow {
     private String lastClipboardOffer = "";
     private final DetailPane detail = new DetailPane();
     private SearchPane searchPane;
+    private final RssStore rssStore;
+    /** The reader: its own schedule, a virtual thread per fetch, listeners on the FX thread. */
+    private final RssService rss;
+
+    private RssPane rssPane;
     /** The transfers (sidebar, filter, list, detail) and the Search tab share the centre. */
     private javafx.scene.Node transfersView;
 
@@ -193,6 +203,14 @@ public final class MainWindow {
         this.definitionStore = new DefinitionStore(configDir);
         installExampleDefinitions();
         definitionStore.load();
+        this.rssStore = new RssStore(configDir);
+        rssStore.load();
+        this.rss = new RssService(
+                rssStore,
+                new FeedFetcher(),
+                settings::rssRefreshMinutes,
+                r -> Thread.ofVirtual().name("rss-fetch").start(r),
+                Platform::runLater);
         stage.setTitle(AppInfo.NAME);
 
         BorderPane root = new BorderPane();
@@ -217,6 +235,8 @@ public final class MainWindow {
         settingsWindow.setSearchDefinitions(
                 definitionStore,
                 () -> opener.accept(definitionStore.dir().toUri().toString()));
+        settingsWindow.setRss(rss);
+        rss.start();
         settingsWindow.setOnTestNotification(() -> {
             Automation a = automation;
             if (a != null) a.testNotification();
@@ -258,6 +278,7 @@ public final class MainWindow {
             rememberDivider();
             stopPolling();
             stopWatching();
+            rss.stop();
             updates.shutdown();
             sync.shutdown();
         });
@@ -289,6 +310,7 @@ public final class MainWindow {
             return promptDialog.getDialogPane().getScene();
         if (aboutDialog != null && aboutDialog.isShowing())
             return aboutDialog.getDialogPane().getScene();
+        if (rssPane != null && rssPane.dialogScene() != null) return rssPane.dialogScene();
         if (settingsWindow.dialogScene() != null) return settingsWindow.dialogScene();
         if (settingsWindow.isShowing()) return settingsWindow.scene();
         if (logWindow.isShowing()) return logWindow.scene();
@@ -302,6 +324,7 @@ public final class MainWindow {
         if (tagsDialog != null && tagsDialog.isShowing()) tagsDialog.cancel();
         if (promptDialog != null && promptDialog.isShowing()) promptDialog.close();
         if (aboutDialog != null && aboutDialog.isShowing()) aboutDialog.close();
+        if (rssPane != null) rssPane.closeDialog();
         settingsWindow.closeDialogsForCapture();
     }
 
@@ -352,6 +375,35 @@ public final class MainWindow {
         } else if (action.equals("settings-definitions-reload")) {
             settingsWindow.show(stage);
             settingsWindow.reloadDefinitionsForCapture();
+        } else if (action.equals("rss")) {
+            showRss();
+        } else if (action.startsWith("rss:")) {
+            // rss:<url>: the feed added through the service, as the dialog would, and refreshed.
+            showRss();
+            try {
+                rss.addFeed(Feed.of(action.substring("rss:".length()), "", 0));
+            } catch (IOException e) {
+                System.err.println("capture: could not add the feed: " + e.getMessage());
+            }
+        } else if (action.startsWith("rss-dialog")) {
+            // rss-dialog, rss-dialog:<url>: the Add Feed dialog from the tab, the URL typed in.
+            showRss();
+            int colon = action.indexOf(':');
+            rssPane.openDialogForCapture(colon < 0 ? "" : action.substring(colon + 1));
+        } else if (action.startsWith("rss-feed:")) {
+            showRss();
+            rssPane.selectFeedForCapture(action.substring("rss-feed:".length()));
+        } else if (action.startsWith("rss-keys:")) {
+            // Keys pressed where the focus is (DOWN+ENTER in the articles), once no feed is refreshing.
+            showRss();
+            rssPane.pressForCapture(java.util.Arrays.stream(
+                            action.substring("rss-keys:".length()).split("\\+"))
+                    .map(key -> KeyCode.valueOf(key.trim().toUpperCase(java.util.Locale.ROOT)))
+                    .toList());
+        } else if (action.startsWith("settings-rss-add")) {
+            settingsWindow.show(stage);
+            int colon = action.indexOf(':');
+            settingsWindow.openRssDialogForCapture(colon < 0 ? "" : action.substring(colon + 1));
         } else if (action.equals("search")) {
             showSearch();
         } else if (action.startsWith("search:")) {
@@ -443,6 +495,17 @@ public final class MainWindow {
                     + (searchPane.searching() ? " (searching)" : ""));
             for (String row : searchPane.rowsForCapture()) System.out.println("capture: search-row=" + row);
         }
+        System.out.println("capture: rss-tab=" + (rssShowing() ? "showing" : "hidden"));
+        if (rssShowing()) {
+            System.out.println("capture: rss-status=" + rssPane.statusText());
+            for (String f : rssPane.feedsForCapture()) System.out.println("capture: rss-feed=" + f);
+            for (String row : rssPane.rowsForCapture()) System.out.println("capture: rss-row=" + row);
+            System.out.println("capture: rss-detail=" + rssPane.detailForCapture());
+            if (!rssPane.dialogTitle().isEmpty())
+                System.out.println("capture: dialog=" + rssPane.dialogTitle() + " | " + rssPane.dialogStatus());
+        }
+        if (!settingsWindow.rssStatus().isEmpty())
+            System.out.println("capture: rss-settings=" + settingsWindow.rssStatus());
     }
 
     /**
@@ -836,6 +899,32 @@ public final class MainWindow {
                 AddRequest.Source source = SearchAdd.sourceOf(result, new TorrentFetch()::fetch);
                 if (!fetching.isEmpty()) Platform.runLater(() -> setStatus("Fetched " + result.name()));
                 addSource(e, source, AddDialog.Via.SEARCH, withoutAsking, defaults);
+            } catch (EngineException | IOException | RuntimeException ex) {
+                String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                Platform.runLater(() -> setStatus(message));
+            }
+        });
+    }
+
+    /**
+     * FX thread. An article into the Add dialog: its magnet as it is, its {@code .torrent} link
+     * fetched first, the status bar saying so meanwhile.
+     */
+    private void addFromArticle(Article article) {
+        Engine e = engine;
+        if (e == null) {
+            setStatus("The engine is still starting");
+            return;
+        }
+        String fetching = RssAdd.fetchingText(article);
+        if (!fetching.isEmpty()) setStatus(fetching);
+        boolean withoutAsking = settings.addWithoutAsking();
+        AddDialog.Defaults defaults = AddDialog.Defaults.from(settings);
+        Thread.ofVirtual().name("rss-add").start(() -> {
+            try {
+                AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
+                if (!fetching.isEmpty()) Platform.runLater(() -> setStatus("Fetched " + article.displayTitle()));
+                addSource(e, source, AddDialog.Via.RSS, withoutAsking, defaults);
             } catch (EngineException | IOException | RuntimeException ex) {
                 String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
                 Platform.runLater(() -> setStatus(message));
@@ -1691,6 +1780,7 @@ public final class MainWindow {
                 new Command(
                         "settings", "Settings…", chord(KeyCode.COMMA), null, always, () -> settingsWindow.show(stage)),
                 new Command("search", "Search…", chord(KeyCode.K), null, always, this::showSearch),
+                new Command("rss", "RSS Feeds…", chord(KeyCode.R), null, always, this::showRss),
                 new Command("transfers", "Show Transfers", null, "Esc", always, this::showTransfers),
                 new Command(
                         "filter",
@@ -1765,6 +1855,7 @@ public final class MainWindow {
                 new Separator(),
                 toolButton("filter", Icons.find()),
                 toolButton("search", Icons.search()),
+                toolButton("rss", Icons.rss()),
                 toolButton("event-log", Icons.history()),
                 toolButton("settings", Icons.settings()),
                 spacer,
@@ -1821,6 +1912,7 @@ public final class MainWindow {
                         addClipboard,
                         new SeparatorMenuItem(),
                         command("search").menuItem(),
+                        command("rss").menuItem(),
                         command("settings").menuItem(),
                         new SeparatorMenuItem(),
                         quit);
@@ -1938,7 +2030,7 @@ public final class MainWindow {
         // The first torrent makes the table appear; it takes the focus then, unless the person is
         // typing a filter at that moment.
         table.visibleProperty().addListener((o, was, now) -> {
-            if (now && !filter.isFocused() && !searchShowing()) table.requestFocus();
+            if (now && !filter.isFocused() && !searchShowing() && !rssShowing()) table.requestFocus();
         });
         StackPane centre = new StackPane(table, empty);
         split = new SplitPane(centre);
@@ -2009,7 +2101,8 @@ public final class MainWindow {
         // The Search tab shares the centre with the transfers: one is shown and managed, the
         // other neither, so the transfers look exactly as they did while Search is away.
         searchPane = new SearchPane(new SearchHost(), settings);
-        StackPane centre2 = new StackPane(centreWithSidebar, searchPane);
+        rssPane = new RssPane(new RssHost(), rss, settings);
+        StackPane centre2 = new StackPane(centreWithSidebar, searchPane, rssPane);
         VBox.setVgrow(centre2, Priority.ALWAYS);
         return new VBox(centre2);
     }
@@ -2062,6 +2155,58 @@ public final class MainWindow {
         return searchPane != null && searchPane.isVisible();
     }
 
+    // ---- the RSS tab ----------------------------------------------------------------------------
+
+    /** What the RSS tab asks of the window. */
+    private final class RssHost implements RssPane.Host {
+        @Override
+        public void add(Article article) {
+            addFromArticle(article);
+        }
+
+        @Override
+        public void openLink(String url) {
+            if (!url.isEmpty()) opener.accept(url);
+        }
+
+        @Override
+        public void copy(String text) {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(text);
+            Clipboard.getSystemClipboard().setContent(content);
+            setStatus("Copied " + (text.startsWith("magnet:") ? "the magnet link" : "the link"));
+        }
+
+        @Override
+        public void say(String text) {
+            setStatus(text);
+        }
+
+        @Override
+        public void leave() {
+            showTransfers();
+        }
+    }
+
+    private boolean rssShowing() {
+        return rssPane != null && rssPane.isVisible();
+    }
+
+    /** Ctrl+R: the RSS tab in place of the transfers, the articles focused. */
+    private void showRss() {
+        showView(rssPane);
+        rssPane.focusDefault();
+    }
+
+    /** One of the three centre views shown and managed, the other two neither. */
+    private void showView(javafx.scene.Node view) {
+        for (javafx.scene.Node n : List.of(transfersView, searchPane, rssPane)) {
+            boolean on = n == view;
+            n.setVisible(on);
+            n.setManaged(on);
+        }
+    }
+
     /**
      * The shipped definition files into the folder, the ones not there yet; a failure is a log
      * line, not a failed start.
@@ -2090,29 +2235,20 @@ public final class MainWindow {
             reportDefinitionProblems();
             searchPane.reloadProviders();
         }
-        if (!searchShowing()) {
-            transfersView.setVisible(false);
-            transfersView.setManaged(false);
-            searchPane.setVisible(true);
-            searchPane.setManaged(true);
-        }
+        showView(searchPane);
         searchPane.focusQuery();
     }
 
     /** Escape in the query: the transfers back, as they were. */
     private void showTransfers() {
-        if (searchShowing()) {
-            searchPane.setVisible(false);
-            searchPane.setManaged(false);
-            transfersView.setVisible(true);
-            transfersView.setManaged(true);
-        }
+        showView(transfersView);
         table.requestFocus();
     }
 
     /** The list that is showing takes the focus back: after a dialog, after the palette. */
     private void focusList() {
         if (searchShowing()) searchPane.focusResults();
+        else if (rssShowing()) rssPane.focusArticles();
         else table.requestFocus();
     }
 

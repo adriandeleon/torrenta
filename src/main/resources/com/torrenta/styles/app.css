@@ -508,3 +508,50 @@
 .search-chip:focused {
     -fx-border-color: -color-accent-emphasis;
 }
+
+/*
+ * The RSS tab: the feed list on the left (a feed with unread articles in bold, its count in the
+ * muted ink, a glyph while it refreshes or after it failed), the article rows in bold while unread,
+ * and the chosen article's text below on the subtle ground.
+ */
+.rss-feeds .list-cell {
+    -fx-padding: 4 8 4 8;
+}
+
+.rss-feeds .list-cell:unread .rss-feed-title {
+    -fx-font-weight: bold;
+}
+
+.rss-feed-count {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 0.9em;
+}
+
+.rss-feed-glyph {
+    -fx-text-fill: -color-warning-fg;
+}
+
+.rss-table .table-row-cell:unread {
+    -fx-font-weight: bold;
+}
+
+.rss-detail {
+    -fx-background-color: -color-bg-subtle;
+}
+
+.rss-detail-title {
+    -fx-font-weight: bold;
+    -fx-font-size: 1.05em;
+}
+
+.rss-detail-link {
+    -fx-padding: 0;
+    -fx-border-width: 0;
+}
+
+.rss-detail-scroll,
+.rss-detail-scroll > .viewport {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
