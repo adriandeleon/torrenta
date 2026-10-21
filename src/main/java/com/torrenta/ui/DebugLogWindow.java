@@ -19,6 +19,8 @@ import javafx.stage.Window;
 
 import com.torrenta.AppInfo;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Shows what {@link DebugLog} has captured, with a button to copy it into a bug report. Termina's.
  * Non-modal and reusable, like the event log's window: closing hides it, the next opening shows it
@@ -39,20 +41,20 @@ final class DebugLogWindow {
         path.getStyleClass().add("debug-log-file");
         path.setWrapText(true);
 
-        Button refresh = new Button("Refresh");
+        Button refresh = new Button(tr("debugLog.refresh"));
         refresh.setOnAction(e -> refresh());
-        Button copy = new Button("Copy");
+        Button copy = new Button(tr("common.copy"));
         copy.setOnAction(e -> {
             ClipboardContent content = new ClipboardContent();
             content.putString(text.getText());
             Clipboard.getSystemClipboard().setContent(content);
         });
-        Button clear = new Button("Clear");
+        Button clear = new Button(tr("debugLog.clear"));
         clear.setOnAction(e -> {
             DebugLog.clear();
             refresh();
         });
-        Button close = new Button("Close");
+        Button close = new Button(tr("common.close"));
         close.setOnAction(e -> stage.hide());
 
         Region spacer = new Region();
@@ -73,7 +75,7 @@ final class DebugLogWindow {
             if (e.getCode() == KeyCode.ESCAPE) stage.hide();
         });
 
-        stage.setTitle(AppInfo.NAME + " — Debug Log");
+        stage.setTitle(tr("debugLog.title", AppInfo.NAME));
         stage.setScene(scene);
         // Owned but not modal: the point is to watch it while provoking whatever is going wrong.
         stage.initOwner(owner);
@@ -83,11 +85,11 @@ final class DebugLogWindow {
     private void refresh() {
         // As text, not a prompt: the area takes the focus, and a focused area shows no prompt.
         String captured = DebugLog.text();
-        text.setText(captured.isEmpty() ? "Nothing has been logged this session" : captured);
+        text.setText(captured.isEmpty() ? tr("debugLog.empty") : captured);
         // Scrolled to the end: the newest line is the one being looked for.
         text.positionCaret(text.getText().length());
         text.setScrollTop(Double.MAX_VALUE);
-        path.setText(DebugLog.file() == null ? "" : "Log file: " + DebugLog.file());
+        path.setText(DebugLog.file() == null ? "" : tr("debugLog.file", DebugLog.file()));
     }
 
     /** Shows, refreshed, or brings to the front; hidden by its Close button or Esc. */

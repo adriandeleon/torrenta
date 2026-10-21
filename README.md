@@ -217,7 +217,10 @@ is kept there as `torrent.<info-hash>.share` and goes with the torrent when it i
 caps and connection counts are libtorrent's and live in its resume data. The global queue and share
 limits are `queue.*` and `share.*`. The theme is there too, under General →
 Appearance: Editora Light and Dark (Caret & Ink, as Editora and Termina), Nord and Cupertino,
-light and dark, applied the moment one is picked (`ui.theme` in the file).
+light and dark, applied the moment one is picked (`ui.theme` in the file). Settings → General →
+Language picks the interface language: System (the operating system's, English when that is not
+one of them), English, Deutsch, Español, Français, Italiano or Português, in force after a restart
+(`ui.language`, a preference, so it syncs).
 
 **Settings sync.** Settings → Sync connects the settings file to a Git repository of yours (a
 private one on GitHub, say: "Create on GitHub" makes it through the `gh` CLI). Every computer that

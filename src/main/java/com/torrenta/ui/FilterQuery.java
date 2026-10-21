@@ -11,6 +11,8 @@ import java.util.regex.Pattern;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentState;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The filter box's text, read as a query: a test over {@link Torrent} and the chips that show it.
  *
@@ -104,22 +106,23 @@ public final class FilterQuery {
         String value = m.group(3).trim();
         Term term =
                 switch (key) {
-                    case "state" -> op.equals(":") ? state(value) : Term.invalid("state takes a colon");
-                    case "cat", "category" -> op.equals(":") ? category(value) : Term.invalid(key + " takes a colon");
-                    case "tag" -> op.equals(":") ? tag(value) : Term.invalid("tag takes a colon");
-                    case "tracker" -> op.equals(":") ? tracker(value) : Term.invalid("tracker takes a colon");
-                    case "hash" -> op.equals(":") ? hash(value) : Term.invalid("hash takes a colon");
-                    case "is" -> op.equals(":") ? is(value) : Term.invalid("is takes a colon");
+                    case "state" -> op.equals(":") ? state(value) : Term.invalid(tr("filter.takesColon", key));
+                    case "cat", "category" ->
+                        op.equals(":") ? category(value) : Term.invalid(tr("filter.takesColon", key));
+                    case "tag" -> op.equals(":") ? tag(value) : Term.invalid(tr("filter.takesColon", key));
+                    case "tracker" -> op.equals(":") ? tracker(value) : Term.invalid(tr("filter.takesColon", key));
+                    case "hash" -> op.equals(":") ? hash(value) : Term.invalid(tr("filter.takesColon", key));
+                    case "is" -> op.equals(":") ? is(value) : Term.invalid(tr("filter.takesColon", key));
                     case "ratio" -> ratio(comparison(op, value));
                     case "size" -> size(comparison(op, value));
                     case "added" -> added(comparison(op, value), now);
-                    default -> Term.invalid("unknown filter " + key);
+                    default -> Term.invalid(tr("filter.unknown", key));
                 };
         if (term.test == null) {
             chips.add(new Chip(token.raw, term.label, false));
             return name(token.text);
         }
-        chips.add(new Chip(token.raw, (token.negated ? "not " : "") + term.label, true));
+        chips.add(new Chip(token.raw, token.negated ? tr("filter.not", term.label) : term.label, true));
         return term.test;
     }
 
@@ -130,53 +133,53 @@ public final class FilterQuery {
 
     private static Term state(String value) {
         return switch (value.toLowerCase(Locale.ROOT)) {
-            case "downloading" -> column(TorrentState.DOWNLOADING.label());
-            case "seeding" -> column(TorrentState.SEEDING.label());
-            case "checking" -> column(TorrentState.CHECKING.label());
-            case "metadata" -> column(TorrentState.FETCHING_METADATA.label());
-            case "finished" -> column(TorrentState.FINISHED.label());
-            case "paused" -> column("Paused");
-            case "error", "errored" -> column("Error");
-            default -> Term.invalid(value.isEmpty() ? "state needs a value" : "no state " + value);
+            case "downloading" -> column(Format.stateLabel(TorrentState.DOWNLOADING));
+            case "seeding" -> column(Format.stateLabel(TorrentState.SEEDING));
+            case "checking" -> column(Format.stateLabel(TorrentState.CHECKING));
+            case "metadata" -> column(Format.stateLabel(TorrentState.FETCHING_METADATA));
+            case "finished" -> column(Format.stateLabel(TorrentState.FINISHED));
+            case "paused" -> column(Format.pausedLabel());
+            case "error", "errored" -> column(Format.errorLabel());
+            default -> Term.invalid(value.isEmpty() ? tr("filter.stateNeedsValue") : tr("filter.noState", value));
         };
     }
 
     /** The State column's own text, so the two cannot disagree on what outranks what. */
     private static Term column(String label) {
-        return new Term(t -> Format.stateLabel(t).equals(label), "state is " + label);
+        return new Term(t -> Format.stateLabel(t).equals(label), tr("filter.stateIs", label));
     }
 
     private static Term category(String value) {
-        if (value.isEmpty()) return Term.invalid("category needs a name");
-        return new Term(t -> t.category().equalsIgnoreCase(value), "category " + value);
+        if (value.isEmpty()) return Term.invalid(tr("filter.categoryNeedsName"));
+        return new Term(t -> t.category().equalsIgnoreCase(value), tr("filter.category", value));
     }
 
     private static Term tag(String value) {
-        if (value.isEmpty()) return Term.invalid("tag needs a name");
-        return new Term(t -> t.tags().stream().anyMatch(value::equalsIgnoreCase), "tag " + value);
+        if (value.isEmpty()) return Term.invalid(tr("filter.tagNeedsName"));
+        return new Term(t -> t.tags().stream().anyMatch(value::equalsIgnoreCase), tr("filter.tag", value));
     }
 
     /** Any of its tracker hosts, or the one it last announced to (which a snapshot may name alone). */
     private static Term tracker(String value) {
-        if (value.isEmpty()) return Term.invalid("tracker needs a host");
+        if (value.isEmpty()) return Term.invalid(tr("filter.trackerNeedsHost"));
         String needle = value.toLowerCase(Locale.ROOT);
         Predicate<String> has = host -> host.toLowerCase(Locale.ROOT).contains(needle);
         return new Term(
                 t -> t.trackers().stream().anyMatch(has)
                         || (!t.tracker().isBlank() && has.test(Format.host(t.tracker()))),
-                "tracker " + value);
+                tr("filter.tracker", value));
     }
 
     private static Term hash(String value) {
         String prefix = value.toLowerCase(Locale.ROOT);
-        if (!HEX.matcher(prefix).matches()) return Term.invalid("hash takes hex digits");
-        return new Term(t -> t.id().toLowerCase(Locale.ROOT).startsWith(prefix), "hash " + prefix + "…");
+        if (!HEX.matcher(prefix).matches()) return Term.invalid(tr("filter.hashTakesHex"));
+        return new Term(t -> t.id().toLowerCase(Locale.ROOT).startsWith(prefix), tr("filter.hash", prefix));
     }
 
     private static Term is(String value) {
         return switch (value.toLowerCase(Locale.ROOT)) {
-            case "sequential" -> new Term(Torrent::sequential, "sequential");
-            default -> Term.invalid(value.isEmpty() ? "is needs a value" : "no such flag " + value);
+            case "sequential" -> new Term(Torrent::sequential, tr("filter.sequential"));
+            default -> Term.invalid(value.isEmpty() ? tr("filter.isNeedsValue") : tr("filter.noSuchFlag", value));
         };
     }
 
@@ -184,16 +187,21 @@ public final class FilterQuery {
 
     private enum Op {
         LT("under"),
-        LE("at most"),
+        LE("atMost"),
         GT("over"),
-        GE("at least"),
+        GE("atLeast"),
         EQ("is");
 
-        /** How the op reads in a ratio or size chip. */
-        final String word;
+        /** The catalogue key's last segment: {@code filter.op.<id>}. */
+        private final String id;
 
-        Op(String word) {
-            this.word = word;
+        Op(String id) {
+            this.id = id;
+        }
+
+        /** How the op reads in a ratio or size chip, in the UI language; read at call time. */
+        String word() {
+            return tr("filter.op." + id);
         }
 
         static Op of(String symbol) {
@@ -229,17 +237,17 @@ public final class FilterQuery {
     }
 
     private static Term ratio(Comparison c) {
-        if (!NUMBER.matcher(c.operand).matches()) return Term.invalid("ratio takes a number");
+        if (!NUMBER.matcher(c.operand).matches()) return Term.invalid(tr("filter.ratioTakesNumber"));
         double bound = Double.parseDouble(c.operand);
         // Nothing moved either way shows as a dash, and counts as no ratio at all: 0.
         return new Term(
                 t -> c.op.holds(Double.compare(Math.max(0, Format.ratioValue(t.uploaded(), t.downloaded())), bound)),
-                "ratio " + c.op.word + " " + c.operand);
+                tr("filter.ratio", c.op.word(), c.operand));
     }
 
     private static Term size(Comparison c) {
         Matcher m = SIZE.matcher(c.operand.toLowerCase(Locale.ROOT));
-        if (!m.matches()) return Term.invalid("size takes a number and k, m, g or t");
+        if (!m.matches()) return Term.invalid(tr("filter.sizeTakesNumber"));
         int shift =
                 switch (m.group(2)) {
                     case "k" -> 10;
@@ -252,7 +260,8 @@ public final class FilterQuery {
                 .multiply(BigDecimal.valueOf(1L << shift))
                 .setScale(0, java.math.RoundingMode.HALF_UP)
                 .longValue();
-        return new Term(t -> c.op.holds(Long.compare(t.size(), bound)), "size " + c.op.word + " " + Bytes.human(bound));
+        return new Term(
+                t -> c.op.holds(Long.compare(t.size(), bound)), tr("filter.size", c.op.word(), Bytes.human(bound)));
     }
 
     /**
@@ -260,40 +269,40 @@ public final class FilterQuery {
      * torrent whose added time is unknown (0) matches neither.
      */
     private static Term added(Comparison c, long now) {
-        if (c.op == Op.EQ) return Term.invalid("added takes < or >");
+        if (c.op == Op.EQ) return Term.invalid(tr("filter.addedTakesComparison"));
         Matcher m = AGE.matcher(c.operand.toLowerCase(Locale.ROOT));
-        if (!m.matches()) return Term.invalid("added takes a number and h, d or w");
+        if (!m.matches()) return Term.invalid(tr("filter.addedTakesNumber"));
         long amount;
         try {
             amount = Long.parseLong(m.group(1));
         } catch (NumberFormatException e) {
-            return Term.invalid("added: too long ago");
+            return Term.invalid(tr("filter.addedTooLongAgo"));
         }
         String unit =
                 switch (m.group(2)) {
-                    case "h" -> "hour";
-                    case "d" -> "day";
-                    default -> "week";
+                    case "h" -> "hours";
+                    case "d" -> "days";
+                    default -> "weeks";
                 };
         long seconds =
                 switch (unit) {
-                    case "hour" -> 3600L;
-                    case "day" -> 86_400L;
+                    case "hours" -> 3600L;
+                    case "days" -> 86_400L;
                     default -> 7 * 86_400L;
                 };
         long age;
         try {
             age = Math.multiplyExact(amount, seconds);
         } catch (ArithmeticException e) {
-            return Term.invalid("added: too long ago");
+            return Term.invalid(tr("filter.addedTooLongAgo"));
         }
-        String span = amount + " " + unit + (amount == 1 ? "" : "s");
+        String span = tr("filter.span." + unit, amount);
         String label =
                 switch (c.op) {
-                    case LT -> "added in the last " + span;
-                    case LE -> "added at most " + span + " ago";
-                    case GT -> "added more than " + span + " ago";
-                    default -> "added at least " + span + " ago";
+                    case LT -> tr("filter.addedInLast", span);
+                    case LE -> tr("filter.addedAtMost", span);
+                    case GT -> tr("filter.addedMoreThan", span);
+                    default -> tr("filter.addedAtLeast", span);
                 };
         // Compare ages, not instants: the younger the torrent, the smaller its age.
         return new Term(t -> t.added() > 0 && c.op.holds(Long.compare(now - t.added(), age)), label);

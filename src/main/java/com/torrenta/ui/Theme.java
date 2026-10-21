@@ -7,6 +7,8 @@ import atlantafx.base.theme.CupertinoLight;
 import atlantafx.base.theme.NordDark;
 import atlantafx.base.theme.NordLight;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * A theme: the control stylesheet for the application's windows, applied with
  * {@code Application.setUserAgentStylesheet} and switched live from Settings.
@@ -17,24 +19,22 @@ import atlantafx.base.theme.NordLight;
  * external references are modena assets that resolve out of {@code javafx.controls}).
  */
 public enum Theme {
-    EDITORA_LIGHT("editora-light", "Editora Light", false, null),
-    EDITORA_DARK("editora-dark", "Editora Dark", true, null),
-    NORD_LIGHT("nord-light", "Nord Light", false, NordLight::new),
-    NORD_DARK("nord-dark", "Nord Dark", true, NordDark::new),
-    CUPERTINO_LIGHT("cupertino-light", "Cupertino Light", false, CupertinoLight::new),
-    CUPERTINO_DARK("cupertino-dark", "Cupertino Dark", true, CupertinoDark::new);
+    EDITORA_LIGHT("editora-light", false, null),
+    EDITORA_DARK("editora-dark", true, null),
+    NORD_LIGHT("nord-light", false, NordLight::new),
+    NORD_DARK("nord-dark", true, NordDark::new),
+    CUPERTINO_LIGHT("cupertino-light", false, CupertinoLight::new),
+    CUPERTINO_DARK("cupertino-dark", true, CupertinoDark::new);
 
     /** The first-run theme, and the fallback for a name the settings file holds that is not one. */
     public static final Theme DEFAULT = EDITORA_DARK;
 
     private final String id;
-    private final String displayName;
     private final boolean dark;
     private final Supplier<atlantafx.base.theme.Theme> atlantafx;
 
-    Theme(String id, String displayName, boolean dark, Supplier<atlantafx.base.theme.Theme> atlantafx) {
+    Theme(String id, boolean dark, Supplier<atlantafx.base.theme.Theme> atlantafx) {
         this.id = id;
-        this.displayName = displayName;
         this.dark = dark;
         this.atlantafx = atlantafx;
     }
@@ -43,8 +43,9 @@ public enum Theme {
         return id;
     }
 
+    /** The name the ChoiceBox shows, in the UI language ({@code theme.<id>}); read at call time, never cached. */
     public String displayName() {
-        return displayName;
+        return tr("theme." + id);
     }
 
     public boolean isDark() {
@@ -76,6 +77,6 @@ public enum Theme {
 
     @Override
     public String toString() {
-        return displayName;
+        return displayName();
     }
 }

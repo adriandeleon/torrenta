@@ -42,6 +42,8 @@ import com.torrenta.search.SearchResult;
 import com.torrenta.search.SearchService;
 import com.torrenta.store.Settings;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The Search tab: a query field, a row of category chips (one chosen, All by default), a row of
  * provider chips (every enabled provider, on unless switched off), a status line with one clause
@@ -86,7 +88,7 @@ final class SearchPane extends VBox {
     private final ToggleGroup categoryGroup = new ToggleGroup();
     private final FlowPane categoryChips = new FlowPane(6, 6);
     private final FlowPane providerChips = new FlowPane(6, 6);
-    private final Hyperlink noProviders = new Hyperlink("No search provider yet: add one in Settings → Search");
+    private final Hyperlink noProviders = new Hyperlink(tr("search.status.noProviders"));
     private final Label status = new Label();
     private final ProgressIndicator spinner = new ProgressIndicator();
     private final SearchRows rows = new SearchRows();
@@ -108,7 +110,7 @@ final class SearchPane extends VBox {
         table = buildTable();
         VBox.setVgrow(table, Priority.ALWAYS);
 
-        query.setPromptText("Search every provider — Enter searches, Esc returns to the transfers");
+        query.setPromptText(tr("search.prompt"));
         query.setOnKeyPressed(e -> {
             if (e.getCode() == KeyCode.ENTER) {
                 runSearch();
@@ -156,7 +158,12 @@ final class SearchPane extends VBox {
         statusRow.setAlignment(Pos.CENTER_LEFT);
 
         VBox top = new VBox(
-                8, queryRow, row("Category", categoryChips), row("Providers", providerChips), noProviders, statusRow);
+                8,
+                queryRow,
+                row(tr("search.category"), categoryChips),
+                row(tr("search.providers"), providerChips),
+                noProviders,
+                statusRow);
         top.setPadding(new Insets(10, 12, 8, 12));
         top.getStyleClass().add("search-head");
         getChildren().addAll(top, table);
@@ -331,7 +338,7 @@ final class SearchPane extends VBox {
         Map<String, String> failures = new LinkedHashMap<>();
         status.setText(SearchStatus.line(names, counts, failures, false));
         spinner.setVisible(true);
-        table.setPlaceholder(new Label("Searching…"));
+        table.setPlaceholder(new Label(tr("search.placeholder.searching")));
 
         running = Thread.ofVirtual().name("search").start(() -> {
             Map<String, List<SearchResult>> answers = new LinkedHashMap<>();
@@ -363,7 +370,7 @@ final class SearchPane extends VBox {
                 rows.apply(outcome.results());
                 spinner.setVisible(false);
                 status.setText(SearchStatus.line(names, counts, failures, true));
-                table.setPlaceholder(new Label("Nothing found"));
+                table.setPlaceholder(new Label(tr("search.status.nothingFound")));
                 running = null;
                 Runnable then = whenDone;
                 whenDone = null;
@@ -390,26 +397,31 @@ final class SearchPane extends VBox {
         t.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
         t.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
         t.setTableMenuButtonVisible(true);
-        t.setPlaceholder(new Label("No results yet"));
+        t.setPlaceholder(new Label(tr("search.placeholder.none")));
         t.getStyleClass().addAll("torrent-table", "search-table");
 
-        TableColumn<SearchRow, String> name = column("name", "Name", 420, SearchResult::name, s -> s);
+        TableColumn<SearchRow, String> name = column("name", tr("common.name"), 420, SearchResult::name, s -> s);
         name.setComparator(String.CASE_INSENSITIVE_ORDER);
         TableColumn<SearchRow, Integer> seeds =
-                column("seeds", "Seeds", 70, SearchResult::seeds, SearchPane::countText);
+                column("seeds", tr("search.column.seeds"), 70, SearchResult::seeds, SearchPane::countText);
         t.getColumns()
                 .addAll(List.of(
                         name,
-                        column("size", "Size", 90, SearchResult::size, SearchPane::sizeText),
+                        column("size", tr("common.size"), 90, SearchResult::size, SearchPane::sizeText),
                         seeds,
-                        column("leechers", "Leechers", 80, SearchResult::leechers, SearchPane::countText),
+                        column(
+                                "leechers",
+                                tr("search.column.leechers"),
+                                80,
+                                SearchResult::leechers,
+                                SearchPane::countText),
                         column(
                                 "date",
-                                "Date",
+                                tr("search.column.date"),
                                 150,
                                 r -> r.published() == null ? -1L : r.published().getEpochSecond(),
                                 Format::dateTime),
-                        column("provider", "Provider", 120, SearchResult::provider, s -> s)));
+                        column("provider", tr("search.column.provider"), 120, SearchResult::provider, s -> s)));
         // Seeds first by default; a click cycles the column, and no sort at all is the ranked order.
         seeds.setSortType(TableColumn.SortType.DESCENDING);
         t.getSortOrder().add(seeds);
@@ -446,9 +458,9 @@ final class SearchPane extends VBox {
     }
 
     private ContextMenu buildContextMenu(TableView<SearchRow> t) {
-        MenuItem add = new MenuItem("Add…");
-        MenuItem copy = new MenuItem("Copy Link");
-        MenuItem detail = new MenuItem("Open Detail Page");
+        MenuItem add = new MenuItem(tr("search.menu.add"));
+        MenuItem copy = new MenuItem(tr("search.menu.copyLink"));
+        MenuItem detail = new MenuItem(tr("search.menu.openDetail"));
         add.setOnAction(e -> selected(t).ifPresent(host::add));
         copy.setOnAction(e -> selected(t).ifPresent(r -> host.copy(r.link().value())));
         detail.setOnAction(e -> selected(t).ifPresent(r -> host.openDetail(r.detailUrl())));
@@ -457,7 +469,7 @@ final class SearchPane extends VBox {
             var r = selected(t);
             add.setDisable(r.isEmpty());
             copy.setDisable(r.isEmpty());
-            copy.setText(r.map(SearchAdd::copyLabel).orElse("Copy Link"));
+            copy.setText(r.map(SearchAdd::copyLabel).orElse(tr("search.menu.copyLink")));
             detail.setDisable(r.map(x -> x.detailUrl().isEmpty()).orElse(true));
         });
         return menu;

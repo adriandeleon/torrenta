@@ -6,6 +6,8 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * One auto-download rule, qBittorrent's shape: which articles it wants (phrases or a regex that
  * the title must and must not contain, an {@link EpisodeFilter}, which feeds, how old is too
@@ -53,9 +55,9 @@ public record Rule(
 
     /** Whether a torrent the rule adds starts paused. */
     public enum AddPaused {
-        DEFAULT("As the Add dialog's default says"),
-        YES("Paused"),
-        NO("Started");
+        DEFAULT("default"),
+        YES("yes"),
+        NO("no");
 
         private final String label;
 
@@ -64,7 +66,7 @@ public record Rule(
         }
 
         public String label() {
-            return label;
+            return tr("rule.addPaused." + label);
         }
 
         /** The file's word, {@code default}, {@code yes} or {@code no}; anything else is the default. */

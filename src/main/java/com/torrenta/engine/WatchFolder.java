@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * A folder watched for {@code .torrent} and {@code .magnet} files, and what to do with one that
  * appears: the shape qBittorrent and Transmission give it.
@@ -27,8 +29,8 @@ public record WatchFolder(
 
     /** The file after its torrent was added: gone, or kept under a name the watcher skips. */
     public enum AfterAdd {
-        DELETE("Delete the file"),
-        RENAME("Rename it to name.torrent.added");
+        DELETE("delete"),
+        RENAME("rename");
 
         private final String label;
 
@@ -37,15 +39,15 @@ public record WatchFolder(
         }
 
         public String label() {
-            return label;
+            return tr("watchFolder.afterAdd." + label);
         }
     }
 
     /** Where the torrent's files go. */
     public enum SaveTo {
-        DEFAULT("The download folder"),
-        WATCH_FOLDER("The watch folder itself"),
-        FOLDER("Another folder");
+        DEFAULT("default"),
+        WATCH_FOLDER("watchFolder"),
+        FOLDER("folder");
 
         private final String label;
 
@@ -54,7 +56,7 @@ public record WatchFolder(
         }
 
         public String label() {
-            return label;
+            return tr("watchFolder.saveTo." + label);
         }
     }
 

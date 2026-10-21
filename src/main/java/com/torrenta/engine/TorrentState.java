@@ -1,13 +1,15 @@
 package com.torrenta.engine;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /** Where a torrent is in its life, reduced to what the list needs to show. */
 public enum TorrentState {
-    CHECKING("Checking"),
-    FETCHING_METADATA("Fetching metadata"),
-    DOWNLOADING("Downloading"),
-    FINISHED("Finished"),
-    SEEDING("Seeding"),
-    UNKNOWN("Unknown");
+    CHECKING("format.state.checking"),
+    FETCHING_METADATA("format.state.fetchingMetadata"),
+    DOWNLOADING("format.state.downloading"),
+    FINISHED("format.state.finished"),
+    SEEDING("format.state.seeding"),
+    UNKNOWN("common.unknown");
 
     private final String label;
 
@@ -15,7 +17,8 @@ public enum TorrentState {
         this.label = label;
     }
 
+    /** The state's word in the interface language, read at call time. */
     public String label() {
-        return label;
+        return tr(label);
     }
 }

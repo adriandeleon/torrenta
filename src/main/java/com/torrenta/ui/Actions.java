@@ -4,6 +4,8 @@ import java.util.List;
 
 import com.torrenta.engine.Torrent;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /** Rules behind the torrent actions. Pure, so they are tested rather than assumed. */
 public final class Actions {
 
@@ -23,20 +25,18 @@ public final class Actions {
         return !selected.stream().allMatch(Torrent::sequential);
     }
 
-    /** {@code Paused 1 torrent}, {@code Paused 3 torrents}, {@code Paused 2 torrents, 1 failed: …}. */
+    /**
+     * {@code Paused 1 torrent}, {@code Paused 3 torrents}, {@code Paused 2 torrents, 1 failed: …}.
+     * The verb arrives translated ({@code actions.verb.*}); the count and the failures are the
+     * catalogue's own sentence.
+     */
     public static String outcome(String verb, int done, List<String> failures) {
-        String text = verb + " " + done + (done == 1 ? " torrent" : " torrents");
-        if (!failures.isEmpty()) {
-            text += ", " + failures.size() + " failed: " + failures.get(0);
-        }
-        return text;
+        if (failures.isEmpty()) return tr("actions.outcome", verb, done);
+        return tr("actions.outcomeFailed", verb, done, failures.size(), failures.get(0));
     }
 
     /** The confirmation for removal, worded by what it will do. */
     public static String removeQuestion(int count, boolean deleteFiles) {
-        String what = count == 1 ? "this torrent" : "these " + count + " torrents";
-        return deleteFiles
-                ? "Remove " + what + " and delete the downloaded files? This cannot be undone."
-                : "Remove " + what + "? The downloaded files stay on disk.";
+        return deleteFiles ? tr("actions.removeQuestion.delete", count) : tr("actions.removeQuestion.keep", count);
     }
 }

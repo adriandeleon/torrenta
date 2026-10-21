@@ -296,6 +296,7 @@ Everything in Settings that the engine already knows how to do.
    the detail pane's Speed tab.)
 
 ### 0.8 — App polish
+**0.8 is feature-complete.**
 
 Asked for by adl on 2026-10-20, each its own PR, taken from Editora so the family looks the same:
 
@@ -317,7 +318,11 @@ Asked for by adl on 2026-10-20, each its own PR, taken from Editora so the famil
    over D-Bus on Linux, AWT elsewhere, close-to-tray once an icon has appeared), and a badge: the
    download rate on the macOS dock, the downloading count on a Linux launcher that reads Unity's
    signal; none on Windows, where AWT badges only its own windows.
-6. **Interface languages**, from Termina's `i18n` package, with the same six to start.
+6. ✓ **Interface languages**, from Termina's `i18n` package, with the same six to start: English,
+   Deutsch, Español, Français, Italiano, Português (`com.torrenta.i18n.Messages`, the catalogues
+   under `resources/com/torrenta/i18n/`); Settings → General → Language, System by default, applied
+   on restart; `ui.language` syncs. Every text of the window, the dialogs, the Settings pages, the
+   tabs, the palette, the status bar and the tray goes through `tr()`; a sweep test keeps it so.
 
 The interface font (Inter, as Editora's, #14) and the command palette's look (Editora's, #23) are in.
 

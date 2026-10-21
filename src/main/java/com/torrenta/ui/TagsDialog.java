@@ -25,6 +25,8 @@ import javafx.stage.Window;
 
 import com.torrenta.engine.TorrentLabels;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The Edit Tags dialog: a checkbox per tag that exists, and a field for new ones.
  *
@@ -41,7 +43,7 @@ final class TagsDialog {
     private final Stage stage = new Stage();
     private final Map<String, CheckBox> boxes = new LinkedHashMap<>();
     private final TextField newTags = new TextField();
-    private final Button apply = new Button("Apply");
+    private final Button apply = new Button(tr("dialog.common.apply"));
     private Result result;
 
     /**
@@ -52,7 +54,7 @@ final class TagsDialog {
     TagsDialog(Window owner, String subject, List<String> existing, List<List<String>> selected) {
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
-        stage.setTitle("Tags: " + subject);
+        stage.setTitle(tr("dialog.tags.title", subject));
 
         TreeSet<String> all = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
         all.addAll(existing);
@@ -69,28 +71,28 @@ final class TagsDialog {
             boxes.put(tag, box);
             list.getChildren().add(box);
         }
-        if (all.isEmpty()) list.getChildren().add(hint("No tags yet. Type the first ones below."));
+        if (all.isEmpty()) list.getChildren().add(hint(tr("dialog.tags.noTags")));
         ScrollPane scroll = new ScrollPane(list);
         scroll.setFitToWidth(true);
         scroll.setPrefHeight(Math.min(260, 28 * Math.max(1, all.size()) + 16));
         scroll.getStyleClass().add("tags-list");
         list.setPadding(new Insets(8));
 
-        newTags.setPromptText("new tags, comma-separated");
+        newTags.setPromptText(tr("dialog.tags.newTags.prompt"));
         HBox.setHgrow(newTags, Priority.ALWAYS);
-        HBox newRow = new HBox(8, muted("Add"), newTags);
+        HBox newRow = new HBox(8, muted(tr("common.add")), newTags);
         newRow.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
 
         apply.setDefaultButton(true);
         apply.setOnAction(e -> confirm());
-        Button cancel = new Button("Cancel");
+        Button cancel = new Button(tr("common.cancel"));
         cancel.setCancelButton(true);
         cancel.setOnAction(e -> cancel());
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
         HBox buttons = new HBox(8, spacer, cancel, apply);
 
-        VBox content = new VBox(12, muted("Tags"), scroll, newRow, buttons);
+        VBox content = new VBox(12, muted(tr("dialog.common.tags")), scroll, newRow, buttons);
         content.setPadding(new Insets(14));
         Scene scene = new Scene(content, 420, 150 + scroll.getPrefHeight());
         scene.getStylesheets()

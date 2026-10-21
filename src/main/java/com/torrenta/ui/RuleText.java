@@ -8,6 +8,8 @@ import com.torrenta.rss.Article;
 import com.torrenta.rss.EpisodeFilter;
 import com.torrenta.rss.Rule;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /** The rule dialog's and the Rules table's words, pure so they can be tested without a scene. */
 final class RuleText {
 
@@ -37,27 +39,27 @@ final class RuleText {
 
     /** A name for a new rule that no existing rule has: the phrase, then "phrase (2)", "phrase (3)". */
     static String freshName(String wanted, Collection<String> taken) {
-        String base = wanted == null || wanted.isBlank() ? "New rule" : wanted.trim();
+        String base = wanted == null || wanted.isBlank() ? tr("dialog.rule.newName") : wanted.trim();
         if (!taken.contains(base)) return base;
         for (int i = 2; ; i++) {
-            String candidate = base + " (" + i + ")";
+            String candidate = tr("dialog.rule.freshName", base, Integer.toString(i));
             if (!taken.contains(candidate)) return candidate;
         }
     }
 
     /** Duplicate's name: "Name (copy)", then "Name (copy 2)". */
     static String copyName(String name, Collection<String> taken) {
-        String first = name + " (copy)";
+        String first = tr("dialog.rule.copyName", name);
         if (!taken.contains(first)) return first;
         for (int i = 2; ; i++) {
-            String candidate = name + " (copy " + i + ")";
+            String candidate = tr("dialog.rule.copyNameN", name, Integer.toString(i));
             if (!taken.contains(candidate)) return candidate;
         }
     }
 
     /** The Feeds column: "All feeds", or the names, an unknown id shown as its id. */
     static String feedsText(Rule rule, Map<String, String> namesById) {
-        if (rule.feeds().isEmpty()) return "All feeds";
+        if (rule.feeds().isEmpty()) return tr("dialog.rule.allFeeds");
         return String.join(
                 ", ",
                 rule.feeds().stream().map(id -> namesById.getOrDefault(id, id)).toList());
@@ -65,31 +67,32 @@ final class RuleText {
 
     /** The Last match column: "never", else "5 min ago". */
     static String lastMatchText(Rule rule, long nowMs) {
-        return rule.lastMatch() == null ? "never" : RssText.ago(rule.lastMatch().toEpochMilli(), nowMs);
+        return rule.lastMatch() == null
+                ? tr("dialog.rule.never")
+                : RssText.ago(rule.lastMatch().toEpochMilli(), nowMs);
     }
 
     /** One line of the dialog's Matches list: the title, then the feed in the muted ink after a dot. */
     static String matchLine(Article article, String feedName) {
-        return feedName.isEmpty() ? article.displayTitle() : article.displayTitle() + " · " + feedName;
+        return feedName.isEmpty()
+                ? article.displayTitle()
+                : tr("dialog.rule.matchLine", article.displayTitle(), feedName);
     }
 
     /** The heading over the Matches list. */
     static String matchesHeading(int matched, int total, boolean stale) {
-        if (total == 0) return "Matches — no articles yet; the list fills as the feeds refresh";
-        String n = matched == 0 ? "none" : Integer.toString(matched);
-        return "Matches — " + n + " of " + total + (total == 1 ? " article" : " articles") + (stale ? "…" : "");
+        if (total == 0) return tr("dialog.rule.matches.empty");
+        String n = matched == 0 ? tr("dialog.rule.matches.none") : Integer.toString(matched);
+        return tr(stale ? "dialog.rule.matches.stale" : "dialog.rule.matches", n, total);
     }
 
     /** The Rules section's line under the table. */
     static String rulesStatus(List<Rule> rules, boolean autoDownload) {
         if (rules.isEmpty()) return "";
         long on = rules.stream().filter(Rule::enabled).count();
-        String count = rules.size() == 1 ? "1 rule" : rules.size() + " rules";
-        String enabled = on == rules.size() ? "" : ", " + on + " enabled";
-        return count
-                + enabled
-                + (autoDownload
-                        ? ", run as the feeds refresh"
-                        : "; the switch above is off, so they run only on Run rules now");
+        String count = on == rules.size()
+                ? tr("dialog.rule.status.count", rules.size())
+                : tr("dialog.rule.status.countEnabled", rules.size(), on);
+        return tr(autoDownload ? "dialog.rule.status.auto" : "dialog.rule.status.manual", count);
     }
 }

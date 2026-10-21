@@ -6,6 +6,8 @@ import java.util.TreeSet;
 
 import com.torrenta.engine.Torrent;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * One entry of the sidebar: everything, a status, one category, no category, one tag, no tag, one
  * tracker host, no tracker, a tracker in error.
@@ -119,13 +121,13 @@ public record SidebarFilter(Kind kind, String value) {
     /** The entry's text in the sidebar. */
     public String title() {
         return switch (kind) {
-            case ALL -> "All";
+            case ALL -> tr("sidebar.all");
             case STATUS -> status().title();
             case CATEGORY, TAG, TRACKER -> value;
-            case UNCATEGORISED -> "Uncategorised";
-            case UNTAGGED -> "Untagged";
-            case TRACKERLESS -> "Trackerless";
-            case TRACKER_ERROR -> "Tracker error";
+            case UNCATEGORISED -> tr("sidebar.uncategorised");
+            case UNTAGGED -> tr("sidebar.untagged");
+            case TRACKERLESS -> tr("sidebar.trackerless");
+            case TRACKER_ERROR -> tr("sidebar.trackerError");
         };
     }
 

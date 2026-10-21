@@ -26,6 +26,8 @@ import javafx.util.StringConverter;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.TorrentLimits;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The Limits dialog: one torrent's own rate caps, connection counts, piece order and share limits.
  *
@@ -40,13 +42,18 @@ final class LimitsDialog {
     record Result(TorrentLimits limits, ShareLimit shareOverride) {}
 
     private enum ShareChoice {
-        GLOBAL("The global limits"),
-        OWN("This torrent's own");
+        GLOBAL("global"),
+        OWN("own");
 
-        private final String label;
+        private final String id;
 
-        ShareChoice(String label) {
-            this.label = label;
+        ShareChoice(String id) {
+            this.id = id;
+        }
+
+        /** Read at call time: the language is chosen after the enum loads. */
+        String label() {
+            return tr("dialog.limits.share." + id);
         }
     }
 
@@ -55,13 +62,13 @@ final class LimitsDialog {
     private final Spinner<Integer> upload = kibSpinner();
     private final Spinner<Integer> connections = countSpinner(10_000);
     private final Spinner<Integer> uploadSlots = countSpinner(1_000);
-    private final CheckBox firstAndLast = new CheckBox("Download the first and last pieces first");
+    private final CheckBox firstAndLast = new CheckBox(tr("dialog.limits.firstAndLast"));
     private final ChoiceBox<ShareChoice> shareChoice = new ChoiceBox<>();
     private final Spinner<Double> ratio =
             new Spinner<>(new SpinnerValueFactory.DoubleSpinnerValueFactory(0, 1000, 0, 0.1));
     private final Spinner<Integer> minutes = countSpinner(366 * 24 * 60);
     private final ChoiceBox<ShareLimit.Action> action = new ChoiceBox<>();
-    private final Button apply = new Button("Apply");
+    private final Button apply = new Button(tr("dialog.common.apply"));
     private Result result;
 
     /**
@@ -80,7 +87,7 @@ final class LimitsDialog {
             boolean hasMetadata) {
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
-        stage.setTitle("Limits: " + subject);
+        stage.setTitle(tr("dialog.limits.title", subject));
 
         GridPane form = new GridPane();
         form.setHgap(10);
@@ -92,21 +99,23 @@ final class LimitsDialog {
         form.getColumnConstraints().addAll(labels, fields);
 
         int row = 0;
-        form.addRow(row++, muted("Download"), unit(download, "KiB/s, 0 for none"));
-        form.addRow(row++, muted("Upload"), unit(upload, "KiB/s, 0 for none"));
-        form.addRow(row++, muted("Connections"), unit(connections, "peers at once, 0 for the global limit"));
-        form.addRow(row++, muted("Upload slots"), unit(uploadSlots, "peers unchoked at once, 0 for the global limit"));
-        form.addRow(row++, muted("Pieces"), firstAndLast);
+        form.addRow(row++, muted(tr("dialog.limits.download")), unit(download, tr("dialog.limits.rate.unit")));
+        form.addRow(row++, muted(tr("dialog.limits.upload")), unit(upload, tr("dialog.limits.rate.unit")));
+        form.addRow(
+                row++, muted(tr("dialog.limits.connections")), unit(connections, tr("dialog.limits.connections.unit")));
+        form.addRow(
+                row++, muted(tr("dialog.limits.uploadSlots")), unit(uploadSlots, tr("dialog.limits.uploadSlots.unit")));
+        form.addRow(row++, muted(tr("dialog.limits.pieces")), firstAndLast);
         if (!hasMetadata) {
             firstAndLast.setDisable(true);
-            form.add(hint("Available once the metadata has arrived."), 1, row++);
+            form.add(hint(tr("dialog.limits.metadataHint")), 1, row++);
         }
 
         shareChoice.getItems().addAll(ShareChoice.values());
         shareChoice.setConverter(new StringConverter<>() {
             @Override
             public String toString(ShareChoice c) {
-                return c == null ? "" : c.label;
+                return c == null ? "" : c.label();
             }
 
             @Override
@@ -114,15 +123,15 @@ final class LimitsDialog {
                 return null;
             }
         });
-        form.addRow(row++, muted("Share limits"), shareChoice);
-        Label globalHint = hint("Global: " + global + " (Settings → Queue and share limits)");
+        form.addRow(row++, muted(tr("dialog.limits.shareLimits")), shareChoice);
+        Label globalHint = hint(tr("dialog.limits.globalHint", global));
         globalHint.setMaxWidth(Double.MAX_VALUE);
         form.add(globalHint, 1, row++);
         ratio.setEditable(true);
         ratio.setPrefWidth(110);
         commitOnBlur(ratio);
-        form.addRow(row++, muted("Ratio"), unit(ratio, "uploaded over downloaded, 0 for none"));
-        form.addRow(row++, muted("Seeding time"), unit(minutes, "minutes, 0 for none"));
+        form.addRow(row++, muted(tr("dialog.limits.ratio")), unit(ratio, tr("dialog.limits.ratio.unit")));
+        form.addRow(row++, muted(tr("dialog.limits.seedingTime")), unit(minutes, tr("dialog.limits.seedingTime.unit")));
         action.getItems().addAll(ShareLimit.Action.values());
         action.setConverter(new StringConverter<>() {
             @Override
@@ -135,7 +144,7 @@ final class LimitsDialog {
                 return null;
             }
         });
-        form.addRow(row++, muted("When reached"), action);
+        form.addRow(row++, muted(tr("dialog.limits.whenReached")), action);
         shareChoice.valueProperty().addListener((o, was, now) -> {
             boolean own = now == ShareChoice.OWN;
             ratio.setDisable(!own);
@@ -156,7 +165,7 @@ final class LimitsDialog {
 
         apply.setDefaultButton(true);
         apply.setOnAction(e -> confirm());
-        Button cancel = new Button("Cancel");
+        Button cancel = new Button(tr("common.cancel"));
         cancel.setCancelButton(true);
         cancel.setOnAction(e -> cancel());
         Region spacer = new Region();

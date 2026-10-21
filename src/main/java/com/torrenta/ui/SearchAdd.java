@@ -6,6 +6,8 @@ import java.net.URI;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.search.SearchResult;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * A result into what the Add dialog takes: a magnet is the magnet source as it is; a {@code
  * .torrent} link is fetched (on the caller's worker) and becomes the file source with the URL as
@@ -28,7 +30,7 @@ final class SearchAdd {
                 try {
                     uri = URI.create(url.url());
                 } catch (IllegalArgumentException e) {
-                    throw new IOException("The link is not a URL: " + url.url());
+                    throw new IOException(tr("search.notUrl", url.url()));
                 }
                 yield new AddRequest.TorrentFile(fetcher.fetch(uri), url.url());
             }
@@ -37,11 +39,13 @@ final class SearchAdd {
 
     /** The status line while a {@code .torrent} link is being fetched; empty for a magnet. */
     static String fetchingText(SearchResult result) {
-        return result.link() instanceof SearchResult.Link.TorrentUrl ? "Fetching " + result.name() + "…" : "";
+        return result.link() instanceof SearchResult.Link.TorrentUrl ? tr("search.fetching", result.name()) : "";
     }
 
     /** The context menu's copy item: what kind of link the result has. */
     static String copyLabel(SearchResult result) {
-        return result.link() instanceof SearchResult.Link.Magnet ? "Copy Magnet Link" : "Copy Link";
+        return result.link() instanceof SearchResult.Link.Magnet
+                ? tr("search.menu.copyMagnetLink")
+                : tr("search.menu.copyLink");
     }
 }

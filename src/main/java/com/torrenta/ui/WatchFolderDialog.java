@@ -27,6 +27,8 @@ import javafx.util.StringConverter;
 import com.torrenta.engine.Category;
 import com.torrenta.engine.WatchFolder;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * One watch folder, added or edited: the folder, what becomes of a file once added, where the
  * torrent saves, its category, and whether it starts paused.
@@ -40,11 +42,11 @@ final class WatchFolderDialog {
     private final TextField folder = new TextField();
     private final ChoiceBox<WatchFolder.SaveTo> saveTo = new ChoiceBox<>();
     private final TextField savePath = new TextField();
-    private final Button browseSave = new Button("Browse…");
+    private final Button browseSave = new Button(tr("common.browse"));
     private final ChoiceBox<WatchFolder.AfterAdd> afterAdd = new ChoiceBox<>();
     private final ChoiceBox<String> category = new ChoiceBox<>();
-    private final CheckBox startPaused = new CheckBox("Start paused");
-    private final Button save = new Button("Save");
+    private final CheckBox startPaused = new CheckBox(tr("dialog.watchFolder.startPaused"));
+    private final Button save = new Button(tr("common.save"));
     private WatchFolder result;
 
     /**
@@ -54,7 +56,7 @@ final class WatchFolderDialog {
     WatchFolderDialog(Window owner, WatchFolder existing, List<Category> categories) {
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
-        stage.setTitle(existing == null ? "Add Watch Folder" : "Edit Watch Folder");
+        stage.setTitle(existing == null ? tr("dialog.watchFolder.title.add") : tr("dialog.watchFolder.title.edit"));
 
         GridPane form = new GridPane();
         form.setHgap(10);
@@ -66,11 +68,11 @@ final class WatchFolderDialog {
         form.getColumnConstraints().addAll(labels, fields);
 
         int row = 0;
-        folder.setPromptText("a folder to watch for .torrent and .magnet files");
+        folder.setPromptText(tr("dialog.watchFolder.folder.prompt"));
         HBox.setHgrow(folder, Priority.ALWAYS);
-        Button browse = new Button("Browse…");
-        browse.setOnAction(e -> browse("Folder to watch", folder));
-        form.addRow(row++, muted("Watch"), new HBox(6, folder, browse));
+        Button browse = new Button(tr("common.browse"));
+        browse.setOnAction(e -> browse(tr("dialog.watchFolder.folderChooser"), folder));
+        form.addRow(row++, muted(tr("dialog.watchFolder.watch")), new HBox(6, folder, browse));
 
         saveTo.getItems().addAll(WatchFolder.SaveTo.values());
         saveTo.setConverter(new StringConverter<>() {
@@ -84,13 +86,13 @@ final class WatchFolderDialog {
                 return null;
             }
         });
-        savePath.setPromptText("the folder the torrents save to");
+        savePath.setPromptText(tr("dialog.watchFolder.savePath.prompt"));
         HBox.setHgrow(savePath, Priority.ALWAYS);
-        browseSave.setOnAction(e -> browse("Save path", savePath));
+        browseSave.setOnAction(e -> browse(tr("dialog.common.savePathChooser"), savePath));
         HBox saveRow = new HBox(6, savePath, browseSave);
         savePath.disableProperty().bind(saveTo.valueProperty().isNotEqualTo(WatchFolder.SaveTo.FOLDER));
         browseSave.disableProperty().bind(savePath.disableProperty());
-        form.addRow(row++, muted("Save to"), saveTo);
+        form.addRow(row++, muted(tr("dialog.common.saveTo")), saveTo);
         form.add(saveRow, 1, row++);
 
         afterAdd.getItems().addAll(WatchFolder.AfterAdd.values());
@@ -105,14 +107,14 @@ final class WatchFolderDialog {
                 return null;
             }
         });
-        form.addRow(row++, muted("After adding"), afterAdd);
+        form.addRow(row++, muted(tr("dialog.watchFolder.afterAdding")), afterAdd);
 
         category.getItems().add("");
         for (Category c : categories) category.getItems().add(c.name());
         category.setConverter(new StringConverter<>() {
             @Override
             public String toString(String name) {
-                return name == null || name.isEmpty() ? "None" : name;
+                return name == null || name.isEmpty() ? tr("common.none") : name;
             }
 
             @Override
@@ -120,11 +122,10 @@ final class WatchFolderDialog {
                 return null;
             }
         });
-        form.addRow(row++, muted("Category"), category);
+        form.addRow(row++, muted(tr("dialog.common.category")), category);
         form.addRow(row++, new Label(), startPaused);
 
-        Label hint = hint("A .torrent is added once it has stopped growing; a .magnet file holds one magnet"
-                + " link per line. A file that is not a torrent is renamed .invalid and left alone.");
+        Label hint = hint(tr("dialog.watchFolder.hint"));
         hint.setMaxWidth(Double.MAX_VALUE);
 
         save.setDefaultButton(true);
@@ -137,7 +138,7 @@ final class WatchFolderDialog {
                         folder.textProperty(),
                         saveTo.valueProperty(),
                         savePath.textProperty()));
-        Button cancel = new Button("Cancel");
+        Button cancel = new Button(tr("common.cancel"));
         cancel.setCancelButton(true);
         cancel.setOnAction(e -> cancel());
         Region spacer = new Region();

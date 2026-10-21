@@ -20,6 +20,8 @@ import javafx.stage.Window;
 import com.torrenta.AppInfo;
 import com.torrenta.engine.SessionStats;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The Statistics window: the session's counters in sections (this session, all time, network,
  * disk, torrents) over the session speed graph. Non-modal and reusable, like the event log:
@@ -36,17 +38,15 @@ final class StatisticsWindow {
 
     StatisticsWindow(Window owner, int windowSeconds, IntConsumer onWindowChanged) {
         stage.initOwner(owner);
-        stage.setTitle(AppInfo.NAME + " — Statistics");
+        stage.setTitle(tr("stats.title", AppInfo.NAME));
         graph = new SpeedGraph(windowSeconds, true);
         graph.setOnWindowChanged(onWindowChanged);
         graph.setMinHeight(160);
 
         // Two columns of sections: the two about bytes on the left, the three gauges on the right.
-        VBox left = new VBox(section(StatsText.SECTIONS.get(0)), section(StatsText.SECTIONS.get(1)));
-        VBox right = new VBox(
-                section(StatsText.SECTIONS.get(2)),
-                section(StatsText.SECTIONS.get(3)),
-                section(StatsText.SECTIONS.get(4)));
+        List<String> names = StatsText.sections();
+        VBox left = new VBox(section(names.get(0)), section(names.get(1)));
+        VBox right = new VBox(section(names.get(2)), section(names.get(3)), section(names.get(4)));
         HBox.setHgrow(left, Priority.ALWAYS);
         HBox.setHgrow(right, Priority.ALWAYS);
         HBox sections = new HBox(32, left, right);

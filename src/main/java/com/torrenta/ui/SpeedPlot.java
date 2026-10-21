@@ -2,6 +2,8 @@ package com.torrenta.ui;
 
 import java.util.List;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Where a speed graph puts its points: the pure half of {@link SpeedGraph}, so the mapping is
  * tested rather than eyeballed. Time runs left to right with {@code now} at the right edge and
@@ -98,7 +100,7 @@ public record SpeedPlot(
 
     /** The window's name for a chip: {@code 1 min}, {@code 10 min}, {@code 1 h}, {@code 24 h}. */
     public static String windowLabel(int seconds) {
-        if (seconds < 3600) return (seconds / 60) + " min";
-        return (seconds / 3600) + " h";
+        if (seconds < 3600) return tr("stats.window.minutes", seconds / 60);
+        return tr("stats.window.hours", seconds / 3600);
     }
 }

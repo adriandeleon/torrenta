@@ -3,6 +3,8 @@ package com.torrenta.ui;
 import java.util.List;
 import java.util.Map;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The Search tab's status line, pure: one clause per provider asked, in the order they were asked,
  * joined with middle dots — "Prowlarr: 42 results · Jackett: timed out after 20 s · Local: …",
@@ -24,30 +26,32 @@ final class SearchStatus {
         int total = 0;
         for (String name : asked) {
             if (sb.length() > 0) sb.append(" · ");
-            sb.append(name).append(": ");
             Integer count = counts.get(name);
             String failure = failures.get(name);
+            String answer;
             if (count != null) {
                 total += count;
-                sb.append(count == 1 ? "1 result" : count + " results");
+                answer = tr("search.status.results", count);
             } else if (failure != null) {
-                sb.append(failure);
+                answer = failure;
             } else {
-                sb.append("…");
+                answer = "…";
             }
+            sb.append(tr("search.status.provider", name, answer));
         }
         if (done && total == 0 && !asked.isEmpty()) {
             boolean anyAnswered = asked.stream().anyMatch(counts::containsKey);
-            sb.insert(0, (anyAnswered ? "Nothing found" : "No provider answered") + " · ");
+            String why = anyAnswered ? tr("search.status.nothingFound") : tr("search.status.noProviderAnswered");
+            sb.insert(0, why + " · ");
         }
         return sb.toString();
     }
 
     /** What the line says before a search can run. */
     static String cannotSearch(boolean providersConfigured, boolean providersChosen, boolean queryGiven) {
-        if (!providersConfigured) return "No search provider yet: add one in Settings → Search";
-        if (!providersChosen) return "Every provider is switched off; turn one on to search";
-        if (!queryGiven) return "Type what to search for and press Enter";
+        if (!providersConfigured) return tr("search.status.noProviders");
+        if (!providersChosen) return tr("search.status.allOff");
+        if (!queryGiven) return tr("search.status.typeQuery");
         return "";
     }
 }

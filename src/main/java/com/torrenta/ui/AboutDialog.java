@@ -23,6 +23,8 @@ import javafx.stage.Window;
 import com.torrenta.AppInfo;
 import com.torrenta.update.ReleaseInfo;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The About panel, Editora's: icon beside name, version and tagline as one block, the copyright,
  * a column of links (licence, homepage, releases, the settings file, and the update when one is
@@ -30,9 +32,12 @@ import com.torrenta.update.ReleaseInfo;
  */
 public final class AboutDialog {
 
-    public static final String TAGLINE = "A keyboard-first, cross-platform BitTorrent client.";
-
     private AboutDialog() {}
+
+    /** The line under the name; read at call time, as the language is chosen after this class loads. */
+    public static String tagline() {
+        return tr("dialog.about.tagline");
+    }
 
     /**
      * Builds the panel; the caller shows it. Non-modal and shown without waiting, so the capture
@@ -41,7 +46,7 @@ public final class AboutDialog {
     public static Alert create(Window owner, Path settingsFile, Consumer<String> openUrl, ReleaseInfo update) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION);
         alert.initOwner(owner);
-        alert.setTitle("About " + AppInfo.NAME);
+        alert.setTitle(tr("dialog.about.title", AppInfo.NAME));
         // The whole dialog is the content: no header band or graphic, so the icon, name, version
         // and tagline read as one block the way a native About panel does.
         alert.setHeaderText(null);
@@ -56,9 +61,9 @@ public final class AboutDialog {
 
         Label name = new Label(AppInfo.NAME);
         name.getStyleClass().add("about-name");
-        Label version = new Label("Version " + AppInfo.VERSION);
+        Label version = new Label(tr("dialog.about.version", AppInfo.VERSION));
         version.getStyleClass().add("about-version");
-        Label tagline = new Label(TAGLINE);
+        Label tagline = new Label(tagline());
         tagline.getStyleClass().add("about-tagline");
         tagline.setWrapText(true);
         VBox titleBox = new VBox(2, name, version, tagline);
@@ -79,18 +84,19 @@ public final class AboutDialog {
         copyright.getStyleClass().add("about-copyright");
 
         VBox links = new VBox(2);
-        links.getChildren().add(link(AppInfo.LICENSE, () -> openUrl.accept(AppInfo.HOMEPAGE + "/blob/master/LICENSE")));
-        links.getChildren().add(link("Homepage", () -> openUrl.accept(AppInfo.HOMEPAGE)));
-        links.getChildren().add(link("Releases", () -> openUrl.accept(AppInfo.RELEASES_PAGE)));
-        Hyperlink settingsLink = link("Settings file: " + settingsFile, () -> {
+        links.getChildren()
+                .add(link(tr("dialog.about.license"), () -> openUrl.accept(AppInfo.HOMEPAGE + "/blob/master/LICENSE")));
+        links.getChildren().add(link(tr("dialog.about.homepage"), () -> openUrl.accept(AppInfo.HOMEPAGE)));
+        links.getChildren().add(link(tr("dialog.about.releases"), () -> openUrl.accept(AppInfo.RELEASES_PAGE)));
+        Hyperlink settingsLink = link(tr("dialog.about.settingsFile", settingsFile.toString()), () -> {
             alert.close();
             openUrl.accept(settingsFile.getParent().toUri().toString());
         });
-        settingsLink.setTooltip(new Tooltip("Open the folder that holds it"));
+        settingsLink.setTooltip(new Tooltip(tr("dialog.about.settingsFile.tooltip")));
         links.getChildren().add(settingsLink);
         if (update != null) {
             String url = update.url() == null || update.url().isBlank() ? AppInfo.RELEASES_PAGE : update.url();
-            Hyperlink updateLink = link("Update available: " + update.version(), () -> {
+            Hyperlink updateLink = link(tr("dialog.about.updateAvailable", update.version()), () -> {
                 alert.close();
                 openUrl.accept(url);
             });
@@ -102,12 +108,12 @@ public final class AboutDialog {
         Label env = new Label(details);
         env.getStyleClass().add("about-env");
 
-        Button copyDetails = new Button("Copy details");
+        Button copyDetails = new Button(tr("dialog.about.copyDetails"));
         copyDetails.setOnAction(e -> {
             ClipboardContent content = new ClipboardContent();
             content.putString(details);
             Clipboard.getSystemClipboard().setContent(content);
-            copyDetails.setText("Copied");
+            copyDetails.setText(tr("dialog.about.copied"));
         });
         HBox footer = new HBox(copyDetails);
         footer.setAlignment(Pos.CENTER_LEFT);
@@ -115,7 +121,7 @@ public final class AboutDialog {
         VBox content = new VBox(14, header, copyright, links, env, footer);
         content.getStyleClass().add("about-content");
         alert.getDialogPane().setContent(content);
-        alert.getButtonTypes().setAll(new ButtonType("Close", ButtonBar.ButtonData.OK_DONE));
+        alert.getButtonTypes().setAll(new ButtonType(tr("common.close"), ButtonBar.ButtonData.OK_DONE));
         return alert;
     }
 

@@ -1,25 +1,25 @@
 package com.torrenta.ui;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * How tall the transfer list's rows are. Comfortable rows are two lines, the name over a thin
  * progress bar and the status sentence, so the Progress and Status columns are not needed;
  * compact rows are one line with those as columns. Each density remembers its own column layout.
  */
 public enum Density {
-    COMFORTABLE("comfortable", "Comfortable", 48, DefaultLayouts.COMFORTABLE),
-    COMPACT("compact", "Compact", -1, "");
+    COMFORTABLE("comfortable", 48, DefaultLayouts.COMFORTABLE),
+    COMPACT("compact", -1, "");
 
     /** The first-run density, and the fallback for a value the settings file holds that is not one. */
     public static final Density DEFAULT = COMFORTABLE;
 
     private final String id;
-    private final String label;
     private final double cellSize;
     private final String defaultLayout;
 
-    Density(String id, String label, double cellSize, String defaultLayout) {
+    Density(String id, double cellSize, String defaultLayout) {
         this.id = id;
-        this.label = label;
         this.cellSize = cellSize;
         this.defaultLayout = defaultLayout;
     }
@@ -52,9 +52,10 @@ public enum Density {
         return fallback;
     }
 
+    /** The name the ChoiceBox shows, in the UI language ({@code density.<id>}); read at call time. */
     @Override
     public String toString() {
-        return label;
+        return tr("density." + id);
     }
 
     /** Held apart so the enum constants can name it before the class body runs. */

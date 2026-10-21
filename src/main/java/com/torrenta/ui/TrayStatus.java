@@ -8,6 +8,8 @@ import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.tray.TrayDisplay;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * What the tray shows for a snapshot: the icon's state and its one line of text, the rates and a
  * count of what the torrents are doing. Pure; computed on the poll thread, once a second, and
@@ -33,21 +35,21 @@ public record TrayStatus(TrayDisplay display, String line) {
             else if (t.state() == TorrentState.SEEDING) seeding++;
         }
         List<String> parts = new ArrayList<>();
-        if (downloading > 0) parts.add(downloading + " downloading");
-        if (seeding > 0) parts.add(seeding + " seeding");
-        if (queued > 0) parts.add(queued + " queued");
-        if (paused > 0) parts.add(paused + " paused");
-        if (errors > 0) parts.add(errors == 1 ? "1 error" : errors + " errors");
+        if (downloading > 0) parts.add(tr("tray.downloading", downloading));
+        if (seeding > 0) parts.add(tr("tray.seeding", seeding));
+        if (queued > 0) parts.add(tr("tray.queued", queued));
+        if (paused > 0) parts.add(tr("tray.paused", paused));
+        if (errors > 0) parts.add(tr("tray.errors", errors));
         String summary;
-        if (torrents.isEmpty()) summary = "No torrents";
-        else if (parts.isEmpty()) summary = torrents.size() == 1 ? "1 torrent" : torrents.size() + " torrents";
+        if (torrents.isEmpty()) summary = tr("tray.noTorrents");
+        else if (parts.isEmpty()) summary = tr("tray.torrents", torrents.size());
         else summary = String.join(", ", parts);
-        String line = "↓ " + Bytes.rate(rates.download()) + "  ↑ " + Bytes.rate(rates.upload()) + " · " + summary;
+        String line = tr("tray.line", Bytes.rate(rates.download()), Bytes.rate(rates.upload()), summary);
         return new TrayStatus(new TrayDisplay(downloading > 0, errors > 0), line);
     }
 
     /** Before the engine is up: nothing to count, and the line says what is happening. */
     public static TrayStatus starting() {
-        return new TrayStatus(TrayDisplay.idle(), "Starting the engine…");
+        return new TrayStatus(TrayDisplay.idle(), tr("tray.starting"));
     }
 }

@@ -111,6 +111,21 @@ class SettingsTest {
     }
 
     @Test
+    void theInterfaceLanguageFollowsTheSystemUnlessChosen(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        assertEquals("system", settings.uiLanguage(), "unset: follow the operating system");
+        settings.setUiLanguage("es");
+        settings.save();
+        Settings read = new Settings(file);
+        read.load();
+        assertEquals("es", read.uiLanguage());
+        read.setUiLanguage("");
+        assertEquals("system", read.uiLanguage(), "blank means automatic again");
+    }
+
+    @Test
     void toolbarShowsUnlessTurnedOff(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Settings settings = new Settings(file);

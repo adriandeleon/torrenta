@@ -5,6 +5,7 @@ import java.util.List;
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentPreview.FileEntry;
+import com.torrenta.i18n.Messages;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -104,8 +105,8 @@ class FileTreeTest {
         FileTree.Node b = sub.children().get(0);
         FileTree.step(b, +1);
         assertEquals("High", FileTree.label(b));
-        assertEquals("Mixed", FileTree.label(sub));
-        assertEquals("Mixed", FileTree.label(root));
+        assertEquals(Messages.tr("dialog.add.priority.mixed"), FileTree.label(sub));
+        assertEquals(Messages.tr("dialog.add.priority.mixed"), FileTree.label(root));
 
         FileTree.step(sub, -1);
         assertEquals("Normal", FileTree.label(sub), "a folder steps from its highest file, and all follow");
