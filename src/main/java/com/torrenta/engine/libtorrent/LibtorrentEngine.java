@@ -692,6 +692,19 @@ public final class LibtorrentEngine implements Engine {
                 .connect_peer(new tcp_endpoint(Address.parseIp("127.0.0.1").swig(), port));
     }
 
+    /**
+     * Retries a failed peer connection after a second instead of libtorrent's minute, for the
+     * loopback tests: {@code connect_peer} only adds the address to the peer list, and an address
+     * whose last attempt failed is not dialled again for {@code min_reconnect_time}, so one early
+     * refusal would otherwise outlast any test deadline.
+     */
+    void reconnectQuicklyForTest() throws EngineException {
+        SettingsPack pack = new SettingsPack();
+        pack.setInteger(settings_pack.int_types.min_reconnect_time.swigValue(), 1);
+        pack.setInteger(settings_pack.int_types.peer_connect_timeout.swigValue(), 3);
+        running().applySettings(pack);
+    }
+
     @Override
     public synchronized String category(String id) throws EngineException {
         return labelsOf(id).category();
