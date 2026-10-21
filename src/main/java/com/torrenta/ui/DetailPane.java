@@ -395,10 +395,7 @@ final class DetailPane extends VBox {
         prompt.setContentText(tr("detail.trackers.addDialog.prompt"));
         prompt.getEditor().setPrefColumnCount(48);
         Optional<String> text = prompt.showAndWait();
-        text.ifPresent(t -> {
-            List<String> urls = List.of(t.trim().split("\\\\s+"));
-            if (!urls.isEmpty() && !urls.get(0).isEmpty()) onAddTrackers.accept(urls);
-        });
+        text.map(Actions::trackerUrls).filter(urls -> !urls.isEmpty()).ifPresent(onAddTrackers);
     }
 
     private javafx.scene.Node buildPieces() {

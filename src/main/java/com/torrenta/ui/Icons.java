@@ -128,6 +128,7 @@ final class Icons {
             case "queue-bottom" -> moveBottom();
             case "queue" -> queue();
             case "set-location" -> folderMove();
+            case "choose-files" -> files();
             case "limits" -> gauge();
             case "set-category" -> open();
             case "edit-tags" -> tag();

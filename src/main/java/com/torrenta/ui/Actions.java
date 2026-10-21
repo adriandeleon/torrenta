@@ -1,6 +1,7 @@
 package com.torrenta.ui;
 
 import java.util.List;
+import java.util.function.Predicate;
 
 import com.torrenta.engine.Torrent;
 
@@ -50,6 +51,26 @@ public final class Actions {
         if (filterActive) return Escape.CLEAR_FILTER;
         if (hasSelection) return Escape.CLEAR_SELECTION;
         return Escape.NOTHING;
+    }
+
+    /**
+     * Choose Files… is for one torrent at a time, and only one added with "Add now, pick files
+     * when ready" whose files have not been chosen yet ({@code marked}).
+     */
+    public static boolean canChooseFiles(List<String> selectedIds, Predicate<String> marked) {
+        return selectedIds.size() == 1 && marked.test(selectedIds.get(0));
+    }
+
+    /**
+     * The Add Trackers prompt's text as announce URLs: one per whitespace-separated word, in the
+     * order typed, each once. Lines, spaces and tabs all separate; nothing left is no URLs.
+     */
+    public static List<String> trackerUrls(String text) {
+        if (text == null) return List.of();
+        return java.util.Arrays.stream(text.strip().split("\\s+"))
+                .filter(u -> !u.isEmpty())
+                .distinct()
+                .toList();
     }
 
     /** The confirmation for removal, worded by what it will do. */
