@@ -306,8 +306,9 @@ Asked for by adl on 2026-10-20, each its own PR, taken from Editora so the famil
    key by key (bans and default trackers are keys in it), a Git repo as the store, optional, automatic
    and manual triggers, this machine wins on a same-key conflict, setup by pasted URL plus "Create on
    GitHub"; the clone pins the `gh` account that can read the repo.
-5. **OS integration**: `.torrent` and `magnet:` handler, single instance with hand-off, tray or dock
-   badge with rates.
+5. **OS integration**: `.torrent` and `magnet:` handler, single instance with hand-off; ✓ the tray
+   icon with the rates (Nux's and Modula's `tray` package: SNI over D-Bus on Linux, AWT elsewhere,
+   close-to-tray once an icon has appeared). A dock badge is still open.
 6. **Interface languages**, from Termina's `i18n` package, with the same six to start.
 
 The interface font (Inter, as Editora's, #14) and the command palette's look (Editora's, #23) are in.

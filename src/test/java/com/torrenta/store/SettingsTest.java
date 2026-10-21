@@ -124,6 +124,22 @@ class SettingsTest {
     }
 
     @Test
+    void theTrayAndClosingToItAreOnByDefaultAndRoundTrip(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        assertTrue(settings.tray(), "on by default: where the desktop has a tray, the icon appears");
+        assertTrue(settings.closeToTray(), "on by default: the torrents go on when the window closes");
+        settings.setTray(false);
+        settings.setCloseToTray(false);
+        settings.save();
+        Settings read = new Settings(file);
+        read.load();
+        assertFalse(read.tray());
+        assertFalse(read.closeToTray());
+    }
+
+    @Test
     void sidebarShowsUnlessTurnedOffAndItsFilterIsAStringTheUiParses(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Settings settings = new Settings(file);

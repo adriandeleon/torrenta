@@ -111,6 +111,11 @@ final class DevCapture {
         if (!window.availableUpdateVersion().isEmpty())
             System.out.println("capture: update=" + window.availableUpdateVersion());
         if (scene != stage.getScene()) System.out.println("capture: scene=dialog");
+        // The backend that came up ("sni", "awt") or the reason none did, and the icon's line.
+        System.out.println("capture: tray=" + window.trayDescription());
+        System.out.println("capture: trayLine=" + window.trayLine());
+        // False after a close-request with a tray to close to: the window is hidden, not gone.
+        System.out.println("capture: showing=" + stage.isShowing());
         // What a dialog opened on a later pulse than the action shows now, for the hook to read.
         for (String line : window.lateLinesForCapture()) System.out.println("capture: " + line);
     }

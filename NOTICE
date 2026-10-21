@@ -19,6 +19,19 @@ Licensed under MIT. Used as an unmodified dependency for the Nord and Cupertino
 control themes.
 
 --------------------------------------------------------------------------------
+dbus-java — https://github.com/hypfvieh/dbus-java
+Copyright David M., Matthew Johnson and contributors
+Licensed under MIT. Used as an unmodified dependency (core and the JDK
+unix-socket transport) for the Linux tray icon, a StatusNotifierItem on the
+session bus.
+
+--------------------------------------------------------------------------------
+SLF4J — https://www.slf4j.org
+Copyright QOS.ch
+Licensed under MIT. The java.util.logging binding, so dbus-java's log reaches
+the same place as everything else's.
+
+--------------------------------------------------------------------------------
 Bundled font
 --------------------------------------------------------------------------------
 

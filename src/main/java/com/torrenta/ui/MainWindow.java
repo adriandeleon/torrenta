@@ -96,6 +96,8 @@ import com.torrenta.store.LabelStore;
 import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
+import com.torrenta.tray.TorrentaTray;
+import com.torrenta.tray.Trays;
 import com.torrenta.update.ReleaseInfo;
 import com.torrenta.update.UpdateCheck;
 import com.torrenta.update.UpdateService;
@@ -206,6 +208,19 @@ public final class MainWindow {
 
     private ScheduledExecutorService poller;
 
+    /** The tray icon once one has come up, else null; set on the FX thread, read by the poll. */
+    private volatile TorrentaTray tray;
+    /** Why there is no tray, once an attempt has said; empty before one and while there is one. */
+    private volatile String trayReason = "";
+    /** What the tray was last given, so an equal snapshot costs no round trip; poll thread. */
+    private volatile TrayStatus trayStatus = TrayStatus.starting();
+    /** The window is hidden behind the tray icon, not closed: {@code onHidden} tears nothing down. */
+    private boolean hiddenToTray;
+    /** Quit was asked for: a close request is not a close-to-tray, and teardown runs once. */
+    private boolean quitting;
+
+    private boolean shutDown;
+
     /**
      * @param opener opens a URI with the desktop (a folder, later a web page); the application's
      *     host services, which only the {@code Application} can hand out
@@ -265,6 +280,7 @@ public final class MainWindow {
         settingsWindow.setLabels(labels, new LabelsHost());
         settingsWindow.setOnIpFilterChanged(this::refreshIpFilter, this::ipFilterStatusText);
         settingsWindow.setOnAppearanceChanged(this::applyAppearance);
+        settingsWindow.setOnTrayChanged(this::applyTraySetting);
         applyAppearance();
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
         settingsWindow.setSearchProviders(searchStore, searchPane::reloadProviders);
@@ -312,13 +328,18 @@ public final class MainWindow {
             if (now) offerClipboard();
         });
         stage.setScene(scene);
+        // The live setting, not one captured at startup: the checkbox can change while the window
+        // is open. Conditional on a tray having actually appeared, not on the preference alone:
+        // hiding a window that leaves no icon behind is how a program becomes unreachable.
+        stage.setOnCloseRequest(e -> {
+            if (!quitting && tray != null && settings.closeToTray()) {
+                e.consume();
+                hideToTray();
+            }
+        });
         stage.setOnHidden(e -> {
-            rememberDivider();
-            stopPolling();
-            stopWatching();
-            rss.stop();
-            updates.shutdown();
-            sync.shutdown();
+            if (hiddenToTray) return;
+            shutdown();
         });
         setStatus("Starting the engine…");
         rates.setText(ratesText(Engine.Rates.ZERO));
@@ -327,6 +348,124 @@ public final class MainWindow {
     public void show() {
         stage.show();
         table.requestFocus();
+        installTray();
+    }
+
+    // ---- tray -----------------------------------------------------------------------------------
+
+    /**
+     * Brings the tray up off the FX thread, because both backends can block on D-Bus or AWT
+     * initialisation and neither is worth a stalled first frame. Nothing happens when the setting
+     * is off or an icon is already up; a second attempt that finds one up disposes its own.
+     */
+    private void installTray() {
+        if (!settings.tray() || tray != null) return;
+        Thread.ofPlatform().daemon().name("tray-init").start(() -> {
+            Trays.Attempt attempt =
+                    Trays.create(() -> Platform.runLater(this::showFromTray), () -> Platform.runLater(this::quit));
+            Platform.runLater(() -> {
+                if (attempt.tray().isEmpty()) {
+                    trayReason = attempt.reason();
+                    // Silence here is the bug a person actually hits: the setting is on, the box
+                    // says so, and closing still quits, because no tray ever appeared.
+                    setStatus("No tray icon (" + attempt.reason() + "); closing the window quits " + AppInfo.NAME);
+                    return;
+                }
+                TorrentaTray created = attempt.tray().get();
+                if (tray != null || !settings.tray()) {
+                    created.dispose();
+                    return;
+                }
+                tray = created;
+                trayReason = "";
+                // Without this, hiding the last window ends the JavaFX runtime, which calls
+                // App.stop, which ends the process: closing to the tray would quit no matter what
+                // the close handler did. Set only once a tray really exists, for the reason above.
+                Platform.setImplicitExit(false);
+                created.update(trayStatus.display(), trayStatus.line());
+                LOG.info("Tray icon up (" + created.backend() + ")");
+            });
+        });
+    }
+
+    /** FX thread, from the Settings page: the switch was flipped, bring the icon up or take it down. */
+    private void applyTraySetting() {
+        if (settings.tray()) {
+            installTray();
+            return;
+        }
+        TorrentaTray current = tray;
+        if (current == null) return;
+        tray = null;
+        current.dispose();
+        Platform.setImplicitExit(true);
+        // A window hidden behind an icon that has just gone would be unreachable.
+        if (hiddenToTray) showFromTray();
+    }
+
+    /** Poll thread: the icon and its line, only when they changed since the last push. */
+    private void pushTray(TrayStatus next) {
+        if (next.equals(trayStatus)) return;
+        trayStatus = next;
+        TorrentaTray current = tray;
+        if (current != null) current.update(next.display(), next.line());
+    }
+
+    private void hideToTray() {
+        rememberDivider();
+        hiddenToTray = true;
+        stage.hide();
+    }
+
+    private void showFromTray() {
+        hiddenToTray = false;
+        stage.show();
+        stage.setIconified(false);
+        stage.toFront();
+        table.requestFocus();
+    }
+
+    /**
+     * Ends the program: from the File menu, the tray menu, or a close with no tray to close to.
+     * Platform.exit is needed outright once implicit exit is off; before that it is harmless.
+     */
+    private void quit() {
+        quitting = true;
+        hiddenToTray = false;
+        if (stage.isShowing()) stage.close(); // onHidden tears down
+        else shutdown();
+        Platform.exit();
+    }
+
+    /** Once: what the window owns, before the engine is stopped behind it. */
+    private void shutdown() {
+        if (shutDown) return;
+        shutDown = true;
+        rememberDivider();
+        stopPolling();
+        stopWatching();
+        rss.stop();
+        updates.shutdown();
+        sync.shutdown();
+    }
+
+    /** Any thread, idempotent; from App.stop, after the engine. */
+    public void disposeTray() {
+        TorrentaTray current = tray;
+        tray = null;
+        if (current != null) current.dispose();
+    }
+
+    /** The backend that came up, or the reason none did, or "none"; read by the development capture. */
+    public String trayDescription() {
+        TorrentaTray current = tray;
+        if (current != null) return current.backend();
+        return trayReason.isEmpty() ? "none" : trayReason;
+    }
+
+    /** The icon's line as last pushed; read by the development capture. */
+    public String trayLine() {
+        return trayStatus.line();
     }
 
     /** The status bar's text; read by the development capture. */
@@ -404,6 +543,9 @@ public final class MainWindow {
     public void runForCapture(String action) {
         if (action.equals("close-window")) {
             stage.close();
+        } else if (action.equals("close-request")) {
+            // What the title bar's button sends: the close-to-tray rule runs, stage.close() skips it.
+            stage.fireEvent(new javafx.stage.WindowEvent(stage, javafx.stage.WindowEvent.WINDOW_CLOSE_REQUEST));
         } else if (action.equals("select-all")) {
             table.getSelectionModel().selectAll();
         } else if (action.equals("event-log")) {
@@ -1375,6 +1517,7 @@ public final class MainWindow {
             }
         }
         TorrentDetail shown = detailSnapshot;
+        pushTray(TrayStatus.of(snapshot, current));
         Platform.runLater(() -> {
             rows.apply(snapshot, System.currentTimeMillis() / 1000);
             refreshSidebar(snapshot);
@@ -2040,7 +2183,7 @@ public final class MainWindow {
 
         MenuItem quit = new MenuItem("Quit");
         quit.setAccelerator(chord(KeyCode.Q));
-        quit.setOnAction(e -> stage.close());
+        quit.setOnAction(e -> quit());
 
         Menu file = new Menu("File");
         file.getItems()
