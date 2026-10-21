@@ -107,6 +107,7 @@ class IconsTest {
                 "filter",
                 "transfers",
                 "focus-sidebar",
+                "toggle-detail",
                 "select-all",
                 "event-log",
                 "check-updates",
