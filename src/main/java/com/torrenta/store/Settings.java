@@ -51,6 +51,8 @@ public final class Settings {
     public static final String UI_DENSITY = "ui.density";
     /** The Search tab's results columns, the same shape. */
     public static final String SEARCH_COLUMNS = "search.columns";
+    /** The declarative search providers switched off, by id, space-separated; syncs. */
+    public static final String SEARCH_DISABLED = "search.disabled";
     /** The detail pane: shown, which tab, and the divider position (0..1 of the window). */
     public static final String DETAIL_VISIBLE = "detail.visible";
 
@@ -82,6 +84,12 @@ public final class Settings {
     public static final String UI_STATE_COLORS = "ui.stateColors";
     /** The theme id ({@code editora-dark}, {@code nord-light}, …); the UI maps it and falls back. */
     public static final String THEME = "ui.theme";
+    /**
+     * The menu bar drawn in the window's own title bar ({@code StageStyle.EXTENDED}); off by default,
+     * read once when the window is built, so it applies on restart. {@code ui.ExtendedWindow} says
+     * where it is allowed.
+     */
+    public static final String UI_EXTENDED_WINDOW = "ui.extendedWindow";
 
     public static final String LAST_UPDATE_CHECK = "updates.lastCheckEpochMs";
     /** The version the user chose to skip; a manual check still reports it. */
@@ -408,6 +416,14 @@ public final class Settings {
         return readBoolean(UI_SIDEBAR, true);
     }
 
+    public boolean extendedWindow() {
+        return readBoolean(UI_EXTENDED_WINDOW, false);
+    }
+
+    public void setExtendedWindow(boolean on) {
+        properties.setProperty(UI_EXTENDED_WINDOW, String.valueOf(on));
+    }
+
     public void setSidebar(boolean shown) {
         properties.setProperty(UI_SIDEBAR, String.valueOf(shown));
     }
@@ -521,6 +537,21 @@ public final class Settings {
 
     public void setIpFilterBans(java.util.List<String> bans) {
         properties.setProperty(IPFILTER_BANS, String.join(" ", bans));
+    }
+
+    /** The ids of the definition-file providers switched off in Settings → Search. */
+    public java.util.Set<String> disabledSearchDefinitions() {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        for (String id : properties.getProperty(SEARCH_DISABLED, "").trim().split("\\s+")) {
+            if (!id.isEmpty()) out.add(id);
+        }
+        return out;
+    }
+
+    public void setDisabledSearchDefinitions(java.util.Collection<String> ids) {
+        String joined = String.join(" ", new java.util.TreeSet<>(ids)).trim();
+        if (joined.isEmpty()) properties.remove(SEARCH_DISABLED);
+        else properties.setProperty(SEARCH_DISABLED, joined);
     }
 
     /** The connection settings as stored, each clamped to a sane range. */

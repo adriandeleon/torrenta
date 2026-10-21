@@ -11,7 +11,22 @@
  * A scene stylesheet rather than a rule in app.css, because dialogs, alerts, the Settings window
  * and the log window each live in a scene of their own, and because a scene sheet survives the
  * runtime setUserAgentStylesheet that a theme switch performs. Fonts.installUiFont attaches it.
+ *
+ * The size is the redesign's 13px (the theme's root says 14px); it is set here, on the scene,
+ * for the same reason the family is, so every window reads at one scale.
  */
 .root {
     -fx-font-family: "Inter", "System", "sans-serif";
+    -fx-font-size: 13px;
+}
+
+/* Hashes, paths and addresses: "Inter speaks, JetBrains Mono works". */
+.mono {
+    -fx-font-family: "JetBrains Mono", "monospace";
+    -fx-font-size: 11.5px;
+}
+
+.mono-field {
+    -fx-font-family: "JetBrains Mono", "monospace";
+    -fx-font-size: 12px;
 }

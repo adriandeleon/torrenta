@@ -90,6 +90,19 @@ class SettingsTest {
     }
 
     @Test
+    void theMenuBarStaysUnderTheTitleBarUnlessAsked(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        Settings settings = new Settings(file);
+        settings.load();
+        assertFalse(settings.extendedWindow(), "off by default: it changes how the window is decorated");
+        settings.setExtendedWindow(true);
+        settings.save();
+        Settings read = new Settings(file);
+        read.load();
+        assertTrue(read.extendedWindow());
+    }
+
+    @Test
     void sidebarShowsUnlessTurnedOffAndItsFilterIsAStringTheUiParses(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Settings settings = new Settings(file);
@@ -358,5 +371,23 @@ class SettingsTest {
                 IllegalArgumentException.class,
                 () -> read.setEventCommand(com.torrenta.engine.EngineEvent.Kind.ERROR, "x"),
                 "nothing runs on an error");
+    }
+
+    @Test
+    void disabledSearchDefinitionsAreASortedSpaceSeparatedList(@TempDir Path dir) throws IOException {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        assertTrue(settings.disabledSearchDefinitions().isEmpty());
+        settings.setDisabledSearchDefinitions(java.util.List.of("linuxtracker", "archive-org", "linuxtracker"));
+        assertEquals("archive-org linuxtracker", settings.get(Settings.SEARCH_DISABLED, ""));
+        assertEquals(java.util.Set.of("archive-org", "linuxtracker"), settings.disabledSearchDefinitions());
+        settings.save();
+        Settings read = new Settings(dir.resolve(Settings.FILE_NAME));
+        read.load();
+        assertEquals(java.util.Set.of("archive-org", "linuxtracker"), read.disabledSearchDefinitions());
+        read.setDisabledSearchDefinitions(java.util.List.of());
+        assertEquals("", read.get(Settings.SEARCH_DISABLED, ""), "none is no key");
+        assertTrue(
+                com.torrenta.sync.SyncKeys.isSynced(Settings.SEARCH_DISABLED),
+                "which files are off travels; the files do not");
     }
 }

@@ -60,6 +60,22 @@ first, sorted by seeds unless a column is clicked. `Enter` on a result opens the
 a `.torrent` link fetched first. The results table's columns are remembered like the transfer
 list's.
 
+**Search providers without an API** are definition files: `search-providers/<id>.json` in the config
+folder, one per site, interpreted by one generic provider, so the app ships no site-specific code
+and a site change is a file edit. A file names the site (`id`, `name`, `homepage`), its `type`
+(`json` or `html`), a `search.url` template with `{query}` and `{category}` (the latter mapped
+through a `categories` table from Torrenta's category names to the site's values), optional paging
+(`search.page` with `{page}`, `pages`, `delayMs`), `headers`, and `fields`: a `rows` path or
+selector and, per field (`name`, `size`, `seeds`, `leechers`, `date`, `magnet`, `torrentUrl`,
+`infoHash`, `detailUrl`), a JSON-pointer path or a CSS-like selector, with `attr`, `regex`,
+`template` and a date `format` where the text needs them. Sizes ("1.4 GiB", "700 MB", "1,234,567")
+and dates (ISO, RFC 1123, "Sep 13, 2026", "2 days ago") are parsed; what is missing is a dash, never
+a failure. The HTML side is a small selector engine and a lenient parser of our own, enough for a
+listing table. Three examples ship and are copied in once (Internet Archive, LinuxTracker, Academic
+Torrents; never written over, a `.example` beside yours if you changed one); Settings → Search
+lists the files, says which loaded and why not, switches each off (`search.disabled`, synced),
+reloads the folder and opens it. The format in full: [docs/search-providers.md](docs/search-providers.md).
+
 ### Building a native app image
 
 ```bash
@@ -89,7 +105,12 @@ engine, status bar) and exits. CI runs the first form under Xvfb on Linux as a s
 `-Dtorrenta.captureAction=search:debian,search-keys:DOWN+ENTER` drives the Search tab; a stand-in
 Torznab server for it is `java scripts/torznab-stub.java 9696 <search.xml> [caps.xml]` with the
 fixtures under `src/test/resources/com/torrenta/search`, and a provider at
-`http://127.0.0.1:9696/api` in the config folder's `search-providers.json`.
+`http://127.0.0.1:9696/api` in the config folder's `search-providers.json`. For a definition file,
+`java scripts/search-stub.java 9797 src/test/resources/com/torrenta/search/declarative` serves the
+recorded pages, so a file whose `search.url` is `http://127.0.0.1:9797/linuxtracker.html?q={query}`
+searches without asking the site; `settings-page:Search` and `settings:definition` photograph the
+page that lists the files, `settings-definitions-reload` presses Reload, and the capture prints a
+`definition=` line per file.
 
 ## Files
 
@@ -112,7 +133,9 @@ changes and deleted with the torrent. Watch folders are `watch-folders.json` (fo
 with the file, save path, category, start paused), this machine's and never synced; a file that is
 not a torrent is renamed `.invalid` and left alone. Search providers are `search-providers.json`
 (name, URL, API key, enabled, the category count the last Test found), this machine's too and
-never synced, since the key is a secret. The commands run on an event are
+never synced, since the key is a secret. Definition-file providers are `search-providers/<id>.json`,
+one per site, read only (the shipped examples are copied in once and never written over); which are
+switched off is `search.disabled` in the settings file and syncs. The commands run on an event are
 `automation.onAdded`, `automation.onFinished` and `automation.onSeedingDone` in the settings file,
 this machine's too (they name its programs); the notification switches are `notify.added`,
 `notify.finished`, `notify.seedingDone` and `notify.error` and do sync. A torrent's own share limit (Torrent → Limits…)
@@ -120,7 +143,12 @@ is kept there as `torrent.<info-hash>.share` and goes with the torrent when it i
 caps and connection counts are libtorrent's and live in its resume data. The global queue and share
 limits are `queue.*` and `share.*`. The theme is there too, under General →
 Appearance: Editora Light and Dark (Caret & Ink, as Editora and Termina), Nord and Cupertino,
-light and dark, applied the moment one is picked (`ui.theme` in the file).
+light and dark, applied the moment one is picked (`ui.theme` in the file). Beside it, **Merge the
+menu bar into the title bar** (`ui.extendedWindow`, off by default, experimental) draws the window
+without a system title bar and puts the menus, the title and the window buttons on that one row,
+a row of space back for the list; the window keeps the platform's own buttons, drag, double-click
+and edge resize. It applies on restart, and is not offered on macOS, where the menu belongs to the
+system bar. The capture prints the style in force as `capture: style=`.
 
 **Settings sync.** Settings → Sync connects the settings file to a Git repository of yours (a
 private one on GitHub, say: "Create on GitHub" makes it through the `gh` CLI). Every computer that

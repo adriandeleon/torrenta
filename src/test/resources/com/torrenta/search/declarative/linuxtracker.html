@@ -1,0 +1,230 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>
+    (() => {
+      try {
+        const saved = localStorage.getItem("linuxtracker-theme");
+        const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.theme =
+          saved || (systemDark ? "dark" : "light");
+      } catch (_) {
+        document.documentElement.dataset.theme = "light";
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        const button = document.querySelector(".theme-toggle");
+        if (!button) return;
+
+        const updateButton = () => {
+          const dark = document.documentElement.dataset.theme === "dark";
+          button.textContent = dark ? "☀" : "☾";
+          button.setAttribute(
+            "aria-label",
+            dark ? "Switch to light mode" : "Switch to dark mode"
+          );
+          button.setAttribute(
+            "title",
+            dark ? "Switch to light mode" : "Switch to dark mode"
+          );
+        };
+
+        updateButton();
+
+        button.addEventListener("click", () => {
+          const next =
+            document.documentElement.dataset.theme === "dark"
+              ? "light"
+              : "dark";
+
+          document.documentElement.dataset.theme = next;
+
+          try {
+            localStorage.setItem("linuxtracker-theme", next);
+          } catch (_) {}
+
+          updateButton();
+        });
+      });
+    })();
+  </script>
+  <!-- Google tag consent defaults -->
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+
+    (() => {
+      let analyticsConsent = "denied";
+
+      try {
+        if (
+          localStorage.getItem("linuxtracker-analytics-consent") === "granted"
+        ) {
+          analyticsConsent = "granted";
+        }
+      } catch (_) {}
+
+      gtag("consent", "default", {
+        analytics_storage: analyticsConsent,
+        ad_storage: "denied",
+        ad_user_data: "denied",
+        ad_personalization: "denied",
+        wait_for_update: 500
+      });
+    })();
+
+    gtag("js", new Date());
+    gtag("config", "G-W6N12K4D4Q");
+  </script>
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-W6N12K4D4Q"></script>
+
+  <title>Torrents - LinuxTracker</title>
+  <link rel="stylesheet" href="/static/css/site.css?v=20260923-1">
+  <link rel="stylesheet" href="/static/css/content.css?v=20260923-1">
+  <link rel="stylesheet" href="/static/css/torrents.css?v=20260923-1">
+  <link rel="stylesheet" href="/static/css/torrent-actions.css?v=20260923-1">
+  <link rel="stylesheet" href="/static/css/torrent-manage.css?v=20260923-1">
+  <link rel="stylesheet" href="/static/css/top-torrents.css?v=20260923-1">
+  <link rel="stylesheet" href="/static/css/statistics.css?v=20260923-1">
+  <link rel="stylesheet" href="/static/css/info-pages.css?v=20260923-1">
+  <link rel="stylesheet" href="/static/css/news.css?v=20260923-1">
+  <link rel="stylesheet" href="/static/css/chat.css?v=20260923-1">
+  <link rel="stylesheet" href="/static/css/accounts.css?v=20260923-1">
+  <link rel="stylesheet" href="/static/css/account-detail.css?v=20260923-1">
+  <link rel="stylesheet" href="/static/css/email-verification.css?v=20260923-1">
+  <link rel="stylesheet" href="/static/css/mfa.css?v=20260923-1">
+  <link rel="icon" href="/static/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  
+</head>
+<body>
+
+<header class="site-header">
+  <div class="topbar shell">
+    <a class="brand" href="/">
+  <img
+    class="brand-badge"
+    src="/static/img/branding/linuxtracker-badge.png"
+    alt=""
+    width="62"
+    height="62"
+  >
+  <span class="brand-copy">
+    <span class="brand-name">Linux<span>Tracker</span></span>
+    <small>LINUX DISTRIBUTIONS. TOGETHER.</small>
+  </span>
+</a>
+    
+<!-- the search form was cut from this fixture -->
+<div class="table-wrap torrent-table-wrap">
+<table class="torrent-table">
+      <thead>
+        <tr>
+          <th>Torrent</th>
+          <th>Category</th>
+          <th>Added</th>
+          <th class="numeric">Size</th>
+          <th class="numeric stat-col">Seeds</th>
+          <th class="numeric stat-col">Leech</th>
+          <th class="numeric stat-col">Done</th>
+        </tr>
+      </thead>
+      <tbody>
+      
+        <tr>
+          <td class="torrent-name-cell">
+            <a class="torrent-name" href="/torrents/b7852b7fa31d85b83a4d705143ac077d00d5956d/">debian-13.7.0-arm64-STICK16GB-1.iso</a>
+            <span class="torrent-mobile-meta">Debian · 14.9 GB · Sep 13, 2026</span>
+          </td>
+          <td><span class="category-badge">Debian</span></td>
+          <td class="muted-cell">Sep 13, 2026</td>
+          <td class="numeric muted-cell">14.9 GB</td>
+          <td class="numeric seeds stat-stack">
+            <strong>9</strong>
+            
+          </td>
+          <td class="numeric leeches stat-stack">
+            <strong>0</strong>
+            
+          </td>
+          <td class="numeric stat-stack">
+            <strong>25</strong>
+            
+          </td>
+        </tr>
+      
+        <tr>
+          <td class="torrent-name-cell">
+            <a class="torrent-name" href="/torrents/f448dfa1f9a399470ee9ca02b418a94ecc6923c0/">debian-13.7.0-amd64-STICK16GB-1.iso</a>
+            <span class="torrent-mobile-meta">Debian · 14.9 GB · Sep 13, 2026</span>
+          </td>
+          <td><span class="category-badge">Debian</span></td>
+          <td class="muted-cell">Sep 13, 2026</td>
+          <td class="numeric muted-cell">14.9 GB</td>
+          <td class="numeric seeds stat-stack">
+            <strong>12</strong>
+            
+          </td>
+          <td class="numeric leeches stat-stack">
+            <strong>0</strong>
+            
+          </td>
+          <td class="numeric stat-stack">
+            <strong>26</strong>
+            
+          </td>
+        </tr>
+      
+        <tr>
+          <td class="torrent-name-cell">
+            <a class="torrent-name" href="/torrents/4648f9191b560d8a44f54dbd68264b569090d850/">debian-13.7.0-source-DVD-22.iso</a>
+            <span class="torrent-mobile-meta">Debian · 2.1 GB · Sep 13, 2026</span>
+          </td>
+          <td><span class="category-badge">Debian</span></td>
+          <td class="muted-cell">Sep 13, 2026</td>
+          <td class="numeric muted-cell">2.1 GB</td>
+          <td class="numeric seeds stat-stack">
+            <strong>7</strong>
+            
+          </td>
+          <td class="numeric leeches stat-stack">
+            <strong>0</strong>
+            
+          </td>
+          <td class="numeric stat-stack">
+            <strong>24</strong>
+            
+          </td>
+        </tr>
+      
+        <tr>
+          <td class="torrent-name-cell">
+            <a class="torrent-name" href="/torrents/799e0460e87346a6c2eb9419c8b3d81187964af1/">debian-13.7.0-source-DVD-21.iso</a>
+            <span class="torrent-mobile-meta">Debian · 4.4 GB · Sep 13, 2026</span>
+          </td>
+          <td><span class="category-badge">Debian</span></td>
+          <td class="muted-cell">Sep 13, 2026</td>
+          <td class="numeric muted-cell">4.4 GB</td>
+          <td class="numeric seeds stat-stack">
+            <strong>20</strong>
+            
+          </td>
+          <td class="numeric leeches stat-stack">
+            <strong>0</strong>
+            
+          </td>
+          <td class="numeric stat-stack">
+            <strong>38</strong>
+            
+          </td>
+        </tr>
+      
+        
+      </tbody>
+    </table>
+</div>
+</main></body></html>
