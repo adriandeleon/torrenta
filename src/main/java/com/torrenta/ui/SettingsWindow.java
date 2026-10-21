@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import javafx.beans.binding.Bindings;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Node;
@@ -48,10 +49,13 @@ import javafx.util.StringConverter;
 
 import com.torrenta.AppInfo;
 import com.torrenta.automation.AutomationSettings;
+import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
+import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.WatchFolder;
+import com.torrenta.engine.transmission.TransmissionEngine;
 import com.torrenta.rss.Feed;
 import com.torrenta.rss.RssService;
 import com.torrenta.rss.Rule;
@@ -60,6 +64,7 @@ import com.torrenta.search.TorznabEndpoint;
 import com.torrenta.search.TorznabProvider;
 import com.torrenta.store.DefinitionStore;
 import com.torrenta.store.LabelStore;
+import com.torrenta.store.ProfileStore;
 import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
@@ -103,6 +108,7 @@ final class SettingsWindow {
         RSS(Group.APPLICATION, "rss"),
         SYNC(Group.APPLICATION, "sync"),
         LABELS(Group.APPLICATION, "labels"),
+        ENGINE_PROFILES(Group.ENGINE, "engine"),
         CONNECTION(Group.ENGINE, "connection"),
         PROTOCOL(Group.ENGINE, "protocol"),
         IP_FILTER(Group.ENGINE, "ipFilter"),
@@ -124,7 +130,18 @@ final class SettingsWindow {
         }
     }
 
-    private record Row(Category category, Node node, String keywords, VBox section) {}
+    /** {@code capability} is what the row needs of the engine, or null for every engine. */
+    private record Row(Category category, Node node, String keywords, VBox section, Engine.Capability capability) {
+        Row(Category category, Node node, String keywords, VBox section) {
+            this(category, node, keywords, section, null);
+        }
+    }
+
+    /** Rows and pages the engine in use cannot act on; hidden until another engine comes up. */
+    private final Set<Node> engineHiddenRows = new java.util.HashSet<>();
+
+    private final Set<Category> engineHiddenPages = new LinkedHashSet<>();
+    private String engineQuery = "";
 
     /** The keys this window owns, for Reset. */
     private static final String[] OWNED_KEYS = concat(
@@ -403,6 +420,7 @@ final class SettingsWindow {
         if (searchDialog != null && searchDialog.isShowing()) return searchDialog.scene();
         if (rssDialog != null && rssDialog.isShowing()) return rssDialog.scene();
         if (ruleDialog != null && ruleDialog.isShowing()) return ruleDialog.scene();
+        if (profileDialog != null && profileDialog.isShowing()) return profileDialog.scene();
         return null;
     }
 
@@ -412,6 +430,7 @@ final class SettingsWindow {
         if (searchDialog != null && searchDialog.isShowing()) return searchDialog.title();
         if (rssDialog != null && rssDialog.isShowing()) return rssDialog.title();
         if (ruleDialog != null && ruleDialog.isShowing()) return ruleDialog.title();
+        if (profileDialog != null && profileDialog.isShowing()) return profileDialog.title();
         return "";
     }
 
@@ -421,6 +440,7 @@ final class SettingsWindow {
         if (searchDialog != null && searchDialog.isShowing()) searchDialog.cancel();
         if (rssDialog != null && rssDialog.isShowing()) rssDialog.cancel();
         if (ruleDialog != null && ruleDialog.isShowing()) ruleDialog.cancel();
+        if (profileDialog != null && profileDialog.isShowing()) profileDialog.cancel();
     }
 
     /**
@@ -893,6 +913,7 @@ final class SettingsWindow {
         List<Object> items = new ArrayList<>();
         Group current = null;
         for (Category category : Category.values()) {
+            if (engineHiddenPages.contains(category)) continue;
             if (category.group != current) {
                 current = category.group;
                 items.add(current);
@@ -974,10 +995,11 @@ final class SettingsWindow {
     }
 
     private void filter(String query) {
+        engineQuery = query == null ? "" : query;
         hiddenCategories.clear();
         Set<Category> withHits = new LinkedHashSet<>();
         for (Row row : rows) {
-            boolean visible = matches(query, row.keywords());
+            boolean visible = matches(query, row.keywords()) && !engineHiddenRows.contains(row.node());
             row.node().setVisible(visible);
             row.node().setManaged(visible);
             if (visible) withHits.add(row.category());
@@ -1006,6 +1028,7 @@ final class SettingsWindow {
         page.setFillWidth(true);
         switch (category) {
             case GENERAL -> buildGeneral(page);
+            case ENGINE_PROFILES -> buildEngine(page);
             case ADDING -> buildAdding(page);
             case WATCH -> buildWatch(page);
             case AUTOMATION -> buildAutomation(page);
@@ -1038,6 +1061,18 @@ final class SettingsWindow {
     /** A titled row with an explanatory line under it. The title leads the keywords, for captures. */
     private Node row(
             Category category, VBox section, String title, String description, Region control, String keywords) {
+        return row(category, section, title, description, control, keywords, null);
+    }
+
+    /** A row the engine in use may lack: hidden by {@link #applyCapabilities} when it does. */
+    private Node row(
+            Category category,
+            VBox section,
+            String title,
+            String description,
+            Region control,
+            String keywords,
+            Engine.Capability capability) {
         Label name = new Label(title);
         name.getStyleClass().add("settings-row-title");
         VBox text = new VBox(2, name);
@@ -1053,8 +1088,41 @@ final class SettingsWindow {
         line.setAlignment(Pos.CENTER_LEFT);
         line.getStyleClass().add("settings-row");
         section.getChildren().add(line);
-        rows.add(new Row(category, line, title + " | " + description + " " + keywords, section));
+        rows.add(new Row(category, line, title + " | " + description + " " + keywords, section, capability));
         return line;
+    }
+
+    /**
+     * FX thread. Hides the rows the engine has no capability for, and drops from the sidebar a
+     * page left with no row; the search filter keeps them hidden. Everything comes back for an
+     * engine that has it all.
+     */
+    void applyCapabilities(Engine.Capabilities caps) {
+        engineHiddenRows.clear();
+        engineHiddenPages.clear();
+        for (Row row : rows) {
+            if (row.capability() != null && caps.lacks(row.capability())) engineHiddenRows.add(row.node());
+        }
+        for (Category category : Category.values()) {
+            if (!CapabilityRules.pageShown(category.name(), caps)) {
+                engineHiddenPages.add(category);
+                continue;
+            }
+            boolean anyRow = false;
+            boolean anyShown = false;
+            for (Row row : rows) {
+                if (row.category() != category) continue;
+                anyRow = true;
+                if (!engineHiddenRows.contains(row.node())) anyShown = true;
+            }
+            if (anyRow && !anyShown) engineHiddenPages.add(category);
+        }
+        Object selected = sidebar.getSelectionModel().getSelectedItem();
+        sidebar.getItems().setAll(sidebarItems());
+        filter(engineQuery);
+        if (selected instanceof Category c && sidebar.getItems().contains(c))
+            sidebar.getSelectionModel().select(c);
+        else selectFirstVisible();
     }
 
     // ---------------------------------------------------------------- pages
@@ -1259,7 +1327,8 @@ final class SettingsWindow {
                 tr("settings.general.downloadDir"),
                 tr("settings.general.downloadDir.desc"),
                 new HBox(6, downloadDir, browse),
-                tr("settings.general.downloadDir.keywords"));
+                tr("settings.general.downloadDir.keywords"),
+                Engine.Capability.LOCAL_FILES);
 
         incompleteEnabled = new CheckBox();
         incompleteEnabled.selectedProperty().addListener((o, was, now) -> {
@@ -1298,7 +1367,8 @@ final class SettingsWindow {
                 tr("settings.general.incompleteDir"),
                 tr("settings.general.incompleteDir.desc"),
                 incompleteRow,
-                tr("settings.general.incompleteDir.keywords"));
+                tr("settings.general.incompleteDir.keywords"),
+                Engine.Capability.STORAGE_OPTIONS);
         partSuffix = new CheckBox();
         partSuffix.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -1311,7 +1381,8 @@ final class SettingsWindow {
                 tr("settings.general.partSuffix"),
                 tr("settings.general.partSuffix.desc"),
                 partSuffix,
-                tr("settings.general.partSuffix.keywords"));
+                tr("settings.general.partSuffix.keywords"),
+                Engine.Capability.STORAGE_OPTIONS);
         preallocate = new CheckBox();
         preallocate.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -1324,7 +1395,8 @@ final class SettingsWindow {
                 tr("settings.general.preallocate"),
                 tr("settings.general.preallocate.desc"),
                 preallocate,
-                tr("settings.general.preallocate.keywords"));
+                tr("settings.general.preallocate.keywords"),
+                Engine.Capability.STORAGE_OPTIONS);
 
         VBox updates = section(page, tr("settings.general.updates"));
         updateCheck = new CheckBox();
@@ -2280,6 +2352,250 @@ final class SettingsWindow {
                                     searchStore.entries().size()));
     }
 
+    // ---------------------------------------------------------------- engine profiles
+
+    /** What the Engine page tells the window, on the FX thread. */
+    interface ProfilesHost {
+        /** Switch to this profile now, in place. */
+        void switchTo(EngineProfile profile);
+
+        /** The profile whose engine is running. */
+        EngineProfile inUse();
+
+        /** The running engine's description, or empty while none is up. */
+        String engineLine();
+    }
+
+    private ProfileStore profileStore;
+    private ProfilesHost profilesHost;
+    private TableView<EngineProfile> profileTable;
+    private Label profileStatusLabel;
+    private Label profileInUseLabel;
+    private EngineProfileDialog profileDialog;
+    /** Asks a daemon who it is; swapped for a fake in a capture or a test. */
+    private EngineProfileDialog.Tester profileTester = TransmissionEngine::probe;
+
+    /** The store the Engine page edits, and who to tell. */
+    void setProfiles(ProfileStore store, ProfilesHost host) {
+        this.profileStore = store;
+        this.profilesHost = host;
+        reloadProfiles();
+    }
+
+    /** The window's engine changed: the "in use" line follows. */
+    void refreshProfiles() {
+        reloadProfiles();
+    }
+
+    private void buildEngine(VBox page) {
+        VBox section = section(page, tr("settings.engine.profiles"));
+        profileTable = new TableView<>();
+        profileTable.setPrefHeight(170);
+        profileTable.setPlaceholder(new Label(tr("settings.engine.profiles.empty")));
+        profileTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        TableColumn<EngineProfile, String> name = new TableColumn<>(tr("common.name"));
+        name.setPrefWidth(150);
+        name.setCellValueFactory(c ->
+                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().displayName()));
+        TableColumn<EngineProfile, String> kind = new TableColumn<>(tr("settings.engine.column.kind"));
+        kind.setPrefWidth(80);
+        kind.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                c.getValue().kind().label()));
+        TableColumn<EngineProfile, String> url = new TableColumn<>(tr("settings.engine.column.url"));
+        url.setPrefWidth(260);
+        url.setCellValueFactory(c ->
+                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().url()));
+        TableColumn<EngineProfile, String> user = new TableColumn<>(tr("settings.engine.column.username"));
+        user.setPrefWidth(100);
+        user.setCellValueFactory(c ->
+                new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().username()));
+        TableColumn<EngineProfile, String> next = new TableColumn<>(tr("settings.engine.column.nextStart"));
+        next.setPrefWidth(90);
+        next.setCellValueFactory(c -> new javafx.beans.property.ReadOnlyStringWrapper(
+                c.getValue().id().equals(settings.engineProfile()) ? tr("settings.table.yes") : ""));
+        profileTable.getColumns().addAll(List.of(name, kind, url, user, next));
+        profileTable.setRowFactory(t -> {
+            javafx.scene.control.TableRow<EngineProfile> row = new javafx.scene.control.TableRow<>();
+            row.setOnMouseClicked(e -> {
+                if (e.getClickCount() == 2 && !row.isEmpty() && !row.getItem().isLocal()) editProfile();
+            });
+            return row;
+        });
+        javafx.beans.binding.BooleanBinding remoteSelected = Bindings.createBooleanBinding(
+                () -> {
+                    EngineProfile p = profileTable.getSelectionModel().getSelectedItem();
+                    return p != null && !p.isLocal();
+                },
+                profileTable.getSelectionModel().selectedItemProperty());
+        Button add = new Button(tr("settings.table.add"));
+        add.setOnAction(e -> addProfile());
+        Button edit = new Button(tr("common.edit"));
+        edit.disableProperty().bind(remoteSelected.not());
+        edit.setOnAction(e -> editProfile());
+        Button remove = new Button(tr("common.remove"));
+        remove.disableProperty().bind(remoteSelected.not());
+        remove.setOnAction(e -> removeProfile());
+        Button test = new Button(tr("settings.engine.test"));
+        test.disableProperty().bind(remoteSelected.not());
+        test.setOnAction(e -> testProfile());
+        Button useNext = new Button(tr("settings.engine.useNext"));
+        useNext.disableProperty()
+                .bind(profileTable.getSelectionModel().selectedItemProperty().isNull());
+        useNext.setOnAction(e -> useProfileNext());
+        Button switchNow = new Button(tr("settings.engine.switchNow"));
+        switchNow
+                .disableProperty()
+                .bind(profileTable.getSelectionModel().selectedItemProperty().isNull());
+        switchNow.setOnAction(e -> switchProfileNow());
+        HBox buttons = new HBox(6, add, edit, remove, test, useNext, switchNow);
+        buttons.setAlignment(Pos.CENTER_LEFT);
+        Label hint = new Label(tr("settings.engine.profiles.hint"));
+        hint.setWrapText(true);
+        hint.getStyleClass().add("settings-row-description");
+        profileInUseLabel = new Label();
+        profileInUseLabel.setWrapText(true);
+        profileInUseLabel.getStyleClass().add("settings-row-title");
+        profileStatusLabel = new Label();
+        profileStatusLabel.setWrapText(true);
+        profileStatusLabel.getStyleClass().add("settings-row-description");
+        VBox box = new VBox(8, hint, profileInUseLabel, profileTable, buttons, profileStatusLabel);
+        section.getChildren().add(box);
+        rows.add(new Row(
+                Category.ENGINE_PROFILES,
+                box,
+                tr("settings.engine.profiles") + " | " + tr("settings.engine.profiles.keywords"),
+                section));
+    }
+
+    private void addProfile() {
+        if (profileStore == null) return;
+        profileDialog = new EngineProfileDialog(stage, null, profileTester);
+        Optional<EngineProfile> made = profileDialog.showAndWait();
+        profileDialog = null;
+        if (made.isEmpty()) return;
+        List<EngineProfile> list = new ArrayList<>(profileStore.entries());
+        list.add(made.get());
+        saveProfiles(list, made.get());
+    }
+
+    private void editProfile() {
+        EngineProfile selected = profileTable.getSelectionModel().getSelectedItem();
+        if (profileStore == null || selected == null || selected.isLocal()) return;
+        profileDialog = new EngineProfileDialog(stage, selected, profileTester);
+        Optional<EngineProfile> edited = profileDialog.showAndWait();
+        profileDialog = null;
+        if (edited.isEmpty()) return;
+        List<EngineProfile> list = new ArrayList<>(profileStore.entries());
+        int at = list.indexOf(selected);
+        if (at < 0) list.add(edited.get());
+        else list.set(at, edited.get());
+        saveProfiles(list, edited.get());
+    }
+
+    private void removeProfile() {
+        EngineProfile selected = profileTable.getSelectionModel().getSelectedItem();
+        if (profileStore == null || selected == null || selected.isLocal()) return;
+        List<EngineProfile> list = new ArrayList<>(profileStore.entries());
+        list.remove(selected);
+        if (settings.engineProfile().equals(selected.id())) {
+            settings.setEngineProfile(EngineProfile.LOCAL_ID);
+            settings.saveQuietly();
+        }
+        saveProfiles(list, null);
+    }
+
+    /** Asks the selected daemon who it is, off the FX thread, and says so under the table. */
+    private void testProfile() {
+        EngineProfile selected = profileTable.getSelectionModel().getSelectedItem();
+        if (selected == null || selected.isLocal()) return;
+        profileStatusLabel.setText(tr("settings.engine.testing", selected.displayName()));
+        Thread.ofVirtual().name("profile-test").start(() -> {
+            String line;
+            try {
+                TransmissionEngine.Daemon d = profileTester.test(selected);
+                line = tr("settings.engine.testResult", selected.displayName(), EngineProfileDialog.daemonLine(d));
+            } catch (com.torrenta.engine.EngineException e) {
+                line = tr("settings.engine.testFailed", selected.displayName(), e.getMessage());
+            } catch (RuntimeException e) {
+                line = tr("settings.engine.testFailed", selected.displayName(), e.toString());
+            }
+            String text = line;
+            javafx.application.Platform.runLater(() -> profileStatusLabel.setText(text));
+        });
+    }
+
+    private void useProfileNext() {
+        EngineProfile selected = profileTable.getSelectionModel().getSelectedItem();
+        if (selected == null) return;
+        settings.setEngineProfile(selected.id());
+        settings.saveQuietly();
+        reloadProfiles();
+        profileTable.getSelectionModel().select(selected);
+        profileStatusLabel.setText(tr("settings.engine.nextStart", selected.displayName()));
+    }
+
+    private void switchProfileNow() {
+        EngineProfile selected = profileTable.getSelectionModel().getSelectedItem();
+        if (selected == null || profilesHost == null) return;
+        profilesHost.switchTo(selected);
+        reloadProfiles();
+    }
+
+    private void saveProfiles(List<EngineProfile> list, EngineProfile select) {
+        try {
+            profileStore.set(list);
+        } catch (IOException e) {
+            report(tr("settings.engine.saveFailed", e.getMessage()));
+            return;
+        }
+        reloadProfiles();
+        if (select != null) profileTable.getSelectionModel().select(select);
+    }
+
+    /** The store's list into the table, the local engine first; the "in use" line refreshed. */
+    private void reloadProfiles() {
+        if (profileStore == null || profileTable == null) return;
+        EngineProfile selected = profileTable.getSelectionModel().getSelectedItem();
+        profileTable.getItems().setAll(profileStore.all());
+        if (selected != null && profileTable.getItems().contains(selected))
+            profileTable.getSelectionModel().select(selected);
+        if (profilesHost != null) {
+            EngineProfile inUse = profilesHost.inUse();
+            String engine = profilesHost.engineLine();
+            EngineProfile next = profileStore.byId(settings.engineProfile()).orElse(EngineProfile.LOCAL);
+            profileInUseLabel.setText(tr(
+                    "settings.engine.inUse",
+                    inUse.displayName(),
+                    engine.isEmpty() ? 0 : 1,
+                    engine,
+                    next.id().equals(inUse.id()) ? 0 : 1,
+                    next.displayName()));
+        }
+    }
+
+    /** The open profile dialog's test line, for a capture. */
+    String profileDialogStatusForCapture() {
+        return profileDialog != null && profileDialog.isShowing() ? profileDialog.statusText() : "";
+    }
+
+    /** Opens the Add Profile dialog on the next pulse, with the URL filled in and Test pressed when asked. */
+    void openProfileDialogForCapture(String url, boolean test) {
+        selectPageForCapture("ENGINE_PROFILES");
+        javafx.application.Platform.runLater(() -> {
+            if (profileStore == null) return;
+            profileDialog = new EngineProfileDialog(stage, null, profileTester);
+            profileDialog.prefillUrl(url);
+            if (test) javafx.application.Platform.runLater(profileDialog::runTest);
+            Optional<EngineProfile> made = profileDialog.showAndWait();
+            profileDialog = null;
+            if (made.isPresent()) {
+                List<EngineProfile> list = new ArrayList<>(profileStore.entries());
+                list.add(made.get());
+                saveProfiles(list, made.get());
+            }
+        });
+    }
+
     private void buildAutomation(VBox page) {
         VBox run = section(page, tr("settings.automation.runOnEvent"));
         onAdded = commandField(EngineEvent.Kind.ADDED);
@@ -2409,7 +2725,8 @@ final class SettingsWindow {
                 tr("settings.adding.sequential"),
                 tr("settings.adding.sequential.desc"),
                 addSequential,
-                tr("settings.adding.sequential.keywords"));
+                tr("settings.adding.sequential.keywords"),
+                Engine.Capability.SEQUENTIAL_DOWNLOAD);
         addWithoutAsking = new CheckBox();
         addWithoutAsking.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -2459,7 +2776,8 @@ final class SettingsWindow {
                 tr("settings.connection.ipv6"),
                 tr("settings.connection.ipv6.desc"),
                 ipv6,
-                tr("settings.connection.ipv6.keywords"));
+                tr("settings.connection.ipv6.keywords"),
+                Engine.Capability.LISTEN_DETAILS);
         listenInterface = text(Settings.CONN_INTERFACE);
         listenInterface.setPrefColumnCount(18);
         listenInterface.setPromptText(tr("settings.connection.interface.prompt"));
@@ -2469,7 +2787,8 @@ final class SettingsWindow {
                 tr("settings.connection.interface"),
                 tr("settings.connection.interface.desc"),
                 listenInterface,
-                tr("settings.connection.interface.keywords"));
+                tr("settings.connection.interface.keywords"),
+                Engine.Capability.LISTEN_DETAILS);
 
         VBox limits = section(page, tr("settings.connection.limits"));
         maxConnections = intSpinner(2, 10_000, Settings.CONN_MAX_CONNECTIONS);
@@ -2495,7 +2814,8 @@ final class SettingsWindow {
                 tr("settings.connection.uploadSlots"),
                 tr("settings.connection.uploadSlots.desc"),
                 uploadSlots,
-                tr("settings.connection.uploadSlots.keywords"));
+                tr("settings.connection.uploadSlots.keywords"),
+                Engine.Capability.UPLOAD_SLOTS);
 
         VBox proxy = section(page, tr("settings.connection.proxy"));
         proxyType = new ChoiceBox<>();
@@ -2522,7 +2842,8 @@ final class SettingsWindow {
                 tr("settings.connection.proxyType"),
                 tr("settings.connection.proxyType.desc"),
                 proxyType,
-                tr("settings.connection.proxyType.keywords"));
+                tr("settings.connection.proxyType.keywords"),
+                Engine.Capability.PROXY);
         proxyHost = text(Settings.PROXY_HOST);
         proxyHost.setPrefColumnCount(18);
         row(
@@ -2531,7 +2852,8 @@ final class SettingsWindow {
                 tr("settings.connection.proxyHost"),
                 tr("settings.connection.proxyHost.desc"),
                 proxyHost,
-                tr("settings.connection.proxyHost.keywords"));
+                tr("settings.connection.proxyHost.keywords"),
+                Engine.Capability.PROXY);
         proxyPort = intSpinner(1, 65535, Settings.PROXY_PORT);
         row(Category.CONNECTION, proxy, tr("settings.connection.proxyPort"), "", proxyPort, "");
         proxyUsername = text(Settings.PROXY_USERNAME);
@@ -2541,7 +2863,8 @@ final class SettingsWindow {
                 tr("settings.connection.proxyUsername"),
                 tr("settings.connection.proxyUsername.desc"),
                 proxyUsername,
-                tr("settings.connection.proxyUsername.keywords"));
+                tr("settings.connection.proxyUsername.keywords"),
+                Engine.Capability.PROXY);
         proxyPassword = new PasswordField();
         proxyPassword.textProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -2554,7 +2877,8 @@ final class SettingsWindow {
                 tr("settings.connection.proxyPassword"),
                 tr("settings.connection.proxyPassword.desc"),
                 proxyPassword,
-                tr("settings.connection.proxyPassword.keywords"));
+                tr("settings.connection.proxyPassword.keywords"),
+                Engine.Capability.PROXY);
         proxyPeers = bool(Settings.PROXY_PEERS);
         row(
                 Category.CONNECTION,
@@ -2562,7 +2886,8 @@ final class SettingsWindow {
                 tr("settings.connection.proxyPeers"),
                 tr("settings.connection.proxyPeers.desc"),
                 proxyPeers,
-                tr("settings.connection.proxyPeers.keywords"));
+                tr("settings.connection.proxyPeers.keywords"),
+                Engine.Capability.PROXY);
         for (var control : List.of(proxyHost, proxyPort, proxyUsername, proxyPassword, proxyPeers)) {
             control.disableProperty().bind(proxyType.valueProperty().isEqualTo(EngineSettings.ProxyType.NONE));
         }
@@ -2636,7 +2961,8 @@ final class SettingsWindow {
                 tr("settings.protocol.anonymous"),
                 tr("settings.protocol.anonymous.desc"),
                 anonymous,
-                tr("settings.protocol.anonymous.keywords"));
+                tr("settings.protocol.anonymous.keywords"),
+                Engine.Capability.ANONYMOUS_MODE);
 
         VBox trackers = section(page, tr("settings.protocol.trackers"));
         defaultTrackers = new TextArea();
@@ -2698,7 +3024,8 @@ final class SettingsWindow {
                 tr("settings.ipFilter.refreshHours"),
                 tr("settings.ipFilter.refreshHours.desc"),
                 ipFilterHours,
-                tr("settings.ipFilter.refreshHours.keywords"));
+                tr("settings.ipFilter.refreshHours.keywords"),
+                Engine.Capability.IP_FILTER);
         ipFilterFile = new TextField();
         ipFilterFile.setPrefColumnCount(16);
         ipFilterFile.setPromptText(tr("settings.ipFilter.file.prompt"));
@@ -2721,7 +3048,8 @@ final class SettingsWindow {
                 tr("settings.ipFilter.file"),
                 tr("settings.ipFilter.file.desc"),
                 new HBox(6, ipFilterFile, browseFile),
-                tr("settings.ipFilter.file.keywords"));
+                tr("settings.ipFilter.file.keywords"),
+                Engine.Capability.IP_FILTER);
 
         VBox bans = section(page, tr("settings.ipFilter.bans"));
         ipFilterBans = new TextArea();
@@ -2743,7 +3071,8 @@ final class SettingsWindow {
                 tr("settings.ipFilter.banned"),
                 tr("settings.ipFilter.banned.desc"),
                 ipFilterBans,
-                tr("settings.ipFilter.banned.keywords"));
+                tr("settings.ipFilter.banned.keywords"),
+                Engine.Capability.IP_FILTER);
         ipFilterStatusLabel = new Label("");
         ipFilterStatusLabel.getStyleClass().add("settings-row-description");
         ipFilterStatusLabel.setWrapText(true);
@@ -2841,7 +3170,8 @@ final class SettingsWindow {
                 tr("settings.speed.countOverhead"),
                 tr("settings.speed.countOverhead.desc"),
                 countOverhead,
-                tr("settings.speed.countOverhead.keywords"));
+                tr("settings.speed.countOverhead.keywords"),
+                Engine.Capability.OVERHEAD_IN_LIMITS);
     }
 
     private void buildQueue(VBox page) {
@@ -2869,7 +3199,8 @@ final class SettingsWindow {
                 tr("settings.queue.activeLimit"),
                 tr("settings.queue.activeLimit.desc"),
                 activeLimit,
-                tr("settings.queue.activeLimit.keywords"));
+                tr("settings.queue.activeLimit.keywords"),
+                Engine.Capability.ACTIVE_TOTAL_LIMIT);
         ignoreSlow = bool(Settings.QUEUE_IGNORE_SLOW);
         row(
                 Category.QUEUE,
@@ -3008,6 +3339,7 @@ final class SettingsWindow {
         loading = true;
         try {
             reloadLabels();
+            reloadProfiles();
             reloadWatch();
             reloadDefinitions();
             reloadRss();

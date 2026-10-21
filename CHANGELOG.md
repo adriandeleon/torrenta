@@ -34,6 +34,25 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **A Transmission daemon as the engine** (roadmap 0.9): the same window drives a
+  `transmission-daemon` on a seedbox or a NAS over its RPC (`TransmissionEngine`: JSON over HTTP(S),
+  the session-id handshake, basic auth; one lean `torrent-get` per poll, the detail fields only for
+  the selected torrent; added, finished, removed and error events made by comparing polls, since
+  the RPC has no push). Settings → Engine, the first page of the Engine group, holds the profiles:
+  Local (libtorrent) and any number of remote daemons (name, URL, user, password, Test connection
+  for the version and RPC version), kept in `profiles.json` beside the settings, owner-readable,
+  never synced; Use at next start (`engine.profile`, this machine's) or Switch now, also File →
+  Switch engine profile… and the palette, which restarts the engine in place. The window title
+  names a remote profile; a daemon that cannot be reached leaves the window up with the reason,
+  Retry and Switch profile…. What a daemon cannot do is hidden, not greyed out and not imitated
+  (`Engine.Capabilities`): the torrent creator, the magnet file list before adding, the IP filter
+  from ranges (the blocklist URL stays: the daemon fetches it), first-and-last pieces, skip check
+  and stop condition on add, upload slots, the proxy, interface binding and IPv6, anonymous mode,
+  overhead in limits, the storage choices, the limit on torrents active in all, sequential download
+  before RPC 18, and Open folder/Open file/Browse unless the daemon is on this machine. Categories
+  and tags live in the daemon's labels (`category:<name>` plus the tags); a Settings change while a
+  daemon is in use sends that one key, never this machine's whole file. Tested against
+  transmission-daemon 4.1.0-beta.2; a real-daemon test runs where the daemon is installed.
 - **Icons in the menus and on the detail tabs.** Every item of the File, Torrent, View and Help
   menus and of the list's right-click menu shows its glyph before its name, the same line glyph
   the toolbar uses for the same command (`Icons.forCommand` is the one rule), at 16 px; the
