@@ -142,6 +142,9 @@ final class Icons {
             case "event-log" -> history();
             case "toggle-toolbar" -> toolbar();
             case "toggle-sidebar", "focus-sidebar" -> sidebar();
+            case "statistics" -> graph();
+            case "message-log" -> messages();
+            case "debug-log" -> bug();
             default -> null;
         };
     }
@@ -349,5 +352,21 @@ final class Icons {
     /** A box with an arrow out of its corner: a page to open elsewhere. */
     static Glyph external() {
         return line("M7 3.5H3.5v9h9V9M9.5 3.5h3v3M12.5 3.5L7.5 8.5");
+    }
+
+    /** Axes with a line rising across them: Statistics, and the Speed tab. */
+    static Glyph graph() {
+        return line("M2.5 2.5v11h11M4.5 10.5l3-3.5 2.5 2 3.5-4.5");
+    }
+
+    /** A speech bubble with lines in it: the message log. */
+    static Glyph messages() {
+        return line("M2.5 3h11v7.5H7.5L4.5 13v-2.5h-2zM5 5.8h6M5 8.2h4");
+    }
+
+    /** A bug: body, legs and feelers, for the debug log. */
+    static Glyph bug() {
+        return line("M5.5 7.5a2.5 3.3 0 1 0 5 0a2.5 3.3 0 1 0-5 0M8 4.2v6.6M5.5 6.2H3M5.5 9H3.2"
+                + "M10.5 6.2H13M10.5 9h2.3M6.5 4.5L5.2 2.8M9.5 4.5l1.3-1.7");
     }
 }

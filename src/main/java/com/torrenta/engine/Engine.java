@@ -121,6 +121,12 @@ public interface Engine extends AutoCloseable {
     /** Session-wide payload rates. */
     Rates rates();
 
+    /**
+     * The session's counters and the all-time totals, as of the engine's last reading: cheap, no
+     * engine round trip, so the Statistics window may ask every second.
+     */
+    SessionStats stats();
+
     /** Writes what is needed to bring the torrents back; also done on {@link #stop()}. */
     void flush();
 

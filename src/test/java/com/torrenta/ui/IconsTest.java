@@ -48,7 +48,6 @@ class IconsTest {
         assertTrue(
                 seen.containsAll(List.of(
                         "newFile",
-                        "newFile",
                         "open",
                         "magnet",
                         "pause",
@@ -102,6 +101,9 @@ class IconsTest {
                 "focus-sidebar",
                 "select-all",
                 "event-log",
+                "statistics",
+                "message-log",
+                "debug-log",
                 "check-updates",
                 "about"
             })
