@@ -115,7 +115,8 @@ final class SettingsWindow {
                 Settings.ADD_START_PAUSED,
                 Settings.ADD_SEQUENTIAL,
                 Settings.ADD_WITHOUT_ASKING,
-                Settings.UI_STATE_COLORS
+                Settings.UI_STATE_COLORS,
+                Settings.UI_DENSITY
             },
             concat(
                     Settings.DOWNLOAD_KEYS,
@@ -261,6 +262,7 @@ final class SettingsWindow {
     private CheckBox preallocate;
     private CheckBox updateCheck;
     private CheckBox stateColors;
+    private ChoiceBox<Density> density;
     private CheckBox addStartPaused;
     private CheckBox addSequential;
     private CheckBox addWithoutAsking;
@@ -821,6 +823,23 @@ final class SettingsWindow {
                 "Editora's Caret & Ink pair, and AtlantaFX's Nord and Cupertino, light and dark. Applied at once.",
                 theme,
                 "appearance colors colours dark light nord cupertino editora style");
+        density = new ChoiceBox<>();
+        density.getItems().addAll(Density.values());
+        density.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setDensity(now.id());
+            settings.saveQuietly();
+            onAppearanceChanged.run();
+        });
+        row(
+                Category.GENERAL,
+                appearance,
+                "Row density",
+                "Comfortable rows are two lines: the name over a thin progress bar and what the torrent is"
+                        + " doing. Compact rows are one line, with Progress and Status as columns. Each keeps"
+                        + " its own columns.",
+                density,
+                "rows density comfortable compact height two lines list table columns");
         stateColors = new CheckBox();
         stateColors.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -1873,6 +1892,7 @@ final class SettingsWindow {
             preallocate.setSelected(settings.preallocate());
             updateCheck.setSelected(settings.updateCheck());
             stateColors.setSelected(settings.stateColors());
+            density.setValue(Density.byId(settings.density(), Density.DEFAULT));
             syncEnabled.setSelected(settings.syncEnabled());
             syncUrl.setText(settings.syncUrl());
             syncBranch.setText(settings.syncBranch().equals("main") ? "" : settings.syncBranch());

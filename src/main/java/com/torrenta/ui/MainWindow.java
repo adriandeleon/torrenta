@@ -110,6 +110,14 @@ public final class MainWindow {
     private final LogWindow logWindow;
     private final Label errorBadge = new Label();
     private TableView<TorrentRow> table;
+    /** Two-line or one-line rows; each remembers its own columns. */
+    private Density density = Density.DEFAULT;
+    /** The columns as built, before any remembered layout: compact's default. */
+    private String builtInLayout = "";
+
+    private final javafx.scene.control.ToggleGroup densityGroup = new javafx.scene.control.ToggleGroup();
+    private final java.util.Map<Density, javafx.scene.control.RadioMenuItem> densityItems =
+            new java.util.EnumMap<>(Density.class);
     private List<Command> commands = List.of();
     private AddDialog currentDialog;
     private LimitsDialog limitsDialog;
@@ -178,8 +186,8 @@ public final class MainWindow {
         settingsWindow.setOnEngineSettingsChanged(this::applyEngineSettings);
         settingsWindow.setLabels(labels, new LabelsHost());
         settingsWindow.setOnIpFilterChanged(this::refreshIpFilter, this::ipFilterStatusText);
-        settingsWindow.setOnAppearanceChanged(this::applyStateColors);
-        applyStateColors();
+        settingsWindow.setOnAppearanceChanged(this::applyAppearance);
+        applyAppearance();
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
         sync = new SettingsSync(settings, configDir, new SyncHost());
         settingsWindow.setSync(sync);
@@ -511,7 +519,7 @@ public final class MainWindow {
             javafx.application.Application.setUserAgentStylesheet(
                     Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
             applyEngineSettings();
-            applyStateColors();
+            applyAppearance();
             refreshIpFilter(false);
             if (settingsWindow.isShowing()) settingsWindow.reloadFromSettings();
         }
@@ -1549,6 +1557,13 @@ public final class MainWindow {
                         always,
                         this::focusFilter),
                 new Command(
+                        "toggle-density",
+                        "Toggle Row Density (Comfortable / Compact)",
+                        null,
+                        null,
+                        always,
+                        () -> chooseDensity(density.other())),
+                new Command(
                         "select-all",
                         "Select All",
                         null,
@@ -1683,11 +1698,21 @@ public final class MainWindow {
         CheckMenuItem sidebarItem = new CheckMenuItem("Sidebar");
         sidebarItem.setAccelerator(shiftChord(KeyCode.B));
         sidebarItem.selectedProperty().bindBidirectional(sidebar.visibleProperty());
+        for (Density d : Density.values()) {
+            javafx.scene.control.RadioMenuItem item = new javafx.scene.control.RadioMenuItem(d + " Rows");
+            item.setToggleGroup(densityGroup);
+            item.setSelected(d == density);
+            item.setOnAction(e -> chooseDensity(d));
+            densityItems.put(d, item);
+        }
         Menu view = new Menu("View");
         view.getItems()
                 .addAll(
                         toolbarItem,
                         sidebarItem,
+                        new SeparatorMenuItem(),
+                        densityItems.get(Density.COMFORTABLE),
+                        densityItems.get(Density.COMPACT),
                         new SeparatorMenuItem(),
                         command("filter").menuItem(),
                         command("focus-sidebar").menuItem(),
@@ -1937,8 +1962,7 @@ public final class MainWindow {
         table.setOnKeyPressed(this::onTableKey);
         table.setRowFactory(t -> new StateRow());
 
-        TableColumn<TorrentRow, String> name = column("name", "Name", 360, true, Torrent::name, s -> s);
-        name.setComparator(String.CASE_INSENSITIVE_ORDER);
+        TableColumn<TorrentRow, RowView> name = nameColumn();
         TableColumn<TorrentRow, Double> progress =
                 column("progress", "Progress", 110, true, Torrent::progress, Format::percent);
         progress.setCellFactory(ProgressBarTableCell.forTableColumn());
@@ -1951,8 +1975,8 @@ public final class MainWindow {
                         statusColumn(),
                         column("seeds", "Seeds", 70, true, Torrent::seeds, String::valueOf),
                         column("peers", "Peers", 70, true, Torrent::peers, String::valueOf),
-                        column("down", "Down", 90, true, Torrent::downloadRate, Bytes::rate),
-                        column("up", "Up", 90, true, Torrent::uploadRate, Bytes::rate),
+                        column("down", "Down", 90, true, Torrent::downloadRate, Format::rate),
+                        column("up", "Up", 90, true, Torrent::uploadRate, Format::rate),
                         column("eta", "ETA", 80, true, Format::etaSeconds, Format::eta),
                         column(
                                 "ratio",
@@ -1968,12 +1992,146 @@ public final class MainWindow {
                         column("tags", "Tags", 160, false, t -> Format.tags(t.tags()), s -> s),
                         column("path", "Save path", 240, false, Torrent::savePath, s -> s)));
 
-        ColumnMemory.apply(table, ColumnLayout.parse(settings.get(Settings.TABLE_COLUMNS, "")));
+        builtInLayout = ColumnLayout.format(ColumnMemory.capture(table));
+        density = Density.byId(settings.density(), Density.DEFAULT);
+        ColumnMemory.apply(table, ColumnLayout.parse(layoutFor(density)));
+        styleForDensity(table);
         ColumnMemory.watch(table, () -> {
-            settings.set(Settings.TABLE_COLUMNS, ColumnLayout.format(ColumnMemory.capture(table)));
+            settings.set(layoutKey(density), ColumnLayout.format(ColumnMemory.capture(table)));
             settings.saveQuietly();
         });
         return table;
+    }
+
+    private static String layoutKey(Density d) {
+        return d == Density.COMFORTABLE ? Settings.TABLE_COLUMNS_COMFORTABLE : Settings.TABLE_COLUMNS;
+    }
+
+    /** The remembered layout for a density, else its default (compact's is the columns as built). */
+    private String layoutFor(Density d) {
+        String saved = settings.get(layoutKey(d), "");
+        if (!saved.isBlank()) return saved;
+        return d == Density.COMPACT ? builtInLayout : d.defaultLayout();
+    }
+
+    private void styleForDensity(TableView<TorrentRow> t) {
+        t.setFixedCellSize(density.cellSize() > 0 ? density.cellSize() : Region.USE_COMPUTED_SIZE);
+        t.getStyleClass().removeAll("comfortable", "compact");
+        t.getStyleClass().add(density.id());
+    }
+
+    /**
+     * Switches the rows' density: the columns as they are now are kept for the density being left,
+     * the other density's own come back, and the cells redraw. The menu follows.
+     */
+    private void applyDensity(Density next) {
+        densityItems
+                .getOrDefault(next, new javafx.scene.control.RadioMenuItem())
+                .setSelected(true);
+        if (next == density) return;
+        settings.set(layoutKey(density), ColumnLayout.format(ColumnMemory.capture(table)));
+        density = next;
+        styleForDensity(table);
+        ColumnMemory.apply(table, ColumnLayout.parse(layoutFor(next)));
+        // A refresh() reuses the cells, and a progress cell built at the other height keeps its
+        // bar where that height put it; a new factory makes new cells.
+        for (TableColumn<TorrentRow, ?> column : table.getColumns()) renewCells(column);
+        table.refresh();
+        settings.saveQuietly();
+    }
+
+    private static <T> void renewCells(TableColumn<TorrentRow, T> column) {
+        var factory = column.getCellFactory();
+        column.setCellFactory(c -> null);
+        column.setCellFactory(factory);
+    }
+
+    /** From the menu or the palette: remembered, then applied. */
+    private void chooseDensity(Density next) {
+        settings.setDensity(next.id());
+        settings.saveQuietly();
+        applyDensity(next);
+    }
+
+    /** Everything Settings → Appearance drives in this window. */
+    private void applyAppearance() {
+        applyStateColors();
+        applyDensity(Density.byId(settings.density(), Density.DEFAULT));
+    }
+
+    /**
+     * The Name column's value: the name, plus what a comfortable row draws under it. A value, not
+     * the snapshot, so the cell redraws exactly when what it shows changes (the stall clock moves a
+     * sentence on while the snapshot stays equal). Sorts by name.
+     */
+    record RowView(String name, StatusLine line, double progress) {}
+
+    private TableColumn<TorrentRow, RowView> nameColumn() {
+        TableColumn<TorrentRow, RowView> column = new TableColumn<>("Name");
+        column.setId("name");
+        column.setPrefWidth(360);
+        column.setCellValueFactory(cell -> {
+            TorrentRow row = cell.getValue();
+            return row.torrentProperty()
+                    .map(t -> new RowView(
+                            t.name(), StatusLine.of(t, row.quietSeconds(), shareLimitFor(t)), t.progress()));
+        });
+        column.setComparator(java.util.Comparator.comparing(RowView::name, String.CASE_INSENSITIVE_ORDER));
+        column.setCellFactory(c -> new NameCell());
+        return column;
+    }
+
+    /**
+     * Compact: the name. Comfortable: the state's glyph beside two lines, the name over a thin bar
+     * and the status sentence; the bar and the glyph take the row's state colour from app.css.
+     */
+    private final class NameCell extends TableCell<TorrentRow, RowView> {
+        private final Label glyph = new Label();
+        private final Label name = new Label();
+        private final javafx.scene.control.ProgressBar bar = new javafx.scene.control.ProgressBar();
+        private final Label lead = new Label();
+        private final Label rest = new Label();
+        private final HBox two;
+
+        NameCell() {
+            glyph.getStyleClass().addAll("state-glyph", "row-glyph");
+            name.getStyleClass().add("row-name");
+            bar.getStyleClass().add("row-bar");
+            lead.getStyleClass().add("state-lead");
+            rest.getStyleClass().add("state-rest");
+            lead.setMinWidth(Region.USE_PREF_SIZE);
+            HBox sub = new HBox(lead, rest);
+            sub.setAlignment(Pos.CENTER_LEFT);
+            HBox under = new HBox(10, bar, sub);
+            under.setAlignment(Pos.CENTER_LEFT);
+            VBox lines = new VBox(3, name, under);
+            lines.setAlignment(Pos.CENTER_LEFT);
+            HBox.setHgrow(lines, Priority.ALWAYS);
+            lines.setMinWidth(0);
+            two = new HBox(8, glyph, lines);
+            two.setAlignment(Pos.CENTER_LEFT);
+            two.getStyleClass().add("row-two-lines");
+        }
+
+        @Override
+        protected void updateItem(RowView item, boolean empty) {
+            super.updateItem(item, empty);
+            if (empty || item == null) {
+                setText(null);
+                setGraphic(null);
+            } else if (density == Density.COMPACT) {
+                setGraphic(null);
+                setText(item.name());
+            } else {
+                setText(null);
+                glyph.setText(item.line().state().glyph());
+                name.setText(item.name());
+                bar.setProgress(item.progress());
+                lead.setText(item.line().lead());
+                rest.setText(item.line().rest());
+                setGraphic(two);
+            }
+        }
     }
 
     /**

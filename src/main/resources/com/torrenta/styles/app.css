@@ -129,6 +129,41 @@
     -fx-text-fill: -color-fg-muted;
 }
 
+/*
+ * Comfortable rows (ui.Density): the glyph beside two lines, the name over a thin bar and the
+ * status sentence. The bar takes the state colours below like the Progress column's does.
+ */
+.torrent-table.comfortable .row-glyph {
+    -fx-min-width: 1.6em;
+    -fx-alignment: center;
+    -fx-font-size: 1.1em;
+}
+
+.torrent-table.comfortable .row-name {
+    -fx-text-fill: -color-cell-fg;
+}
+
+.torrent-table.comfortable .state-lead,
+.torrent-table.comfortable .state-rest {
+    -fx-font-size: 0.92em;
+}
+
+.torrent-table .row-bar {
+    -fx-min-width: 120;
+    -fx-pref-width: 120;
+    -fx-max-width: 120;
+    -fx-pref-height: 4;
+    -fx-max-height: 4;
+    -fx-min-height: 4;
+}
+
+.torrent-table .row-bar > .track,
+.torrent-table .row-bar > .bar {
+    -fx-background-radius: 2;
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+}
+
 /* Paused, queued and done rows recede: nothing is happening and nothing is wrong. */
 .torrent-table .table-row-cell:inactive {
     -color-cell-fg: -color-fg-muted;

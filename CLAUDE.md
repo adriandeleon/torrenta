@@ -224,6 +224,13 @@ release process with the names changed; Termina's README and memory hold the war
   and a stalled torrent's snapshots are often equal while its clock moves. State colours are
   scoped under `.state-colors` on the scene root so the setting can turn them off. The redesign
   these come from is `docs/UI-REDESIGN.md`.
+- **Row density swaps column layouts and must renew the cells.** Comfortable rows (two lines, the
+  default) and compact rows each keep their own layout (`table.columns.comfortable`,
+  `table.columns`); `applyDensity` saves the one being left and applies the other. `refresh()`
+  reuses cells, and a progress cell built at the other row height kept its bar at the top of the
+  row: re-setting each column's cell factory makes new ones. The Name column's value is a
+  `RowView` (name, sentence, progress), not the name, so the comfortable cell redraws when its
+  second line changes.
 - **Rows are `TorrentRow` objects, never `Torrent` snapshots.** The list has an extractor on the
   row's torrent property, which is what makes the `SortedList` re-sort on an in-place update.
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
