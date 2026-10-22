@@ -111,7 +111,9 @@ class IconsTest {
                 "select-all",
                 "event-log",
                 "check-updates",
-                "about"
+                "about",
+                "alt-speed",
+                "quit"
             })
     void everyMenuCommandHasAGlyph(String id) {
         Icons.Glyph a = Icons.forCommand(id);

@@ -117,6 +117,7 @@ final class DevCapture {
         System.out.println("capture: javafx=" + System.getProperty("javafx.runtime.version", "?"));
         System.out.println("capture: status=" + window.statusText());
         System.out.println("capture: statusbar=" + window.networkStatusText());
+        System.out.println("capture: alt-speed=" + window.altSpeedText());
         for (String line : window.eventLines()) System.out.println("capture: event=" + line);
         if (!window.availableUpdateVersion().isEmpty())
             System.out.println("capture: update=" + window.availableUpdateVersion());

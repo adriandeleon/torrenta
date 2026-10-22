@@ -28,7 +28,6 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
@@ -243,6 +242,11 @@ public final class MainWindow {
     private final MenuItem skipUpdateItem = new MenuItem();
     private final Label updateBadge = new Label();
     private final Label altSpeedToggle = new Label();
+    /** View → Alternative Speed Limits, checked while they are in force. */
+    private CheckMenuItem altSpeedItem;
+    /** Whether the alternative limits were in force at the last refresh, on the FX thread. */
+    private boolean altSpeedOn;
+
     private ReleaseInfo availableUpdate;
     private SettingsSync sync;
     private final Label syncBadge = new Label(tr("status.syncProblem"));
@@ -438,6 +442,12 @@ public final class MainWindow {
             showDownloadFolder(welcome);
         }));
         detail.setOnBanPeer(this::banPeer);
+        detail.setOnCopyPeer(address -> {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(address);
+            Clipboard.getSystemClipboard().setContent(content);
+            setStatus(tr("status.copied.address", address));
+        });
         log.installLogBridge(Platform::runLater);
         reportDefinitionProblems();
         host.getChildren().add(root);
@@ -752,6 +762,11 @@ public final class MainWindow {
     }
 
     /** The status bar's network entries as shown; read by the development capture. */
+    /** The status bar's alternative-speed toggle and View's check item, for the capture hook. */
+    public String altSpeedText() {
+        return "\"" + altSpeedToggle.getText() + "\" checked=" + (altSpeedItem != null && altSpeedItem.isSelected());
+    }
+
     public String networkStatusText() {
         String dot = portDot.getStyleClass().stream()
                 .filter(c -> c.startsWith("port-") && !c.equals("port-dot"))
@@ -924,6 +939,11 @@ public final class MainWindow {
         } else if (action.startsWith("settings:")) {
             settingsWindow.show(stage);
             settingsWindow.searchForCapture(action.substring("settings:".length()));
+        } else if (action.startsWith("settings-key:")) {
+            // A key in the open Settings window, where its focus is (settings-key:ESCAPE).
+            settingsWindow.keyForCapture(KeyCode.valueOf(action.substring("settings-key:".length())));
+        } else if (action.equals("settings-close")) {
+            settingsWindow.hideForCapture();
         } else if (action.startsWith("settings-layout:")) {
             // settings-layout:<sidebar>/<detail>, e.g. right/hidden: the General page's two rows.
             String[] ids = action.substring("settings-layout:".length()).split("/", 2);
@@ -1111,6 +1131,24 @@ public final class MainWindow {
                         .findFirst()
                         .orElseThrow(() -> new IllegalArgumentException("no submenu " + title));
             }
+        } else if (action.equals("peer-menu") || action.equals("peer-ban")) {
+            // The Peers tab's context menu about the first peer, its lines printed; peer-ban then
+            // presses Ban Peer. Two seconds on, so the detail poll has filled the tab after a
+            // select-first in the same batch (allow for it in captureAfterMs).
+            showDetail();
+            detail.selectTab("peers");
+            javafx.animation.PauseTransition later =
+                    new javafx.animation.PauseTransition(javafx.util.Duration.seconds(2));
+            later.setOnFinished(e -> {
+                if (action.equals("peer-menu")) {
+                    detail.showPeerMenuForCapture();
+                    System.out.println("capture: peer-menu=" + detail.peerMenuLines());
+                } else {
+                    System.out.println("capture: peer-ban=" + detail.banFirstPeerForCapture() + " bans="
+                            + settings.ipFilterBans());
+                }
+            });
+            later.play();
         } else if (action.equals("context-menu")) {
             // The list's context menu, as a right-click on it would open it.
             table.getContextMenu().show(table, javafx.geometry.Side.BOTTOM, 0, 0);
@@ -1157,6 +1195,8 @@ public final class MainWindow {
         if (detailWanted) System.out.println("capture: detail=" + detail.summary());
         if (settingsWindow.isShowing())
             System.out.println("capture: settings=" + settingsWindow.visibleRowsForCapture());
+        if (settingsWindow.isShowing())
+            System.out.println("capture: settings-search=" + settingsWindow.searchStateForCapture());
         if (!settingsWindow.dialogTitle().isEmpty())
             System.out.println("capture: dialog=" + settingsWindow.dialogTitle());
         if (!settingsWindow.searchStatus().isEmpty())
@@ -1334,6 +1374,8 @@ public final class MainWindow {
             Platform.runLater(() -> {
                 altSpeedToggle.setText(alternative ? tr("status.altSpeed.on") : tr("status.altSpeed.off"));
                 altSpeedToggle.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("active"), alternative);
+                altSpeedOn = alternative;
+                if (altSpeedItem != null) altSpeedItem.setSelected(alternative);
             });
         } catch (EngineException ex) {
             Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
@@ -1432,9 +1474,7 @@ public final class MainWindow {
 
     /** From the Peers tab: the address (without its port) joins the manual bans, and the filter is on. */
     private void banPeer(String address) {
-        String ip = address;
-        if (ip.startsWith("[")) ip = ip.substring(1, ip.indexOf(']'));
-        else if (ip.chars().filter(c -> c == ':').count() == 1) ip = ip.substring(0, ip.indexOf(':'));
+        String ip = Actions.peerHost(address);
         List<String> bans = new ArrayList<>(settings.ipFilterBans());
         if (!bans.contains(ip)) bans.add(ip);
         settings.setIpFilterBans(bans);
@@ -2415,15 +2455,12 @@ public final class MainWindow {
     private void remove(boolean deleteFiles) {
         List<Torrent> selected = selectedTorrents();
         if (selected.isEmpty()) return;
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, Actions.removeQuestion(selected.size(), deleteFiles));
-        confirm.setHeaderText(deleteFiles ? tr("window.remove.header.delete") : tr("common.remove"));
-        confirm.initOwner(stage);
-        Fonts.installUiFont(confirm.getDialogPane());
-        ButtonType yes = new ButtonType(
-                deleteFiles ? tr("window.remove.button.delete") : tr("common.remove"), ButtonType.OK.getButtonData());
-        confirm.getButtonTypes().setAll(yes, ButtonType.CANCEL);
-        Optional<ButtonType> answer = confirm.showAndWait();
-        if (answer.isEmpty() || answer.get() != yes) return;
+        boolean yes = RemoveConfirm.ask(
+                stage,
+                deleteFiles ? tr("window.remove.header.delete") : tr("common.remove"),
+                Actions.removeQuestion(selected.size(), deleteFiles),
+                deleteFiles ? tr("window.remove.button.delete") : tr("common.remove"));
+        if (!yes) return;
         onSelection(tr("actions.verb.removed"), (e, t) -> {
             e.remove(t.id(), deleteFiles);
             Platform.runLater(() -> forgetOverride(t.id()));
@@ -2943,6 +2980,14 @@ public final class MainWindow {
                 new Command("remove", tr("command.remove"), null, "Delete", selection, () -> remove(false)),
                 new Command(
                         "remove-data", tr("command.removeData"), null, "Shift+Delete", selection, () -> remove(true)),
+                new Command(
+                        "alt-speed",
+                        tr("command.altSpeed"),
+                        shiftChord(KeyCode.J),
+                        null,
+                        always,
+                        this::toggleAlternativeSpeed),
+                new Command("quit", tr("menu.file.quit"), chord(KeyCode.Q), null, always, this::quit),
                 new Command("check-updates", tr("command.checkUpdates"), null, null, always, this::checkForUpdatesNow),
                 new Command("about", tr("command.about", AppInfo.NAME), null, null, always, this::showAbout),
                 new Command(
@@ -3193,10 +3238,7 @@ public final class MainWindow {
         MenuItem addMagnet = menuItem("add-magnet");
         MenuItem addClipboard = menuItem("add-clipboard");
 
-        MenuItem quit = new MenuItem(tr("menu.file.quit"));
-        quit.setGraphic(menuIcon(Icons.power()));
-        quit.setAccelerator(chord(KeyCode.Q));
-        quit.setOnAction(e -> quit());
+        MenuItem quit = menuItem("quit");
 
         Menu file = new Menu(tr("menu.file"));
         file.getItems()
@@ -3237,6 +3279,16 @@ public final class MainWindow {
         detailItem.setAccelerator(shiftChord(KeyCode.D));
         detailItem.setSelected(detailPlace.shown());
         detailItem.setOnAction(e -> toggleDetail());
+        // Checked while the alternative limits are in force, by hand or by the schedule; the
+        // command flips the manual switch, as a click on the status bar's toggle does.
+        Command altSpeed = command("alt-speed");
+        altSpeedItem = new CheckMenuItem(altSpeed.label());
+        altSpeedItem.setGraphic(menuIcon(Icons.forCommand("alt-speed")));
+        altSpeedItem.setAccelerator(altSpeed.accelerator());
+        altSpeedItem.setOnAction(e -> {
+            altSpeedItem.setSelected(altSpeedOn);
+            altSpeed.run().run();
+        });
         detailRightItem = new CheckMenuItem(tr("menu.view.detailRight"));
         detailRightItem.setSelected(DetailPlace.of(true, settings.detailSide()).beside());
         detailRightItem.setOnAction(e -> switchDetailSide());
@@ -3260,6 +3312,8 @@ public final class MainWindow {
                         new SeparatorMenuItem(),
                         densityItems.get(Density.COMFORTABLE),
                         densityItems.get(Density.COMPACT),
+                        new SeparatorMenuItem(),
+                        altSpeedItem,
                         new SeparatorMenuItem(),
                         menuItem("filter"),
                         menuItem("transfers"),

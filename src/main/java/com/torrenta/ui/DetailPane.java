@@ -74,7 +74,13 @@ final class DetailPane extends VBox {
     private Consumer<String> onRemoveTracker = url -> {};
     private Runnable onReannounce = () -> {};
     private Consumer<String> onBanPeer = address -> {};
+    private Consumer<String> onCopyPeer = address -> {};
     private MenuItem openItem;
+    private MenuItem banItem;
+    private TableView<TorrentDetail.Peer> peerTable;
+    private ContextMenu peerMenu;
+    /** The peer the open context menu is about, read when it shows: the list is replaced every tick. */
+    private String peerTarget;
 
     DetailPane() {
         getStyleClass().add("detail-pane");
@@ -124,9 +130,39 @@ final class DetailPane extends VBox {
         onBanPeer = handler;
     }
 
-    /** Hides what the engine cannot do here: Open file when the files are not on this machine. */
+    void setOnCopyPeer(Consumer<String> handler) {
+        onCopyPeer = handler;
+    }
+
+    /**
+     * Hides what the engine cannot do here: Open file when the files are not on this machine, Ban
+     * Peer when the engine takes no IP filter from us.
+     */
     void applyCapabilities(com.torrenta.engine.Engine.Capabilities caps) {
         if (openItem != null) openItem.setVisible(caps.has(com.torrenta.engine.Engine.Capability.LOCAL_FILES));
+        if (banItem != null) banItem.setVisible(caps.has(com.torrenta.engine.Engine.Capability.IP_FILTER));
+    }
+
+    /** For the capture hook: the Peers tab's context menu, about the first peer when there is one. */
+    void showPeerMenuForCapture() {
+        selectTab("peers");
+        if (!peerItems.isEmpty()) peerTable.getSelectionModel().clearAndSelect(0);
+        peerMenu.show(peerTable, javafx.geometry.Side.BOTTOM, 0, 0);
+    }
+
+    /** For the capture hook: the menu's lines, {@code [icon]} after an item with a glyph. */
+    java.util.List<String> peerMenuLines() {
+        return peerMenu.getItems().stream()
+                .filter(MenuItem::isVisible)
+                .map(i -> i.getText() + (i.getGraphic() != null ? " [icon]" : "") + (i.isDisable() ? " (off)" : ""))
+                .toList();
+    }
+
+    /** For the capture hook: presses Ban Peer on the first peer; false when there is none. */
+    boolean banFirstPeerForCapture() {
+        if (peerItems.isEmpty() || !banItem.isVisible()) return false;
+        onBanPeer.accept(peerItems.get(0).address());
+        return true;
     }
 
     /** The Speed tab's window, shared with the Statistics window through the settings. */
@@ -376,6 +412,28 @@ final class DetailPane extends VBox {
                         column(tr("detail.peers.column.downloaded"), 100, p -> Bytes.human(p.downloaded())),
                         column(tr("detail.peers.column.uploaded"), 100, p -> Bytes.human(p.uploaded()))));
         Headers.uppercase(peers);
+
+        banItem = new MenuItem(tr("detail.peers.ban"));
+        banItem.setGraphic(Icons.ban().at(Icons.MENU_SIZE));
+        banItem.setOnAction(e -> {
+            if (peerTarget != null) onBanPeer.accept(peerTarget);
+        });
+        MenuItem copy = new MenuItem(tr("detail.peers.copyAddress"));
+        copy.setGraphic(Icons.copy().at(Icons.MENU_SIZE));
+        copy.setOnAction(e -> {
+            if (peerTarget != null) onCopyPeer.accept(peerTarget);
+        });
+        peerMenu = new ContextMenu(banItem, copy);
+        // A right-click selects the row before the menu shows; the address is taken then, because
+        // the next tick replaces the list (and with it the selection) while the menu is open.
+        peerMenu.setOnShowing(e -> {
+            TorrentDetail.Peer peer = peers.getSelectionModel().getSelectedItem();
+            peerTarget = peer == null ? null : peer.address();
+            banItem.setDisable(peerTarget == null);
+            copy.setDisable(peerTarget == null);
+        });
+        peers.setContextMenu(peerMenu);
+        peerTable = peers;
         return peers;
     }
 

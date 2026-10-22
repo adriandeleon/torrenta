@@ -141,6 +141,8 @@ final class Icons {
             case "remove-data" -> trashData();
             case "check-updates" -> download();
             case "about" -> info();
+            case "alt-speed" -> altSpeed();
+            case "quit" -> power();
             case "settings" -> settings();
             case "search" -> search();
             case "transfers" -> transfers();
@@ -279,6 +281,16 @@ final class Icons {
         return line(
                 "M7 5.5h5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 7 5.5z"
                         + "M3 10.5V3.6A1.1 1.1 0 0 1 4.1 2.5H11");
+    }
+
+    /** A circle struck through: Ban Peer. */
+    static Glyph ban() {
+        return line("M2.8 8a5.2 5.2 0 1 0 10.4 0a5.2 5.2 0 1 0-10.4 0M4.3 4.3l7.4 7.4");
+    }
+
+    /** The gauge with its needle low: the alternative (slower) speed limits. */
+    static Glyph altSpeed() {
+        return line("M2.8 11.5a5.2 5.2 0 1 1 10.4 0M8 11.5L5.2 8.1M2.5 13.5h11");
     }
 
     /** A hash sign, for the info-hash. */

@@ -32,7 +32,33 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   with "Add now, pick files when ready" and after the files arrived, instead of looking for the
   swarm again from nothing.
 
+- **Alternative speed limits have a command**: View → Alternative Speed Limits (`Ctrl+Shift+J`),
+  checked while they are in force, and in the palette. Quit is in the palette too.
+- **Settings search opens the page that answers it best**: a row whose title matches beats one
+  whose description does, which beats a keyword, so "proxy" opens Connection rather than Sync.
+  A section's heading counts as a keyword of its rows ("proxy" lists the whole Proxy section).
+  `Esc` in a search clears it before it closes the window, and the window opens again unfiltered.
+- **Every removal asks first.** Feeds, rules, watched folders, search providers, engine profiles,
+  categories and tags in Settings are removed after the same question the torrent list and the
+  RSS tab ask; the categories' and tags' buttons say Remove, like the rest.
+- **A search asks the providers again after five minutes.** An answer was reused for as long as
+  the window stayed open, so running the same search later never found anything new.
+
 ### Fixed
+
+- **Ban Peer was unreachable**: the Peers tab has a context menu, Ban Peer and Copy Address
+  (Ban Peer only for an engine that takes our IP filter), as Settings → IP filter promised. It
+  bans the host alone: libtorrent's addresses read `tcp://host:port`, and the scheme went into the
+  ban, which the filter then skipped. Transmission's IPv6 peers are shown in brackets.
+- **The Add dialog's "Wait here for the file list" led nowhere once the fetch had failed**: it hid
+  Add now and left Add disabled for good. Wait is offered only while the file list can still come.
+- **"Add now, pick files when ready" downloaded every file on Transmission**, which has no stop
+  condition. A daemon gets plain Add and Add paused for a magnet instead.
+- **Spinners dropped a number typed before Tab or a click elsewhere**: the RSS refresh interval,
+  the sync interval, a feed's own interval and a rule's "ignore for" days now keep it, as the
+  other spinners do; text that is not a number puts the old value back instead of throwing.
+- **Settings → Connection → Proxy port** had no description, no keywords, and showed for an engine
+  without a proxy.
 
 - **Every style after the debug log's in the stylesheet was ignored** (the RSS rule dialog's among
   them, with a CSS warning at every start): a merge had dropped a closing brace.
