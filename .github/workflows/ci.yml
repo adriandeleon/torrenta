@@ -43,6 +43,23 @@ jobs:
           # other allocators ignore it).
           MALLOC_PERTURB_: '165'
 
+      # A JVM that aborts (SIGABRT) leaves no hs_err and prints nothing; macOS's crash reporter
+      # still writes a report with every thread's stack. It goes into the uploaded folder, and the
+      # crashed thread is printed here so the log alone names the culprit.
+      - name: Keep macOS crash reports
+        if: failure() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p target/surefire-reports/crash-reports
+          found=0
+          for f in ~/Library/Logs/DiagnosticReports/java*.ips /Library/Logs/DiagnosticReports/java*.ips; do
+            [ -f "$f" ] || continue
+            found=1
+            cp "$f" target/surefire-reports/crash-reports/
+            python3 -I .github/scripts/ips-summary.py "$f" || head -c 4000 "$f"
+          done
+          [ "$found" = 1 ] || echo "no java crash report under DiagnosticReports"
+
       - name: Upload test reports
         # Only the failures matter here, and only then. A JVM crash leaves its report next to the
         # pom, not under target.
