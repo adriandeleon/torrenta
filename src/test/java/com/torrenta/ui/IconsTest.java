@@ -60,7 +60,8 @@ class IconsTest {
                         "history",
                         "settings",
                         "palette",
-                        "folderSmall")),
+                        "folderSmall",
+                        "fileSmall")),
                 seen.toString());
     }
 

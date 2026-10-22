@@ -1906,9 +1906,13 @@ class LibtorrentEngineTest {
             assertTrue(Files.isRegularFile(moved.resolve("pair").resolve("a.bin")));
             assertTrue(Files.isRegularFile(moved.resolve("pair").resolve("sub").resolve("b.bin")));
             assertFalse(Files.exists(dir.resolve("seed").resolve("pair").resolve("a.bin")), "moved, not copied");
+            // A snapshot, then the slice: a sub-list of the live list throws once the alert thread
+            // adds to it, which it may do while the message is being built.
+            List<EngineEvent> since = List.copyOf(events);
+            since = since.subList(before, since.size());
             assertTrue(
-                    events.stream().skip(before).noneMatch(e -> e.message().contains("checked")),
-                    "a plain move needs no recheck: " + events.subList(before, events.size()));
+                    since.stream().noneMatch(e -> e.message().contains("checked")),
+                    "a plain move needs no recheck: " + since);
             assertEquals(moved.toString(), engine.detail(id).general().savePath());
 
             // The same files already at the next destination: kept as they are, the source left alone.
