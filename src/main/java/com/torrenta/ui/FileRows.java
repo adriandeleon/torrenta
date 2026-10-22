@@ -1,5 +1,6 @@
 package com.torrenta.ui;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -74,6 +75,17 @@ public final class FileRows {
         List<Row> children() {
             return children;
         }
+    }
+
+    /**
+     * The folder a row's "open folder" shows: a folder row is that folder under the save path, a
+     * file row its containing folder, which for a single-file torrent is the save path itself.
+     */
+    public static Path folderOf(Path savePath, Row row) {
+        Path own = savePath.resolve(row.path());
+        if (!row.isFile()) return own;
+        Path parent = own.getParent();
+        return parent == null ? savePath : parent;
     }
 
     private final Map<Integer, Row> byIndex = new LinkedHashMap<>();
