@@ -57,7 +57,7 @@ import static com.torrenta.i18n.Messages.tr;
  *
  * <p>Driveable without the mouse: arrows move, {@code Enter} on an article with a torrent opens
  * the Add dialog for it, {@code M} toggles read, {@code Shift+M} marks the feed read, {@code N}
- * or {@code Ctrl+N} adds a feed, {@code F5} refreshes the feed ({@code Shift+F5} every feed),
+ * adds a feed ({@code Ctrl+N} stays New Torrent), {@code F5} refreshes the feed ({@code Shift+F5} every feed),
  * {@code Delete} in the feed list removes one after a confirm, {@code Ctrl+C} copies the link,
  * {@code Esc} leaves. The context menus mirror the keys. Hidden while another view shows, so its
  * traversable controls never take the first keystroke of a fresh launch.
@@ -564,8 +564,9 @@ final class RssPane extends VBox {
                 else refreshSelected();
                 e.consume();
             }
+            // Plain N only: Ctrl+N is File → New Torrent everywhere, this tab included.
             case N -> {
-                if (e.isShortcutDown() || !typing) {
+                if (!typing && !e.isShortcutDown()) {
                     addFeed("");
                     e.consume();
                 }

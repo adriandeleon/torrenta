@@ -30,13 +30,15 @@ for the others, `dialog-key:<KeyCode>` for a key in its file tree), `choose-file
 selected torrent, `select-first`, `message-log` / `message-log:<query>` (the status bar's history card; its visible
   lines are printed), `debug-log` (the Debug Log window; `-Dtorrenta.captureLogProbe=true` pushes a warning and an
   uncaught exception through the real path before the shot and prints what the log caught),
-  `detail:<tab>` to show the detail pane on a tab, `search` / `search:<query>` / `search-keys:<KEY+KEY>`
+  `detail:<tab>` to show the detail pane on a tab, `welcome-clipboard:<text>` (the welcome's clipboard
+  card as it would read with that text, the real clipboard untouched; a `welcome=` line is printed), `search` / `search:<query>` / `search-keys:<KEY+KEY>`
   for the Search tab (the keys go where the focus is, once the search has ended; a stand-in server is
   `java scripts/torznab-stub.java 9696 <search.xml> [caps.xml]`), `stats` for the Statistics window
   (the PNG is of it; `stats=` and `stats-graph=` lines after the shot), `detail:speed` for the Speed
   tab (a `speed-tab=` line), or `settings` / `settings:<query>` /
   `settings-page:<category>` to open the Settings window (the PNG is then of it) and print the
-  visible rows; the palette's ranking, the
+  visible rows, `settings-layout:<left|right|hidden>/<bottom|right|hidden>` to choose the sidebar's
+  and the detail pane's places on the General page (a `layout=` line after every action); the palette's ranking, the
   open dialog's title and the log window's state are printed, and when a dialog is open the PNG is
   of the dialog.
 
@@ -64,7 +66,7 @@ to try one on purpose).
 | Update | `update.UpdateCheck` (pure: payload, version rules, due), `UpdateService` (GitHub, off the FX thread, `-Dtorrenta.updateEndpoint` for a capture) — Termina's, verbatim | `com.torrenta.update` |
 | Desktop | `os.SingleInstance` (one per config dir: a `FileLock` on `instance.lock` decides, a loopback `ServerSocket` whose port and token are `instance.port`/`instance.token`, owner-only; `claim` hands off or binds, `deliverTo` flushes what arrived first), `InstanceMessage` (pure: token line, one input per line, blank line ends, caps, `absolute` against the sender's cwd), `Handlers` (pure argv: `xdgMimeDefault`, `windowsRegister/Unregister`, `desktopId` by `StartupWMClass`, `apply` with a `Runner`), `MacHandlers` (AWT `Desktop` open handlers), `Badge` + `BadgeState` (pure count + rate + short text) + `Badges.create` (`AwtBadge` dock text on macOS, `UnityBadge` LauncherEntry signal on Linux, none on Windows), `AwtUse.headful` (the one rule for `java.awt.headless`); `Settings.osHandler/osBadge` (`os.*`, never synced); `MainWindow.openFromOutside` | `com.torrenta.os`, `store`, `ui` |
 | Tray | Nux's and Modula's package, free of JavaFX: `TorrentaTray` (update + dispose), `Trays.create` picks `SniTray` (a StatusNotifierItem + `com.canonical.dbusmenu` on the session bus through dbus-java; Linux, no fallback) or `AwtTray` (Windows, macOS) and says why when neither; `TrayDisplay` (pure: what the arrow's colour means), `TrayIconRenderer` (the SVG mark's geometry in Java2D), `SniMenuModel` (pure: ids and properties); `ui.TrayStatus` (pure: snapshot + rates → display + line); `Settings.tray/closeToTray` (`ui.tray`, `ui.closeToTray`); `MainWindow.installTray/hideToTray/quit` | `com.torrenta.tray`, `ui` |
-| UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `MessageLog` + `MessageLogPopup` (the status bar's history: every `setStatus` with its level, a card over the bar in the palette's chrome, Editora's), `DebugLog` + `DebugLogWindow` (Termina's: j.u.l WARNING and above from every logger plus uncaught exceptions, mirrored to `torrenta-session.log`; View → Debug Log and Settings → General → Diagnostics), `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a vertical `SplitPane`, the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `Command` is one action used by menu, context menu and palette; `PaletteKey` (the chord that opens it, `ui.paletteKey`, Alt+X by default, re-applied live by `applyPaletteKey`); `View` (Transfers, Search, RSS; the id is the command that shows it) + `ViewSwitch` (pure: next/previous with wrap, by place, `parse`) + `ViewStrip` (the row above the centre: name, `Ctrl+1/2/3` badge, accent line under the one showing, a click switches; not focus-traversable), `MainWindow.show(View)` the one way a view changes; `Actions` holds the tested rules | `com.torrenta.ui` |
+| UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `MessageLog` + `MessageLogPopup` (the status bar's history: every `setStatus` with its level, a card over the bar in the palette's chrome, Editora's), `DebugLog` + `DebugLogWindow` (Termina's: j.u.l WARNING and above from every logger plus uncaught exceptions, mirrored to `torrenta-session.log`; View → Debug Log and Settings → General → Diagnostics), `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a `SplitPane` under or beside the list (`DetailPlace`; the sidebar's side is `SidebarPlace`, each a shown key plus a side key so hiding keeps the place, each detail place its own divider), the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `NetworkStatus` (the status bar's port dot and words, DHT nodes, free space where downloads go; pure, from `Engine.connectivity()` + `stats().dhtNodes()`) + its `Clock`; `Welcome` + `WelcomeText` (the window before the first torrent: drop zone, the four keys from their commands, the clipboard's magnet or link offered on each focus, the download folder with a "change"); `Command` is one action used by menu, context menu and palette; `PaletteKey` (the chord that opens it, `ui.paletteKey`, Alt+X by default, re-applied live by `applyPaletteKey`); `View` (Transfers, Search, RSS; the id is the command that shows it) + `ViewSwitch` (pure: next/previous with wrap, by place, `parse`) + `ViewStrip` (the row above the centre: name, `Ctrl+1/2/3` badge, accent line under the one showing, a click switches; not focus-traversable), `MainWindow.show(View)` the one way a view changes; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
 | Remote engine | `TransmissionEngine` over Transmission's RPC (`RpcClient`: POST JSON, the 409 session-id handshake, basic auth; `Json` tree over jackson-core streaming; `Bencode` reads a `.torrent` for `inspect`; `TransmissionLabels` puts the category in a `category:` label); `Engine.Capability`/`Capabilities` say what an engine can do, `ui.CapabilityRules` is the pure rule the window hides by; `EngineProfile` (local or remote, URL, user, password) in `store.ProfileStore` (`profiles.json`, owner-only, never synced), `engine.profile` picks the next start's; Settings → Engine, `ui.EngineProfileDialog`; `MainWindow.startEngine/switchProfile` build the engine through App's `EngineFactory` | `com.torrenta.engine.transmission`, `engine`, `store`, `ui` |
@@ -141,7 +143,9 @@ release process with the names changed; Termina's README and memory hold the war
   was the first traversable node. It is `setFocusTraversable(false)`; Ctrl+K (and Ctrl+F) reach it.
 - **Space and Delete are handled on the table, never as scene accelerators.** An accelerator fires
   on any unconsumed key press, and a text field does not consume Space — so a space typed into the
-  filter would pause the selection. `Command.hint` carries the key's name for the menus.
+  filter would pause the selection. `Command.hint` carries the key's name for the menus, where it
+  is the item's accelerator as a `HintCombination`: drawn in the accelerator column, never
+  matching a key, equal only to itself (KeyCombination's own equality compares modifiers alone).
 - **"Paused" means paused by a person.** libtorrent's queue pauses auto-managed torrents too;
   `Torrent.paused` is `PAUSED && !AUTO_MANAGED`, and `pause()` clears `AUTO_MANAGED` first so the
   queue does not resume what the user stopped.
@@ -270,7 +274,9 @@ release process with the names changed; Termina's README and memory hold the war
   arrives, so the fetch is matched by either hash (`fetchOf`), never by `id()`.
 - **"Add now, pick files when ready"** adds with stop-after-metadata and marks
   `torrent.<hash>.pickFiles` in the settings; `MainWindow.chooseFiles(id)` opens the dialog's
-  tree for a torrent in the list and clears the mark. Nothing shows the mark on the row yet.
+  tree for a torrent in the list and clears the mark. Torrent → Choose Files… (`choose-files`) is
+  live for one marked torrent (`Actions.canChooseFiles`); the settings are not observable, so
+  setting or clearing a mark bumps `pickFilesMarks`. Nothing shows the mark on the row yet.
 - **libtorrent's mmap disk I/O takes the JVM's SIGSEGV handler.** Once a file of
   `mmap_file_size_cutoff` pieces (40 by default) is mapped, libtorrent installs a SIGSEGV/SIGBUS
   guard of its own in place of the JVM's (`sigaction`, no chaining); a fault that is not its own,
@@ -317,6 +323,14 @@ release process with the names changed; Termina's README and memory hold the war
   the poll, the watcher and the old engine (on a worker), empties the list and runs `startEngine`,
   which ends in `engineReady` again; `engineUp` stays counted down, so a rule's add during the gap
   sees `engine == null` and fails plainly.
+- **"Open" means a peer from outside reached the port, and nothing less.** `engine.Connectivity`
+  is kept on the alert thread from `listen_succeeded`/`listen_failed` (TCP only), `portmap`/
+  `portmap_error` (either transport mapping is enough), `incoming_connection` (an address on this
+  network, CGNAT included, proves nothing) and `dht_bootstrap`; a new port forgets the rest.
+  Without a running torrent no peer comes, so the port reads "checking" until
+  `NetworkStatus.Clock` has counted five minutes of running torrents with none, then "blocked".
+  The capture prints `statusbar=` (port, dot, DHT, free space); a loopback peer cannot show "open". `Engine.connectivity()` defaults to `NONE` (the
+  Transmission engine), which hides the port and the DHT; free space needs `LOCAL_FILES`.
 - **A removed torrent's alert carries only the hash.** `remove()` reads the name first and raises
   the event itself; the `TORRENT_REMOVED` alert is not listened to.
 - **Ctrl+Tab is a scene event filter, not an accelerator**: focus traversal owns Tab, and a

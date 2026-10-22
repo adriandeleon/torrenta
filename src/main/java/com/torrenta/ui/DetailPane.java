@@ -52,6 +52,7 @@ final class DetailPane extends VBox {
     private final TabPane tabs = new TabPane();
     private final GridPane general = new GridPane();
     private final Label[] generalValues = new Label[13];
+    private final Label[] generalNames = new Label[13];
     private final FileRows fileRows = new FileRows();
     private final TreeTableView<FileRows.Row> files = new TreeTableView<>();
     private final ObservableList<TorrentDetail.Peer> peerItems = FXCollections.observableArrayList();
@@ -270,7 +271,6 @@ final class DetailPane extends VBox {
             tr("detail.general.tracker"),
             tr("detail.general.private")
         };
-        // Two columns of pairs, so the tab is a glance rather than a scroll.
         for (int i = 0; i < names.length; i++) {
             Label name = new Label(names[i]);
             name.getStyleClass().add("dialog-label");
@@ -279,14 +279,32 @@ final class DetailPane extends VBox {
             // The hash and the path: the working face, as Editora sets them.
             if (i < 2) value.getStyleClass().add("mono");
             generalValues[i] = value;
-            int column = i < 7 ? 0 : 2;
-            int row = i < 7 ? i : i - 7;
-            general.add(name, column, row);
-            general.add(value, column + 1, row);
+            generalNames[i] = name;
+            general.getChildren().addAll(name, value);
         }
+        placeGeneral(false);
         ScrollPane scroll = new ScrollPane(general);
         scroll.setFitToWidth(true);
         return scroll;
+    }
+
+    /**
+     * Beside the list the pane is narrow and tall, so General's pairs go down one column; under
+     * it, two columns of pairs make the tab a glance rather than a scroll.
+     */
+    void setBeside(boolean beside) {
+        pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("right"), beside);
+        placeGeneral(beside);
+    }
+
+    private void placeGeneral(boolean oneColumn) {
+        for (int i = 0; i < generalValues.length; i++) {
+            boolean first = oneColumn || i < 7;
+            int column = first ? 0 : 2;
+            int row = first ? i : i - 7;
+            GridPane.setConstraints(generalNames[i], column, row);
+            GridPane.setConstraints(generalValues[i], column + 1, row);
+        }
     }
 
     private javafx.scene.Node buildFiles() {
@@ -395,10 +413,7 @@ final class DetailPane extends VBox {
         prompt.setContentText(tr("detail.trackers.addDialog.prompt"));
         prompt.getEditor().setPrefColumnCount(48);
         Optional<String> text = prompt.showAndWait();
-        text.ifPresent(t -> {
-            List<String> urls = List.of(t.trim().split("\\\\s+"));
-            if (!urls.isEmpty() && !urls.get(0).isEmpty()) onAddTrackers.accept(urls);
-        });
+        text.map(Actions::trackerUrls).filter(urls -> !urls.isEmpty()).ifPresent(onAddTrackers);
     }
 
     private javafx.scene.Node buildPieces() {

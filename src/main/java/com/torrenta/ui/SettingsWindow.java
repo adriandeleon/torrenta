@@ -147,12 +147,17 @@ final class SettingsWindow {
     private static final String[] OWNED_KEYS = concat(
             new String[] {
                 Settings.UI_LANGUAGE,
+                Settings.THEME,
                 Settings.UPDATE_CHECK,
                 Settings.ADD_START_PAUSED,
                 Settings.ADD_SEQUENTIAL,
                 Settings.ADD_WITHOUT_ASKING,
                 Settings.UI_STATE_COLORS,
                 Settings.UI_DENSITY,
+                Settings.UI_SIDEBAR,
+                Settings.UI_SIDEBAR_SIDE,
+                Settings.DETAIL_VISIBLE,
+                Settings.DETAIL_SIDE,
                 Settings.UI_EXTENDED_WINDOW,
                 Settings.UI_PALETTE_KEY,
                 Settings.UI_TRAY,
@@ -323,6 +328,16 @@ final class SettingsWindow {
     String rssStatus() {
         if (rssDialog != null && rssDialog.isShowing()) return rssDialog.statusText();
         return rssStatusLabel == null ? "" : rssStatusLabel.getText();
+    }
+
+    /** Chooses the two layout rows as a person would, by id ({@code right/bottom}); the listeners write and apply. */
+    void chooseLayoutForCapture(String sidebarId, String detailId) {
+        for (SidebarPlace p : SidebarPlace.values()) if (p.id().equals(sidebarId)) sidebarPlace.setValue(p);
+        for (DetailPlace p : DetailPlace.values()) if (p.id().equals(detailId)) detailPlace.setValue(p);
+    }
+
+    void hideForCapture() {
+        stage.hide();
     }
 
     /** Opens the Add Feed dialog from the RSS page, on the next pulse, with the URL typed in. */
@@ -500,6 +515,8 @@ final class SettingsWindow {
     private CheckBox updateCheck;
     private CheckBox stateColors;
     private ChoiceBox<Density> density;
+    private ChoiceBox<SidebarPlace> sidebarPlace;
+    private ChoiceBox<DetailPlace> detailPlace;
     private CheckBox extendedWindow;
     private ChoiceBox<PaletteKey> paletteKey;
     private CheckBox tray;
@@ -868,12 +885,7 @@ final class SettingsWindow {
         pageHost.setAlignment(Pos.TOP_LEFT);
 
         Button reset = new Button(tr("settings.reset"));
-        reset.setOnAction(e -> {
-            settings.reset(OWNED_KEYS);
-            settings.saveQuietly();
-            reload();
-            onAppearanceChanged.run();
-        });
+        reset.setOnAction(e -> resetToDefaults());
         Button close = new Button(tr("common.close"));
         close.setOnAction(e -> stage.hide());
         Region spacer = new Region();
@@ -977,6 +989,61 @@ final class SettingsWindow {
                 return;
             }
         }
+    }
+
+    // ---------------------------------------------------------------- reset
+
+    /** What a Reset re-applies only when its key changed, since each one acts on the desktop. */
+    enum ResetHook {
+        THEME,
+        TRAY,
+        HANDLER,
+        BADGE
+    }
+
+    /** The hooks a Reset must run, from the owned keys' values before and after it (null: unset). */
+    static Set<ResetHook> resetHooks(Map<String, String> before, Map<String, String> after) {
+        Set<ResetHook> hooks = java.util.EnumSet.noneOf(ResetHook.class);
+        java.util.function.Predicate<String> changed =
+                key -> !java.util.Objects.equals(before.get(key), after.get(key));
+        if (changed.test(Settings.THEME)) hooks.add(ResetHook.THEME);
+        if (changed.test(Settings.UI_TRAY) || changed.test(Settings.UI_CLOSE_TO_TRAY)) hooks.add(ResetHook.TRAY);
+        if (changed.test(Settings.OS_HANDLER)) hooks.add(ResetHook.HANDLER);
+        if (changed.test(Settings.OS_BADGE)) hooks.add(ResetHook.BADGE);
+        return hooks;
+    }
+
+    private Map<String, String> ownedValues() {
+        Map<String, String> values = new java.util.HashMap<>();
+        for (String key : OWNED_KEYS) values.put(key, settings.get(key, null));
+        return values;
+    }
+
+    /**
+     * Footer's Reset, after a confirm: every owned key back to its default, the controls
+     * reloaded, and everything those keys drive re-applied, as a live edit of each would have.
+     */
+    private void resetToDefaults() {
+        Alert ask = new Alert(Alert.AlertType.CONFIRMATION, tr("settings.reset.question"));
+        ask.setHeaderText(tr("settings.reset.header"));
+        ask.initOwner(stage);
+        Fonts.installUiFont(ask.getDialogPane());
+        if (ask.showAndWait().filter(b -> b == ButtonType.OK).isEmpty()) return;
+        Map<String, String> before = ownedValues();
+        settings.reset(OWNED_KEYS);
+        settings.saveQuietly();
+        Set<ResetHook> hooks = resetHooks(before, ownedValues());
+        reload();
+        if (hooks.contains(ResetHook.THEME)) {
+            javafx.application.Application.setUserAgentStylesheet(
+                    Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
+        }
+        onAppearanceChanged.run();
+        onEngineSettingsChanged.run();
+        onIpFilterChanged.accept(false);
+        if (hooks.contains(ResetHook.TRAY)) onTrayChanged.run();
+        if (hooks.contains(ResetHook.HANDLER)) onHandlerChanged.run();
+        if (hooks.contains(ResetHook.BADGE)) onBadgeChanged.run();
     }
 
     // ---------------------------------------------------------------- search
@@ -1192,6 +1259,39 @@ final class SettingsWindow {
                 tr("settings.general.density.desc"),
                 density,
                 tr("settings.general.density.keywords"));
+        // Each a pair of keys: whether it shows and where, so hiding keeps the side.
+        sidebarPlace = new ChoiceBox<>();
+        sidebarPlace.getItems().addAll(SidebarPlace.values());
+        sidebarPlace.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setSidebar(now.shown());
+            if (now.shown()) settings.setSidebarSide(now.id());
+            settings.saveQuietly();
+            onAppearanceChanged.run();
+        });
+        row(
+                Category.GENERAL,
+                appearance,
+                tr("settings.general.sidebarPlace"),
+                tr("settings.general.sidebarPlace.desc"),
+                sidebarPlace,
+                tr("settings.general.sidebarPlace.keywords"));
+        detailPlace = new ChoiceBox<>();
+        detailPlace.getItems().addAll(DetailPlace.values());
+        detailPlace.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setDetailVisible(now.shown());
+            if (now.shown()) settings.setDetailSide(now.id());
+            settings.saveQuietly();
+            onAppearanceChanged.run();
+        });
+        row(
+                Category.GENERAL,
+                appearance,
+                tr("settings.general.detailPlace"),
+                tr("settings.general.detailPlace.desc"),
+                detailPlace,
+                tr("settings.general.detailPlace.keywords"));
         stateColors = new CheckBox();
         stateColors.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -3355,6 +3455,8 @@ final class SettingsWindow {
             updateCheck.setSelected(settings.updateCheck());
             stateColors.setSelected(settings.stateColors());
             density.setValue(Density.byId(settings.density(), Density.DEFAULT));
+            sidebarPlace.setValue(SidebarPlace.of(settings.sidebar(), settings.sidebarSide()));
+            detailPlace.setValue(DetailPlace.of(settings.detailVisible(), settings.detailSide()));
             extendedWindow.setSelected(settings.extendedWindow());
             paletteKey.setValue(PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT));
             tray.setSelected(settings.tray());

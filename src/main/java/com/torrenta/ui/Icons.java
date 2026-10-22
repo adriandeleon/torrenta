@@ -128,6 +128,7 @@ final class Icons {
             case "queue-bottom" -> moveBottom();
             case "queue" -> queue();
             case "set-location" -> folderMove();
+            case "choose-files" -> files();
             case "limits" -> gauge();
             case "set-category" -> open();
             case "edit-tags" -> tag();
@@ -154,6 +155,7 @@ final class Icons {
             case "debug-log" -> info();
             case "toggle-toolbar" -> toolbar();
             case "toggle-sidebar", "focus-sidebar" -> sidebar();
+            case "toggle-detail" -> detailPane();
             default -> null;
         };
     }
@@ -325,6 +327,11 @@ final class Icons {
     /** A window with a band down its left: the sidebar. */
     static Glyph sidebar() {
         return line("M2 3.5h12v9H2zM5.5 3.5v9");
+    }
+
+    /** A window with a band across its foot: the detail pane. */
+    static Glyph detailPane() {
+        return line("M2 3.5h12v9H2zM2 9h12");
     }
 
     /** Two tall rows: comfortable density. */

@@ -19,6 +19,13 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Changed
 
+- **The sidebar and the details pane go where you want them.** The sidebar sits on the left or
+  the right of the list, or is hidden; the details pane sits under the list, beside it on the
+  right (running the full height, General in one column), or is collapsed. View has "Sidebar on
+  the Right", "Details Pane" (`Ctrl+Shift+D`) and "Details Pane on the Right", the palette has
+  the same, and Settings → General → Appearance has both as choices. Hiding either keeps its
+  place, and each place of the details pane keeps its own size.
+
 - **The filter box is an omnibox** (`Ctrl+K`, `Ctrl+F` still works): a `key:value` term becomes a
   chip the moment the space after it is typed, one the box cannot read becomes a red chip saying
   why, `Backspace` on an empty box hands the last chip back for editing and a click removes one;
@@ -27,12 +34,33 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   on all of them. `Esc` peels one layer at a time: the box, then the list's filter, then its
   selection. The Search tab moved from `Ctrl+K` to `Ctrl+Shift+F`.
 
+- **`Ctrl+N` is New Torrent in the RSS tab too**; `N` still adds a feed there.
+- **Reset to defaults asks first**, puts the theme back as well, and re-applies what the reset
+  keys drive (the engine's connection, speed and queue settings, the IP filter, and the tray,
+  file handlers and badge where those switches changed) instead of leaving them as they were
+  until the next restart.
+
 - **A magnet added from the Add dialog starts with the peers its file-list fetch found**, both
   with "Add now, pick files when ready" and after the files arrived, instead of looking for the
   swarm again from nothing.
 
 ### Fixed
 
+- **Every style after the debug log's in the stylesheet was ignored** (the RSS rule dialog's among
+  them, with a CSS warning at every start): a merge had dropped a closing brace.
+- **The detail pane opening collapsed to its tab strip.** The empty "No torrents yet" state,
+  which stands in for the list at every launch until the engine's first poll, could push the
+  divider down while the window was being laid out, and that position was saved. The divider is
+  no longer remembered while the empty state shows, the saved one is put back when the list
+  appears, and a saved position that leaves the pane its tabs and nothing more is ignored.
+- **Add Trackers took several URLs as one**: the prompt split on a literal `\s` rather than on
+  whitespace, so two URLs on two lines reached the engine as a single announce URL.
+- **The menus now show `Space`, `Delete`, `Shift+Delete`, `Ctrl+V`, `Ctrl+K`, `Esc`, `Ctrl+A`,
+  `Ctrl+Shift+L`, `Ctrl+Shift+T` and `Ctrl+Shift+M`** beside their items; the keys stay where they
+  were (Space and Delete on the list only, so a space typed into the filter does not pause).
+- **`Ctrl+Shift+G` opens Set Category**, as the palette always said it did.
+- **A poll racing a profile switch** could read the engine field after the switch had cleared
+  it; the poll now works on its own copy and skips a tick with no engine.
 - **A crash, any time after a file of 40 pieces or more was checked, downloaded or seeded** (exit
   139, no error file, "Segmentation fault" from the shell, usually at a garbage collection):
   libtorrent's memory-mapped disk I/O installs a SIGSEGV/SIGBUS handler of its own in place of
@@ -46,6 +74,9 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Torrent → Choose Files…** (the context menu and the palette too) for a torrent added with
+  "Add now, pick files when ready": it opens the file tree to choose the files and starts the
+  torrent. Until now nothing in the window led back to it.
 - **Queue order and Set Location, for both engines.** Torrent → Queue → Move to Top / Up / Down /
   Bottom (`Ctrl+Shift+Home` / `Up` / `Down` / `End`, the context menu and the palette too) move
   the selection in the download queue, the selected torrents keeping their order among themselves;
