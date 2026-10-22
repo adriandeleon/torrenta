@@ -664,11 +664,12 @@ final class RssPane extends VBox {
         Feed feed = id.isEmpty() ? null : service.feed(id);
         if (feed == null) return;
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, tr("rss.removeFeed.text", feed.displayName()));
+        confirm.setTitle(tr("rss.removeFeed.header"));
         confirm.setHeaderText(tr("rss.removeFeed.header"));
         confirm.initOwner(getScene().getWindow());
         Fonts.installUiFont(confirm.getDialogPane());
         ButtonType yes = new ButtonType(tr("common.remove"), ButtonType.OK.getButtonData());
-        confirm.getButtonTypes().setAll(yes, ButtonType.CANCEL);
+        confirm.getButtonTypes().setAll(yes, StockButtons.cancel());
         Optional<ButtonType> answer = confirm.showAndWait();
         if (answer.isPresent() && answer.get() == yes) {
             try {

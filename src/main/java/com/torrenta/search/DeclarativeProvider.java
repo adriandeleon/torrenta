@@ -19,6 +19,8 @@ import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The one generic provider every {@link Definition} runs through: the URL is the definition's
  * template with the query and the category filled in, the answer is read as JSON or as HTML, the
@@ -77,15 +79,16 @@ public final class DeclarativeProvider implements SearchProvider {
                     Thread.sleep(search.delayMs());
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    throw new SearchException("interrupted", e);
+                    throw new SearchException(tr("net.interrupted"), e);
                 }
             }
             URI uri = url(definition, q, category, page);
             String body;
-            try (InputStream in = SearchHttp.get(client, uri, definition.headers(), "the server refused the request")) {
+            try (InputStream in =
+                    SearchHttp.get(client, uri, definition.headers(), tr("search.error.requestRefused"))) {
                 body = new String(in.readAllBytes(), StandardCharsets.UTF_8);
             } catch (IOException e) {
-                throw new SearchException("could not read the answer: " + SearchHttp.reason(e), e);
+                throw new SearchException(tr("search.error.unreadable", SearchHttp.reason(e)), e);
             }
             List<SearchResult> found = extract(definition, body, uri, q, clock.get());
             out.addAll(found);
@@ -134,7 +137,7 @@ public final class DeclarativeProvider implements SearchProvider {
             try {
                 root = JsonExtractor.read(body);
             } catch (IOException e) {
-                throw new SearchException("the answer is not JSON: " + e.getMessage(), e);
+                throw new SearchException(tr("search.error.notJson", e.getMessage()), e);
             }
             for (Object row : JsonExtractor.rows(root, definition.rows().path())) {
                 Map<String, String> raw = rawFields(definition, query, (field) -> jsonRaw(field, row));

@@ -10,6 +10,8 @@ import java.util.Locale;
 import com.torrenta.AppInfo;
 import com.torrenta.engine.EngineException;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Gets libtorrent4j's native library onto disk and tells libtorrent4j where it is.
  *
@@ -48,7 +50,7 @@ final class NativeLibrary {
         try {
             extract(resource, target);
         } catch (IOException e) {
-            throw new EngineException("Could not unpack the BitTorrent engine to " + target, e);
+            throw new EngineException(tr("engine.error.unpack", target), e);
         }
         System.setProperty(PATH_PROPERTY, target.toString());
         ready = true;
@@ -67,13 +69,13 @@ final class NativeLibrary {
                 switch (osArch.toLowerCase(Locale.ROOT)) {
                     case "amd64", "x86_64", "x64" -> "x86_64";
                     case "aarch64", "arm64" -> "arm64";
-                    default -> throw new EngineException("No BitTorrent engine build for this CPU (" + osArch + ")");
+                    default -> throw new EngineException(tr("engine.error.noBuildCpu", osArch));
                 };
         String ext;
         if (os.contains("mac") || os.contains("darwin")) ext = "dylib";
         else if (os.contains("windows")) ext = "dll";
         else if (os.contains("linux")) ext = "so";
-        else throw new EngineException("No BitTorrent engine build for this operating system (" + osName + ")");
+        else throw new EngineException(tr("engine.error.noBuildOs", osName));
         return "lib/" + arch + "/libtorrent4j." + ext;
     }
 
@@ -90,9 +92,10 @@ final class NativeLibrary {
         ClassLoader loader = NativeLibrary.class.getClassLoader();
         try (InputStream in = loader.getResourceAsStream(resource)) {
             if (in == null) {
-                throw new EngineException("This build has no BitTorrent engine for "
-                        + System.getProperty("os.name") + " " + System.getProperty("os.arch")
-                        + " (looked for " + resource + " on the class or module path)");
+                throw new EngineException(tr(
+                        "engine.error.noBuildHere",
+                        System.getProperty("os.name") + " " + System.getProperty("os.arch"),
+                        resource));
             }
             Files.createDirectories(target.getParent());
             if (Files.exists(target) && Files.size(target) == sizeOf(resource, loader)) return;

@@ -1663,6 +1663,7 @@ public final class MainWindow {
         dialog.setTitle(tr("dialog.switchProfile.title"));
         dialog.setHeaderText(tr("dialog.switchProfile.header"));
         dialog.setContentText(tr("dialog.switchProfile.content"));
+        StockButtons.translate(dialog);
         promptDialog = dialog;
         Optional<Choice> picked = dialog.showAndWait();
         promptDialog = null;
@@ -2092,6 +2093,7 @@ public final class MainWindow {
         prompt.setTitle(tr("window.addMagnet.title"));
         prompt.setHeaderText(tr("window.addMagnet.header"));
         prompt.setContentText(tr("window.addMagnet.link"));
+        StockButtons.translate(prompt);
         prompt.getEditor().setPrefColumnCount(48);
         prompt.showAndWait().map(String::trim).filter(t -> !t.isEmpty()).ifPresent(this::addInput);
     }
@@ -2114,8 +2116,8 @@ public final class MainWindow {
             lastClipboardOffer = text;
             setStatus(
                     Inputs.classify(text) == Inputs.Kind.MAGNET
-                            ? tr("status.clipboard.magnet")
-                            : tr("status.clipboard.torrent"));
+                            ? tr("status.clipboard.magnet", chord(KeyCode.V).getDisplayText())
+                            : tr("status.clipboard.torrent", chord(KeyCode.V).getDisplayText()));
         });
     }
 
@@ -2416,12 +2418,13 @@ public final class MainWindow {
         List<Torrent> selected = selectedTorrents();
         if (selected.isEmpty()) return;
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, Actions.removeQuestion(selected.size(), deleteFiles));
+        confirm.setTitle(deleteFiles ? tr("window.remove.header.delete") : tr("common.remove"));
         confirm.setHeaderText(deleteFiles ? tr("window.remove.header.delete") : tr("common.remove"));
         confirm.initOwner(stage);
         Fonts.installUiFont(confirm.getDialogPane());
         ButtonType yes = new ButtonType(
                 deleteFiles ? tr("window.remove.button.delete") : tr("common.remove"), ButtonType.OK.getButtonData());
-        confirm.getButtonTypes().setAll(yes, ButtonType.CANCEL);
+        confirm.getButtonTypes().setAll(yes, StockButtons.cancel());
         Optional<ButtonType> answer = confirm.showAndWait();
         if (answer.isEmpty() || answer.get() != yes) return;
         onSelection(tr("actions.verb.removed"), (e, t) -> {
@@ -2568,6 +2571,7 @@ public final class MainWindow {
         prompt.setTitle(tr("window.category.title"));
         prompt.setHeaderText(tr("window.category.header"));
         prompt.setContentText(tr("window.category.label"));
+        StockButtons.translate(prompt);
         promptDialog = prompt;
         Optional<String> answer = prompt.showAndWait();
         promptDialog = null;
@@ -2599,6 +2603,7 @@ public final class MainWindow {
         prompt.setTitle(tr("window.newCategory.title"));
         prompt.setHeaderText(tr("window.newCategory.header"));
         prompt.setContentText(tr("window.newCategory.name"));
+        StockButtons.translate(prompt);
         promptDialog = prompt;
         Optional<String> name = prompt.showAndWait().map(String::trim).filter(n -> !n.isEmpty());
         promptDialog = null;
@@ -2826,7 +2831,8 @@ public final class MainWindow {
                         chord(KeyCode.V).getDisplayText(),
                         always,
                         this::addFromClipboard),
-                new Command("pause-resume", tr("command.pauseResume"), null, "Space", selection, this::togglePause),
+                new Command(
+                        "pause-resume", tr("command.pauseResume"), null, tr("key.space"), selection, this::togglePause),
                 new Command(
                         "force-resume",
                         tr("command.forceResume"),
@@ -2940,9 +2946,14 @@ public final class MainWindow {
                         null,
                         gate("open-folder", selection),
                         this::openFolder),
-                new Command("remove", tr("command.remove"), null, "Delete", selection, () -> remove(false)),
+                new Command("remove", tr("command.remove"), null, tr("key.delete"), selection, () -> remove(false)),
                 new Command(
-                        "remove-data", tr("command.removeData"), null, "Shift+Delete", selection, () -> remove(true)),
+                        "remove-data",
+                        tr("command.removeData"),
+                        null,
+                        tr("key.shiftDelete"),
+                        selection,
+                        () -> remove(true)),
                 new Command("check-updates", tr("command.checkUpdates"), null, null, always, this::checkForUpdatesNow),
                 new Command("about", tr("command.about", AppInfo.NAME), null, null, always, this::showAbout),
                 new Command(
@@ -2958,7 +2969,13 @@ public final class MainWindow {
                 new Command("search", tr("command.search"), shiftChord(KeyCode.F), null, always, this::showSearch),
                 new Command("rss", tr("command.rss"), chord(KeyCode.R), null, always, this::showRss),
                 new Command("rss-run-rules", tr("command.rssRunRules"), null, null, always, rss::runRulesNow),
-                new Command("transfers", tr("command.transfers"), null, "Esc", always, this::showTransfers),
+                new Command(
+                        "transfers",
+                        tr("command.transfers"),
+                        null,
+                        tr("dialog.common.key.esc"),
+                        always,
+                        this::showTransfers),
                 new Command(
                         "filter",
                         tr("command.filter"),

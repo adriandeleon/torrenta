@@ -16,6 +16,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Runs a search across providers: each on its own virtual thread with a timeout, the answers
  * merged and ranked by {@link ResultRanker}, and what did not answer said in the outcome.
@@ -143,11 +145,11 @@ public final class SearchService {
                         future = done.poll(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
-                        leftover = "interrupted";
+                        leftover = tr("net.interrupted");
                         break;
                     }
                     if (future == null) {
-                        leftover = "timed out after " + timeout.toSeconds() + " s";
+                        leftover = tr("net.timedOut", timeout.toSeconds());
                         break;
                     }
                     SearchProvider provider = pending.remove(future);
@@ -157,15 +159,15 @@ public final class SearchService {
                         answers.add(results);
                         progress.answered(provider.name(), results);
                     } catch (CancellationException e) {
-                        failures.put(provider.name(), "cancelled");
-                        progress.failed(provider.name(), "cancelled");
+                        failures.put(provider.name(), tr("search.error.cancelled"));
+                        progress.failed(provider.name(), tr("search.error.cancelled"));
                     } catch (ExecutionException e) {
                         failures.put(provider.name(), reason(e.getCause()));
                         progress.failed(provider.name(), reason(e.getCause()));
                     } catch (InterruptedException e) {
                         // Cannot happen: the future is done. Treated as the interruption it says.
                         Thread.currentThread().interrupt();
-                        leftover = "interrupted";
+                        leftover = tr("net.interrupted");
                         pending.put(future, provider);
                         break;
                     }
@@ -204,8 +206,8 @@ public final class SearchService {
     }
 
     private static String reason(Throwable cause) {
-        if (cause == null) return "failed";
-        if (cause instanceof InterruptedException) return "interrupted";
+        if (cause == null) return tr("search.error.failed");
+        if (cause instanceof InterruptedException) return tr("net.interrupted");
         String message = cause.getMessage();
         if (message == null || message.isBlank()) return cause.getClass().getSimpleName();
         return message;

@@ -10,6 +10,8 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.zip.GZIPInputStream;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /** Downloads a blocklist, plain or gzip-compressed, bounded in time and size. */
 public final class BlocklistFetch {
 
@@ -39,13 +41,15 @@ public final class BlocklistFetch {
             response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IOException("Interrupted while fetching " + url, e);
+            throw new IOException(tr("net.fetchInterrupted", url), e);
+        } catch (IOException e) {
+            throw new IOException(tr("net.fetchFailed", url, TorrentFetch.reason(e, TIMEOUT)), e);
         }
         if (response.statusCode() / 100 != 2)
-            throw new IOException("The server answered " + response.statusCode() + " for " + url);
+            throw new IOException(tr("net.fetchStatus", String.valueOf(response.statusCode()), url));
         try (InputStream in = response.body()) {
             byte[] bytes = in.readNBytes((int) MAX_BYTES + 1);
-            if (bytes.length > MAX_BYTES) throw new IOException("The blocklist is larger than 200 MiB; refusing it");
+            if (bytes.length > MAX_BYTES) throw new IOException(tr("net.blocklistTooLarge"));
             return gunzipIfNeeded(bytes);
         }
     }
@@ -55,7 +59,7 @@ public final class BlocklistFetch {
         if (bytes.length < 2 || (bytes[0] & 0xff) != 0x1f || (bytes[1] & 0xff) != 0x8b) return bytes;
         try (GZIPInputStream in = new GZIPInputStream(new ByteArrayInputStream(bytes))) {
             byte[] out = in.readNBytes((int) MAX_BYTES + 1);
-            if (out.length > MAX_BYTES) throw new IOException("The blocklist is larger than 200 MiB; refusing it");
+            if (out.length > MAX_BYTES) throw new IOException(tr("net.blocklistTooLarge"));
             return out;
         }
     }

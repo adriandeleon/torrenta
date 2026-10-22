@@ -15,6 +15,8 @@ import javax.xml.stream.XMLStreamException;
 
 import com.torrenta.AppInfo;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Fetches a feed over HTTP: the app's User-Agent, redirects followed, 20 s for the whole request,
  * the body bounded, and a conditional request when the last answer carried an {@code ETag} or a
@@ -66,14 +68,14 @@ public final class FeedFetcher implements FeedSource {
         try {
             response = client.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
         } catch (HttpTimeoutException e) {
-            throw new FeedException("timed out after " + timeout.toSeconds() + " s", e);
+            throw new FeedException(tr("net.timedOut", timeout.toSeconds()), e);
         } catch (IOException e) {
             throw new FeedException(reason(e), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new FeedException("interrupted", e);
+            throw new FeedException(tr("net.interrupted"), e);
         } catch (IllegalArgumentException e) {
-            throw new FeedException("the URL is not usable: " + e.getMessage(), e);
+            throw new FeedException(tr("net.urlNotUsable", e.getMessage()), e);
         }
         int status = response.statusCode();
         if (status == 304) {
@@ -82,7 +84,7 @@ public final class FeedFetcher implements FeedSource {
         }
         if (status / 100 != 2) {
             close(response);
-            throw new FeedException("the server answered " + status);
+            throw new FeedException(tr("net.serverAnswered", String.valueOf(status)));
         }
         String newEtag = response.headers().firstValue("ETag").orElse("");
         String newModified = response.headers().firstValue("Last-Modified").orElse("");
@@ -90,7 +92,7 @@ public final class FeedFetcher implements FeedSource {
             FeedParser.Parsed parsed = FeedParser.parse(in, feed.id());
             return new Result(true, parsed.title(), parsed.articles(), newEtag, newModified);
         } catch (XMLStreamException e) {
-            throw new FeedException("not an RSS or Atom feed", e);
+            throw new FeedException(tr("rss.error.notAFeed"), e);
         } catch (IOException e) {
             throw new FeedException(reason(e), e);
         }
@@ -106,8 +108,8 @@ public final class FeedFetcher implements FeedSource {
 
     /** An exception's message, as a status line should say it. */
     static String reason(Exception e) {
-        if (e instanceof ConnectException) return "could not connect";
-        if (e instanceof UnknownHostException) return "unknown host " + e.getMessage();
+        if (e instanceof ConnectException) return tr("net.couldNotConnect");
+        if (e instanceof UnknownHostException) return tr("net.unknownHost", e.getMessage());
         String message = e.getMessage();
         return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
     }
@@ -124,7 +126,7 @@ public final class FeedFetcher implements FeedSource {
 
         @Override
         public int read() throws IOException {
-            if (left <= 0) throw new IOException("the feed is larger than 20 MiB");
+            if (left <= 0) throw new IOException(tr("rss.error.tooLarge"));
             int b = in.read();
             if (b >= 0) left--;
             return b;
@@ -132,7 +134,7 @@ public final class FeedFetcher implements FeedSource {
 
         @Override
         public int read(byte[] b, int off, int len) throws IOException {
-            if (left <= 0) throw new IOException("the feed is larger than 20 MiB");
+            if (left <= 0) throw new IOException(tr("rss.error.tooLarge"));
             int n = in.read(b, off, (int) Math.min(len, left));
             if (n > 0) left -= n;
             return n;

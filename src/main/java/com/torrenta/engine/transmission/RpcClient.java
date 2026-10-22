@@ -19,6 +19,8 @@ import java.util.logging.Logger;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineProfile;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Transmission's RPC: one JSON object per request, {@code POST}ed to {@code /transmission/rpc},
  * one JSON object back.
@@ -98,21 +100,21 @@ final class RpcClient {
             try {
                 response = http.send(request(json), HttpResponse.BodyHandlers.ofInputStream());
             } catch (ConnectException e) {
-                throw new EngineException("Cannot reach the daemon at " + hostLine() + ": " + reason(e), e);
+                throw new EngineException(tr("engine.error.daemonUnreachable", hostLine(), reason(e)), e);
             } catch (HttpTimeoutException e) {
-                throw new EngineException("The daemon at " + hostLine() + " did not answer in time", e);
+                throw new EngineException(tr("engine.error.daemonTimeout", hostLine()), e);
             } catch (IOException e) {
-                throw new EngineException("Cannot reach the daemon at " + hostLine() + ": " + reason(e), e);
+                throw new EngineException(tr("engine.error.daemonUnreachable", hostLine(), reason(e)), e);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                throw new EngineException("Interrupted while calling the daemon", e);
+                throw new EngineException(tr("engine.error.daemonInterrupted"), e);
             }
             int status = response.statusCode();
             if (status == 409) {
                 String fresh = response.headers().firstValue(SESSION_HEADER).orElse("");
                 drain(response);
                 if (fresh.isEmpty() || attempt > 0) {
-                    throw new EngineException("The daemon at " + hostLine() + " keeps refusing the session id");
+                    throw new EngineException(tr("engine.error.daemonSessionId", hostLine()));
                 }
                 sessionId = fresh;
                 continue;
@@ -121,22 +123,22 @@ final class RpcClient {
                 drain(response);
                 throw new EngineException(
                         authorization.isEmpty()
-                                ? "The daemon at " + hostLine() + " wants a username and password"
-                                : "The daemon at " + hostLine() + " refused the username or password");
+                                ? tr("engine.error.daemonWantsLogin", hostLine())
+                                : tr("engine.error.daemonRefusedLogin", hostLine()));
             }
             if (status / 100 != 2) {
                 drain(response);
-                throw new EngineException("The daemon at " + hostLine() + " answered HTTP " + status);
+                throw new EngineException(tr("engine.error.daemonHttp", hostLine(), String.valueOf(status)));
             }
             Map<String, Object> answer;
             try (InputStream in = response.body()) {
                 answer = Json.obj(Json.parse(in));
             } catch (IOException e) {
-                throw new EngineException("The daemon's answer to " + method + " was not JSON: " + e.getMessage(), e);
+                throw new EngineException(tr("engine.error.daemonNotJson", method, e.getMessage()), e);
             }
             String result = Json.str(answer, "result", "");
             if (!result.equals("success")) {
-                throw new EngineException(result.isEmpty() ? "The daemon gave no result for " + method : result);
+                throw new EngineException(result.isEmpty() ? tr("engine.error.daemonNoResult", method) : result);
             }
             return Json.obj(answer, "arguments");
         }

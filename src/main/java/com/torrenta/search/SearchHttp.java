@@ -15,6 +15,8 @@ import javax.xml.stream.XMLStreamException;
 
 import com.torrenta.AppInfo;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The one HTTP GET every search provider makes: the app's User-Agent, a 20 s limit, redirects
  * followed by the client, the body bounded, and a status or a failure said in the words a status
@@ -57,7 +59,7 @@ final class SearchHttp {
             try {
                 builder.header(h.getKey(), h.getValue());
             } catch (IllegalArgumentException e) {
-                throw new SearchException("the header " + h.getKey() + " is not allowed: " + e.getMessage(), e);
+                throw new SearchException(tr("net.headerNotAllowed", h.getKey(), e.getMessage()), e);
             }
         }
         if (!agent) builder.header("User-Agent", USER_AGENT);
@@ -67,29 +69,28 @@ final class SearchHttp {
         try {
             response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
         } catch (HttpTimeoutException e) {
-            throw new SearchException("timed out after " + TIMEOUT.toSeconds() + " s", e);
+            throw new SearchException(tr("net.timedOut", TIMEOUT.toSeconds()), e);
         } catch (IOException e) {
             throw new SearchException(reason(e), e);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new SearchException("interrupted", e);
+            throw new SearchException(tr("net.interrupted"), e);
         } catch (IllegalArgumentException e) {
-            throw new SearchException("the URL is not usable: " + e.getMessage(), e);
+            throw new SearchException(tr("net.urlNotUsable", e.getMessage()), e);
         }
         int status = response.statusCode();
         if (status == 429) {
             String retry = response.headers().firstValue("Retry-After").orElse("");
             close(response);
-            throw new SearchException(
-                    "rate limited by the server" + (retry.isEmpty() ? "" : "; retry after " + retry + " s"));
+            throw new SearchException(retry.isEmpty() ? tr("net.rateLimited") : tr("net.rateLimitedRetry", retry));
         }
         if (status == 401 || status == 403) {
             close(response);
-            throw new SearchException(refused + " (" + status + ")");
+            throw new SearchException(tr("net.refused", refused, String.valueOf(status)));
         }
         if (status / 100 != 2) {
             close(response);
-            throw new SearchException("the server answered " + status);
+            throw new SearchException(tr("net.serverAnswered", String.valueOf(status)));
         }
         return new BoundedInput(response.body(), MAX_BYTES);
     }
@@ -104,10 +105,10 @@ final class SearchHttp {
 
     /** An exception's message, as a status line should say it. */
     static String reason(Exception e) {
-        if (e instanceof ConnectException) return "could not connect";
-        if (e instanceof UnknownHostException) return "unknown host " + e.getMessage();
-        if (e instanceof HttpTimeoutException) return "timed out after " + TIMEOUT.toSeconds() + " s";
-        if (e instanceof XMLStreamException) return "not Torznab XML";
+        if (e instanceof ConnectException) return tr("net.couldNotConnect");
+        if (e instanceof UnknownHostException) return tr("net.unknownHost", e.getMessage());
+        if (e instanceof HttpTimeoutException) return tr("net.timedOut", TIMEOUT.toSeconds());
+        if (e instanceof XMLStreamException) return tr("search.error.notTorznab");
         String message = e.getMessage();
         return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
     }
@@ -124,7 +125,7 @@ final class SearchHttp {
 
         @Override
         public int read() throws IOException {
-            if (left <= 0) throw new IOException("the answer is larger than 20 MiB");
+            if (left <= 0) throw new IOException(tr("search.error.tooLarge"));
             int b = in.read();
             if (b >= 0) left--;
             return b;
@@ -132,7 +133,7 @@ final class SearchHttp {
 
         @Override
         public int read(byte[] b, int off, int len) throws IOException {
-            if (left <= 0) throw new IOException("the answer is larger than 20 MiB");
+            if (left <= 0) throw new IOException(tr("search.error.tooLarge"));
             int n = in.read(b, off, (int) Math.min(len, left));
             if (n > 0) left -= n;
             return n;

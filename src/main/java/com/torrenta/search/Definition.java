@@ -11,6 +11,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * One declarative provider: a JSON file that says where to search and how to read the answer,
  * interpreted by {@link DeclarativeProvider}. The format is in {@code docs/search-providers.md};
@@ -142,8 +144,7 @@ public record Definition(
         unknown(top, TOP, file, "");
 
         String id = string(top, "id", file, "", true);
-        if (!ID.matcher(id).matches())
-            throw new DefinitionException(file, "id", "must be lower-case letters, digits, '.', '_' or '-'");
+        if (!ID.matcher(id).matches()) throw new DefinitionException(file, "id", tr("search.def.id"));
         String name = string(top, "name", file, "", true);
         String homepage = string(top, "homepage", file, "", false);
         String typeText = string(top, "type", file, "", true).toLowerCase(Locale.ROOT);
@@ -151,31 +152,30 @@ public record Definition(
                 switch (typeText) {
                     case "json" -> Type.JSON;
                     case "html" -> Type.HTML;
-                    default ->
-                        throw new DefinitionException(
-                                file, "type", "must be \"json\" or \"html\", not \"" + typeText + "\"");
+                    default -> throw new DefinitionException(file, "type", tr("search.def.type", typeText));
                 };
 
         Map<String, Object> searchObject = object(require(top, "search", file, ""), file, "search");
         unknown(searchObject, SEARCH, file, "search");
         boolean localFilter = bool(searchObject, "localFilter", file, "search", false);
         String url = string(searchObject, "url", file, "search", true);
-        if (!isHttp(url)) throw new DefinitionException(file, "search.url", "must start with http:// or https://");
+        if (!isHttp(url)) throw new DefinitionException(file, "search.url", tr("search.def.http"));
         if (!localFilter && !url.contains("{query}"))
-            throw new DefinitionException(file, "search.url", "must contain {query} (or set search.localFilter)");
+            throw new DefinitionException(file, "search.url", tr("search.def.query", "{query}"));
         String page = string(searchObject, "page", file, "search", false);
         int pages = integer(searchObject, "pages", file, "search", 1);
         if (pages < 1 || pages > MAX_PAGES)
-            throw new DefinitionException(file, "search.pages", "must be between 1 and " + MAX_PAGES);
+            throw new DefinitionException(
+                    file, "search.pages", tr("search.def.between", "1", String.valueOf(MAX_PAGES)));
         if (pages > 1 && page.isEmpty())
-            throw new DefinitionException(file, "search.page", "is needed when search.pages is more than 1");
+            throw new DefinitionException(file, "search.page", tr("search.def.pageNeeded"));
         if (!page.isEmpty() && !page.contains("{page}"))
-            throw new DefinitionException(file, "search.page", "must contain {page}");
-        if (!page.isEmpty() && !isHttp(page))
-            throw new DefinitionException(file, "search.page", "must start with http:// or https://");
+            throw new DefinitionException(file, "search.page", tr("search.def.contains", "{page}"));
+        if (!page.isEmpty() && !isHttp(page)) throw new DefinitionException(file, "search.page", tr("search.def.http"));
         int delayMs = integer(searchObject, "delayMs", file, "search", 0);
         if (delayMs < 0 || delayMs > MAX_DELAY_MS)
-            throw new DefinitionException(file, "search.delayMs", "must be between 0 and " + MAX_DELAY_MS);
+            throw new DefinitionException(
+                    file, "search.delayMs", tr("search.def.between", "0", String.valueOf(MAX_DELAY_MS)));
         Search search = new Search(url, page, pages, delayMs, localFilter);
 
         Map<String, String> headers = strings(top.get("headers"), file, "headers");
@@ -187,8 +187,7 @@ public record Definition(
                 if (key.equalsIgnoreCase(c.id()) || key.equalsIgnoreCase(c.name())) known = true;
             }
             if (!known)
-                throw new DefinitionException(
-                        file, "categories." + key, "is not a category; the categories are " + categoryNames());
+                throw new DefinitionException(file, "categories." + key, tr("search.def.category", categoryNames()));
         }
 
         Map<String, Object> fieldsObject = object(require(top, "fields", file, ""), file, "fields");
@@ -196,21 +195,21 @@ public record Definition(
         for (Map.Entry<String, Object> e : fieldsObject.entrySet()) {
             String key = e.getKey();
             if (!key.matches("[A-Za-z0-9_]+"))
-                throw new DefinitionException(file, "fields." + key, "a field's name is letters, digits and '_'");
+                throw new DefinitionException(file, "fields." + key, tr("search.def.fieldName"));
             fields.put(key, field(e.getValue(), file, "fields." + key, type));
         }
         Field rows = fields.get(ROWS);
-        if (rows == null) throw new DefinitionException(file, "fields.rows", "is missing");
+        if (rows == null) throw new DefinitionException(file, "fields.rows", tr("search.def.missing"));
         if (rows.isTemplate()
                 || rows.isConstant()
                 || !rows.attr().isEmpty()
                 || !rows.regex().isEmpty())
-            throw new DefinitionException(file, "fields.rows", "is a selector or path alone");
+            throw new DefinitionException(file, "fields.rows", tr("search.def.rowsAlone"));
         if (rows.path().isEmpty() && type == Type.HTML)
-            throw new DefinitionException(file, "fields.rows", "is missing");
-        if (!fields.containsKey("name")) throw new DefinitionException(file, "fields.name", "is missing");
+            throw new DefinitionException(file, "fields.rows", tr("search.def.missing"));
+        if (!fields.containsKey("name")) throw new DefinitionException(file, "fields.name", tr("search.def.missing"));
         if (!fields.containsKey("magnet") && !fields.containsKey("torrentUrl") && !fields.containsKey("infoHash"))
-            throw new DefinitionException(file, "fields", "needs one of magnet, torrentUrl or infoHash");
+            throw new DefinitionException(file, "fields", tr("search.def.link"));
         for (Map.Entry<String, Field> e : fields.entrySet()) {
             if (!e.getValue().isTemplate()) continue;
             var m = PLACEHOLDER.matcher(e.getValue().template());
@@ -220,10 +219,12 @@ public record Definition(
                 Field other = fields.get(ref);
                 if (other == null)
                     throw new DefinitionException(
-                            file, "fields." + e.getKey() + ".template", "{" + ref + "} names no field");
+                            file, "fields." + e.getKey() + ".template", tr("search.def.noField", "{" + ref + "}"));
                 if (other.isTemplate())
                     throw new DefinitionException(
-                            file, "fields." + e.getKey() + ".template", "{" + ref + "} is itself a template");
+                            file,
+                            "fields." + e.getKey() + ".template",
+                            tr("search.def.nestedTemplate", "{" + ref + "}"));
             }
         }
         return new Definition(id, name, homepage, type, search, headers, categories, fields);
@@ -232,14 +233,14 @@ public record Definition(
     private static Field field(Object value, String file, String at, Type type) throws DefinitionException {
         if (value instanceof String s) {
             if (s.isBlank() && at.equals("fields." + ROWS) && type == Type.JSON) return Field.of("");
-            if (s.isBlank()) throw new DefinitionException(file, at, "is empty");
+            if (s.isBlank()) throw new DefinitionException(file, at, tr("search.def.empty"));
             checkPath(s, file, at, type);
             return Field.of(s);
         }
         Map<String, Object> o = object(value, file, at);
         unknown(o, FIELD, file, at);
         if (o.containsKey("path") && o.containsKey("selector"))
-            throw new DefinitionException(file, at, "has both path and selector; they are the same thing");
+            throw new DefinitionException(file, at, tr("search.def.pathAndSelector"));
         String path = string(o, type == Type.JSON ? "path" : "selector", file, at, false);
         if (path.isEmpty()) path = string(o, type == Type.JSON ? "selector" : "path", file, at, false);
         String attr = string(o, "attr", file, at, false);
@@ -249,28 +250,28 @@ public record Definition(
         String constant = string(o, "value", file, at, false);
         if (path.isEmpty() && template.isEmpty() && constant.isEmpty() && attr.isEmpty())
             throw new DefinitionException(
-                    file, at, "needs a " + (type == Type.JSON ? "path" : "selector") + ", a template or a value");
+                    file, at, tr("search.def.needsSource", type == Type.JSON ? "path" : "selector"));
         if (!template.isEmpty() && !path.isEmpty())
             throw new DefinitionException(
-                    file, at, "has both a template and a " + (type == Type.JSON ? "path" : "selector"));
+                    file, at, tr("search.def.templateAndPath", type == Type.JSON ? "path" : "selector"));
         if (!constant.isEmpty() && (!path.isEmpty() || !template.isEmpty()))
-            throw new DefinitionException(file, at, "a value stands alone");
+            throw new DefinitionException(file, at, tr("search.def.valueAlone"));
         if (!attr.isEmpty() && type == Type.JSON)
-            throw new DefinitionException(file, at + ".attr", "is for html definitions");
+            throw new DefinitionException(file, at + ".attr", tr("search.def.attrHtml"));
         if (!path.isEmpty()) checkPath(path, file, at, type);
         if (!regex.isEmpty()) {
             try {
                 Pattern.compile(regex);
             } catch (PatternSyntaxException e) {
-                throw new DefinitionException(file, at + ".regex", "does not compile: " + e.getDescription());
+                throw new DefinitionException(file, at + ".regex", tr("search.def.regex", e.getDescription()));
             }
         }
         if (!format.isEmpty()) {
-            if (!at.endsWith(".date")) throw new DefinitionException(file, at + ".format", "is for the date field");
+            if (!at.endsWith(".date")) throw new DefinitionException(file, at + ".format", tr("search.def.formatDate"));
             try {
                 java.time.format.DateTimeFormatter.ofPattern(format, Locale.ENGLISH);
             } catch (IllegalArgumentException e) {
-                throw new DefinitionException(file, at + ".format", "is not a date pattern: " + e.getMessage());
+                throw new DefinitionException(file, at + ".format", tr("search.def.datePattern", e.getMessage()));
             }
         }
         return new Field(path, attr, regex, template, format, constant);
@@ -301,13 +302,14 @@ public record Definition(
     @SuppressWarnings("unchecked")
     private static Map<String, Object> object(Object value, String file, String at) throws DefinitionException {
         if (value instanceof Map<?, ?> map) return (Map<String, Object>) map;
-        throw new DefinitionException(file, at, "must be an object {…}");
+        throw new DefinitionException(file, at, tr("search.def.object", "{…}"));
     }
 
     private static Object require(Map<String, Object> o, String key, String file, String at)
             throws DefinitionException {
         Object v = o.get(key);
-        if (v == null || v == JsonExtractor.NULL) throw new DefinitionException(file, join(at, key), "is missing");
+        if (v == null || v == JsonExtractor.NULL)
+            throw new DefinitionException(file, join(at, key), tr("search.def.missing"));
         return v;
     }
 
@@ -315,11 +317,11 @@ public record Definition(
             throws DefinitionException {
         Object v = o.get(key);
         if (v == null || v == JsonExtractor.NULL) {
-            if (required) throw new DefinitionException(file, join(at, key), "is missing");
+            if (required) throw new DefinitionException(file, join(at, key), tr("search.def.missing"));
             return "";
         }
-        if (!(v instanceof String s)) throw new DefinitionException(file, join(at, key), "must be a string");
-        if (required && s.isBlank()) throw new DefinitionException(file, join(at, key), "is empty");
+        if (!(v instanceof String s)) throw new DefinitionException(file, join(at, key), tr("search.def.string"));
+        if (required && s.isBlank()) throw new DefinitionException(file, join(at, key), tr("search.def.empty"));
         return s.trim();
     }
 
@@ -328,7 +330,7 @@ public record Definition(
         Object v = o.get(key);
         if (v == null || v == JsonExtractor.NULL) return fallback;
         if (v instanceof Long l && l >= Integer.MIN_VALUE && l <= Integer.MAX_VALUE) return l.intValue();
-        throw new DefinitionException(file, join(at, key), "must be a whole number");
+        throw new DefinitionException(file, join(at, key), tr("search.def.integer"));
     }
 
     private static boolean bool(Map<String, Object> o, String key, String file, String at, boolean fallback)
@@ -336,7 +338,7 @@ public record Definition(
         Object v = o.get(key);
         if (v == null || v == JsonExtractor.NULL) return fallback;
         if (v instanceof Boolean b) return b;
-        throw new DefinitionException(file, join(at, key), "must be true or false");
+        throw new DefinitionException(file, join(at, key), tr("search.def.boolean"));
     }
 
     private static Map<String, String> strings(Object value, String file, String at) throws DefinitionException {
@@ -345,8 +347,8 @@ public record Definition(
         Map<String, String> out = new LinkedHashMap<>();
         for (Map.Entry<String, Object> e : o.entrySet()) {
             if (!(e.getValue() instanceof String s))
-                throw new DefinitionException(file, join(at, e.getKey()), "must be a string");
-            if (e.getKey().isBlank()) throw new DefinitionException(file, at, "has an empty key");
+                throw new DefinitionException(file, join(at, e.getKey()), tr("search.def.string"));
+            if (e.getKey().isBlank()) throw new DefinitionException(file, at, tr("search.def.emptyKey"));
             out.put(e.getKey().trim(), s);
         }
         return out;
@@ -359,8 +361,9 @@ public record Definition(
                 throw new DefinitionException(
                         file,
                         join(at, key),
-                        "is not a key here; the keys are "
-                                + String.join(", ", known.stream().sorted().toList()));
+                        tr(
+                                "search.def.unknownKey",
+                                String.join(", ", known.stream().sorted().toList())));
         }
     }
 

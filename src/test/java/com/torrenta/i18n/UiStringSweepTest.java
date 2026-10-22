@@ -139,6 +139,204 @@ class UiStringSweepTest {
         assertEquals(List.of(), offenders, "English in the UI sources; wrap in tr(...) or allow-list here");
     }
 
+    /**
+     * Calls whose message a person reads without a text position in sight: an engine error or
+     * event (the status bar, the Add dialog, the event log, the notifications), a provider's or a
+     * feed's failure, a definition file's problem, a tray or badge reason. Every literal among
+     * their arguments is a sentence in English unless it sits inside a {@code tr(…)}.
+     */
+    private static final Pattern CARRIER = Pattern.compile("(?:"
+            + "new\\s+(?:EngineException|SearchException|FeedException|EngineEvent)\\s*\\("
+            + "|EngineEvent\\s*\\.\\s*(?:info|warning|error|session|of)\\s*\\("
+            + "|Attempt\\s*\\.\\s*none\\s*\\("
+            + ")");
+
+    /** The file and the key at fault come first; only the third argument is the sentence. */
+    private static final Pattern DEFINITION_EXCEPTION = Pattern.compile("new\\s+DefinitionException\\s*\\(");
+
+    /**
+     * Methods whose result the window shows as it is: a dialog's problem line, a failure's reason,
+     * a notification, a log line, a status line. A literal in one of their {@code return}s or
+     * {@code Optional.of(…)}s is English on every screen. A bare name counts in every class (a
+     * {@code problem} or a {@code reason} is always a sentence for a person); {@code Class.method}
+     * names one method where the name alone is too common. A new method of that kind belongs here.
+     */
+    private static final Set<String> SHOWN_METHODS = Set.of(
+            "problem",
+            "regexProblem",
+            "reason",
+            "notificationText",
+            "Automation.label",
+            "RuleEngine.describe",
+            "RuleEngine.describeFailure",
+            "WatchFolders.statusText",
+            "TorznabEndpoint.maskedKey",
+            "LibtorrentEngine.description",
+            "LibtorrentEngine.limitText",
+            "TransmissionEngine.description",
+            "DetailPane.trackerStatus",
+            "PieceSize.label");
+
+    private static final Pattern METHOD_HEADER =
+            Pattern.compile("[\\w>\\]?]\\s+(\\w+)\\s*\\([^()]*\\)\\s*(?:throws\\s+[\\w., ]+)?\\{");
+
+    private static final Pattern RETURNED = Pattern.compile("\\breturn\\b|\\bOptional\\s*\\.\\s*of\\s*\\(");
+
+    /**
+     * Literals that are not sentences even where a person may read them: product names and the
+     * library's own words, which every language writes the same.
+     */
+    private static final Set<String> NOT_SENTENCES = Set.of(
+            // LibtorrentEngine.description(): "libtorrent 2.1.0 (libtorrent4j 2.1.0-39)"
+            "libtorrent ",
+            " (libtorrent4j ",
+            // binary units, written the same in every language (Bytes)
+            " KiB",
+            " MiB");
+
+    /** A switch's {@code case "…"} label: a value the method was handed, not one it shows. */
+    private static final Pattern CASE_LABEL = Pattern.compile("\\bcase\\s+\"(?:[^\"\\\\]|\\\\.)*\"");
+
+    @Test
+    void noEnglishInAnEngineErrorAnEventOrAFailure() throws IOException {
+        List<String> offenders = new ArrayList<>();
+        for (Path file : sources()) {
+            String text = stripComments(Files.readString(file, StandardCharsets.UTF_8));
+            Matcher m = CARRIER.matcher(text);
+            while (m.find()) {
+                String args = argumentsAt(text, m.end());
+                for (String literal : untranslated(args)) {
+                    offenders.add(file + ":" + lineOf(text, m.start()) + "  \"" + literal + "\"");
+                }
+            }
+            Matcher d = DEFINITION_EXCEPTION.matcher(text);
+            while (d.find()) {
+                List<String> args = splitArguments(argumentsAt(text, d.end()));
+                for (int i = 2; i < args.size(); i++) {
+                    for (String literal : untranslated(args.get(i))) {
+                        offenders.add(file + ":" + lineOf(text, d.start()) + "  \"" + literal + "\"");
+                    }
+                }
+            }
+        }
+        assertEquals(List.of(), offenders, "English handed to an exception or an event a person reads; use tr(...)");
+    }
+
+    @Test
+    void noEnglishReturnedFromAMethodTheWindowShows() throws IOException {
+        // A set: an Optional.of inside a return is seen by both patterns.
+        Set<String> offenders = new java.util.LinkedHashSet<>();
+        for (Path file : sources()) {
+            String text = stripComments(Files.readString(file, StandardCharsets.UTF_8));
+            String type = file.getFileName().toString().replace(".java", "");
+            Matcher h = METHOD_HEADER.matcher(text);
+            while (h.find()) {
+                if (!SHOWN_METHODS.contains(h.group(1)) && !SHOWN_METHODS.contains(type + "." + h.group(1))) continue;
+                int open = h.end() - 1;
+                String body = text.substring(open + 1, closing(text, open, '{', '}'));
+                Matcher r = RETURNED.matcher(body);
+                while (r.find()) {
+                    int end = body.indexOf(';', r.end());
+                    // A switch expression returns from every arm: the whole switch is what is returned.
+                    if (body.substring(r.end()).stripLeading().startsWith("switch")) {
+                        end = closing(body, body.indexOf('{', r.end()), '{', '}');
+                    }
+                    String returned = CASE_LABEL
+                            .matcher(body.substring(r.end(), end < 0 ? body.length() : end))
+                            .replaceAll("case _");
+                    for (String literal : untranslated(returned)) {
+                        offenders.add(file + ":" + lineOf(text, open + 1 + r.start()) + "  " + h.group(1) + "() \""
+                                + literal + "\"");
+                    }
+                }
+            }
+        }
+        assertEquals(
+                List.of(), List.copyOf(offenders), "English returned from a method whose result is shown; use tr(...)");
+    }
+
+    @Test
+    void theSweepSeesThroughTranslationsAndNothingElse() {
+        assertEquals(List.of(), untranslated("tr(\"engine.error.noSuchFile\", input), e"));
+        assertEquals(List.of(), untranslated("tr(\"search.def.query\", \"{query}\")"));
+        assertEquals(List.of("No such file: "), untranslated("\"No such file: \" + input"));
+        assertEquals(List.of("failed"), untranslated("x ? tr(\"a\") : \"failed\""));
+        assertEquals(List.of(), untranslated("name + \": \" + message"));
+        assertEquals(List.of("a", "b(c)", "\"d,e\""), splitArguments("a, b(c), \"d,e\""));
+        String call = "new EngineException(\"x (y)\", e) + z";
+        assertEquals("\"x (y)\", e", argumentsAt(call, call.indexOf('(') + 1));
+    }
+
+    /** The text between the parenthesis just before {@code from} and its partner. */
+    static String argumentsAt(String text, int from) {
+        return text.substring(from, closing(text, from - 1, '(', ')'));
+    }
+
+    /** Where the bracket opened at {@code open} closes, strings and characters skipped; the end if never. */
+    private static int closing(String text, int open, char opener, char closer) {
+        int depth = 0;
+        for (int i = open; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '"' || c == '\'') {
+                i = skipQuoted(text, i);
+            } else if (c == opener) {
+                depth++;
+            } else if (c == closer && --depth == 0) {
+                return i;
+            }
+        }
+        return text.length();
+    }
+
+    /** The index of the quote that ends the literal opened at {@code i}. */
+    private static int skipQuoted(String text, int i) {
+        char quote = text.charAt(i);
+        int j = i + 1;
+        while (j < text.length() && text.charAt(j) != quote) {
+            if (text.charAt(j) == '\\') j++;
+            j++;
+        }
+        return j;
+    }
+
+    /** The top-level arguments of an argument list, trimmed. */
+    static List<String> splitArguments(String args) {
+        List<String> out = new ArrayList<>();
+        int depth = 0;
+        int start = 0;
+        for (int i = 0; i < args.length(); i++) {
+            char c = args.charAt(i);
+            if (c == '"' || c == '\'') i = skipQuoted(args, i);
+            else if (c == '(' || c == '[' || c == '{') depth++;
+            else if (c == ')' || c == ']' || c == '}') depth--;
+            else if (c == ',' && depth == 0) {
+                out.add(args.substring(start, i).trim());
+                start = i + 1;
+            }
+        }
+        if (!args.isBlank()) out.add(args.substring(start).trim());
+        return out;
+    }
+
+    /** The literals with letters in {@code code} once every {@code tr(…)} call is taken out. */
+    static List<String> untranslated(String code) {
+        StringBuilder rest = new StringBuilder();
+        Matcher tr = Pattern.compile("\\btr\\s*\\(").matcher(code);
+        int at = 0;
+        while (tr.find(at)) {
+            rest.append(code, at, tr.start());
+            at = Math.min(code.length(), closing(code, tr.end() - 1, '(', ')') + 1);
+        }
+        rest.append(code.substring(Math.min(at, code.length())));
+        List<String> out = new ArrayList<>();
+        Matcher literal = ANY_LITERAL.matcher(rest);
+        while (literal.find()) {
+            String value = literal.group(1);
+            if (LETTERS.matcher(value).find() && !NOT_SENTENCES.contains(value)) out.add(value);
+        }
+        return out;
+    }
+
     @Test
     void noStaticFieldHoldsATranslation() throws IOException {
         List<String> offenders = new ArrayList<>();
