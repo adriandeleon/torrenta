@@ -178,6 +178,14 @@ public final class MainWindow {
     private volatile boolean statsWanted;
     /** The session rates, one sample per poll, for the Statistics window's graph. */
     private final SpeedHistory sessionHistory = new SpeedHistory();
+    /** The window's bounds when last neither maximised nor minimised; what is saved. */
+    private WindowGeometry.Bounds normalBounds;
+    /**
+     * The last {@link SpeedHistory#RECENT_SECONDS} of every torrent's rates, by id: a few KiB each,
+     * so the Speed tab is not empty the first time a torrent is chosen. Gone with the torrent.
+     */
+    private final java.util.concurrent.ConcurrentMap<String, SpeedHistory> recentHistories =
+            new java.util.concurrent.ConcurrentHashMap<>();
     /** The rates of every torrent that has been selected, by id, for the Speed tab; gone with the torrent. */
     private final java.util.concurrent.ConcurrentMap<String, SpeedHistory> torrentHistories =
             new java.util.concurrent.ConcurrentHashMap<>();
@@ -471,7 +479,8 @@ public final class MainWindow {
         reportDefinitionProblems();
         host.getChildren().add(root);
 
-        Scene scene = new Scene(host, 960, 600);
+        WindowGeometry.Bounds opening = openingBounds();
+        Scene scene = new Scene(host, opening.width(), opening.height());
         scene.getStylesheets()
                 .add(MainWindow.class
                         .getResource("/com/torrenta/styles/app.css")
@@ -510,6 +519,7 @@ public final class MainWindow {
             }
         });
         stage.setScene(scene);
+        placeWindow(opening);
         // The live setting, not one captured at startup: the checkbox can change while the window
         // is open. Conditional on a tray having actually appeared, not on the preference alone:
         // hiding a window that leaves no icon behind is how a program becomes unreachable.
@@ -735,8 +745,100 @@ public final class MainWindow {
         if (current != null) current.update(next.display(), next.line());
     }
 
+    // ---- the window's place ---------------------------------------------------------------------
+
+    /**
+     * Where the window opens: the saved bounds if a screen still shows them, else a first window
+     * as wide as the sidebar and the default columns need, so the list opens without a
+     * horizontal scrollbar.
+     */
+    private WindowGeometry.Bounds openingBounds() {
+        List<WindowGeometry.Bounds> screens = javafx.stage.Screen.getScreens().stream()
+                .map(sc -> bounds(sc.getVisualBounds()))
+                .toList();
+        WindowGeometry.Bounds primary = bounds(javafx.stage.Screen.getPrimary().getVisualBounds());
+        double columns = table.getVisibleLeafColumns().stream()
+                .mapToDouble(TableColumn::getPrefWidth)
+                .sum();
+        double side = settings.sidebar() ? sidebar.prefWidth(-1) : 0;
+        return WindowGeometry.choose(
+                WindowGeometry.parse(settings.windowBounds()),
+                screens,
+                primary,
+                side + columns + WindowGeometry.LIST_CHROME,
+                WindowGeometry.FIRST_RUN_HEIGHT);
+    }
+
+    private static WindowGeometry.Bounds bounds(javafx.geometry.Rectangle2D r) {
+        return new WindowGeometry.Bounds(r.getMinX(), r.getMinY(), r.getWidth(), r.getHeight());
+    }
+
+    /**
+     * Puts the stage where {@link #openingBounds} said, maximised if it was, and keeps the normal
+     * bounds as they change. A maximise can move and resize the stage a pulse before it says it is
+     * maximised, so a change is taken as the normal bounds only once it has held for a moment.
+     */
+    private void placeWindow(WindowGeometry.Bounds at) {
+        stage.setX(at.x());
+        stage.setY(at.y());
+        stage.setWidth(at.width());
+        stage.setHeight(at.height());
+        normalBounds = at;
+        if (settings.windowMaximized()) stage.setMaximized(true);
+        javafx.animation.PauseTransition settle =
+                new javafx.animation.PauseTransition(javafx.util.Duration.millis(400));
+        settle.setOnFinished(e -> {
+            if (stage.isShowing() && !stage.isMaximized() && !stage.isIconified() && !stage.isFullScreen())
+                normalBounds = stageBounds();
+        });
+        javafx.beans.InvalidationListener moved = o -> settle.playFromStart();
+        stage.xProperty().addListener(moved);
+        stage.yProperty().addListener(moved);
+        stage.widthProperty().addListener(moved);
+        stage.heightProperty().addListener(moved);
+        stage.maximizedProperty().addListener(moved);
+    }
+
+    private WindowGeometry.Bounds stageBounds() {
+        return new WindowGeometry.Bounds(stage.getX(), stage.getY(), stage.getWidth(), stage.getHeight());
+    }
+
+    /**
+     * Saves where the window is, for the next start: on close, on a hide to the tray, and from
+     * App.stop for any way out that skips both. The bounds as they are when the window is
+     * plainly open, else the last normal ones.
+     */
+    public void rememberWindow() {
+        boolean maximized = stage.isMaximized();
+        WindowGeometry.Bounds normal = maximized || stage.isIconified() || stage.isFullScreen() || normalBounds == null
+                ? normalBounds
+                : stageBounds();
+        if (normal == null || normal.width() < WindowGeometry.MIN_WIDTH || normal.height() < WindowGeometry.MIN_HEIGHT)
+            return;
+        settings.setWindow(WindowGeometry.format(normal), maximized);
+        settings.saveQuietly();
+    }
+
+    /** The stage's bounds and state, and what is stored, for the capture hook. */
+    private String windowLine() {
+        return WindowGeometry.format(stageBounds()) + " maximized=" + stage.isMaximized() + " saved="
+                + settings.windowBounds() + (settings.windowMaximized() ? " (maximized)" : "")
+                + " hScroll=" + horizontalScrollbarShowing();
+    }
+
+    /** Whether the list's horizontal scrollbar shows: the first-run width is meant to avoid it. */
+    private boolean horizontalScrollbarShowing() {
+        for (javafx.scene.Node n : table.lookupAll(".scroll-bar")) {
+            if (n instanceof javafx.scene.control.ScrollBar bar
+                    && bar.getOrientation() == javafx.geometry.Orientation.HORIZONTAL
+                    && bar.isVisible()) return true;
+        }
+        return false;
+    }
+
     private void hideToTray() {
         rememberDivider();
+        rememberWindow();
         hiddenToTray = true;
         stage.hide();
     }
@@ -766,6 +868,7 @@ public final class MainWindow {
         if (shutDown) return;
         shutDown = true;
         rememberDivider();
+        rememberWindow();
         stopPolling();
         stopWatching();
         rss.stop();
@@ -807,6 +910,41 @@ public final class MainWindow {
                 + (dhtStatus.isVisible() ? dhtStatus.getText() : "") + "\" free=\""
                 + (freeStatus.isVisible() ? freeStatus.getText() : "") + "\" low="
                 + freeStatus.getStyleClass().contains("free-low");
+    }
+
+    /**
+     * Each shown status-bar entry as {@code name=width/needed} (an entry narrower than it needs is
+     * elided), then the bar's right edge against the window's, for the capture hook.
+     */
+    private String statusBarFit() {
+        StringBuilder out = new StringBuilder();
+        java.util.Map<String, Region> named = new java.util.LinkedHashMap<>();
+        named.put("port", portStatus);
+        named.put("dht", dhtStatus);
+        named.put("message", status);
+        // Each rate is a box of the number and its sparkline.
+        named.put("down", (Region) downRate.getParent());
+        named.put("up", (Region) upRate.getParent());
+        named.put("alt", altSpeedToggle);
+        named.put("free", freeStatus);
+        named.put("update", updateBadge);
+        named.put("sync", syncBadge);
+        named.put("errors", errorBadge);
+        named.forEach((name, r) -> {
+            if (r == null || !r.isVisible() || !r.isManaged()) return;
+            out.append(name)
+                    .append('=')
+                    .append(Math.round(r.getWidth()))
+                    .append('/')
+                    .append(Math.round(r.prefWidth(-1)))
+                    .append(' ');
+        });
+        double right = statusBar.localToScene(statusBar.getLayoutBounds()).getMaxX();
+        return out.append("barRight=")
+                .append(Math.round(right))
+                .append(" window=")
+                .append(Math.round(stage.getScene().getWidth()))
+                .toString();
     }
 
     /** The status bar's text; read by the development capture. */
@@ -899,6 +1037,8 @@ public final class MainWindow {
      */
     public List<String> lateLinesForCapture() {
         List<String> out = new ArrayList<>();
+        out.add("statusbar-fit=" + statusBarFit());
+        out.add("window=" + windowLine());
         if (createDialog != null && createDialog.isShowing()) {
             out.add("dialog=" + createDialog.title());
             out.addAll(createDialog.linesForCapture());
@@ -933,7 +1073,7 @@ public final class MainWindow {
     /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
     public List<String> eventLines() {
         return log.events().stream()
-                .map(e -> LogWindow.levelLabel(e.level()) + " " + e.message())
+                .map(e -> LogWindow.levelLabel(e.level()) + " " + e.text())
                 .toList();
     }
 
@@ -948,6 +1088,18 @@ public final class MainWindow {
     public void runForCapture(String action) {
         if (action.equals("close-window")) {
             stage.close();
+        } else if (action.startsWith("window:")) {
+            // window:<width>x<height>+<x>+<y>, or window:maximize
+            String spec = action.substring("window:".length());
+            if (spec.equals("maximize")) stage.setMaximized(true);
+            else {
+                String[] p = spec.split("[x+]");
+                stage.setMaximized(false);
+                stage.setWidth(Double.parseDouble(p[0]));
+                stage.setHeight(Double.parseDouble(p[1]));
+                stage.setX(Double.parseDouble(p[2]));
+                stage.setY(Double.parseDouble(p[3]));
+            }
         } else if (action.equals("close-request")) {
             // What the title bar's button sends: the close-to-tray rule runs, stage.close() skips it.
             stage.fireEvent(new javafx.stage.WindowEvent(stage, javafx.stage.WindowEvent.WINDOW_CLOSE_REQUEST));
@@ -1350,9 +1502,9 @@ public final class MainWindow {
             ipFilter.setEngine(engine);
             Thread.ofVirtual().name("ip-filter").start(() -> {
                 ipFilter.applyStored(this::reportIpFilter);
-                ipFilter.refresh(false, this::reportIpFilter);
+                ipFilter.refreshIfDue(this::reportIpFilter);
             });
-            poller.scheduleAtFixedRate(() -> ipFilter.refresh(false, this::reportIpFilter), 1, 1, TimeUnit.HOURS);
+            poller.scheduleAtFixedRate(() -> ipFilter.refreshIfDue(this::reportIpFilter), 1, 1, TimeUnit.HOURS);
         } else if (capabilities.has(Engine.Capability.BLOCKLIST_URL) && settings.ipFilterEnabled()) {
             // Only when a blocklist is wanted: the daemon's own state is not worth a status line otherwise.
             refreshBlocklist();
@@ -2275,15 +2427,17 @@ public final class MainWindow {
         Engine.Rates current = engine.rates();
         long nowSeconds = System.currentTimeMillis() / 1000;
         sessionHistory.add(nowSeconds, current.download(), current.upload());
-        if (!torrentHistories.isEmpty()) {
-            Set<String> present = new java.util.HashSet<>();
-            for (Torrent t : snapshot) {
-                present.add(t.id());
-                SpeedHistory h = torrentHistories.get(t.id());
-                if (h != null) h.add(nowSeconds, t.downloadRate(), t.uploadRate());
-            }
-            torrentHistories.keySet().retainAll(present);
+        Set<String> present = new java.util.HashSet<>();
+        for (Torrent t : snapshot) {
+            present.add(t.id());
+            recentHistories
+                    .computeIfAbsent(t.id(), k -> SpeedHistory.recent())
+                    .add(nowSeconds, t.downloadRate(), t.uploadRate());
+            SpeedHistory h = torrentHistories.get(t.id());
+            if (h != null) h.add(nowSeconds, t.downloadRate(), t.uploadRate());
         }
+        recentHistories.keySet().retainAll(present);
+        torrentHistories.keySet().retainAll(present);
         // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
         com.torrenta.engine.SessionStats stats = statsWanted ? engine.stats() : null;
         enforceShareLimits(engine, snapshot);
@@ -3557,8 +3711,13 @@ public final class MainWindow {
                 c -> {
                     var selected = table.getSelectionModel().getSelectedItems();
                     detailId = selected.size() == 1 ? selected.get(0).id() : null;
-                    // The Speed tab's history starts with the first selection and is fed from the next poll.
-                    if (detailId != null) torrentHistories.computeIfAbsent(detailId, k -> new SpeedHistory());
+                    // The Speed tab's full history starts with the first selection, from the short one
+                    // every torrent keeps, so the tab has the last two minutes to show at once.
+                    if (detailId != null)
+                        torrentHistories.computeIfAbsent(detailId, k -> {
+                            SpeedHistory recent = recentHistories.get(k);
+                            return recent == null ? new SpeedHistory() : recent.widened();
+                        });
                     if (detailId == null && detailWanted) detail.clear();
                 });
         detail.selectTab(settings.get(Settings.DETAIL_TAB, "overview"));

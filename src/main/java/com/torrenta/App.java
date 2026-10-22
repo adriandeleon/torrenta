@@ -159,6 +159,7 @@ public final class App extends Application {
     @Override
     public void stop() {
         if (window != null) {
+            window.rememberWindow();
             window.stopPolling();
             window.stopEngine();
         }

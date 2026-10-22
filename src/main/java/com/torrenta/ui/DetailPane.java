@@ -142,8 +142,8 @@ final class DetailPane extends VBox {
     private final ObservableList<TorrentDetail.Peer> peerItems = FXCollections.observableArrayList();
     private final ObservableList<TorrentDetail.Tracker> trackerItems = FXCollections.observableArrayList();
     private final TableView<TorrentDetail.Tracker> trackers = new TableView<>(trackerItems);
-    private final ListView<EngineEvent> logList = new ListView<>();
-    private FilteredList<EngineEvent> logItems;
+    private final ListView<EventLog.Line> logList = new ListView<>();
+    private FilteredList<EventLog.Line> logItems;
     /** The selected torrent's graph; fed every tick, painted only while its tab shows. */
     private final SpeedGraph speed = new SpeedGraph(600, false);
 
@@ -217,7 +217,7 @@ final class DetailPane extends VBox {
     }
 
     /** The window's event log, of which the Log tab shows the selected torrent's lines. */
-    void setEvents(ObservableList<EngineEvent> events) {
+    void setEvents(ObservableList<EventLog.Line> events) {
         logItems = new FilteredList<>(events, e -> false);
         logList.setItems(logItems);
     }
@@ -382,7 +382,7 @@ final class DetailPane extends VBox {
         tabs.setManaged(true);
         if (another && logItems != null) {
             String id = g.id();
-            logItems.setPredicate(e -> id.equals(e.torrentId()));
+            logItems.setPredicate(e -> id.equals(e.event().torrentId()));
             if (!logItems.isEmpty()) logList.scrollTo(logItems.size() - 1);
         }
 
@@ -774,7 +774,7 @@ final class DetailPane extends VBox {
             }
 
             @Override
-            protected void updateItem(EngineEvent e, boolean empty) {
+            protected void updateItem(EventLog.Line e, boolean empty) {
                 super.updateItem(e, empty);
                 getStyleClass().removeAll("log-warning", "log-error");
                 if (empty || e == null) {
@@ -782,7 +782,7 @@ final class DetailPane extends VBox {
                     return;
                 }
                 time.setText(LOG_TIME.format(e.at().atZone(ZoneId.systemDefault())));
-                message.setText(e.message());
+                message.setText(e.text());
                 if (e.level() == EngineEvent.Level.ERROR) getStyleClass().add("log-error");
                 else if (e.level() == EngineEvent.Level.WARNING) getStyleClass().add("log-warning");
                 setGraphic(box);

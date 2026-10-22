@@ -34,6 +34,7 @@ import javafx.scene.text.Font;
 final class SpeedGraph extends VBox {
 
     private final Canvas canvas = new Canvas();
+    private final Pane plot;
     private final ToggleGroup windows = new ToggleGroup();
     private final Label downLegend = new Label();
     private final Label upLegend = new Label();
@@ -89,7 +90,7 @@ final class SpeedGraph extends VBox {
         head.setAlignment(Pos.CENTER_LEFT);
         head.setPadding(new Insets(6, 8, 2, 8));
 
-        Pane plot = new Pane(canvas, downSwatch, upSwatch, gridSwatch, textSwatch);
+        plot = new Pane(canvas, downSwatch, upSwatch, gridSwatch, textSwatch);
         plot.getStyleClass().add("speed-graph-plot");
         // Its own size, not its children's: the canvas is bound to the pane, which would otherwise
         // size itself from the canvas and never grow.
@@ -103,6 +104,11 @@ final class SpeedGraph extends VBox {
         VBox.setVgrow(plot, Priority.ALWAYS);
         getChildren().addAll(head, plot);
         showLegend(0, 0, 0, 0);
+    }
+
+    /** The plot's preferred height, under the chips and the legend; 180 unless told. */
+    void setPlotHeight(double height) {
+        plot.setPrefHeight(height);
     }
 
     /** Hears the window chips; the owner remembers the choice and tells the other graph. */

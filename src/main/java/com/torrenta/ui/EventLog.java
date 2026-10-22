@@ -18,6 +18,10 @@ import com.torrenta.engine.EngineEvent;
  * What has happened, newest last, bounded: the engine's events, plus anything the app itself logs
  * at warning or above, so a failed settings write shows up in the same place as a tracker error.
  *
+ * <p>A line said again within {@link Repeats#WINDOW} is counted on the line it repeats rather
+ * than added ({@link Line#count}), so one tracker's error, which libtorrent reports once per
+ * listen interface, is one line.
+ *
  * <p>The FX thread owns the list, as it owns every view of it. {@link #add} must be called there;
  * {@link #logBridge} hops onto it through the executor it is given, which in the app is {@code
  * Platform.runLater} and in the tests is "run it now".
@@ -27,10 +31,48 @@ public final class EventLog {
     /** Enough to scroll back through a day; above this the oldest go. */
     static final int CAPACITY = 2000;
 
-    private final ObservableList<EngineEvent> events = FXCollections.observableArrayList();
+    /**
+     * One line of the log: the event as first said, how many times, and when last.
+     *
+     * @param event the first time it was said; its {@code at} is the line's time
+     * @param count how many times, at least one
+     * @param last when it was last said, for the window a repeat must fall in
+     */
+    public record Line(EngineEvent event, int count, Instant last) {
+        Line(EngineEvent event) {
+            this(event, 1, event.at());
+        }
+
+        public Instant at() {
+            return event.at();
+        }
+
+        public EngineEvent.Level level() {
+            return event.level();
+        }
+
+        public String torrent() {
+            return event.torrent();
+        }
+
+        /** The message, with "×N" once it has been said more than once. */
+        public String text() {
+            return Repeats.text(event.message(), count);
+        }
+
+        Repeats.Key key() {
+            return key(event);
+        }
+
+        static Repeats.Key key(EngineEvent e) {
+            return new Repeats.Key(e.level(), e.torrentId(), e.message());
+        }
+    }
+
+    private final ObservableList<Line> events = FXCollections.observableArrayList();
     private final ReadOnlyIntegerWrapper errors = new ReadOnlyIntegerWrapper(this, "errors", 0);
 
-    public ObservableList<EngineEvent> events() {
+    public ObservableList<Line> events() {
         return events;
     }
 
@@ -40,7 +82,13 @@ public final class EventLog {
     }
 
     public void add(EngineEvent event) {
-        events.add(event);
+        int same = Repeats.find(events, Line::key, Line::last, Line.key(event), event.at());
+        if (same >= 0) {
+            Line line = events.get(same);
+            events.set(same, new Line(line.event(), line.count() + 1, event.at()));
+            return;
+        }
+        events.add(new Line(event));
         if (event.level() == EngineEvent.Level.ERROR) errors.set(errors.get() + 1);
         if (events.size() > CAPACITY) events.remove(0, events.size() - CAPACITY);
     }

@@ -30,6 +30,11 @@ import static com.torrenta.i18n.Messages.tr;
  */
 final class StatisticsWindow {
 
+    /** The window's width; its height is what the sections and the graph ask for. */
+    private static final double WIDTH = 760;
+
+    private static final double PLOT_HEIGHT = 240;
+
     private final Stage stage = new Stage();
     private final List<StatsText.Row> layout = StatsText.rows(SessionStats.NONE);
     private final Label[] values = new Label[layout.size()];
@@ -43,19 +48,26 @@ final class StatisticsWindow {
         graph.setOnWindowChanged(onWindowChanged);
         graph.setMinHeight(160);
 
-        // Two columns of sections: the two about bytes on the left, the three gauges on the right.
+        // Two columns of sections, each one grid: a column's labels share one width, so its values
+        // start at one x in every section, and a heading after the first stands off the rows above.
         List<String> names = StatsText.sections();
-        VBox left = new VBox(section(names.get(0)), section(names.get(1)));
-        VBox right = new VBox(section(names.get(2)), section(names.get(3)), section(names.get(4)));
-        HBox.setHgrow(left, Priority.ALWAYS);
-        HBox.setHgrow(right, Priority.ALWAYS);
-        HBox sections = new HBox(32, left, right);
-        sections.setPadding(new Insets(10, 16, 10, 16));
+        HBox sections = new HBox(40);
+        for (List<Integer> column : StatsText.columns()) {
+            GridPane grid = column(column.stream().map(names::get).toList());
+            HBox.setHgrow(grid, Priority.ALWAYS);
+            sections.getChildren().add(grid);
+        }
+        sections.setPadding(new Insets(10, 16, 14, 16));
+        // The plot taller than the detail pane's and clear of the window's bottom edge.
+        graph.setPlotHeight(PLOT_HEIGHT);
+        graph.setPadding(new Insets(0, 0, 10, 0));
         VBox.setVgrow(graph, Priority.ALWAYS);
 
         VBox root = new VBox(sections, graph);
         root.getStyleClass().add("stats-window");
-        Scene scene = new Scene(root, 760, 560);
+        root.setPrefWidth(WIDTH);
+        // As tall as the sections and the graph want: a fixed 560 cut the plot to its baseline.
+        Scene scene = new Scene(root);
         scene.getStylesheets()
                 .add(StatisticsWindow.class
                         .getResource("/com/torrenta/styles/app.css")
@@ -67,29 +79,33 @@ final class StatisticsWindow {
         stage.setScene(scene);
     }
 
-    private GridPane section(String name) {
+    private GridPane column(List<String> sectionNames) {
         GridPane grid = new GridPane();
         grid.setHgap(16);
         grid.setVgap(3);
         ColumnConstraints labels = new ColumnConstraints();
         labels.setMinWidth(Region.USE_PREF_SIZE);
         ColumnConstraints numbers = new ColumnConstraints();
+        numbers.setMinWidth(Region.USE_PREF_SIZE);
         numbers.setHgrow(Priority.ALWAYS);
         grid.getColumnConstraints().addAll(labels, numbers);
-        Label title = new Label(name);
-        title.getStyleClass().add("stats-section");
-        grid.add(title, 0, 0, 2, 1);
-        int row = 1;
-        for (int i = 0; i < layout.size(); i++) {
-            if (!layout.get(i).section().equals(name)) continue;
-            Label label = new Label(layout.get(i).label());
-            label.getStyleClass().add("dialog-label");
-            Label value = new Label(layout.get(i).value());
-            value.getStyleClass().add("stats-value");
-            values[i] = value;
-            grid.add(label, 0, row);
-            grid.add(value, 1, row);
-            row++;
+        int row = 0;
+        for (String name : sectionNames) {
+            Label title = new Label(name);
+            title.getStyleClass().add("stats-section");
+            if (row > 0) title.getStyleClass().add("stats-section-next");
+            grid.add(title, 0, row++, 2, 1);
+            for (int i = 0; i < layout.size(); i++) {
+                if (!layout.get(i).section().equals(name)) continue;
+                Label label = new Label(layout.get(i).label());
+                label.getStyleClass().add("dialog-label");
+                Label value = new Label(layout.get(i).value());
+                value.getStyleClass().add("stats-value");
+                values[i] = value;
+                grid.add(label, 0, row);
+                grid.add(value, 1, row);
+                row++;
+            }
         }
         return grid;
     }

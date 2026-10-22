@@ -30,6 +30,15 @@ public final class StatsText {
                 tr("stats.section.torrents"));
     }
 
+    /**
+     * Which sections share a column, left to right, as indices into {@link #sections()}: the two
+     * about bytes on the left, the three gauges on the right. A column is one grid, so its values
+     * start at one x whatever section they are in.
+     */
+    public static List<List<Integer>> columns() {
+        return List.of(List.of(0, 1), List.of(2, 3, 4));
+    }
+
     /** Every row, in display order; the same labels in the same order for every snapshot. */
     public static List<Row> rows(SessionStats s) {
         List<Row> out = new ArrayList<>();

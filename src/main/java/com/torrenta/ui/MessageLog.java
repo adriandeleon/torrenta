@@ -1,10 +1,8 @@
 package com.torrenta.ui;
 
 import java.time.Instant;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Deque;
 import java.util.List;
 
 import com.torrenta.engine.EngineEvent;
@@ -18,6 +16,9 @@ import com.torrenta.engine.EngineEvent;
  * not recorded. The engine's events have a log of their own ({@link EventLog}, with the torrent
  * and a level filter); this is the status bar's history, whatever put the words there.
  *
+ * <p>The same words at the same level within {@link Repeats#WINDOW} of their last time are one
+ * entry with a count, moved to the top with the new time.
+ *
  * <p>Pure: no toolkit, so the cap, the skipping and the order are unit-tested.
  */
 public final class MessageLog {
@@ -25,20 +26,40 @@ public final class MessageLog {
     /** Enough to scroll back through a session; above this the oldest go. */
     public static final int MAX_ENTRIES = 200;
 
-    /** One line: when, what, and how loudly it was said (the status bar colours the loud ones). */
-    public record Entry(Instant at, String text, EngineEvent.Level level) {
+    /**
+     * One line: when it was last said, what, how loudly (the status bar colours the loud ones),
+     * and how many times.
+     */
+    public record Entry(Instant at, String words, EngineEvent.Level level, int count) {
         public Entry {
             level = level == null ? EngineEvent.Level.INFO : level;
+            count = Math.max(1, count);
+        }
+
+        public Entry(Instant at, String words, EngineEvent.Level level) {
+            this(at, words, level, 1);
+        }
+
+        /** The words, with "×N" once they have been said more than once. */
+        public String text() {
+            return Repeats.text(words, count);
+        }
+
+        Repeats.Key key() {
+            return new Repeats.Key(level, null, words);
         }
     }
 
     // Oldest first; evicted from the head, appended at the tail.
-    private final Deque<Entry> entries = new ArrayDeque<>();
+    private final List<Entry> entries = new ArrayList<>();
 
     /** Records {@code text} at {@code at}; does nothing for a null or blank line. */
     public void add(String text, EngineEvent.Level level, Instant at) {
         if (text == null || text.isBlank()) return;
-        entries.addLast(new Entry(at, text, level));
+        Entry next = new Entry(at, text, level);
+        int same = Repeats.find(entries, Entry::key, Entry::at, next.key(), at);
+        if (same >= 0) next = new Entry(at, text, level, entries.remove(same).count() + 1);
+        entries.add(next);
         while (entries.size() > MAX_ENTRIES) entries.removeFirst();
     }
 

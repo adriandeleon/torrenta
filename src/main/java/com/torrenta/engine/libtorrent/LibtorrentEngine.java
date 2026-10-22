@@ -1792,13 +1792,16 @@ public final class LibtorrentEngine implements Engine {
 
     @Override
     public synchronized void setIpFilter(List<IpRange> ranges) throws EngineException {
+        boolean had = !ipFilter.isEmpty();
         ipFilter = List.copyOf(ranges);
         SessionManager s = session;
         if (s == null || !s.isRunning()) return;
         s.swig().set_ip_filter(toFilter(ipFilter));
-        emit(EngineEvent.session(
-                EngineEvent.Level.INFO,
-                ipFilter.isEmpty() ? "IP filter cleared" : "IP filter: " + ipFilter.size() + " ranges"));
+        // Clearing a filter that was never set (the start, with the filter off) is not news.
+        if (had || !ipFilter.isEmpty())
+            emit(EngineEvent.session(
+                    EngineEvent.Level.INFO,
+                    ipFilter.isEmpty() ? "IP filter cleared" : "IP filter: " + ipFilter.size() + " ranges"));
     }
 
     @Override

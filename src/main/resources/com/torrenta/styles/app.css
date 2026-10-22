@@ -1204,6 +1204,11 @@
     -fx-padding: 6 0 2 0;
 }
 
+/* A section after the first in its column: a gap, so the sections read as groups. */
+.stats-section-next {
+    -fx-padding: 14 0 2 0;
+}
+
 .stats-value {
     -fx-text-fill: -color-fg-default;
 }

@@ -27,19 +27,60 @@ public final class SpeedHistory {
     /** The rates at one moment, bytes per second; a coarse sample's {@code at} is its minute's start. */
     public record Sample(long at, long download, long upload) {}
 
-    private final long[] fineAt = new long[FINE_SECONDS];
-    private final long[] fineDown = new long[FINE_SECONDS];
-    private final long[] fineUp = new long[FINE_SECONDS];
-    private final long[] coarseMinute = new long[COARSE_MINUTES];
-    private final long[] coarseDown = new long[COARSE_MINUTES];
-    private final long[] coarseUp = new long[COARSE_MINUTES];
-    private final int[] coarseCount = new int[COARSE_MINUTES];
+    /**
+     * Seconds kept by {@link #recent()}: the short history every torrent has, so its Speed tab has
+     * something to draw the first time it is chosen. Small on purpose, since every torrent has one.
+     */
+    public static final int RECENT_SECONDS = 120;
+
+    private final int fineSize;
+    private final int coarseSize;
+    private final long[] fineAt;
+    private final long[] fineDown;
+    private final long[] fineUp;
+    private final long[] coarseMinute;
+    private final long[] coarseDown;
+    private final long[] coarseUp;
+    private final int[] coarseCount;
     private long lastAt = Long.MIN_VALUE;
     private Sample latest;
 
+    /** The full history: ten minutes a second, a day a minute. */
     public SpeedHistory() {
+        this(FINE_SECONDS, COARSE_MINUTES);
+    }
+
+    private SpeedHistory(int fineSeconds, int coarseMinutes) {
+        fineSize = fineSeconds;
+        coarseSize = coarseMinutes;
+        fineAt = new long[fineSeconds];
+        fineDown = new long[fineSeconds];
+        fineUp = new long[fineSeconds];
+        coarseMinute = new long[coarseMinutes];
+        coarseDown = new long[coarseMinutes];
+        coarseUp = new long[coarseMinutes];
+        coarseCount = new int[coarseMinutes];
         java.util.Arrays.fill(fineAt, Long.MIN_VALUE);
         java.util.Arrays.fill(coarseMinute, Long.MIN_VALUE);
+    }
+
+    /** A short history, {@link #RECENT_SECONDS} a second and no averages: a few KiB. */
+    public static SpeedHistory recent() {
+        return new SpeedHistory(RECENT_SECONDS, 0);
+    }
+
+    /**
+     * A full history holding what this one has: the history a torrent's Speed tab keeps from
+     * the moment it is first chosen, started from the short one so it does not start empty.
+     */
+    public synchronized SpeedHistory widened() {
+        SpeedHistory full = new SpeedHistory();
+        if (latest == null) return full;
+        for (long t = lastAt - fineSize + 1; t <= lastAt; t++) {
+            int slot = slot(t, fineSize);
+            if (fineAt[slot] == t) full.add(t, fineDown[slot], fineUp[slot]);
+        }
+        return full;
     }
 
     /** Records this second's rates; a second already recorded, or earlier than one, is ignored. */
@@ -47,12 +88,13 @@ public final class SpeedHistory {
         if (atSeconds <= lastAt) return;
         lastAt = atSeconds;
         latest = new Sample(atSeconds, download, upload);
-        int slot = slot(atSeconds, FINE_SECONDS);
+        int slot = slot(atSeconds, fineSize);
         fineAt[slot] = atSeconds;
         fineDown[slot] = download;
         fineUp[slot] = upload;
+        if (coarseSize == 0) return;
         long minute = Math.floorDiv(atSeconds, 60);
-        int m = slot(minute, COARSE_MINUTES);
+        int m = slot(minute, coarseSize);
         if (coarseMinute[m] != minute) {
             coarseMinute[m] = minute;
             coarseDown[m] = 0;
@@ -71,9 +113,10 @@ public final class SpeedHistory {
      */
     public synchronized List<Sample> samples(int windowSeconds, long nowSeconds) {
         List<Sample> out = new ArrayList<>();
-        if (windowSeconds <= FINE_SECONDS) {
-            for (long t = nowSeconds - windowSeconds + 1; t <= nowSeconds; t++) {
-                int slot = slot(t, FINE_SECONDS);
+        // A short history has no averages: it gives the seconds it has, whatever the window.
+        if (windowSeconds <= fineSize || coarseSize == 0) {
+            for (long t = nowSeconds - Math.min(windowSeconds, fineSize) + 1; t <= nowSeconds; t++) {
+                int slot = slot(t, fineSize);
                 if (fineAt[slot] == t) out.add(new Sample(t, fineDown[slot], fineUp[slot]));
             }
             return out;
@@ -81,7 +124,7 @@ public final class SpeedHistory {
         long first = Math.floorDiv(nowSeconds - windowSeconds, 60) + 1;
         long last = Math.floorDiv(nowSeconds, 60);
         for (long minute = first; minute <= last; minute++) {
-            int m = slot(minute, COARSE_MINUTES);
+            int m = slot(minute, coarseSize);
             if (coarseMinute[m] != minute || coarseCount[m] == 0) continue;
             out.add(new Sample(minute * 60, coarseDown[m] / coarseCount[m], coarseUp[m] / coarseCount[m]));
         }
@@ -94,8 +137,8 @@ public final class SpeedHistory {
      * once rather than a single minute's dot.
      */
     public synchronized List<Sample> blended(int windowSeconds, long nowSeconds) {
-        if (windowSeconds <= FINE_SECONDS) return samples(windowSeconds, nowSeconds);
-        List<Sample> fine = samples(FINE_SECONDS, nowSeconds);
+        if (windowSeconds <= fineSize) return samples(windowSeconds, nowSeconds);
+        List<Sample> fine = samples(fineSize, nowSeconds);
         long fineStart = fine.isEmpty() ? nowSeconds + 1 : fine.getFirst().at();
         List<Sample> out = new ArrayList<>();
         for (Sample s : samples(windowSeconds, nowSeconds)) {

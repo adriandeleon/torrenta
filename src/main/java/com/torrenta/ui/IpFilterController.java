@@ -63,11 +63,34 @@ final class IpFilterController {
         apply(force || due(), report);
     }
 
+    /**
+     * The start's and the schedule's refresh: fetches and applies only when a download is due.
+     * {@link #applyStored} has already put the filter in place at start, so applying again with
+     * nothing new said "IP filter cleared" twice at every start (and once an hour after) when the
+     * filter is off.
+     */
+    void refreshIfDue(Consumer<String> report) {
+        if (fetchDue(
+                settings.ipFilterEnabled(),
+                settings.ipFilterUrl(),
+                settings.ipFilterLastRefresh(),
+                settings.ipFilterRefreshHours(),
+                System.currentTimeMillis())) apply(true, report);
+    }
+
     private boolean due() {
-        long last = settings.ipFilterLastRefresh();
-        long interval = settings.ipFilterRefreshHours() * 3600_000L;
-        long now = System.currentTimeMillis();
+        return due(settings.ipFilterLastRefresh(), settings.ipFilterRefreshHours(), System.currentTimeMillis());
+    }
+
+    /** Whether a list last fetched at {@code last} (epoch ms, 0 for never) is due a new download. */
+    static boolean due(long last, int intervalHours, long now) {
+        long interval = intervalHours * 3600_000L;
         return last <= 0 || last > now || now - last >= interval;
+    }
+
+    /** Whether the schedule has anything to do: the filter on, a URL to fetch from, and due. */
+    static boolean fetchDue(boolean enabled, String url, long last, int intervalHours, long now) {
+        return enabled && url != null && !url.isEmpty() && due(last, intervalHours, now);
     }
 
     private synchronized void apply(boolean fetch, Consumer<String> report) {
