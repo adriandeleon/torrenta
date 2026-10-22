@@ -277,9 +277,13 @@
                     <systemPropertyVariables>
                         <!-- NativeLibrary unpacks the engine here instead of under ~/.torrenta. -->
                         <torrenta.nativeDir>${project.build.directory}/native</torrenta.nativeDir>
+                        <!-- com.torrenta.TestProgress: which test was running when a fork died. -->
+                        <torrenta.testProgress>${project.build.directory}/surefire-reports/test-progress.log</torrenta.testProgress>
                     </systemPropertyVariables>
-                    <!-- The engine's JNI class calls System.load; see the javafx plugin options. -->
-                    <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
+                    <!-- The engine's JNI class calls System.load; see the javafx plugin options.
+                         A crash report goes beside the test reports, which CI uploads on failure,
+                         rather than into whatever directory the fork happened to start in. -->
+                    <argLine>@{argLine} --enable-native-access=ALL-UNNAMED -XX:ErrorFile=${project.build.directory}/surefire-reports/hs_err_pid%p.log</argLine>
                 </configuration>
             </plugin>
 

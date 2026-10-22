@@ -205,6 +205,18 @@ release process with the names changed; Termina's README and memory hold the war
   holds every vector with `Reference.reachabilityFence` until the copies are made. Anything that
   points into a parent (`status.pieces()`, `info.files()`) is used while the parent is fenced. CI
   runs the Linux tests with `MALLOC_PERTURB_` so a slip crashes every time, not once in a hundred.
+- **The libtorrent inside libtorrent4j 2.1.0-39 (pinned 2026-01-25) can crash on its own thread.**
+  `torrent::on_piece_verified` calls `m_picker->completed_hash_job()` without checking the picker,
+  and the picker can go while a piece's hash job is in flight: it is dropped when the torrent
+  becomes a seed and by `handle_inconsistent_hashes`, and a `force_recheck` (which a `move_storage`
+  that finds files issues by itself) leaves stale jobs behind. The completion then segfaults on
+  libtorrent's network thread (`Current thread is native thread`, `libtorrent4j.so+0x41e71a`,
+  `si_addr` 0) and surefire reports exit 134 with no failing test. No call of ours is on the stack,
+  so no lock or fence of ours can prevent it. Upstream guarded it after the pin (ff0ebd76c5, then the
+  picker generation in 63c45f16bd); no libtorrent4j release has either. It killed
+  `LibtorrentEngineTest` once in about 125 CI runs (PR #65's first, 2026-10-22). When a fork dies,
+  `target/surefire-reports/test-progress.log` (`TestProgress`) names the test that was running, and
+  CI prints it, the crash report and the core's stacks.
 - **Run-on-event is driven by `EngineEvent.Kind`, not by parsing messages.** The engine tags
   `ADDED` (never a torrent restored at start: `restoring.remove(id)` decides), `FINISHED`
   (`torrent_finished_alert`, which also fires after a check that finds every piece), `ERROR`

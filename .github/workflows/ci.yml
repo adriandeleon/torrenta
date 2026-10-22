@@ -43,9 +43,28 @@ jobs:
           # other allocators ignore it).
           MALLOC_PERTURB_: '165'
 
+      # A native crash kills the fork with no test failure, and surefire names only the class.
+      # TestProgress writes a line before and after every test: a start with no end is the test
+      # the JVM died in. The fork's crash report goes beside it (-XX:ErrorFile in the pom), and on
+      # Linux systemd-coredump keeps the core, whose every thread it can unwind (the crash report
+      # shows one frame of a library built without frame pointers).
+      - name: Say where a crashed fork died
+        if: failure()
+        shell: bash
+        run: |
+          progress=target/surefire-reports/test-progress.log
+          if [ -f "$progress" ]; then echo "--- last tests started ---"; tail -n 6 "$progress"; fi
+          for report in target/surefire-reports/hs_err_pid*.log hs_err_pid*.log; do
+            [ -f "$report" ] || continue
+            echo "--- $report ---"; sed -n '1,40p' "$report"
+          done
+          if [ "$RUNNER_OS" = "Linux" ] && command -v coredumpctl > /dev/null; then
+            sudo coredumpctl info --no-pager java || true
+          fi
+
       - name: Upload test reports
-        # Only the failures matter here, and only then. A JVM crash leaves its report next to the
-        # pom, not under target.
+        # Only the failures matter here, and only then. The fork's crash report is under
+        # surefire-reports; one from another JVM would be next to the pom.
         if: failure()
         uses: actions/upload-artifact@v4
         with:
