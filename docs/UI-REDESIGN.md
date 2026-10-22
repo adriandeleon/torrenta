@@ -58,8 +58,9 @@ rail of dots with counts (board 2).
 ### 4. Inspector and diagnosis (board 1)
 
 The detail pane gains an **Overview** tab first: action buttons with their keys, the diagnosis
-card when there is one, the pieces map, a 30-minute sparkline, then the facts. Ctrl+1…5 picks a
-tab, Ctrl+J hides the pane.
+card when there is one, the pieces map, a 30-minute sparkline, then the facts. Ctrl+J hides the pane.
+The tabs need keys of their own, to be decided: Ctrl+1, 2 and 3 went to the window's views
+(Transfers, Search, RSS; adl, 2026-10-21), so Ctrl+1…5 no longer picks a tab.
 
 **Where it docks** (decided, adl, 2026-10-20): to the right on a wide window, below on a narrow
 one, configurable. The setting is `detail.position` = `auto` (default) | `right` | `bottom`. It is
