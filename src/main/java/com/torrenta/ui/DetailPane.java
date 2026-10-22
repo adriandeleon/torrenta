@@ -70,11 +70,13 @@ final class DetailPane extends VBox {
 
     private BiConsumer<Integer, com.torrenta.engine.Priority> onFilePriority = (i, p) -> {};
     private Consumer<FileRows.Row> onOpenFile = r -> {};
+    private Consumer<String> onOpenFolder = folder -> {};
     private Consumer<List<String>> onAddTrackers = urls -> {};
     private Consumer<String> onRemoveTracker = url -> {};
     private Runnable onReannounce = () -> {};
     private Consumer<String> onBanPeer = address -> {};
-    private MenuItem openItem;
+    private final ContextMenu filesMenu = new ContextMenu();
+    private boolean localFiles = true;
 
     DetailPane() {
         getStyleClass().add("detail-pane");
@@ -108,6 +110,11 @@ final class DetailPane extends VBox {
         onOpenFile = handler;
     }
 
+    /** Open Folder and Open Parent Folder: the folder's path inside the torrent, empty for the top. */
+    void setOnOpenFolder(Consumer<String> handler) {
+        onOpenFolder = handler;
+    }
+
     void setOnAddTrackers(Consumer<List<String>> handler) {
         onAddTrackers = handler;
     }
@@ -124,9 +131,10 @@ final class DetailPane extends VBox {
         onBanPeer = handler;
     }
 
-    /** Hides what the engine cannot do here: Open file when the files are not on this machine. */
+    /** Hides what the engine cannot do here: the Files tab's menu opens files on this machine only. */
     void applyCapabilities(com.torrenta.engine.Engine.Capabilities caps) {
-        if (openItem != null) openItem.setVisible(caps.has(com.torrenta.engine.Engine.Capability.LOCAL_FILES));
+        localFiles = caps.has(com.torrenta.engine.Engine.Capability.LOCAL_FILES);
+        files.setContextMenu(localFiles ? filesMenu : null);
     }
 
     /** The Speed tab's window, shared with the Statistics window through the settings. */
@@ -312,7 +320,7 @@ final class DetailPane extends VBox {
         files.setEditable(true);
         files.setColumnResizePolicy(TreeTableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         files.setPlaceholder(new Label(tr("detail.files.empty")));
-        TreeTableColumn<FileRows.Row, String> name = treeColumn(tr("common.name"), 320, FileRows.Row::name);
+        TreeTableColumn<FileRows.Row, FileRows.Row> name = nameColumn(tr("common.name"), 320);
         TreeTableColumn<FileRows.Row, String> size = new TreeTableColumn<>(tr("common.size"));
         size.setPrefWidth(90);
         size.setCellValueFactory(p -> p.getValue().getValue().sizeProperty().map(n -> Bytes.human(n.longValue())));
@@ -350,15 +358,66 @@ final class DetailPane extends VBox {
         files.getColumns().addAll(List.of(name, size, progress, priority));
         Headers.uppercase(files);
 
-        openItem = new MenuItem(tr("detail.files.openFile"));
-        MenuItem open = openItem;
-        open.setGraphic(Icons.open().at(Icons.MENU_SIZE));
-        open.setOnAction(e -> {
-            var item = files.getSelectionModel().getSelectedItem();
-            if (item != null && item.getValue().isFile()) onOpenFile.accept(item.getValue());
+        // What the menu offers follows the row: a file opens, or its folder does; a folder opens.
+        MenuItem openFile = new MenuItem(tr("detail.files.openFile"));
+        openFile.setGraphic(Icons.open().at(Icons.MENU_SIZE));
+        openFile.setOnAction(e -> selectedFileRow().filter(FileRows.Row::isFile).ifPresent(onOpenFile));
+        MenuItem openFolder = new MenuItem(tr("detail.files.openFolder"));
+        openFolder.setGraphic(Icons.folderOpen().at(Icons.MENU_SIZE));
+        openFolder.setOnAction(e -> selectedFileRow().map(FileRows::folderOf).ifPresent(onOpenFolder));
+        MenuItem openParent = new MenuItem(tr("detail.files.openParent"));
+        openParent.setGraphic(Icons.folderUp().at(Icons.MENU_SIZE));
+        openParent.setOnAction(e -> selectedFileRow().map(FileRows::folderOf).ifPresent(onOpenFolder));
+        filesMenu.getItems().setAll(openFile, openFolder, openParent);
+        filesMenu.setOnShowing(e -> {
+            boolean file = selectedFileRow().map(FileRows.Row::isFile).orElse(false);
+            openFile.setVisible(file);
+            openParent.setVisible(file);
+            openFolder.setVisible(!file);
         });
-        files.setContextMenu(new ContextMenu(open));
+        files.setContextMenu(filesMenu);
+        // No row under the menu (a right-click below the last one with nothing chosen): no menu.
+        files.addEventFilter(javafx.scene.input.ContextMenuEvent.CONTEXT_MENU_REQUESTED, e -> {
+            if (selectedFileRow().isEmpty()) e.consume();
+        });
         return files;
+    }
+
+    private Optional<FileRows.Row> selectedFileRow() {
+        var item = files.getSelectionModel().getSelectedItem();
+        return item == null ? Optional.empty() : Optional.ofNullable(item.getValue());
+    }
+
+    /**
+     * Capture only: chooses the files tree's row {@code index} (as shown, folders included) and
+     * opens the menu a right-click on it would; the menu's lines are the window's {@code menu=}.
+     */
+    void openFilesMenuForCapture(int index) {
+        openFilesMenuForCapture(index, 20);
+    }
+
+    /** The rows come with the next poll after the selection: waits for them, 150 ms at a time. */
+    private void openFilesMenuForCapture(int index, int triesLeft) {
+        if (files.getExpandedItemCount() <= index && triesLeft > 0) {
+            var wait = new javafx.animation.PauseTransition(javafx.util.Duration.millis(150));
+            wait.setOnFinished(e -> openFilesMenuForCapture(index, triesLeft - 1));
+            wait.play();
+            return;
+        }
+        files.getSelectionModel().clearAndSelect(index);
+        if (files.getContextMenu() != null) files.getContextMenu().show(files, javafx.geometry.Side.BOTTOM, 0, 0);
+    }
+
+    /** Capture only: the files tree's rows as shown, indented by depth, each with its kind. */
+    List<String> fileLinesForCapture() {
+        List<String> lines = new java.util.ArrayList<>();
+        for (int i = 0; i < files.getExpandedItemCount(); i++) {
+            var item = files.getTreeItem(i);
+            FileRows.Row row = item.getValue();
+            lines.add("  ".repeat(Math.max(0, files.getTreeItemLevel(item) - 1)) + row.name() + " ["
+                    + FileKind.of(row.name(), !row.isFile()).name().toLowerCase(java.util.Locale.ROOT) + "]");
+        }
+        return lines;
     }
 
     private javafx.scene.Node buildPeers() {
@@ -473,19 +532,36 @@ final class DetailPane extends VBox {
         return column;
     }
 
-    private static TreeTableColumn<FileRows.Row, String> treeColumn(
-            String title, double width, Function<FileRows.Row, String> text) {
-        TreeTableColumn<FileRows.Row, String> column = new TreeTableColumn<>(title);
+    /** The Files tab's Name: the row's kind as a glyph before its name; sorts by the name. */
+    private static TreeTableColumn<FileRows.Row, FileRows.Row> nameColumn(String title, double width) {
+        TreeTableColumn<FileRows.Row, FileRows.Row> column = new TreeTableColumn<>(title);
         column.setPrefWidth(width);
-        column.setCellValueFactory(
-                p -> new ReadOnlyObjectWrapper<>(text.apply(p.getValue().getValue())));
+        column.setCellValueFactory(p -> new ReadOnlyObjectWrapper<>(p.getValue().getValue()));
+        column.setComparator(java.util.Comparator.comparing(FileRows.Row::name));
         column.setCellFactory(c -> new TreeTableCell<>() {
+            /** The kind the graphic shows, so a tick that changes nothing makes no new node. */
+            private FileKind shown;
+
             @Override
-            protected void updateItem(String item, boolean empty) {
+            protected void updateItem(FileRows.Row item, boolean empty) {
                 super.updateItem(item, empty);
-                setText(empty ? null : item);
+                if (empty || item == null) {
+                    setText(null);
+                    setGraphic(null);
+                    shown = null;
+                    return;
+                }
+                setText(item.name());
+                FileKind kind = FileKind.of(item.name(), !item.isFile());
+                if (kind != shown || getGraphic() == null) {
+                    Icons.Glyph glyph = kind.glyph();
+                    glyph.getStyleClass().add(kind == FileKind.FOLDER ? "file-kind-folder" : "file-kind");
+                    setGraphic(glyph);
+                    shown = kind;
+                }
             }
         });
+        column.getStyleClass().add("files-name");
         return column;
     }
 

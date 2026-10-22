@@ -888,6 +888,8 @@ public final class MainWindow {
             out.add("stats-graph=" + statsWindow.graph().summaryForCapture());
         }
         if (detailWanted && detail.activeTab().equals("speed")) out.add("speed-tab=" + detail.speedSummaryForCapture());
+        if (detailWanted && detail.activeTab().equals("files"))
+            for (String line : detail.fileLinesForCapture()) out.add("file=" + line);
         if (!settingsWindow.profileDialogStatusForCapture().isEmpty()) {
             out.add("dialog=" + settingsWindow.dialogTitle());
             out.add("profile-test=" + settingsWindow.profileDialogStatusForCapture());
@@ -1152,6 +1154,11 @@ public final class MainWindow {
                         .findFirst()
                         .orElseThrow(() -> new IllegalArgumentException("no submenu " + title));
             }
+        } else if (action.startsWith("files-menu:")) {
+            // The Files tab's menu on its row N (as shown, folders included), as a right-click opens it.
+            showDetail();
+            detail.selectTab("files");
+            detail.openFilesMenuForCapture(Integer.parseInt(action.substring("files-menu:".length())));
         } else if (action.equals("context-menu")) {
             // The list's context menu, as a right-click on it would open it.
             table.getContextMenu().show(table, javafx.geometry.Side.BOTTOM, 0, 0);
@@ -3483,6 +3490,22 @@ public final class MainWindow {
                     : rows.get(id) == null ? null : rows.get(id).torrent();
             if (t != null)
                 opener.accept(Path.of(t.savePath()).resolve(row.path()).toUri().toString());
+        });
+        detail.setOnOpenFolder(relative -> {
+            String id = detailId;
+            TorrentRow row = id == null ? null : rows.get(id);
+            if (row == null
+                    || row.torrent().savePath() == null
+                    || row.torrent().savePath().isBlank()) return;
+            Path savePath = Path.of(row.torrent().savePath());
+            // A folder no piece has reached is not on the disk yet: the nearest one above it opens.
+            // Looking is disk I/O (a network mount can stall), so it is not done on the FX thread.
+            Thread.ofVirtual().name("open-folder").start(() -> {
+                String uri = FileRows.nearestFolder(savePath, relative, java.nio.file.Files::isDirectory)
+                        .toUri()
+                        .toString();
+                Platform.runLater(() -> opener.accept(uri));
+            });
         });
         detail.setOnAddTrackers(urls -> {
             String id = detailId;

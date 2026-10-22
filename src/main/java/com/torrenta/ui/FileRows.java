@@ -1,9 +1,11 @@
 package com.torrenta.ui;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 import javafx.beans.property.LongProperty;
 import javafx.beans.property.ObjectProperty;
@@ -104,6 +106,30 @@ public final class FileRows {
         }
         refreshFolders(root);
         return false;
+    }
+
+    /**
+     * The folder inside the torrent that Open Folder (a folder row) or Open Parent Folder (a file
+     * row) shows, forward slashes: the folder's own path, or the file's minus its name, empty for a
+     * file at the top, which is the save path itself.
+     */
+    public static String folderOf(Row row) {
+        if (!row.isFile()) return row.path();
+        int slash = row.path().lastIndexOf('/');
+        return slash < 0 ? "" : row.path().substring(0, slash);
+    }
+
+    /**
+     * {@code relative} under {@code savePath}, or the nearest folder above it that exists: a
+     * folder no piece has reached yet is not on the disk, and the save path is the floor.
+     */
+    public static Path nearestFolder(Path savePath, String relative, Predicate<Path> isDirectory) {
+        Path floor = savePath.normalize();
+        Path folder = floor.resolve(relative).normalize();
+        // A path that climbs out of the save path (it should never, libtorrent sanitises) opens the floor.
+        if (!folder.startsWith(floor)) return floor;
+        while (!folder.equals(floor) && !isDirectory.test(folder)) folder = folder.getParent();
+        return folder;
     }
 
     public void clear() {
