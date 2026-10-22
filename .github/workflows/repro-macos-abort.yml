@@ -23,20 +23,18 @@ jobs:
           cache: maven
       - name: Loop the tests
         shell: bash
-        env:
-          JAVA_TOOL_OPTIONS: -XX:ErrorFile=${{ runner.temp }}/evidence/hs_err_pid%p.log
         run: |
           mkdir -p "$RUNNER_TEMP/evidence"
           ./mvnw -B -q --no-transfer-progress test-compile
           fails=0
-          for i in 1 2 3 4; do
+          for i in 1 2 3 4 5 6; do
             echo "=== iteration $i"
             if ./mvnw -B --no-transfer-progress test > "$RUNNER_TEMP/evidence/run-$i.log" 2>&1; then
               echo "iteration $i passed"
             else
               fails=$((fails+1))
               echo "::warning::iteration $i failed"
-              grep -E "Abort trap|Segmentation|Tests run:.*Fail|ERROR\]" "$RUNNER_TEMP/evidence/run-$i.log" | head -20
+              grep -E "Abort trap|Segmentation|goodbye|starting fork|Tests run:.*Fail|ERROR\]" "$RUNNER_TEMP/evidence/run-$i.log" | head -20
               cp -R target/surefire-reports "$RUNNER_TEMP/evidence/reports-$i" || true
             fi
           done
