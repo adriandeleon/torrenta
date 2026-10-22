@@ -141,6 +141,8 @@ final class Icons {
             case "remove-data" -> trashData();
             case "check-updates" -> download();
             case "about" -> info();
+            case "alt-speed" -> altSpeed();
+            case "quit" -> power();
             case "settings" -> settings();
             case "search" -> search();
             case "rss" -> rss();
@@ -208,7 +210,7 @@ final class Icons {
         return line("M2.7 4.7h10.6M6 4.7V2.7h4v2M4 4.7l.7 8.6h6.6l.7-8.6");
     }
 
-    /** A folder beside a category in the sidebar. */
+    /** A folder beside a category in the sidebar, and beside a folder in the Files tab. */
     static Glyph folderSmall() {
         return line("M2 12.5V3.5h4.2l1.5 2h5.8v2M2 12.5l2.2-5h10.3l-2.2 5z", SMALL_SCALE);
     }
@@ -284,6 +286,16 @@ final class Icons {
                         + "M3 10.5V3.6A1.1 1.1 0 0 1 4.1 2.5H11");
     }
 
+    /** A circle struck through: Ban Peer. */
+    static Glyph ban() {
+        return line("M2.8 8a5.2 5.2 0 1 0 10.4 0a5.2 5.2 0 1 0-10.4 0M4.3 4.3l7.4 7.4");
+    }
+
+    /** The gauge with its needle low: the alternative (slower) speed limits. */
+    static Glyph altSpeed() {
+        return line("M2.8 11.5a5.2 5.2 0 1 1 10.4 0M8 11.5L5.2 8.1M2.5 13.5h11");
+    }
+
     /** A hash sign, for the info-hash. */
     static Glyph hash() {
         return line("M6 2.5l-1.5 11M11.5 2.5L10 13.5M3 6h10.5M2.5 10H13");
@@ -347,6 +359,78 @@ final class Icons {
     /** A sheet with its corner turned and lines on it: the Files tab. */
     static Glyph files() {
         return line("M4.5 2.5h4.6l2.9 2.9v8.1h-7.5zM9.1 2.5v2.9h2.9M6.5 9h3M6.5 11h3");
+    }
+
+    // ---- the Files tab's rows, by FileKind -------------------------------------------------------
+
+    /** The sheet with its corner turned, for {@link #file} and the kinds drawn on it. */
+    private static final String SHEET = "M4.5 2.5h4.6l2.9 2.9v8.1h-7.5zM9.1 2.5v2.9h2.9";
+
+    /** A closed folder: a folder row. */
+    static Glyph folder() {
+        return line("M2 12.5V3.5h4.2l1.5 2h6.3v7z");
+    }
+
+    /** A blank sheet: a file of no kind we know. */
+    static Glyph file() {
+        return line(SHEET);
+    }
+
+    /** A sheet with a play mark: video. */
+    static Glyph fileVideo() {
+        return line(SHEET + "M7 8v3.6l3-1.8z");
+    }
+
+    /** A sheet with a note: audio. */
+    static Glyph fileAudio() {
+        return line(SHEET + "M6.2 11.4a1 1 0 1 0 2 0a1 1 0 1 0-2 0M8.2 11.4V7.6l1.9.8");
+    }
+
+    /** A sheet with a hill and a sun: an image. */
+    static Glyph fileImage() {
+        return line(SHEET + "M5.6 12.4l1.9-2.4 1.3 1.5.9-1 1.4 1.9M6.4 7.6h.1");
+    }
+
+    /** A sheet with a zip down it: an archive. */
+    static Glyph fileArchive() {
+        return line(SHEET + "M7.3 2.5v1.2M8.3 4.2v1.2M7.3 5.9v1.2M7.3 8.8h2v2.4h-2z");
+    }
+
+    /** An open book: an ebook or a comic. */
+    static Glyph book() {
+        return line("M8 4.3C6.6 3.3 4.6 2.9 2.5 3.1v9.4c2.1-.2 4.1.2 5.5 1.2 1.4-1 3.4-1.4 5.5-1.2V3.1"
+                + "c-2.1-.2-4.1.2-5.5 1.2zM8 4.3v9.4");
+    }
+
+    /** A screen with caption lines: subtitles. */
+    static Glyph subtitles() {
+        return line("M2 3.5h12v9H2zM4.5 9.8h4.2M10.2 9.8h1.6");
+    }
+
+    /** A disc with its hole: a disc or disk image. */
+    static Glyph disc() {
+        return line("M2.8 8a5.2 5.2 0 1 0 10.4 0a5.2 5.2 0 1 0-10.4 0M6.7 8a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0-2.6 0");
+    }
+
+    /** A cylinder in three bands: data. */
+    static Glyph database() {
+        return line("M3.5 4.2c0-1 2-1.7 4.5-1.7s4.5.7 4.5 1.7-2 1.7-4.5 1.7-4.5-.7-4.5-1.7z"
+                + "M3.5 4.2v7.6c0 1 2 1.7 4.5 1.7s4.5-.7 4.5-1.7V4.2M3.5 8c0 1 2 1.7 4.5 1.7s4.5-.7 4.5-1.7");
+    }
+
+    /** A package: a program or an installer. */
+    static Glyph box() {
+        return line("M2.5 5L8 2.5 13.5 5v6L8 13.5 2.5 11zM2.5 5L8 7.5 13.5 5M8 7.5v6");
+    }
+
+    /** A folder with an arrow out of it: Open Folder in the Files tab. */
+    static Glyph folderOpen() {
+        return line("M2 12.5V3.5h4.2l1.5 2h6.3v7zM6 10.5l3.5-3.5M6.8 7h2.7v2.7");
+    }
+
+    /** A folder with an arrow up out of it: Open Parent Folder. */
+    static Glyph folderUp() {
+        return line("M2 12.5V3.5h4.2l1.5 2h6.3v7zM8 11V7.2M6.3 8.8L8 7.1l1.7 1.7");
     }
 
     /** Two people: the Peers tab. */

@@ -46,13 +46,21 @@ class UiStringSweepTest {
             + "|\\.(?:setText|setPromptText|setTitle|setHeaderText|setContentText|setStatus|setTooltip|setAccessibleText)\\s*\\(\\s*(?:new\\s+Tooltip\\s*\\(\\s*)?"
             + "|new\\s+Command\\s*\\(\\s*\"[^\"]*\"\\s*,\\s*"
             + "|new\\s+Alert\\s*\\([^,()]*,\\s*"
-            + ")\"((?:[^\"\\\\]|\\\\.)*)\"");
+            + ")\"([^\"\\\\]*+(?:\\\\.[^\"\\\\]*+)*+)\"");
 
-    private static final Pattern TR_LITERAL = Pattern.compile("\\btr\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
-    private static final Pattern TR_PREFIX = Pattern.compile("\\btr\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\.)*)\"\\s*\\+");
+    /*
+     * A literal's body is [^"\\]*+(?:\\.[^"\\]*+)*+, possessive and unrolled, never the plainer
+     * (?:[^"\\]|\\.)*: java.util.regex recurses once per character through an alternation in a
+     * loop, and a long literal overflowed the stack on Linux CI (smaller thread stacks), while the
+     * possessive character class runs as a loop and the group recurses only per escape.
+     */
+    private static final Pattern TR_LITERAL =
+            Pattern.compile("\\btr\\s*\\(\\s*\"([^\"\\\\]*+(?:\\\\.[^\"\\\\]*+)*+)\"");
+    private static final Pattern TR_PREFIX =
+            Pattern.compile("\\btr\\s*\\(\\s*\"([^\"\\\\]*+(?:\\\\.[^\"\\\\]*+)*+)\"\\s*\\+");
     private static final Pattern STATIC_TR =
             Pattern.compile("static\\s+(?:final\\s+)?\\w[\\w<>, ]*\\s+\\w+\\s*=[^;]*\\btr\\s*\\(");
-    private static final Pattern ANY_LITERAL = Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"");
+    private static final Pattern ANY_LITERAL = Pattern.compile("\"([^\"\\\\]*+(?:\\\\.[^\"\\\\]*+)*+)\"");
     private static final Pattern LETTERS = Pattern.compile("\\p{L}");
 
     /**
@@ -100,8 +108,10 @@ class UiStringSweepTest {
                 out.append(source, i, Math.min(j + 1, n));
                 i = j + 1;
             } else if (c == '\'' && i + 2 < n) {
+                // a char literal becomes ' ': a '"' left as it was paired with the next string's
+                // quote, and the "literal" between them ran on for a thousand characters
                 int j = source.charAt(i + 1) == '\\' ? i + 3 : i + 2;
-                out.append(source, i, Math.min(j + 1, n));
+                out.append("' '");
                 i = j + 1;
             } else if (c == '/' && i + 1 < n && source.charAt(i + 1) == '/') {
                 while (i < n && source.charAt(i) != '\n') i++;
@@ -392,5 +402,7 @@ class UiStringSweepTest {
     void theCommentStripperKeepsStringsAndLines() {
         String src = "a // c\n\"http://x\" /* b\n b */ d";
         assertEquals("a \n\"http://x\" \n d", stripComments(src));
+        assertEquals("c == ' ' || s == \"x\"", stripComments("c == '\"' || s == \"x\""));
+        assertEquals("' ' + \"a\"", stripComments("'\\'' + \"a\""));
     }
 }

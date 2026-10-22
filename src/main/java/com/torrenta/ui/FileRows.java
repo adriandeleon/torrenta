@@ -1,9 +1,11 @@
 package com.torrenta.ui;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 import javafx.beans.property.LongProperty;
 import javafx.beans.property.ObjectProperty;
@@ -76,6 +78,17 @@ public final class FileRows {
         }
     }
 
+    /**
+     * The folder a row's "open folder" shows: a folder row is that folder under the save path, a
+     * file row its containing folder, which for a single-file torrent is the save path itself.
+     */
+    public static Path folderOf(Path savePath, Row row) {
+        Path own = savePath.resolve(row.path());
+        if (!row.isFile()) return own;
+        Path parent = own.getParent();
+        return parent == null ? savePath : parent;
+    }
+
     private final Map<Integer, Row> byIndex = new LinkedHashMap<>();
     private Row root;
     private TreeItem<Row> rootItem;
@@ -104,6 +117,19 @@ public final class FileRows {
         }
         refreshFolders(root);
         return false;
+    }
+
+    /**
+     * {@code wanted} (a {@link #folderOf}), or the nearest folder above it that exists: a folder no
+     * piece has reached yet is not on the disk, and the save path is the floor.
+     */
+    public static Path nearestFolder(Path savePath, Path wanted, Predicate<Path> isDirectory) {
+        Path floor = savePath.normalize();
+        Path folder = wanted.normalize();
+        // A path that climbs out of the save path (it should never, libtorrent sanitises) opens the floor.
+        if (!folder.startsWith(floor)) return floor;
+        while (!folder.equals(floor) && !isDirectory.test(folder)) folder = folder.getParent();
+        return folder;
     }
 
     public void clear() {

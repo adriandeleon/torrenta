@@ -60,7 +60,9 @@ class IconsTest {
                         "history",
                         "settings",
                         "palette",
-                        "folderSmall")),
+                        "folderSmall",
+                        "folder",
+                        "file")),
                 seen.toString());
     }
 
@@ -114,7 +116,9 @@ class IconsTest {
                 "select-all",
                 "event-log",
                 "check-updates",
-                "about"
+                "about",
+                "alt-speed",
+                "quit"
             })
     void everyMenuCommandHasAGlyph(String id) {
         Icons.Glyph a = Icons.forCommand(id);

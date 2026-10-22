@@ -15,9 +15,7 @@ import javafx.css.PseudoClass;
 import javafx.geometry.Insets;
 import javafx.geometry.Orientation;
 import javafx.geometry.Pos;
-import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
@@ -663,15 +661,7 @@ final class RssPane extends VBox {
         String id = selectedFeedId();
         Feed feed = id.isEmpty() ? null : service.feed(id);
         if (feed == null) return;
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, tr("rss.removeFeed.text", feed.displayName()));
-        confirm.setTitle(tr("rss.removeFeed.header"));
-        confirm.setHeaderText(tr("rss.removeFeed.header"));
-        confirm.initOwner(getScene().getWindow());
-        Fonts.installUiFont(confirm.getDialogPane());
-        ButtonType yes = new ButtonType(tr("common.remove"), ButtonType.OK.getButtonData());
-        confirm.getButtonTypes().setAll(yes, StockButtons.cancel());
-        Optional<ButtonType> answer = confirm.showAndWait();
-        if (answer.isPresent() && answer.get() == yes) {
+        if (RemoveConfirm.ask(getScene().getWindow(), RemoveConfirm.Kind.FEED, feed.displayName())) {
             try {
                 service.removeFeed(id);
             } catch (IOException e) {

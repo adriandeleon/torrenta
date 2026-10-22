@@ -44,6 +44,18 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   with "Add now, pick files when ready" and after the files arrived, instead of looking for the
   swarm again from nothing.
 
+- **Alternative speed limits have a command**: View → Alternative Speed Limits (`Ctrl+Shift+J`),
+  checked while they are in force, and in the palette. Quit is in the palette too.
+- **Settings search opens the page that answers it best**: a row whose title matches beats one
+  whose description does, which beats a keyword, so "proxy" opens Connection rather than Sync.
+  A section's heading counts as a keyword of its rows ("proxy" lists the whole Proxy section).
+  `Esc` in a search clears it before it closes the window, and the window opens again unfiltered.
+- **Every removal asks first.** Feeds, rules, watched folders, search providers, engine profiles,
+  categories and tags in Settings are removed after the same question the torrent list and the
+  RSS tab ask; the categories' and tags' buttons say Remove, like the rest.
+- **A search asks the providers again after five minutes.** An answer was reused for as long as
+  the window stayed open, so running the same search later never found anything new.
+
 ### Fixed
 
 - **The rest of the interface speaks the chosen language.** Engine errors and events (the status
@@ -56,6 +68,39 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   `Entf` in German menus) rather than a fixed "Ctrl+V" or "Space". The UI string sweep now also
   fails on English handed to an engine exception or event, or returned from a method whose result
   the window shows.
+- **A long status message no longer pushes the rest of the status bar off the window.** A
+  tracker warning used to elide "Alt speed" and the rates as well and push free space off the
+  right edge; now the message alone shortens, with an ellipsis, and the port, DHT, rates and free
+  space keep their width.
+- **The same message is one line with a count.** libtorrent reports a tracker's error once per
+  listen interface, so one unreachable tracker logged the same warning about seven times per
+  torrent; the event log and the status bar's history now keep one line ("… ×7") for the same
+  level, torrent and words within ten seconds of the last time.
+- **"IP filter cleared" no longer appears (twice) at every start.** The start applied the stored
+  filter and then refreshed, which applied it again; a refresh now runs only when a download is
+  due, and the engine says nothing when clearing a filter that was never set.
+- **The window remembers its size, its place and whether it was maximised**, on this machine
+  only (never synced), and comes back on a screen that is still there, made to fit it. The first
+  window is wide enough for the default columns, with no horizontal scrollbar.
+- **The Statistics window's sections are spaced and aligned**: a gap between sections, the values
+  of a column starting at one place in every section, and the window as tall as its graph needs
+  instead of cutting it at the baseline.
+- **A torrent's Speed tab is no longer empty the first time it is chosen**: every torrent keeps
+  its last two minutes of rates, and the tab starts from them.
+- **Ban Peer was unreachable**: the Peers tab has a context menu, Ban Peer and Copy Address
+  (Ban Peer only for an engine that takes our IP filter), as Settings → IP filter promised. It
+  bans the host alone: libtorrent's addresses read `tcp://host:port`, and the scheme went into the
+  ban, which the filter then skipped. Transmission's IPv6 peers are shown in brackets.
+- **The Add dialog's "Wait here for the file list" led nowhere once the fetch had failed**: it hid
+  Add now and left Add disabled for good. Wait is offered only while the file list can still come.
+- **"Add now, pick files when ready" downloaded every file on Transmission**, which has no stop
+  condition. A daemon gets plain Add and Add paused for a magnet instead.
+- **Spinners dropped a number typed before Tab or a click elsewhere**: the RSS refresh interval,
+  the sync interval, a feed's own interval and a rule's "ignore for" days now keep it, as the
+  other spinners do; text that is not a number puts the old value back instead of throwing.
+- **Settings → Connection → Proxy port** had no description, no keywords, and showed for an engine
+  without a proxy.
+
 - **Every style after the debug log's in the stylesheet was ignored** (the RSS rule dialog's among
   them, with a CSS warning at every start): a merge had dropped a closing brace.
 - **The detail pane opening collapsed to its tab strip.** The empty "No torrents yet" state,

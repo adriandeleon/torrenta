@@ -81,6 +81,7 @@ final class FeedDialog {
         minutes.setValueFactory(new SpinnerValueFactory.IntegerSpinnerValueFactory(
                 Feed.MIN_MINUTES, Feed.MAX_MINUTES, globalMinutes, 5));
         minutes.setEditable(true);
+        Spinners.commitOnBlur(minutes);
         minutes.setPrefWidth(90);
         minutes.disableProperty().bind(ownInterval.selectedProperty().not());
         Label every = new Label(tr("dialog.feed.every", Integer.toString(globalMinutes)));

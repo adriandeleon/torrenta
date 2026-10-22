@@ -626,6 +626,7 @@ final class SettingsWindow {
                 tr("settings.sync.branch.keywords"));
         syncInterval = new Spinner<>(1, 1440, 15, 5);
         syncInterval.setEditable(true);
+        Spinners.commitOnBlur(syncInterval);
         syncInterval.setPrefWidth(90);
         syncInterval.valueProperty().addListener((o, was, now) -> {
             if (loading || now == null) return;
@@ -862,6 +863,8 @@ final class SettingsWindow {
             stage.requestFocus();
             return;
         }
+        // A search is for the visit it was typed in: the window opens again on every row.
+        search.clear();
         reload();
         stage.show();
     }
@@ -919,7 +922,10 @@ final class SettingsWindow {
                         .toExternalForm());
         Fonts.installUiFont(scene);
         scene.setOnKeyPressed(e -> {
-            if (e.getCode() == KeyCode.ESCAPE) stage.hide();
+            if (e.getCode() != KeyCode.ESCAPE) return;
+            if (escapeClears(search.getText())) search.clear();
+            else stage.hide();
+            e.consume();
         });
         stage.setScene(scene);
         selectFirstVisible();
@@ -1060,6 +1066,61 @@ final class SettingsWindow {
         return keywords.toLowerCase(Locale.ROOT).contains(query.trim().toLowerCase(Locale.ROOT));
     }
 
+    /**
+     * How well a row answers a query, by where the words are: 3 in its title, 2 in its description,
+     * 1 in its keywords only, 0 not at all. {@code keywords} is {@code title | description |
+     * keywords}, or {@code title | keywords} for a row with no description of its own.
+     */
+    static int rank(String query, String keywords) {
+        if (query == null || query.isBlank()) return 0;
+        String q = query.trim().toLowerCase(Locale.ROOT);
+        String[] parts = keywords.toLowerCase(Locale.ROOT).split(" \\| ", 3);
+        if (parts[0].contains(q)) return 3;
+        if (parts.length == 3 && parts[1].contains(q)) return 2;
+        for (int i = 1; i < parts.length; i++) if (parts[i].contains(q)) return 1;
+        return 0;
+    }
+
+    /**
+     * The page a search should show: the one holding the best-ranked row ({@link #rank}), the
+     * earlier one in sidebar order on a tie; empty when nothing matches. "proxy" opened Sync, whose
+     * description names the proxy password, ahead of Connection, whose rows are the proxy.
+     *
+     * @param rows each row's page and keywords, in sidebar order
+     */
+    static <P> java.util.Optional<P> bestPage(String query, List<Map.Entry<P, String>> rows) {
+        P best = null;
+        int bestRank = 0;
+        for (Map.Entry<P, String> row : rows) {
+            int r = rank(query, row.getValue());
+            if (r > bestRank) {
+                bestRank = r;
+                best = row.getKey();
+            }
+        }
+        return java.util.Optional.ofNullable(best);
+    }
+
+    /** Escape in the window: a search in force is cleared first, and only then does it close. */
+    static boolean escapeClears(String query) {
+        return query != null && !query.isEmpty();
+    }
+
+    /** The search box's text and the page shown, for a capture. */
+    String searchStateForCapture() {
+        Object page = sidebar.getSelectionModel().getSelectedItem();
+        return "query=\"" + search.getText() + "\" page=" + (page instanceof Category c ? c.name() : "none");
+    }
+
+    /** Presses a key in the window, where the focus is, as a person would; for the capture hook. */
+    void keyForCapture(KeyCode code) {
+        Node target = stage.getScene().getFocusOwner() != null
+                ? stage.getScene().getFocusOwner()
+                : stage.getScene().getRoot();
+        target.fireEvent(new javafx.scene.input.KeyEvent(
+                javafx.scene.input.KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false));
+    }
+
     /** The visible rows' titles, for a capture. */
     List<String> visibleRowsForCapture() {
         List<String> out = new ArrayList<>();
@@ -1088,6 +1149,18 @@ final class SettingsWindow {
             if (!withHits.contains(category)) hiddenCategories.add(category);
         }
         sidebar.refresh();
+        // A search shows the page that answers it best; with none, the page shown stays if it can.
+        List<Map.Entry<Category, String>> visibleRows = rows.stream()
+                .filter(row -> !engineHiddenRows.contains(row.node()))
+                .filter(row -> !engineHiddenPages.contains(row.category()))
+                .sorted(java.util.Comparator.comparing(Row::category))
+                .map(row -> Map.entry(row.category(), row.keywords()))
+                .toList();
+        java.util.Optional<Category> best = bestPage(query, visibleRows);
+        if (best.isPresent()) {
+            sidebar.getSelectionModel().select(best.get());
+            return;
+        }
         Object selected = sidebar.getSelectionModel().getSelectedItem();
         if (!(selected instanceof Category category) || hiddenCategories.contains(category)) selectFirstVisible();
     }
@@ -1161,7 +1234,10 @@ final class SettingsWindow {
         line.setAlignment(Pos.CENTER_LEFT);
         line.getStyleClass().add("settings-row");
         section.getChildren().add(line);
-        rows.add(new Row(category, line, title + " | " + description + " " + keywords, section, capability));
+        String hint = description == null ? "" : description;
+        // The section's heading is a keyword of each of its rows: "proxy" finds the proxy's Host.
+        String heading = section.getChildren().getFirst() instanceof Label l ? " " + l.getText() : "";
+        rows.add(new Row(category, line, title + " | " + hint + " | " + keywords + heading, section, capability));
         return line;
     }
 
@@ -1574,7 +1650,7 @@ final class SettingsWindow {
         save.setOnAction(e -> saveCategory());
         categoryName.setOnAction(e -> saveCategory());
         categoryPath.setOnAction(e -> saveCategory());
-        categoryDelete = new Button(tr("common.delete"));
+        categoryDelete = new Button(tr("common.remove"));
         categoryDelete
                 .disableProperty()
                 .bind(categoryTable.getSelectionModel().selectedItemProperty().isNull());
@@ -1608,7 +1684,7 @@ final class SettingsWindow {
         addTag.disableProperty().bind(newTag.textProperty().map(String::isBlank));
         addTag.setOnAction(e -> addTags());
         newTag.setOnAction(e -> addTags());
-        tagDelete = new Button(tr("common.delete"));
+        tagDelete = new Button(tr("common.remove"));
         tagDelete
                 .disableProperty()
                 .bind(tagList.getSelectionModel().selectedItemProperty().isNull());
@@ -1648,6 +1724,7 @@ final class SettingsWindow {
         com.torrenta.engine.Category selected =
                 categoryTable.getSelectionModel().getSelectedItem();
         if (labelStore == null || selected == null) return;
+        if (!RemoveConfirm.ask(stage, RemoveConfirm.Kind.CATEGORY, selected.name())) return;
         try {
             labelStore.removeCategory(selected.name());
         } catch (IOException e) {
@@ -1676,6 +1753,7 @@ final class SettingsWindow {
     private void deleteTag() {
         String selected = tagList.getSelectionModel().getSelectedItem();
         if (labelStore == null || selected == null) return;
+        if (!RemoveConfirm.ask(stage, RemoveConfirm.Kind.TAG, selected)) return;
         try {
             labelStore.removeTag(selected);
         } catch (IOException e) {
@@ -1808,6 +1886,7 @@ final class SettingsWindow {
     private void removeWatchFolder() {
         WatchFolder selected = watchTable.getSelectionModel().getSelectedItem();
         if (watchStore == null || selected == null) return;
+        if (!RemoveConfirm.ask(stage, RemoveConfirm.Kind.WATCH_FOLDER, selected.folder())) return;
         List<WatchFolder> list = new ArrayList<>(watchStore.entries());
         list.remove(selected);
         saveWatchFolders(list, null);
@@ -1840,6 +1919,7 @@ final class SettingsWindow {
         VBox refresh = section(page, tr("settings.rss.refreshing"));
         rssMinutes = new Spinner<>(Feed.MIN_MINUTES, Feed.MAX_MINUTES, 30, 5);
         rssMinutes.setEditable(true);
+        Spinners.commitOnBlur(rssMinutes);
         rssMinutes.setPrefWidth(90);
         rssMinutes.valueProperty().addListener((o, was, now) -> {
             if (loading || now == null) return;
@@ -2032,6 +2112,7 @@ final class SettingsWindow {
     private void removeRule() {
         Rule selected = rulesTable.getSelectionModel().getSelectedItem();
         if (rssService == null || selected == null) return;
+        if (!RemoveConfirm.ask(stage, RemoveConfirm.Kind.RULE, selected.name())) return;
         try {
             rssService.removeRule(selected.name());
         } catch (IOException e) {
@@ -2142,6 +2223,7 @@ final class SettingsWindow {
     private void removeRssFeed() {
         Feed selected = rssTable.getSelectionModel().getSelectedItem();
         if (rssService == null || selected == null) return;
+        if (!RemoveConfirm.ask(stage, RemoveConfirm.Kind.FEED, selected.displayName())) return;
         try {
             rssService.removeFeed(selected.id());
         } catch (IOException e) {
@@ -2391,6 +2473,7 @@ final class SettingsWindow {
     private void removeSearchProvider() {
         TorznabEndpoint selected = searchTable.getSelectionModel().getSelectedItem();
         if (searchStore == null || selected == null) return;
+        if (!RemoveConfirm.ask(stage, RemoveConfirm.Kind.SEARCH_PROVIDER, selected.name())) return;
         List<TorznabEndpoint> list = new ArrayList<>(searchStore.entries());
         list.remove(selected);
         saveSearchProviders(list, null);
@@ -2604,6 +2687,7 @@ final class SettingsWindow {
     private void removeProfile() {
         EngineProfile selected = profileTable.getSelectionModel().getSelectedItem();
         if (profileStore == null || selected == null || selected.isLocal()) return;
+        if (!RemoveConfirm.ask(stage, RemoveConfirm.Kind.ENGINE_PROFILE, selected.displayName())) return;
         List<EngineProfile> list = new ArrayList<>(profileStore.entries());
         list.remove(selected);
         if (settings.engineProfile().equals(selected.id())) {
@@ -2964,7 +3048,14 @@ final class SettingsWindow {
                 tr("settings.connection.proxyHost.keywords"),
                 Engine.Capability.PROXY);
         proxyPort = intSpinner(1, 65535, Settings.PROXY_PORT);
-        row(Category.CONNECTION, proxy, tr("settings.connection.proxyPort"), "", proxyPort, "");
+        row(
+                Category.CONNECTION,
+                proxy,
+                tr("settings.connection.proxyPort"),
+                tr("settings.connection.proxyPort.desc"),
+                proxyPort,
+                tr("settings.connection.proxyPort.keywords"),
+                Engine.Capability.PROXY);
         proxyUsername = text(Settings.PROXY_USERNAME);
         row(
                 Category.CONNECTION,
@@ -3368,9 +3459,7 @@ final class SettingsWindow {
         Spinner<Double> spinner = new Spinner<>(new SpinnerValueFactory.DoubleSpinnerValueFactory(0, 1000, 0, 0.1));
         spinner.setEditable(true);
         spinner.setPrefWidth(110);
-        spinner.focusedProperty().addListener((o, was, now) -> {
-            if (!now) spinner.increment(0);
-        });
+        Spinners.commitOnBlur(spinner);
         spinner.valueProperty().addListener((o, was, now) -> {
             if (loading || now == null) return;
             settings.set(key, ShareLimit.formatRatio(now));
@@ -3407,9 +3496,7 @@ final class SettingsWindow {
         spinner.setEditable(true);
         spinner.setPrefWidth(110);
         // Typed values commit on focus loss as well as Enter, or a typed port is lost on Tab.
-        spinner.focusedProperty().addListener((o, was, now) -> {
-            if (!now) spinner.increment(0);
-        });
+        Spinners.commitOnBlur(spinner);
         spinner.valueProperty().addListener((o, was, now) -> {
             if (loading || now == null) return;
             settings.set(key, String.valueOf(now));

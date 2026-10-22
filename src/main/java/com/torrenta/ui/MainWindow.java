@@ -29,7 +29,6 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
@@ -134,7 +133,12 @@ public final class MainWindow {
     private final Settings settings;
     private final Consumer<String> opener;
     private final Label status = new Label();
-    private final Label rates = new Label();
+    /** The status bar's rates, each with its last minute drawn beside it. */
+    private final Label downRate = new Label();
+
+    private final Label upRate = new Label();
+    private final Sparkline downSpark = new Sparkline(Sparkline.Series.DOWN, 64, 14);
+    private final Sparkline upSpark = new Sparkline(Sparkline.Series.UP, 64, 14);
     // The status bar's network half (NetworkStatus): port with its dot, DHT, free space.
     private final Label portStatus = new Label();
     private final Region portDot = new Region();
@@ -174,6 +178,14 @@ public final class MainWindow {
     private volatile boolean statsWanted;
     /** The session rates, one sample per poll, for the Statistics window's graph. */
     private final SpeedHistory sessionHistory = new SpeedHistory();
+    /** The window's bounds when last neither maximised nor minimised; what is saved. */
+    private WindowGeometry.Bounds normalBounds;
+    /**
+     * The last {@link SpeedHistory#RECENT_SECONDS} of every torrent's rates, by id: a few KiB each,
+     * so the Speed tab is not empty the first time a torrent is chosen. Gone with the torrent.
+     */
+    private final java.util.concurrent.ConcurrentMap<String, SpeedHistory> recentHistories =
+            new java.util.concurrent.ConcurrentHashMap<>();
     /** The rates of every torrent that has been selected, by id, for the Speed tab; gone with the torrent. */
     private final java.util.concurrent.ConcurrentMap<String, SpeedHistory> torrentHistories =
             new java.util.concurrent.ConcurrentHashMap<>();
@@ -250,6 +262,11 @@ public final class MainWindow {
     private final MenuItem skipUpdateItem = new MenuItem();
     private final Label updateBadge = new Label();
     private final Label altSpeedToggle = new Label();
+    /** View → Alternative Speed Limits, checked while they are in force. */
+    private CheckMenuItem altSpeedItem;
+    /** Whether the alternative limits were in force at the last refresh, on the FX thread. */
+    private boolean altSpeedOn;
+
     private ReleaseInfo availableUpdate;
     private SettingsSync sync;
     private final Label syncBadge = new Label(tr("status.syncProblem"));
@@ -402,6 +419,11 @@ public final class MainWindow {
         root.setTop(new VBox(
                 stage.getStyle() == StageStyle.EXTENDED ? ExtendedWindow.header(menuBar, stage) : menuBar, bar));
         table.setContextMenu(buildContextMenu());
+        // The detail header's buttons and the diagnosis's remedies run the same commands.
+        detail.setCommands(
+                id -> commands.stream().filter(c -> c.id().equals(id)).findFirst());
+        detail.setMoreMenu(buildContextMenu());
+        detail.setEvents(log.events());
         palette = new CommandPalette(host, this::focusList, paletteChord.getDisplayText());
         logWindow = new LogWindow(stage, log);
         statsWindow = new StatisticsWindow(stage, settings.statsWindowSeconds(), this::rememberStatsWindow);
@@ -447,11 +469,18 @@ public final class MainWindow {
             showDownloadFolder(welcome);
         }));
         detail.setOnBanPeer(this::banPeer);
+        detail.setOnCopyPeer(address -> {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(address);
+            Clipboard.getSystemClipboard().setContent(content);
+            setStatus(tr("status.copied.address", address));
+        });
         log.installLogBridge(Platform::runLater);
         reportDefinitionProblems();
         host.getChildren().add(root);
 
-        Scene scene = new Scene(host, 960, 600);
+        WindowGeometry.Bounds opening = openingBounds();
+        Scene scene = new Scene(host, opening.width(), opening.height());
         scene.getStylesheets()
                 .add(MainWindow.class
                         .getResource("/com/torrenta/styles/app.css")
@@ -490,6 +519,7 @@ public final class MainWindow {
             }
         });
         stage.setScene(scene);
+        placeWindow(opening);
         // The live setting, not one captured at startup: the checkbox can change while the window
         // is open. Conditional on a tray having actually appeared, not on the preference alone:
         // hiding a window that leaves no icon behind is how a program becomes unreachable.
@@ -504,7 +534,7 @@ public final class MainWindow {
             shutdown();
         });
         setStatus(tr("status.starting"));
-        rates.setText(ratesText(Engine.Rates.ZERO));
+        showRates(Engine.Rates.ZERO, 0);
     }
 
     public void show() {
@@ -715,8 +745,100 @@ public final class MainWindow {
         if (current != null) current.update(next.display(), next.line());
     }
 
+    // ---- the window's place ---------------------------------------------------------------------
+
+    /**
+     * Where the window opens: the saved bounds if a screen still shows them, else a first window
+     * as wide as the sidebar and the default columns need, so the list opens without a
+     * horizontal scrollbar.
+     */
+    private WindowGeometry.Bounds openingBounds() {
+        List<WindowGeometry.Bounds> screens = javafx.stage.Screen.getScreens().stream()
+                .map(sc -> bounds(sc.getVisualBounds()))
+                .toList();
+        WindowGeometry.Bounds primary = bounds(javafx.stage.Screen.getPrimary().getVisualBounds());
+        double columns = table.getVisibleLeafColumns().stream()
+                .mapToDouble(TableColumn::getPrefWidth)
+                .sum();
+        double side = settings.sidebar() ? sidebar.prefWidth(-1) : 0;
+        return WindowGeometry.choose(
+                WindowGeometry.parse(settings.windowBounds()),
+                screens,
+                primary,
+                side + columns + WindowGeometry.LIST_CHROME,
+                WindowGeometry.FIRST_RUN_HEIGHT);
+    }
+
+    private static WindowGeometry.Bounds bounds(javafx.geometry.Rectangle2D r) {
+        return new WindowGeometry.Bounds(r.getMinX(), r.getMinY(), r.getWidth(), r.getHeight());
+    }
+
+    /**
+     * Puts the stage where {@link #openingBounds} said, maximised if it was, and keeps the normal
+     * bounds as they change. A maximise can move and resize the stage a pulse before it says it is
+     * maximised, so a change is taken as the normal bounds only once it has held for a moment.
+     */
+    private void placeWindow(WindowGeometry.Bounds at) {
+        stage.setX(at.x());
+        stage.setY(at.y());
+        stage.setWidth(at.width());
+        stage.setHeight(at.height());
+        normalBounds = at;
+        if (settings.windowMaximized()) stage.setMaximized(true);
+        javafx.animation.PauseTransition settle =
+                new javafx.animation.PauseTransition(javafx.util.Duration.millis(400));
+        settle.setOnFinished(e -> {
+            if (stage.isShowing() && !stage.isMaximized() && !stage.isIconified() && !stage.isFullScreen())
+                normalBounds = stageBounds();
+        });
+        javafx.beans.InvalidationListener moved = o -> settle.playFromStart();
+        stage.xProperty().addListener(moved);
+        stage.yProperty().addListener(moved);
+        stage.widthProperty().addListener(moved);
+        stage.heightProperty().addListener(moved);
+        stage.maximizedProperty().addListener(moved);
+    }
+
+    private WindowGeometry.Bounds stageBounds() {
+        return new WindowGeometry.Bounds(stage.getX(), stage.getY(), stage.getWidth(), stage.getHeight());
+    }
+
+    /**
+     * Saves where the window is, for the next start: on close, on a hide to the tray, and from
+     * App.stop for any way out that skips both. The bounds as they are when the window is
+     * plainly open, else the last normal ones.
+     */
+    public void rememberWindow() {
+        boolean maximized = stage.isMaximized();
+        WindowGeometry.Bounds normal = maximized || stage.isIconified() || stage.isFullScreen() || normalBounds == null
+                ? normalBounds
+                : stageBounds();
+        if (normal == null || normal.width() < WindowGeometry.MIN_WIDTH || normal.height() < WindowGeometry.MIN_HEIGHT)
+            return;
+        settings.setWindow(WindowGeometry.format(normal), maximized);
+        settings.saveQuietly();
+    }
+
+    /** The stage's bounds and state, and what is stored, for the capture hook. */
+    private String windowLine() {
+        return WindowGeometry.format(stageBounds()) + " maximized=" + stage.isMaximized() + " saved="
+                + settings.windowBounds() + (settings.windowMaximized() ? " (maximized)" : "")
+                + " hScroll=" + horizontalScrollbarShowing();
+    }
+
+    /** Whether the list's horizontal scrollbar shows: the first-run width is meant to avoid it. */
+    private boolean horizontalScrollbarShowing() {
+        for (javafx.scene.Node n : table.lookupAll(".scroll-bar")) {
+            if (n instanceof javafx.scene.control.ScrollBar bar
+                    && bar.getOrientation() == javafx.geometry.Orientation.HORIZONTAL
+                    && bar.isVisible()) return true;
+        }
+        return false;
+    }
+
     private void hideToTray() {
         rememberDivider();
+        rememberWindow();
         hiddenToTray = true;
         stage.hide();
     }
@@ -746,6 +868,7 @@ public final class MainWindow {
         if (shutDown) return;
         shutDown = true;
         rememberDivider();
+        rememberWindow();
         stopPolling();
         stopWatching();
         rss.stop();
@@ -773,6 +896,11 @@ public final class MainWindow {
     }
 
     /** The status bar's network entries as shown; read by the development capture. */
+    /** The status bar's alternative-speed toggle and View's check item, for the capture hook. */
+    public String altSpeedText() {
+        return "\"" + altSpeedToggle.getText() + "\" checked=" + (altSpeedItem != null && altSpeedItem.isSelected());
+    }
+
     public String networkStatusText() {
         String dot = portDot.getStyleClass().stream()
                 .filter(c -> c.startsWith("port-") && !c.equals("port-dot"))
@@ -782,6 +910,41 @@ public final class MainWindow {
                 + (dhtStatus.isVisible() ? dhtStatus.getText() : "") + "\" free=\""
                 + (freeStatus.isVisible() ? freeStatus.getText() : "") + "\" low="
                 + freeStatus.getStyleClass().contains("free-low");
+    }
+
+    /**
+     * Each shown status-bar entry as {@code name=width/needed} (an entry narrower than it needs is
+     * elided), then the bar's right edge against the window's, for the capture hook.
+     */
+    private String statusBarFit() {
+        StringBuilder out = new StringBuilder();
+        java.util.Map<String, Region> named = new java.util.LinkedHashMap<>();
+        named.put("port", portStatus);
+        named.put("dht", dhtStatus);
+        named.put("message", status);
+        // Each rate is a box of the number and its sparkline.
+        named.put("down", (Region) downRate.getParent());
+        named.put("up", (Region) upRate.getParent());
+        named.put("alt", altSpeedToggle);
+        named.put("free", freeStatus);
+        named.put("update", updateBadge);
+        named.put("sync", syncBadge);
+        named.put("errors", errorBadge);
+        named.forEach((name, r) -> {
+            if (r == null || !r.isVisible() || !r.isManaged()) return;
+            out.append(name)
+                    .append('=')
+                    .append(Math.round(r.getWidth()))
+                    .append('/')
+                    .append(Math.round(r.prefWidth(-1)))
+                    .append(' ');
+        });
+        double right = statusBar.localToScene(statusBar.getLayoutBounds()).getMaxX();
+        return out.append("barRight=")
+                .append(Math.round(right))
+                .append(" window=")
+                .append(Math.round(stage.getScene().getWidth()))
+                .toString();
     }
 
     /** The status bar's text; read by the development capture. */
@@ -874,6 +1037,8 @@ public final class MainWindow {
      */
     public List<String> lateLinesForCapture() {
         List<String> out = new ArrayList<>();
+        out.add("statusbar-fit=" + statusBarFit());
+        out.add("window=" + windowLine());
         if (createDialog != null && createDialog.isShowing()) {
             out.add("dialog=" + createDialog.title());
             out.addAll(createDialog.linesForCapture());
@@ -888,6 +1053,11 @@ public final class MainWindow {
             out.add("stats-graph=" + statsWindow.graph().summaryForCapture());
         }
         if (detailWanted && detail.activeTab().equals("speed")) out.add("speed-tab=" + detail.speedSummaryForCapture());
+        if (detailWanted && detail.activeTab().equals("files"))
+            for (String line : detail.fileLinesForCapture()) out.add("file=" + line);
+        if (detailWanted && detail.activeTab().equals("overview"))
+            for (String line : detail.overviewLines()) out.add("overview-" + line);
+        out.add("status-bar=" + statusBarForCapture());
         if (!settingsWindow.profileDialogStatusForCapture().isEmpty()) {
             out.add("dialog=" + settingsWindow.dialogTitle());
             out.add("profile-test=" + settingsWindow.profileDialogStatusForCapture());
@@ -903,7 +1073,7 @@ public final class MainWindow {
     /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
     public List<String> eventLines() {
         return log.events().stream()
-                .map(e -> LogWindow.levelLabel(e.level()) + " " + e.message())
+                .map(e -> LogWindow.levelLabel(e.level()) + " " + e.text())
                 .toList();
     }
 
@@ -918,6 +1088,18 @@ public final class MainWindow {
     public void runForCapture(String action) {
         if (action.equals("close-window")) {
             stage.close();
+        } else if (action.startsWith("window:")) {
+            // window:<width>x<height>+<x>+<y>, or window:maximize
+            String spec = action.substring("window:".length());
+            if (spec.equals("maximize")) stage.setMaximized(true);
+            else {
+                String[] p = spec.split("[x+]");
+                stage.setMaximized(false);
+                stage.setWidth(Double.parseDouble(p[0]));
+                stage.setHeight(Double.parseDouble(p[1]));
+                stage.setX(Double.parseDouble(p[2]));
+                stage.setY(Double.parseDouble(p[3]));
+            }
         } else if (action.equals("close-request")) {
             // What the title bar's button sends: the close-to-tray rule runs, stage.close() skips it.
             stage.fireEvent(new javafx.stage.WindowEvent(stage, javafx.stage.WindowEvent.WINDOW_CLOSE_REQUEST));
@@ -945,6 +1127,11 @@ public final class MainWindow {
         } else if (action.startsWith("settings:")) {
             settingsWindow.show(stage);
             settingsWindow.searchForCapture(action.substring("settings:".length()));
+        } else if (action.startsWith("settings-key:")) {
+            // A key in the open Settings window, where its focus is (settings-key:ESCAPE).
+            settingsWindow.keyForCapture(KeyCode.valueOf(action.substring("settings-key:".length())));
+        } else if (action.equals("settings-close")) {
+            settingsWindow.hideForCapture();
         } else if (action.startsWith("settings-layout:")) {
             // settings-layout:<sidebar>/<detail>, e.g. right/hidden: the General page's two rows.
             String[] ids = action.substring("settings-layout:".length()).split("/", 2);
@@ -1117,6 +1304,16 @@ public final class MainWindow {
         } else if (action.startsWith("detail:")) {
             showDetail();
             detail.selectTab(action.substring("detail:".length()));
+        } else if (action.equals("remedy") || action.startsWith("remedy:")) {
+            // remedy or remedy:<NAME> (SKIP_FILE, REANNOUNCE …): pressed once a card offers it.
+            showDetail();
+            detail.pressRemedyForCapture(
+                    action.equals("remedy") ? null : Diagnosis.Remedy.valueOf(action.substring("remedy:".length())));
+        } else if (action.startsWith("files-menu")) {
+            // files-menu or files-menu:<row>: the Files tab's context menu on that visible row.
+            int colon = action.indexOf(':');
+            showDetail();
+            detail.showFilesMenuForCapture(colon < 0 ? 0 : Integer.parseInt(action.substring(colon + 1)));
         } else if (action.startsWith("menu:")) {
             // Open a menu of the bar by its title (menu:File); the PNG is then of the popup.
             // menu:Torrent>Queue opens that submenu too; the PNG is then of the submenu.
@@ -1152,6 +1349,24 @@ public final class MainWindow {
                         .findFirst()
                         .orElseThrow(() -> new IllegalArgumentException("no submenu " + title));
             }
+        } else if (action.equals("peer-menu") || action.equals("peer-ban")) {
+            // The Peers tab's context menu about the first peer, its lines printed; peer-ban then
+            // presses Ban Peer. Two seconds on, so the detail poll has filled the tab after a
+            // select-first in the same batch (allow for it in captureAfterMs).
+            showDetail();
+            detail.selectTab("peers");
+            javafx.animation.PauseTransition later =
+                    new javafx.animation.PauseTransition(javafx.util.Duration.seconds(2));
+            later.setOnFinished(e -> {
+                if (action.equals("peer-menu")) {
+                    detail.showPeerMenuForCapture();
+                    System.out.println("capture: peer-menu=" + detail.peerMenuLines());
+                } else {
+                    System.out.println("capture: peer-ban=" + detail.banFirstPeerForCapture() + " bans="
+                            + settings.ipFilterBans());
+                }
+            });
+            later.play();
         } else if (action.equals("context-menu")) {
             // The list's context menu, as a right-click on it would open it.
             table.getContextMenu().show(table, javafx.geometry.Side.BOTTOM, 0, 0);
@@ -1198,6 +1413,8 @@ public final class MainWindow {
         if (detailWanted) System.out.println("capture: detail=" + detail.summary());
         if (settingsWindow.isShowing())
             System.out.println("capture: settings=" + settingsWindow.visibleRowsForCapture());
+        if (settingsWindow.isShowing())
+            System.out.println("capture: settings-search=" + settingsWindow.searchStateForCapture());
         if (!settingsWindow.dialogTitle().isEmpty())
             System.out.println("capture: dialog=" + settingsWindow.dialogTitle());
         if (!settingsWindow.searchStatus().isEmpty())
@@ -1285,9 +1502,9 @@ public final class MainWindow {
             ipFilter.setEngine(engine);
             Thread.ofVirtual().name("ip-filter").start(() -> {
                 ipFilter.applyStored(this::reportIpFilter);
-                ipFilter.refresh(false, this::reportIpFilter);
+                ipFilter.refreshIfDue(this::reportIpFilter);
             });
-            poller.scheduleAtFixedRate(() -> ipFilter.refresh(false, this::reportIpFilter), 1, 1, TimeUnit.HOURS);
+            poller.scheduleAtFixedRate(() -> ipFilter.refreshIfDue(this::reportIpFilter), 1, 1, TimeUnit.HOURS);
         } else if (capabilities.has(Engine.Capability.BLOCKLIST_URL) && settings.ipFilterEnabled()) {
             // Only when a blocklist is wanted: the daemon's own state is not worth a status line otherwise.
             refreshBlocklist();
@@ -1377,6 +1594,8 @@ public final class MainWindow {
             Platform.runLater(() -> {
                 altSpeedToggle.setText(alternative ? tr("status.altSpeed.on") : tr("status.altSpeed.off"));
                 altSpeedToggle.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("active"), alternative);
+                altSpeedOn = alternative;
+                if (altSpeedItem != null) altSpeedItem.setSelected(alternative);
             });
         } catch (EngineException ex) {
             Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
@@ -1475,9 +1694,7 @@ public final class MainWindow {
 
     /** From the Peers tab: the address (without its port) joins the manual bans, and the filter is on. */
     private void banPeer(String address) {
-        String ip = address;
-        if (ip.startsWith("[")) ip = ip.substring(1, ip.indexOf(']'));
-        else if (ip.chars().filter(c -> c == ':').count() == 1) ip = ip.substring(0, ip.indexOf(':'));
+        String ip = Actions.peerHost(address);
         List<String> bans = new ArrayList<>(settings.ipFilterBans());
         if (!bans.contains(ip)) bans.add(ip);
         settings.setIpFilterBans(bans);
@@ -1682,7 +1899,7 @@ public final class MainWindow {
         rows.apply(List.of(), now);
         refreshSidebar(List.of());
         detail.clear();
-        rates.setText(ratesText(Engine.Rates.ZERO));
+        showRates(Engine.Rates.ZERO, 0);
         if (old != null) Thread.ofVirtual().name("engine-stop").start(old::stop);
         startEngine(next);
     }
@@ -2212,15 +2429,17 @@ public final class MainWindow {
         Engine.Rates current = engine.rates();
         long nowSeconds = System.currentTimeMillis() / 1000;
         sessionHistory.add(nowSeconds, current.download(), current.upload());
-        if (!torrentHistories.isEmpty()) {
-            Set<String> present = new java.util.HashSet<>();
-            for (Torrent t : snapshot) {
-                present.add(t.id());
-                SpeedHistory h = torrentHistories.get(t.id());
-                if (h != null) h.add(nowSeconds, t.downloadRate(), t.uploadRate());
-            }
-            torrentHistories.keySet().retainAll(present);
+        Set<String> present = new java.util.HashSet<>();
+        for (Torrent t : snapshot) {
+            present.add(t.id());
+            recentHistories
+                    .computeIfAbsent(t.id(), k -> SpeedHistory.recent())
+                    .add(nowSeconds, t.downloadRate(), t.uploadRate());
+            SpeedHistory h = torrentHistories.get(t.id());
+            if (h != null) h.add(nowSeconds, t.downloadRate(), t.uploadRate());
         }
+        recentHistories.keySet().retainAll(present);
+        torrentHistories.keySet().retainAll(present);
         // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
         com.torrenta.engine.SessionStats stats = statsWanted ? engine.stats() : null;
         enforceShareLimits(engine, snapshot);
@@ -2245,11 +2464,16 @@ public final class MainWindow {
         Platform.runLater(() -> {
             rows.apply(snapshot, nowSeconds);
             refreshSidebar(snapshot);
-            rates.setText(ratesText(current));
+            showRates(current, nowSeconds);
             showNetwork(port, dht, space);
             if (detailWanted) {
                 if (shown != null && shown.general().id().equals(detailId)) {
-                    detail.show(shown);
+                    TorrentRow row = rows.get(detailId);
+                    detail.show(
+                            shown,
+                            row == null ? null : row.torrent(),
+                            row == null ? 0 : row.quietSeconds(),
+                            nowSeconds);
                     detail.showSpeed(torrentHistories.get(detailId), nowSeconds);
                 } else if (detailId == null) detail.clear();
             }
@@ -2460,16 +2684,12 @@ public final class MainWindow {
     private void remove(boolean deleteFiles) {
         List<Torrent> selected = selectedTorrents();
         if (selected.isEmpty()) return;
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, Actions.removeQuestion(selected.size(), deleteFiles));
-        confirm.setTitle(deleteFiles ? tr("window.remove.header.delete") : tr("common.remove"));
-        confirm.setHeaderText(deleteFiles ? tr("window.remove.header.delete") : tr("common.remove"));
-        confirm.initOwner(stage);
-        Fonts.installUiFont(confirm.getDialogPane());
-        ButtonType yes = new ButtonType(
-                deleteFiles ? tr("window.remove.button.delete") : tr("common.remove"), ButtonType.OK.getButtonData());
-        confirm.getButtonTypes().setAll(yes, StockButtons.cancel());
-        Optional<ButtonType> answer = confirm.showAndWait();
-        if (answer.isEmpty() || answer.get() != yes) return;
+        boolean yes = RemoveConfirm.ask(
+                stage,
+                deleteFiles ? tr("window.remove.header.delete") : tr("common.remove"),
+                Actions.removeQuestion(selected.size(), deleteFiles),
+                deleteFiles ? tr("window.remove.button.delete") : tr("common.remove"));
+        if (!yes) return;
         onSelection(tr("actions.verb.removed"), (e, t) -> {
             e.remove(t.id(), deleteFiles);
             Platform.runLater(() -> forgetOverride(t.id()));
@@ -2832,6 +3052,12 @@ public final class MainWindow {
         opener.accept(Path.of(path).toUri().toString());
     }
 
+    /** The torrent the detail pane shows, or null with no single selection or none in the list. */
+    private Torrent detailTorrent() {
+        String id = detailId;
+        TorrentRow row = id == null ? null : rows.get(id);
+        return row == null ? null : row.torrent();
+    }
     /** The Queue submenu's commands, top to bottom. */
     private static final List<String> QUEUE_COMMANDS = List.of("queue-top", "queue-up", "queue-down", "queue-bottom");
 
@@ -3009,6 +3235,14 @@ public final class MainWindow {
                         tr("key.shiftDelete"),
                         selection,
                         () -> remove(true)),
+                new Command(
+                        "alt-speed",
+                        tr("command.altSpeed"),
+                        shiftChord(KeyCode.J),
+                        null,
+                        always,
+                        this::toggleAlternativeSpeed),
+                new Command("quit", tr("menu.file.quit"), chord(KeyCode.Q), null, always, this::quit),
                 new Command("check-updates", tr("command.checkUpdates"), null, null, always, this::checkForUpdatesNow),
                 new Command("about", tr("command.about", AppInfo.NAME), null, null, always, this::showAbout),
                 new Command(
@@ -3281,10 +3515,7 @@ public final class MainWindow {
         MenuItem addMagnet = menuItem("add-magnet");
         MenuItem addClipboard = menuItem("add-clipboard");
 
-        MenuItem quit = new MenuItem(tr("menu.file.quit"));
-        quit.setGraphic(menuIcon(Icons.power()));
-        quit.setAccelerator(chord(KeyCode.Q));
-        quit.setOnAction(e -> quit());
+        MenuItem quit = menuItem("quit");
 
         Menu file = new Menu(tr("menu.file"));
         file.getItems()
@@ -3323,6 +3554,16 @@ public final class MainWindow {
         detailItem.setAccelerator(shiftChord(KeyCode.D));
         detailItem.setSelected(detailPlace.shown());
         detailItem.setOnAction(e -> toggleDetail());
+        // Checked while the alternative limits are in force, by hand or by the schedule; the
+        // command flips the manual switch, as a click on the status bar's toggle does.
+        Command altSpeed = command("alt-speed");
+        altSpeedItem = new CheckMenuItem(altSpeed.label());
+        altSpeedItem.setGraphic(menuIcon(Icons.forCommand("alt-speed")));
+        altSpeedItem.setAccelerator(altSpeed.accelerator());
+        altSpeedItem.setOnAction(e -> {
+            altSpeedItem.setSelected(altSpeedOn);
+            altSpeed.run().run();
+        });
         detailRightItem = new CheckMenuItem(tr("menu.view.detailRight"));
         detailRightItem.setSelected(DetailPlace.of(true, settings.detailSide()).beside());
         detailRightItem.setOnAction(e -> switchDetailSide());
@@ -3352,6 +3593,8 @@ public final class MainWindow {
                         new SeparatorMenuItem(),
                         densityItems.get(Density.COMFORTABLE),
                         densityItems.get(Density.COMPACT),
+                        new SeparatorMenuItem(),
+                        altSpeedItem,
                         new SeparatorMenuItem(),
                         menuItem("filter"),
                         menuItem("focus-sidebar"),
@@ -3484,22 +3727,38 @@ public final class MainWindow {
                 c -> {
                     var selected = table.getSelectionModel().getSelectedItems();
                     detailId = selected.size() == 1 ? selected.get(0).id() : null;
-                    // The Speed tab's history starts with the first selection and is fed from the next poll.
-                    if (detailId != null) torrentHistories.computeIfAbsent(detailId, k -> new SpeedHistory());
+                    // The Speed tab's full history starts with the first selection, from the short one
+                    // every torrent keeps, so the tab has the last two minutes to show at once.
+                    if (detailId != null)
+                        torrentHistories.computeIfAbsent(detailId, k -> {
+                            SpeedHistory recent = recentHistories.get(k);
+                            return recent == null ? new SpeedHistory() : recent.widened();
+                        });
                     if (detailId == null && detailWanted) detail.clear();
                 });
-        detail.selectTab(settings.get(Settings.DETAIL_TAB, "general"));
+        detail.selectTab(settings.get(Settings.DETAIL_TAB, "overview"));
         detail.setOnFilePriority((index, priority) -> {
             String id = detailId;
             if (id != null) onTorrent("status.prioritySet", id, (e, t) -> e.setFilePriority(t, index, priority));
         });
         detail.setOnOpenFile(row -> {
-            String id = detailId;
-            Torrent t = id == null
-                    ? null
-                    : rows.get(id) == null ? null : rows.get(id).torrent();
+            Torrent t = detailTorrent();
             if (t != null)
                 opener.accept(Path.of(t.savePath()).resolve(row.path()).toUri().toString());
+        });
+        detail.setOnOpenFolder(row -> {
+            Torrent t = detailTorrent();
+            if (t == null || t.savePath() == null || t.savePath().isBlank()) return;
+            Path savePath = Path.of(t.savePath());
+            // A folder no piece has reached is not on the disk yet: the nearest one above it opens.
+            // Looking is disk I/O (a network mount can stall), so it is not done on the FX thread.
+            Thread.ofVirtual().name("open-folder").start(() -> {
+                String uri = FileRows.nearestFolder(
+                                savePath, FileRows.folderOf(savePath, row), java.nio.file.Files::isDirectory)
+                        .toUri()
+                        .toString();
+                Platform.runLater(() -> opener.accept(uri));
+            });
         });
         detail.setOnAddTrackers(urls -> {
             String id = detailId;
@@ -4449,8 +4708,21 @@ public final class MainWindow {
         // The status text is the door to its own history: a click shows what scrolled past.
         status.getStyleClass().add("status-message");
         status.setOnMouseClicked(e -> messagePopup.toggle());
+        // The rates lead the right-hand group, as the redesign has them: each with its minute.
+        downRate.getStyleClass().add("status-rate-down");
+        upRate.getStyleClass().add("status-rate-up");
+        // The session starts idle, so the minute before it began is drawn as the zero it was.
+        downSpark.setZeroBefore(true);
+        upSpark.setZeroBefore(true);
+        HBox down = new HBox(6, downRate, downSpark);
+        HBox up = new HBox(6, upRate, upSpark);
+        down.setAlignment(Pos.CENTER_LEFT);
+        up.setAlignment(Pos.CENTER_LEFT);
+        down.getStyleClass().add("status-rate");
+        up.getStyleClass().add("status-rate");
         // The port and the DHT lead, quiet until the engine says something; a click opens the
-        // Settings page that changes them. Free space ends the row; a click opens the folder.
+        // Settings page that changes them. Free space follows the alternative-speed switch; a click
+        // opens the folder.
         portDot.getStyleClass().add("port-dot");
         portStatus.setGraphic(portDot);
         portStatus.getStyleClass().add("network-status");
@@ -4463,24 +4735,28 @@ public final class MainWindow {
         freeStatus.setTooltip(freeTip);
         freeStatus.setOnMouseClicked(
                 e -> opener.accept(settings.downloadDir().toUri().toString()));
-        for (Label l : List.of(portStatus, dhtStatus, freeStatus)) {
-            l.setMinWidth(Region.USE_PREF_SIZE);
-            reveal(l, false);
-        }
-        // The message gives way first when the window is narrow; the facts keep their width.
+        for (Label l : List.of(portStatus, dhtStatus, freeStatus)) reveal(l, false);
+        // The message is the one that gives way: the rates, the switch and the counts keep their width.
         status.setMinWidth(0);
+        status.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(status, Priority.SOMETIMES);
         HBox bar = new HBox(
                 12,
                 portStatus,
                 dhtStatus,
                 status,
                 spacer,
+                down,
+                up,
                 altSpeedToggle,
+                freeStatus,
                 updateBadge,
                 syncBadge,
-                errorBadge,
-                rates,
-                freeStatus);
+                errorBadge);
+        bar.setAlignment(Pos.CENTER_LEFT);
+        for (Region r : List.<Region>of(
+                portStatus, dhtStatus, down, up, altSpeedToggle, freeStatus, updateBadge, syncBadge, errorBadge))
+            r.setMinWidth(Region.USE_PREF_SIZE);
         bar.setPadding(new Insets(4, 10, 4, 10));
         bar.getStyleClass().add("status-bar");
         return bar;
@@ -4546,8 +4822,21 @@ public final class MainWindow {
         return WelcomeText.folder(dir, home == null ? null : Path.of(home), tilde);
     }
 
-    private static String ratesText(Engine.Rates r) {
-        return tr("status.rates", Bytes.rate(r.download()), Bytes.rate(r.upload()));
+    /** FX thread. The session's rates and their last minute, from the history the poll fills. */
+    private void showRates(Engine.Rates r, long nowSeconds) {
+        downRate.setText(tr("status.rateDown", Bytes.rate(r.download())));
+        upRate.setText(tr("status.rateUp", Bytes.rate(r.upload())));
+        List<SpeedHistory.Sample> minute = sessionHistory.samples(60, nowSeconds);
+        downSpark.show(minute, 60, nowSeconds);
+        upSpark.show(minute, 60, nowSeconds);
+    }
+
+    /** The status bar's right-hand group as words, for the capture hook. */
+    private String statusBarForCapture() {
+        List<String> parts = new ArrayList<>(List.of(downRate.getText(), upRate.getText(), altSpeedToggle.getText()));
+        if (freeStatus.isVisible()) parts.add(freeStatus.getText());
+        if (errorBadge.isVisible()) parts.add(errorBadge.getText());
+        return String.join(" | ", parts);
     }
 
     private void setStatus(String text) {

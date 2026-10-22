@@ -61,6 +61,29 @@ class MessageLogTest {
     }
 
     @Test
+    void theSameLineAgainSoonIsCountedAndMovedToTheTop() {
+        MessageLog log = new MessageLog();
+        log.add("IP filter cleared", EngineEvent.Level.INFO, Instant.ofEpochSecond(1));
+        log.add("Port mapped", EngineEvent.Level.INFO, Instant.ofEpochSecond(2));
+        log.add("IP filter cleared", EngineEvent.Level.INFO, Instant.ofEpochSecond(3));
+        List<MessageLog.Entry> entries = log.entries();
+        assertEquals(2, entries.size());
+        assertEquals("IP filter cleared ×2", entries.get(0).text());
+        assertEquals(2, entries.get(0).count());
+        assertEquals(Instant.ofEpochSecond(3), entries.get(0).at());
+        assertEquals("Port mapped", entries.get(1).text());
+    }
+
+    @Test
+    void theSameWordsAtAnotherLevelOrLaterAreANewLine() {
+        MessageLog log = new MessageLog();
+        log.add("tracker down", EngineEvent.Level.INFO, Instant.ofEpochSecond(1));
+        log.add("tracker down", EngineEvent.Level.WARNING, Instant.ofEpochSecond(1));
+        log.add("tracker down", EngineEvent.Level.WARNING, Instant.ofEpochSecond(100));
+        assertEquals(3, log.size());
+    }
+
+    @Test
     void clearEmptiesTheLog() {
         MessageLog log = new MessageLog();
         add(log, "a", 1);

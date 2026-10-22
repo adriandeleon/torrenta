@@ -1,5 +1,6 @@
 package com.torrenta.ui;
 
+import java.nio.file.Path;
 import java.util.List;
 
 import com.torrenta.engine.Priority;
@@ -56,5 +57,34 @@ class FileRowsTest {
         assertTrue(rows.apply(List.of(f(0, "x", 1, 1))), "metadata arrived");
         assertTrue(rows.apply(List.of(f(0, "x", 1, 1), f(1, "y", 1, 0))), "another torrent");
         assertEquals(2, rows.rootItem().getChildren().size());
+    }
+
+    /** Open Folder: a folder is itself, a file its parent, a single-file torrent's the save path. */
+    @Test
+    void theFolderToOpenIsTheRowsOwnOrItsParent() {
+        FileRows rows = new FileRows();
+        rows.apply(List.of(f(0, "pair/a.bin", 100, 50), f(1, "pair/sub/b.bin", 40, 40)));
+        Path save = Path.of("/dl");
+        var pair = rows.rootItem().getChildren().get(0);
+        assertEquals(Path.of("/dl/pair"), FileRows.folderOf(save, pair.getValue()));
+        assertEquals(Path.of("/dl/pair"), FileRows.folderOf(save, rows.get(0)));
+        assertEquals(Path.of("/dl/pair/sub"), FileRows.folderOf(save, rows.get(1)));
+
+        FileRows single = new FileRows();
+        single.apply(List.of(f(0, "lone.iso", 10, 10)));
+        assertEquals(save, FileRows.folderOf(save, single.get(0)));
+    }
+
+    @Test
+    void theNearestFolderThatExistsOpensNeverAboveTheSavePath() {
+        Path save = Path.of("/data/dl");
+        Path wanted = Path.of("/data/dl/pair/sub");
+        assertEquals(wanted, FileRows.nearestFolder(save, wanted, p -> true));
+        assertEquals(
+                Path.of("/data/dl/pair"),
+                FileRows.nearestFolder(save, wanted, p -> p.equals(Path.of("/data/dl/pair"))));
+        assertEquals(save, FileRows.nearestFolder(save, wanted, p -> false), "nothing there yet");
+        assertEquals(save, FileRows.nearestFolder(save, save, p -> false));
+        assertEquals(save, FileRows.nearestFolder(save, Path.of("/data/dl/../../etc"), p -> true), "never climbs out");
     }
 }
