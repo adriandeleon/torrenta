@@ -425,6 +425,21 @@ release process with the names changed; Termina's README and memory hold the war
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
   write under `~/.torrenta`. `LibtorrentEngineTest` starts a real session on purpose: it is the one
   test that proves the native loads on each CI platform.
+- **On macOS the test JVM ends with `_exit`, because libtorrent4j's OpenSSL can abort at `exit()`.**
+  libtorrent4j 2.1.0-39 links OpenSSL 3.5.5 statically, and OpenSSL registers its cleanup with
+  `atexit`. About one macOS CI run in twenty, that cleanup freed a pointer that was not allocated
+  and libmalloc aborted the fork *after every test had reported*: `Abort trap: 6`, no hs_err, nothing
+  on stderr, and surefire's "Error occurred in starting fork" (the store tests' expected exceptions
+  were only the last lines printed). macOS's crash report named it: the VM thread in `exit()` →
+  `__cxa_finalize_ranges` → libtorrent4j's OpenSSL code → `___BUG_IN_CLIENT_OF_LIBMALLOC_POINTER_BEING_FREED_WAS_NOT_ALLOCATED`,
+  with no libtorrent thread alive. `com.torrenta.NativeTeardownSkip` (a `LauncherSessionListener`
+  in `META-INF/services`, macOS only) waits for the other shutdown hooks (JaCoCo's) once the test
+  session closed and calls `_exit(0)` through FFM, so the C exit handlers never run; hence
+  `--add-opens java.base/java.lang` in the argLine. The packaged app quits through the same `exit()`
+  and has not been seen to crash there. A failing macOS job copies `java*.ips` from
+  `~/Library/Logs/DiagnosticReports` into the uploaded reports and prints the crashed thread
+  (`.github/scripts/ips-summary.py`); surefire drops a fork's stderr once it has said goodbye, so the
+  crash report is the only witness to an exit-time crash.
 - **Palantir 2.92 does not run on JDK 27.** Build with a JDK 25. The enforcer rule in the pom says so
   at `validate`, so `mvn javafx:run` under the sdkman default of 27 stops with the reason instead of
   running a mix the project never tests (one such run crashed at quit).
