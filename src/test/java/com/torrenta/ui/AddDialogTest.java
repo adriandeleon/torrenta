@@ -119,4 +119,37 @@ class AddDialogTest {
         assertEquals("⌘Enter", AddDialog.keyLabel("⌘⏎"));
         assertEquals("Esc", AddDialog.keyLabel("Esc"));
     }
+
+    /** Files known: Add and its partner, whatever the fetch and the engine. */
+    @Test
+    void withFilesAddIsTheChoice() {
+        assertEquals(new AddDialog.Buttons(false, false, true, false), AddDialog.buttons(true, false, true, true));
+        assertEquals(new AddDialog.Buttons(false, false, true, false), AddDialog.buttons(true, false, false, false));
+    }
+
+    @Test
+    void aFetchOnItsWayOffersAddNowAndWait() {
+        assertEquals(new AddDialog.Buttons(true, true, false, false), AddDialog.buttons(false, false, true, true));
+        assertEquals(
+                new AddDialog.Buttons(false, false, true, false),
+                AddDialog.buttons(false, true, true, true),
+                "waiting: Add shows, off until the files come");
+    }
+
+    /** Wait on a failed fetch hid Add now and left Add off for good: a dead end. */
+    @Test
+    void waitIsNotOfferedOnceTheFetchCannotAnswer() {
+        assertEquals(new AddDialog.Buttons(true, false, false, false), AddDialog.buttons(false, false, false, true));
+        assertEquals(
+                new AddDialog.Buttons(true, false, false, false),
+                AddDialog.buttons(false, true, false, true),
+                "a fetch that died while waiting falls back to Add now");
+    }
+
+    /** Transmission ignores the stop condition: Add now would download every file. */
+    @Test
+    void anEngineThatCannotStopGetsThePlainBlindAdd() {
+        assertEquals(new AddDialog.Buttons(false, false, true, true), AddDialog.buttons(false, false, false, false));
+        assertEquals(new AddDialog.Buttons(false, true, true, true), AddDialog.buttons(false, false, true, false));
+    }
 }

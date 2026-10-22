@@ -144,6 +144,7 @@ final class RuleDialog {
         form.add(smartFilter, 1, row++);
         ignoreDays.setValueFactory(new SpinnerValueFactory.IntegerSpinnerValueFactory(0, Rule.MAX_IGNORE_DAYS, 0, 1));
         ignoreDays.setEditable(true);
+        Spinners.commitOnBlur(ignoreDays);
         ignoreDays.setPrefWidth(90);
         ignoreDays.setMinWidth(90);
         Label daysHint = hint(tr("dialog.rule.days.hint"));

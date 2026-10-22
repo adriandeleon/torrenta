@@ -134,7 +134,7 @@ final class LimitsDialog {
         form.add(globalHint, 1, row++);
         ratio.setEditable(true);
         ratio.setPrefWidth(110);
-        commitOnBlur(ratio);
+        Spinners.commitOnBlur(ratio);
         form.addRow(row++, muted(tr("dialog.limits.ratio")), unit(ratio, tr("dialog.limits.ratio.unit")));
         form.addRow(row++, muted(tr("dialog.limits.seedingTime")), unit(minutes, tr("dialog.limits.seedingTime.unit")));
         action.getItems().addAll(ShareLimit.Action.values());
@@ -256,15 +256,8 @@ final class LimitsDialog {
         Spinner<Integer> spinner = new Spinner<>(new SpinnerValueFactory.IntegerSpinnerValueFactory(0, max, 0));
         spinner.setEditable(true);
         spinner.setPrefWidth(110);
-        commitOnBlur(spinner);
+        Spinners.commitOnBlur(spinner);
         return spinner;
-    }
-
-    /** A typed value commits on focus loss as well as Enter, or a number typed before Tab is lost. */
-    private static void commitOnBlur(Spinner<?> spinner) {
-        spinner.focusedProperty().addListener((o, was, now) -> {
-            if (!now) spinner.increment(0);
-        });
     }
 
     private static HBox unit(Region control, String text) {

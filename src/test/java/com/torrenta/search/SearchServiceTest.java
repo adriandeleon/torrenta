@@ -164,6 +164,53 @@ class SearchServiceTest {
         assertEquals(3, ticker.sleeps.size(), "a cached answer asks nothing and waits for nothing");
     }
 
+    /** A clock moved by hand; sleeping moves it too. */
+    private static final class HandTicker implements SearchService.Ticker {
+        long now = 1_000_000_000L;
+
+        @Override
+        public synchronized long nanos() {
+            return now;
+        }
+
+        synchronized void advance(Duration d) {
+            now += d.toNanos();
+        }
+
+        @Override
+        public void sleep(Duration duration) {
+            advance(duration);
+        }
+    }
+
+    @Test
+    void anAnswerIsFreshForItsLifetimeOnly() {
+        Duration five = Duration.ofMinutes(5);
+        assertTrue(SearchService.fresh(0, 0, five));
+        assertTrue(SearchService.fresh(0, five.toNanos() - 1, five));
+        assertTrue(!SearchService.fresh(0, five.toNanos(), five), "at the lifetime it is stale");
+        assertTrue(SearchService.fresh(Long.MAX_VALUE - 10, Long.MIN_VALUE + 10, five), "nanoTime wraps");
+        assertEquals(Duration.ofMinutes(5), SearchService.CACHE_LIFETIME);
+    }
+
+    /** The cache once lived as long as the window: the same search never asked again. */
+    @Test
+    void theSameSearchAsksAgainOnceTheAnswerIsStale() {
+        HandTicker clock = new HandTicker();
+        SearchService service = new SearchService(Duration.ofSeconds(5), Duration.ZERO, clock, Duration.ofMinutes(5));
+        Fake a = Fake.answering("A", hit("a", 5, H1, "A"));
+        service.search("ubuntu", SearchCategory.ALL, List.of(a));
+        clock.advance(Duration.ofMinutes(4));
+        service.search("ubuntu", SearchCategory.ALL, List.of(a));
+        assertEquals(1, a.calls.get(), "four minutes on, the answer stands");
+        clock.advance(Duration.ofMinutes(1));
+        service.search("ubuntu", SearchCategory.ALL, List.of(a));
+        assertEquals(2, a.calls.get(), "five minutes on, the provider is asked again");
+        clock.advance(Duration.ofMinutes(1));
+        service.search("ubuntu", SearchCategory.ALL, List.of(a));
+        assertEquals(2, a.calls.get(), "the new answer starts its own five minutes");
+    }
+
     /** Writes down each call as it comes, with the thread it came on. */
     private static final class Notes implements SearchService.Progress {
         final List<String> lines = java.util.Collections.synchronizedList(new ArrayList<>());
