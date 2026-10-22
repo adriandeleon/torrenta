@@ -1,6 +1,8 @@
 package com.torrenta.engine;
 
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -21,6 +23,20 @@ public interface Engine extends AutoCloseable {
 
     /** Engine name and version, for the status bar and bug reports. Valid after {@link #start()}. */
     String description();
+
+    /**
+     * What this engine can do, of the things the window offers. Valid after {@link #start()}: a
+     * daemon's answer depends on its version. The window hides the commands, pages, rows and
+     * dialog choices behind a missing capability; nothing is greyed out or imitated.
+     */
+    Capabilities capabilities();
+
+    /**
+     * Where a new torrent's files go unless the request says otherwise, as the engine sees it:
+     * this machine's download folder for libtorrent, the daemon's for a remote engine (a path on
+     * the daemon's machine, so a {@code String}). Valid after {@link #start()}.
+     */
+    String downloadDir();
 
     /** Adds a {@code .torrent} file (a path) or a {@code magnet:} link, with the defaults. */
     Torrent add(String input) throws EngineException;
@@ -80,6 +96,24 @@ public interface Engine extends AutoCloseable {
     /** Pieces in order rather than rarest first, for previewing while downloading. */
     void setSequential(String id, boolean sequential) throws EngineException;
 
+    /**
+     * Moves the torrent in the queue: to the top, one up, one down, to the bottom. The others
+     * shift to make room, as {@link Torrent#queuePosition()} then shows; a seed, which libtorrent
+     * keeps out of the download queue, is left where it is.
+     */
+    void queueMove(String id, QueueMove move) throws EngineException;
+
+    /**
+     * Changes where the torrent's files live. With {@code moveFiles} the files are moved there,
+     * never over a file already at the destination (one that is there is kept and used); without
+     * it the torrent is only pointed at the folder, where the files are expected to be already.
+     * The move itself is asynchronous: an event says when it landed or why it did not, and the
+     * snapshot's {@link Torrent#moving()} is on in between where the engine can tell. {@code
+     * destination} is a path on the engine's machine, so a {@code String}, as {@link
+     * #downloadDir()} is.
+     */
+    void moveStorage(String id, String destination, boolean moveFiles) throws EngineException;
+
     /** The torrent's own limits, as it has them now. */
     TorrentLimits limits(String id) throws EngineException;
 
@@ -127,6 +161,16 @@ public interface Engine extends AutoCloseable {
      */
     SessionStats stats();
 
+    /**
+     * The listen port, its mapping, whether a peer from outside has reached it, and the DHT's
+     * state, as of the last alerts: cheap, no engine round trip, so the status bar asks every
+     * second. {@link Connectivity#NONE} before {@link #start()}, and from an engine that cannot
+     * say (a daemon): the status bar then leaves the port and the DHT out.
+     */
+    default Connectivity connectivity() {
+        return Connectivity.NONE;
+    }
+
     /** Writes what is needed to bring the torrents back; also done on {@link #stop()}. */
     void flush();
 
@@ -145,6 +189,16 @@ public interface Engine extends AutoCloseable {
 
     /** Peers refused by the filter since the engine started. */
     long blockedPeers();
+
+    /**
+     * For an engine that fetches its own blocklist by URL ({@link Capability#BLOCKLIST_URL}): sets
+     * the URL, switches the list on or off, and fetches it now. Returns the number of ranges the
+     * engine then holds, or -1 when it cannot say. The default refuses, for an engine whose filter
+     * is handed to it range by range through {@link #setIpFilter}.
+     */
+    default long setBlocklist(String url, boolean enabled) throws EngineException {
+        throw new EngineException("This engine takes no blocklist URL");
+    }
 
     /**
      * Hears every {@link EngineEvent}, on an engine thread: the listener hands it to the FX thread
@@ -191,8 +245,101 @@ public interface Engine extends AutoCloseable {
         void cancel();
     }
 
+    /** Where {@link #queueMove} puts the torrent. */
+    enum QueueMove {
+        TOP,
+        UP,
+        DOWN,
+        BOTTOM
+    }
+
     /** Bytes per second, session-wide. */
     record Rates(long download, long upload) {
         public static final Rates ZERO = new Rates(0, 0);
+    }
+
+    /**
+     * One thing an engine may or may not do. Each is a feature the window offers somewhere: a
+     * command, a Settings row, a dialog choice. libtorrent has them all; a Transmission daemon
+     * lacks the ones its RPC has no word for.
+     */
+    enum Capability {
+        /** Making a {@code .torrent} of local files and seeding it (Ctrl+N). */
+        CREATE_TORRENT,
+        /** A magnet's file list fetched while the Add dialog is open, before the torrent is added. */
+        METADATA_FETCH,
+        /** An IP filter handed over range by range: a blocklist file, manual bans, Ban Peer. */
+        IP_FILTER,
+        /** A blocklist the engine fetches itself from a URL. */
+        BLOCKLIST_URL,
+        /** First and last piece of every file first, in the Limits dialog and the Add dialog. */
+        FIRST_LAST_PIECES,
+        /** The files are on this machine: Open folder, Open file, Browse, free-space readouts. */
+        LOCAL_FILES,
+        /** A SOCKS5 or HTTP proxy for peers and trackers. */
+        PROXY,
+        /** Binding to one interface or address, and the IPv6 switch. */
+        LISTEN_DETAILS,
+        /** How many peers are unchoked at once, session-wide and per torrent. */
+        UPLOAD_SLOTS,
+        /** Anonymous mode: no client name or version on the wire. */
+        ANONYMOUS_MODE,
+        /** Rate limits that count protocol overhead. */
+        OVERHEAD_IN_LIMITS,
+        /** Per-torrent storage choices: an incomplete folder, the {@code .part} suffix, pre-allocation. */
+        STORAGE_OPTIONS,
+        /** A limit on torrents active in all, over the download and seed counts. */
+        ACTIVE_TOTAL_LIMIT,
+        /** Trusting the files on disk as complete when adding (seed mode, "skip check"). */
+        SEED_MODE,
+        /** Stopping by itself once the metadata or the file check is in. */
+        STOP_CONDITION,
+        /** Pieces in order rather than rarest first. */
+        SEQUENTIAL_DOWNLOAD,
+        /** Moving a torrent in the queue: to the top, up, down, to the bottom. */
+        QUEUE_ORDER,
+        /** Changing where a torrent's files live (Set Location). */
+        MOVE_STORAGE;
+
+        /** The capability's name in the interface language, read at call time. */
+        public String label() {
+            return com.torrenta.i18n.Messages.tr("capability." + name().toLowerCase(java.util.Locale.ROOT));
+        }
+    }
+
+    /** The set an engine has. Immutable; {@link #ALL} is libtorrent's. */
+    record Capabilities(Set<Capability> set) {
+
+        public static final Capabilities ALL = new Capabilities(EnumSet.allOf(Capability.class));
+
+        public Capabilities {
+            set = set == null || set.isEmpty() ? Set.of() : Set.copyOf(EnumSet.copyOf(set));
+        }
+
+        public static Capabilities of(Capability... capabilities) {
+            return new Capabilities(Set.of(capabilities));
+        }
+
+        public boolean has(Capability capability) {
+            return set.contains(capability);
+        }
+
+        public boolean lacks(Capability capability) {
+            return !set.contains(capability);
+        }
+
+        /** Everything missing, in declaration order; empty for {@link #ALL}. */
+        public List<Capability> missing() {
+            List<Capability> out = new java.util.ArrayList<>();
+            for (Capability c : Capability.values()) if (lacks(c)) out.add(c);
+            return List.copyOf(out);
+        }
+
+        /** {@code ALL} without the given ones. */
+        public Capabilities without(Capability... capabilities) {
+            EnumSet<Capability> left = EnumSet.copyOf(set.isEmpty() ? EnumSet.noneOf(Capability.class) : set);
+            for (Capability c : capabilities) left.remove(c);
+            return new Capabilities(left);
+        }
     }
 }

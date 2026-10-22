@@ -122,6 +122,13 @@ final class Icons {
             case "recheck" -> refresh();
             case "reannounce" -> broadcast();
             case "sequential" -> sequential();
+            case "queue-top" -> moveTop();
+            case "queue-up" -> moveUp();
+            case "queue-down" -> moveDown();
+            case "queue-bottom" -> moveBottom();
+            case "queue" -> queue();
+            case "set-location" -> folderMove();
+            case "choose-files" -> files();
             case "limits" -> gauge();
             case "set-category" -> open();
             case "edit-tags" -> tag();
@@ -136,6 +143,9 @@ final class Icons {
             case "about" -> info();
             case "settings" -> settings();
             case "search" -> search();
+            case "rss" -> rss();
+            case "view-next" -> viewNext();
+            case "view-previous" -> viewPrevious();
             case "transfers" -> transfers();
             case "filter" -> find();
             case "select-all" -> selectAll();
@@ -145,6 +155,7 @@ final class Icons {
             case "debug-log" -> info();
             case "toggle-toolbar" -> toolbar();
             case "toggle-sidebar", "focus-sidebar" -> sidebar();
+            case "toggle-detail" -> detailPane();
             default -> null;
         };
     }
@@ -323,6 +334,11 @@ final class Icons {
         return line("M2 3.5h12v9H2zM5.5 3.5v9");
     }
 
+    /** A window with a band across its foot: the detail pane. */
+    static Glyph detailPane() {
+        return line("M2 3.5h12v9H2zM2 9h12");
+    }
+
     /** Two tall rows: comfortable density. */
     static Glyph rowsComfortable() {
         return line("M2 3h12v4H2zM2 9h12v4H2z");
@@ -357,5 +373,45 @@ final class Icons {
     /** A box with an arrow out of its corner: a page to open elsewhere. */
     static Glyph external() {
         return line("M7 3.5H3.5v9h9V9M9.5 3.5h3v3M12.5 3.5L7.5 8.5");
+    }
+
+    /** Three stacked lines: the queue, for the Queue submenu. */
+    static Glyph queue() {
+        return line("M3 4.5h10M3 8h10M3 11.5h10");
+    }
+
+    /** An arrow up against a bar: to the top of the queue. */
+    static Glyph moveTop() {
+        return line("M3.5 3h9M8 13V6M5 9l3-3 3 3");
+    }
+
+    /** An arrow up: one place up the queue. */
+    static Glyph moveUp() {
+        return line("M8 13V3.5M4.5 7l3.5-3.5L11.5 7");
+    }
+
+    /** An arrow down: one place down the queue. */
+    static Glyph moveDown() {
+        return line("M8 3v9.5M4.5 9l3.5 3.5L11.5 9");
+    }
+
+    /** An arrow down against a bar: to the bottom of the queue. */
+    static Glyph moveBottom() {
+        return line("M3.5 13h9M8 3v7M5 7l3 3 3-3");
+    }
+
+    /** A folder with an arrow into it: Set Location. */
+    static Glyph folderMove() {
+        return line("M2 12.5V3.5h4.2l1.5 2h5.8v7z M5.5 8.5h5M8.5 6.5l2 2-2 2");
+    }
+
+    /** An arrow right against a bar: the next view. */
+    static Glyph viewNext() {
+        return line("M2.5 8h9M8.5 5l3 3-3 3M13.5 3.5v9");
+    }
+
+    /** An arrow left against a bar: the previous view. */
+    static Glyph viewPrevious() {
+        return line("M13.5 8h-9M7.5 5l-3 3 3 3M2.5 3.5v9");
     }
 }

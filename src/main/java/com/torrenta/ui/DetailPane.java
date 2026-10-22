@@ -157,6 +157,8 @@ final class DetailPane extends VBox {
     private Consumer<String> onRemoveTracker = url -> {};
     private Runnable onReannounce = () -> {};
     private Consumer<String> onBanPeer = address -> {};
+    /** The files are on this machine (not a remote daemon's): Open File and the folder actions show. */
+    private boolean localFiles = true;
 
     DetailPane() {
         getStyleClass().add("detail-pane");
@@ -237,6 +239,13 @@ final class DetailPane extends VBox {
 
     void setOnBanPeer(Consumer<String> handler) {
         onBanPeer = handler;
+    }
+
+    /** Hides what the engine cannot do here: Open file when the files are not on this machine. */
+    void applyCapabilities(com.torrenta.engine.Engine.Capabilities caps) {
+        localFiles = caps.has(com.torrenta.engine.Engine.Capability.LOCAL_FILES);
+        openButton.setVisible(localFiles);
+        openButton.setManaged(localFiles);
     }
 
     /** The Speed tab's window, shared with the Statistics window through the settings. */
@@ -641,8 +650,11 @@ final class DetailPane extends VBox {
         remedies.getChildren().clear();
         remedies.setVisible(!d.remedies().isEmpty());
         remedies.setManaged(!d.remedies().isEmpty());
-        for (int i = 0; i < d.remedies().size(); i++) {
-            remedies.getChildren().add(remedyRow(d, d.remedies().get(i), i == 0));
+        for (Diagnosis.Remedy remedy : d.remedies()) {
+            // A daemon's folder is on its machine: nothing here can open it.
+            if (remedy == Diagnosis.Remedy.OPEN_FOLDER && !localFiles) continue;
+            remedies.getChildren()
+                    .add(remedyRow(d, remedy, remedies.getChildren().isEmpty()));
         }
     }
 
@@ -752,6 +764,14 @@ final class DetailPane extends VBox {
         return c;
     }
 
+    /**
+     * Beside the list or under it, as a pseudo-class for app.css. The layout itself follows the
+     * pane's width (see {@link #relayout}), which is what decides whether two columns fit.
+     */
+    void setBeside(boolean beside) {
+        pseudoClassStateChanged(PseudoClass.getPseudoClass("right"), beside);
+    }
+
     private javafx.scene.Node buildFiles() {
         files.setShowRoot(false);
         files.setEditable(true);
@@ -814,7 +834,8 @@ final class DetailPane extends VBox {
         ContextMenu menu = new ContextMenu(open, folder);
         menu.setOnShowing(e -> {
             boolean file = selectedFileRow().map(FileRows.Row::isFile).orElse(false);
-            open.setVisible(file);
+            open.setVisible(file && localFiles);
+            folder.setVisible(localFiles);
             folder.setText(tr(file ? "detail.files.openContainingFolder" : "detail.files.openFolder"));
         });
         return menu;
@@ -933,10 +954,7 @@ final class DetailPane extends VBox {
         prompt.setContentText(tr("detail.trackers.addDialog.prompt"));
         prompt.getEditor().setPrefColumnCount(48);
         Optional<String> text = prompt.showAndWait();
-        text.ifPresent(t -> {
-            List<String> urls = List.of(t.trim().split("\\\\s+"));
-            if (!urls.isEmpty() && !urls.get(0).isEmpty()) onAddTrackers.accept(urls);
-        });
+        text.map(Actions::trackerUrls).filter(urls -> !urls.isEmpty()).ifPresent(onAddTrackers);
     }
 
     private static <T> TableColumn<T, String> column(String title, double width, Function<T, String> text) {

@@ -14,7 +14,7 @@
 
 A keyboard-first, cross-platform BitTorrent client built on JavaFX.
 
-Status: **early**. A themed window with a menu bar, an icon toolbar, a torrent list, a status bar that keeps its history, an event log, a debug log,
+Status: **feature-complete against the roadmap (0.2 through 0.9), not yet released**. A themed window with a menu bar, an icon toolbar, a torrent list, a status bar that keeps its history, an event log, a debug log,
 on a real engine: libtorrent, through [libtorrent4j](https://github.com/aldenml/libtorrent4j).
 Torrents arrive from a file, a magnet link, a URL, a drop or the clipboard through an Add dialog
 (file selection and priorities, save path with what the torrent leaves free, category, tags, stop
@@ -182,7 +182,9 @@ it): `settings.properties`, hand-editable; `stats.properties`, the all-time tota
 up, seconds active) the Statistics window adds this session to, written every five minutes and
 at quit, this machine's and never synced; `torrents/<info-hash>.fastresume`, one per torrent,
 libtorrent's resume data with the info dictionary inside, so deleting one file forgets one torrent;
-`native/<version>/`, the unpacked engine. While Torrenta runs, `instance.lock` is held, and
+`native/<version>/`, the unpacked engine; `profiles.json`, the remote engine profiles (name, URL,
+user, password; readable by you alone where the file system has modes, never synced), chosen by
+`engine.profile` in the settings file. While Torrenta runs, `instance.lock` is held, and
 `instance.port` and `instance.token` (readable by you alone where the file system has modes) say
 where a second Torrenta hands over its command line; both are deleted at quit, and a stale pair
 left by a crash is taken over without a word. Downloads go to `~/Downloads` until changed in
@@ -253,15 +255,16 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 
 | Chord | Action |
 |---|---|
-| `Ctrl+N` | New torrent: the Create Torrent dialog (a file or folder, hybrid/v1/v2, piece size, private, trackers by tier, web seeds, comment, source; Save as…, then hashed on a worker with a Cancel; the info-hashes and magnet link with Copy buttons once made; seeds at once when asked). In the RSS tab the chord adds a feed instead |
+| `Ctrl+N` | New torrent: the Create Torrent dialog (a file or folder, hybrid/v1/v2, piece size, private, trackers by tier, web seeds, comment, source; Save as…, then hashed on a worker with a Cancel; the info-hashes and magnet link with Copy buttons once made; seeds at once when asked). The RSS tab included (`N` adds a feed there) |
 | `Ctrl+O` (`Cmd+O` on macOS) | Add `.torrent` files, through the Add dialog |
 | `Ctrl+M` | Add a magnet link or a link to a `.torrent` (the clipboard's, if it holds one) |
 | `Ctrl+V` | Add whatever magnet or torrent link is on the clipboard; the status bar says when there is one |
 | `Ctrl+K` (or `Ctrl+F`) | The omnibox. Words filter the list by name as you type; a `key:value` term (`state:seeding`, `cat:Films`, `ratio<1`, `size>4g`, `added<7d`, `tracker:host`, `hash:7a3f`, `-tag:keep`) becomes a chip when you type the space after it, a term it cannot read becomes a red chip saying why, `Backspace` on an empty box hands the last chip back for editing, a click on a chip removes it. `>` and then a name runs a command (the palette opens with what you typed). A pasted magnet, `.torrent` link or path opens the Add dialog. `Enter` selects every match and returns to the list, so the next key acts on all of them; `Esc` empties the box, or returns to the list when it is empty |
 | `Ctrl+B` / `Ctrl+Shift+B` | Focus the sidebar (All, then Status, Categories, Tags and Trackers, every entry with a count; arrows walk every section, `Space` makes the entry the section's choice, `Enter` chooses and returns to the list, `Esc` returns without choosing; `Left`/`Right` fold a section) / show or hide it |
 | `Alt+X` (`M-x`, as in Editora; Settings → General → Keyboard can make it `Ctrl+Shift+P`) | Command palette: every command, found by typing part of its name |
+| `Ctrl+1` / `Ctrl+2` / `Ctrl+3`, `Ctrl+Tab` / `Ctrl+Shift+Tab` | Show Transfers, Search or RSS in the centre, or cycle through them (the cycling is `Ctrl` on macOS too); the strip above the centre says which is showing, with the key for each, and a click on it moves to another. `Ctrl+Shift+F`, `Ctrl+R` and `Esc` in Search or RSS still reach them |
 | `Ctrl+Shift+F` | Search: the Search tab in place of the transfers, with the query focused. A category chip row and a provider chip row (`Tab` walks them, `Space` toggles), `Enter` asks every chosen provider at once and the results land as each answers; `Down` enters the results, `Enter` or a double-click opens the Add dialog for one, `Ctrl+C` copies its link, the context menu opens its detail page; `Esc` returns to the transfers |
-| `Ctrl+R` | RSS: the RSS tab in place of the transfers. Arrows walk the feeds and the articles (`Left`/`Right` between them, `Down` from the filter box into the articles), `Enter` or a double-click on an article with a torrent opens the Add dialog for it, `M` toggles read, `Shift+M` marks the feed read, `N` or `Ctrl+N` adds a feed, `F5` refreshes it (`Shift+F5` every feed), `Delete` in the feed list removes one after a confirm, `Ctrl+C` copies the torrent or the page link; the context menus mirror the keys and add Download (at once, with the defaults) and Create rule from title…; `Esc` returns to the transfers |
+| `Ctrl+R` | RSS: the RSS tab in place of the transfers. Arrows walk the feeds and the articles (`Left`/`Right` between them, `Down` from the filter box into the articles), `Enter` or a double-click on an article with a torrent opens the Add dialog for it, `M` toggles read, `Shift+M` marks the feed read, `N` adds a feed, `F5` refreshes it (`Shift+F5` every feed), `Delete` in the feed list removes one after a confirm, `Ctrl+C` copies the torrent or the page link; the context menus mirror the keys and add Download (at once, with the defaults) and Create rule from title…; `Esc` returns to the transfers |
 | `Ctrl+,` | Settings: download folder, update check, the Add dialog's defaults, Categories and tags (names, save paths, delete), Watch folders, Automation (a command per event with placeholders, desktop notifications), Search (Torznab providers), RSS (the refresh interval, the feeds, the auto-download switch and rules), Connection (port, UPnP, IPv6, interface, connection limits, proxy) and Protocol (DHT, PEX, local discovery, uTP, encryption, anonymous mode, default trackers) IP filter (a blocklist URL refreshed on a schedule, a local list, manual bans), Speed (limits, alternative limits with a weekly schedule, overhead) and Queue and share limits (active downloads, seeds and total, the slow-torrent rule, a ratio and seeding-time limit that pauses or removes); searchable, applies live |
 | `Ctrl+I` | Show or hide the detail pane: General, Files (priorities, open), Peers, Trackers (add, remove, reannounce), Pieces, Speed (the selected torrent's graph, the same windows as the Statistics window's) |
 | `Ctrl+Shift+L` | Event log: what the engine reported (added, finished, tracker and disk errors, ports) |
@@ -272,6 +275,8 @@ everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAP
 | `Ctrl+Shift+R` / `Ctrl+Shift+A` | Force recheck / force reannounce |
 | `Ctrl+Shift+S` | Sequential download on or off |
 | `Ctrl+L` | Limits for the selection: download and upload caps, connections, upload slots, first and last pieces first, and a ratio or seeding-time limit of its own in place of the global one |
+| `Ctrl+Shift+Home` / `Ctrl+Shift+Up` / `Ctrl+Shift+Down` / `Ctrl+Shift+End` | Queue: move the selection to the top, up one, down one, to the bottom; the selected torrents keep their order among themselves (the Torrent and context menus hold them as a Queue submenu; the hidden Queue column shows the positions) |
+| `Ctrl+Shift+D` | Set Location: move the selection's files to another folder (typed or browsed, with the volume's free space); a file already at the destination is kept, never replaced, and a torrent still on its way through the incomplete folder gets the new destination instead of a move now. For a Transmission daemon the folder is a path on its machine |
 | `Ctrl+Shift+G` | Set the selection's category: one that exists, none, or a new one (the Torrent and context menus list them as a submenu) |
 | `Ctrl+T` | Edit the selection's tags: a checkbox per tag that exists, a field for new ones |
 | `Ctrl+C` / `Ctrl+Shift+H` / `Ctrl+Shift+C` | Copy name / info-hash / magnet link |
@@ -295,8 +300,8 @@ shows are remembered. The status bar's "Alt speed" switches the
 alternative speed limits by hand; the schedule in Settings switches them by the clock. The status bar shows the latest event; an error count appears there while
 there are errors, and a click on it opens the log.
 
-The list's columns (seventeen, from the header's ⋮ menu, Category and Tags among them) keep their
-order, widths and visibility in `settings.properties`.
+The list's columns (eighteen, from the header's ⋮ menu, Category, Tags and Queue among them) keep
+their order, widths and visibility in `settings.properties`.
 
 ## BitTorrent engine
 
@@ -319,7 +324,53 @@ Two things about the dependency that are not written down anywhere else:
 
 The alternatives considered were [bt](https://github.com/atomashpolskiy/bt) (pure Java, but its last
 release is from 2021, and it has no uTP or v2 torrents) and a Transmission daemon over RPC (no engine
-work, but a second program to install).
+work, but a second program to install). The second is now the other engine, below.
+
+## Remote: Transmission
+
+The same window can drive a `transmission-daemon` on a seedbox or a NAS instead of libtorrent in
+this process: `com.torrenta.engine.transmission.TransmissionEngine` speaks Transmission's RPC
+(JSON over HTTP(S) at `/transmission/rpc`, the `X-Transmission-Session-Id` handshake, basic auth)
+and the window does not know the difference. Tested against transmission-daemon 4.1.0-beta.2
+(RPC 18); anything from 4.0 (RPC 17) works, with sequential download missing before 4.1.
+
+**Setting it up.** Settings → Engine (`Ctrl+,`, the first page of the Engine group) lists the
+profiles: Local (libtorrent) is always there; Add… takes a name, the daemon's URL (`http://host:9091`
+is enough, the path is added), a user name and a password, and Test connection asks the daemon its
+version, RPC version and download folder. Use at next start remembers the choice
+(`engine.profile` in the settings file, this machine's, never synced); Switch now, or File → Switch
+engine profile… (also in the palette), restarts the engine in place: the list empties, the old
+engine stops, the new one comes up and the list fills from it. The profiles are `profiles.json`
+beside the settings, readable by you alone where the file system has modes, never synced, never
+logged with their passwords. The window title names the profile while a daemon is in use, the
+status bar says "Connecting to …" meanwhile, and when the daemon cannot be reached the window stays
+up with the reason and two buttons, Retry and Switch profile… (both palette commands too).
+
+**What is hidden.** The daemon's RPC has no word for some of what libtorrent does, and the window
+hides those rather than greying them out or pretending: the torrent creator (Ctrl+N and its
+toolbar button), the magnet file list before adding (the Add dialog says the daemon lists the files
+once the torrent is added, and adds blind), the IP filter from ranges (the local blocklist file,
+manual bans, Ban Peer; the page keeps the blocklist URL and the switch, which the daemon fetches
+itself, and says how many ranges it holds), first-and-last-pieces, the skip-check and stop-condition
+choices of the Add dialog, upload slots (session and per torrent), the proxy, interface binding and
+IPv6, anonymous mode, overhead in rate limits, the incomplete-folder, `.part` and pre-allocation
+choices, the limit on torrents active in all, and, before RPC 18, sequential download. Open folder,
+Open file, Browse and the free-space readout stay only when the daemon is on this machine
+(`localhost`, `127.*`, `::1`): a seedbox's paths are its own. Everything else works as it does with
+libtorrent: pause, resume, force resume, recheck, reannounce, remove with or without data, per-file
+priorities, trackers (added and removed through `trackerList`), per-torrent rate caps and peer
+limits, categories and tags (one flat label list on the daemon: the category travels as
+`category:<name>`, the tags as they are), the detail pane (files, peers, trackers, the pieces map
+decoded from the daemon's bitfield), the statistics (the daemon's cumulative counters; what it lacks
+shows a dash), the Speed, Queue, Protocol and Connection pages, watch folders, RSS rules, search,
+run-on-event and notifications. The daemon has no push, so the Event Log's added, finished, removed
+and error lines come from comparing one poll with the last.
+
+**The daemon keeps its own settings.** The Settings → Engine pages still show this machine's file;
+a value changed there while a daemon is in use is sent to the daemon, and only that value:
+untouched rows never overwrite what the daemon's administrator configured. The save path in the
+Add dialog defaults to the daemon's download folder; a torrent sent with the folder unchanged gets
+the daemon's own. Speeds are converted (the daemon counts kilobytes of 1000, the pages KiB).
 
 ## Layout
 
@@ -328,6 +379,7 @@ src/main/java/com/torrenta                    App, AppInfo, DevCapture
 src/main/java/com/torrenta/cli                CommandLine (--help, --version, inputs)
 src/main/java/com/torrenta/engine             Engine, Torrent, TorrentState — no libtorrent types
 src/main/java/com/torrenta/engine/libtorrent  LibtorrentEngine, NativeLibrary
+src/main/java/com/torrenta/engine/transmission TransmissionEngine, RpcClient, Bencode, Json
 src/main/java/com/torrenta/store              ConfigDir, Settings, TorrentStore
 src/main/java/com/torrenta/ui                 MainWindow, Theme, Bytes
 src/main/resources/com/torrenta               build-info.properties, styles/
@@ -338,10 +390,16 @@ scripts/render-icon.py            branding/torrenta-icon.svg → torrenta.png (P
 
 ## Not done
 
-Add-torrent and add-magnet dialogs (the chords only say so in the status bar; pass inputs on the
-command line), pause/resume/remove in the window, speed limits, a settings window, per-torrent
-detail (files, peers, trackers), a native app image (`-Pdist`, to be taken from Termina, plus the
-native library in the image), installers, releases. The order is in [docs/ROADMAP.md](docs/ROADMAP.md).
+- **Content layout without a root folder** in the Add dialog: libtorrent4j 2.1.0-39 has no
+  `torrent_info::rename_file`, and renaming through the handle after adding is confirmed by
+  libtorrent's alerts yet a recheck never finds the files under their new names.
+- **A port test** in Settings → Connection: libtorrent has none, it needs an outside service.
+- **Renaming a torrent or its paths** for a Transmission daemon: the RPC has it, the `Engine`
+  interface does not yet.
+- **A first release.** The pipeline (JReleaser, Homebrew cask, winget) is in place and dry-run
+  pending; the 1.0 criteria in [docs/ROADMAP.md](docs/ROADMAP.md) (a week of daily use on each
+  platform, resume data proven across upgrades, signed installers) are what stands between the
+  code and a tag.
 
 ## License
 

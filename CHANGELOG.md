@@ -5,7 +5,26 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Added
+
+- **A view strip, and keys that name the view.** Transfers, Search and RSS share the window's
+  centre; a thin row above it names the three, marks the one showing with a line of the accent,
+  shows the key that reaches each and switches on a click. `Ctrl+1`, `Ctrl+2` and `Ctrl+3` go
+  straight to one (`Esc`, `Ctrl+Shift+F` and `Ctrl+R` still work), `Ctrl+Tab` and
+  `Ctrl+Shift+Tab` cycle through them (`Ctrl` on macOS too, where `Cmd+Tab` is the
+  system's), and the View menu lists all three first, with Next View and Previous View; Search and
+  RSS Feeds moved there from the File menu. Each view takes the focus as it opens: the list, the
+  query, the articles (the feeds while there are none). Returning to Search after a dialog lands
+  in the query when there are no results to land in.
+
 ### Changed
+
+- **The sidebar and the details pane go where you want them.** The sidebar sits on the left or
+  the right of the list, or is hidden; the details pane sits under the list, beside it on the
+  right (running the full height, General in one column), or is collapsed. View has "Sidebar on
+  the Right", "Details Pane" (`Ctrl+Shift+D`) and "Details Pane on the Right", the palette has
+  the same, and Settings → General → Appearance has both as choices. Hiding either keeps its
+  place, and each place of the details pane keeps its own size.
 
 - **The filter box is an omnibox** (`Ctrl+K`, `Ctrl+F` still works): a `key:value` term becomes a
   chip the moment the space after it is typed, one the box cannot read becomes a red chip saying
@@ -15,12 +34,33 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   on all of them. `Esc` peels one layer at a time: the box, then the list's filter, then its
   selection. The Search tab moved from `Ctrl+K` to `Ctrl+Shift+F`.
 
+- **`Ctrl+N` is New Torrent in the RSS tab too**; `N` still adds a feed there.
+- **Reset to defaults asks first**, puts the theme back as well, and re-applies what the reset
+  keys drive (the engine's connection, speed and queue settings, the IP filter, and the tray,
+  file handlers and badge where those switches changed) instead of leaving them as they were
+  until the next restart.
+
 - **A magnet added from the Add dialog starts with the peers its file-list fetch found**, both
   with "Add now, pick files when ready" and after the files arrived, instead of looking for the
   swarm again from nothing.
 
 ### Fixed
 
+- **Every style after the debug log's in the stylesheet was ignored** (the RSS rule dialog's among
+  them, with a CSS warning at every start): a merge had dropped a closing brace.
+- **The detail pane opening collapsed to its tab strip.** The empty "No torrents yet" state,
+  which stands in for the list at every launch until the engine's first poll, could push the
+  divider down while the window was being laid out, and that position was saved. The divider is
+  no longer remembered while the empty state shows, the saved one is put back when the list
+  appears, and a saved position that leaves the pane its tabs and nothing more is ignored.
+- **Add Trackers took several URLs as one**: the prompt split on a literal `\s` rather than on
+  whitespace, so two URLs on two lines reached the engine as a single announce URL.
+- **The menus now show `Space`, `Delete`, `Shift+Delete`, `Ctrl+V`, `Ctrl+K`, `Esc`, `Ctrl+A`,
+  `Ctrl+Shift+L`, `Ctrl+Shift+T` and `Ctrl+Shift+M`** beside their items; the keys stay where they
+  were (Space and Delete on the list only, so a space typed into the filter does not pause).
+- **`Ctrl+Shift+G` opens Set Category**, as the palette always said it did.
+- **A poll racing a profile switch** could read the engine field after the switch had cleared
+  it; the poll now works on its own copy and skips a tick with no engine.
 - **A crash, any time after a file of 40 pieces or more was checked, downloaded or seeded** (exit
   139, no error file, "Segmentation fault" from the shell, usually at a garbage collection):
   libtorrent's memory-mapped disk I/O installs a SIGSEGV/SIGBUS handler of its own in place of
@@ -34,6 +74,40 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Torrent → Choose Files…** (the context menu and the palette too) for a torrent added with
+  "Add now, pick files when ready": it opens the file tree to choose the files and starts the
+  torrent. Until now nothing in the window led back to it.
+- **Queue order and Set Location, for both engines.** Torrent → Queue → Move to Top / Up / Down /
+  Bottom (`Ctrl+Shift+Home` / `Up` / `Down` / `End`, the context menu and the palette too) move
+  the selection in the download queue, the selected torrents keeping their order among themselves;
+  a hidden Queue column shows the positions and sorts by them. Torrent → Set Location…
+  (`Ctrl+Shift+D`) moves the selection's files to another folder, typed or browsed, with the
+  volume's free space under the field: libtorrent moves with `dont_replace` (a file already at
+  the destination is kept, never written over) and the log says when the move landed or why it
+  did not, the row reads "Moving files" in between, and a torrent still on its way through the
+  incomplete folder gets the new destination in its sidecar instead of a move now; a Transmission
+  daemon gets `torrent-set-location` with a path on its machine (no Browse, no free space there).
+  Two new capabilities, `QUEUE_ORDER` and `MOVE_STORAGE`, both engines have.
+
+- **A Transmission daemon as the engine** (roadmap 0.9): the same window drives a
+  `transmission-daemon` on a seedbox or a NAS over its RPC (`TransmissionEngine`: JSON over HTTP(S),
+  the session-id handshake, basic auth; one lean `torrent-get` per poll, the detail fields only for
+  the selected torrent; added, finished, removed and error events made by comparing polls, since
+  the RPC has no push). Settings → Engine, the first page of the Engine group, holds the profiles:
+  Local (libtorrent) and any number of remote daemons (name, URL, user, password, Test connection
+  for the version and RPC version), kept in `profiles.json` beside the settings, owner-readable,
+  never synced; Use at next start (`engine.profile`, this machine's) or Switch now, also File →
+  Switch engine profile… and the palette, which restarts the engine in place. The window title
+  names a remote profile; a daemon that cannot be reached leaves the window up with the reason,
+  Retry and Switch profile…. What a daemon cannot do is hidden, not greyed out and not imitated
+  (`Engine.Capabilities`): the torrent creator, the magnet file list before adding, the IP filter
+  from ranges (the blocklist URL stays: the daemon fetches it), first-and-last pieces, skip check
+  and stop condition on add, upload slots, the proxy, interface binding and IPv6, anonymous mode,
+  overhead in limits, the storage choices, the limit on torrents active in all, sequential download
+  before RPC 18, and Open folder/Open file/Browse unless the daemon is on this machine. Categories
+  and tags live in the daemon's labels (`category:<name>` plus the tags); a Settings change while a
+  daemon is in use sends that one key, never this machine's whole file. Tested against
+  transmission-daemon 4.1.0-beta.2; a real-daemon test runs where the daemon is installed.
 - **Icons in the menus and on the detail tabs.** Every item of the File, Torrent, View and Help
   menus and of the list's right-click menu shows its glyph before its name, the same line glyph
   the toolbar uses for the same command (`Icons.forCommand` is the one rule), at 16 px; the

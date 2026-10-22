@@ -157,7 +157,7 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Settings window, live-applying, searchable | ✓ | ✓ | 0.4 |
 | Light and dark themes, UI font | ✓ | ✓ | 0.8 |
 | Interface languages | ✓ | ✓ | 0.8 |
-| Control a remote daemon (Transmission RPC as a second `Engine`) | ✓ (remote GUI) | ✗ | 0.9 |
+| Control a remote daemon (Transmission RPC as a second `Engine`) | ✓ (remote GUI) | ✗ | ✓ 0.9 |
 | Serve a web UI / RPC of its own | ✓ | ✓ | later |
 | Headless daemon mode | ✓ | ✓ (`-nox`) | later |
 
@@ -174,9 +174,8 @@ The point at which Torrenta can be left running.
    file; `TorrentStore` as the one owner of what is on disk; `--config-dir`.
 2. **Stable table** — done. Rows keyed by info-hash and updated in place; selection, sort and
    scroll survive a tick. Column chooser, column order and widths remembered. Filter box.
-3. **Actions and chords** — done, except first/last piece first, which libtorrent has no flag
-   for (qBittorrent raises the priority of each file's edge pieces itself); it moves to 0.4 with the
-   per-torrent limits dialog. Pause, resume, force resume, remove, remove with data, recheck,
+3. **Actions and chords** — done. First/last piece first has no libtorrent flag; it landed with
+   0.4's per-torrent limits dialog (#24), raising each file's edge pieces as qBittorrent does. Pause, resume, force resume, remove, remove with data, recheck,
    reannounce, sequential, copy name/hash/magnet, open folder. Context menu, menu bar, command
    palette. Multi-select.
 4. **Engine alerts** — done. libtorrent alerts become engine-neutral `EngineEvent`s: added,
@@ -239,12 +238,12 @@ Everything in Settings that the engine already knows how to do.
 6. **Queue and share limits** — done: active downloads, seeds and total (0 for none; libtorrent's
    -1), the slow-torrent rule, and a global ratio and seeding-time limit with its action (pause or
    remove). libtorrent reads `share_ratio_limit`/`seed_time_limit` only to rank seeds for the queue,
-   so the window applies the rule from its poll (`ShareLimit.decide`, pure). Queue positions and
-   super seeding are not in; they go with 0.5's organisation work or a later PR.
+   so the window applies the rule from its poll (`ShareLimit.decide`, pure). Queue positions are in
+   (Torrent → Queue, the Queue column); super seeding is not.
 7. **Per-torrent limits dialog** — done (Torrent → Limits…, `Ctrl+L`): rate caps, connections,
    upload slots, first and last pieces first (edge-piece priorities, in the resume data), and a
-   share limit of the torrent's own kept as `torrent.<hash>.share`. Set location, rename torrent and
-   files, export `.torrent` are still to come.
+   share limit of the torrent's own kept as `torrent.<hash>.share`. Set location is in (Torrent →
+   Set Location…); rename torrent and files, export `.torrent` are still to come.
 
 ### 0.5 — Organisation and automation
 **0.5 is feature-complete.**
@@ -327,9 +326,20 @@ Asked for by adl on 2026-10-20, each its own PR, taken from Editora so the famil
 The interface font (Inter, as Editora's, #14) and the command palette's look (Editora's, #23) are in.
 
 ### 0.9 — Remote
+**0.9 is feature-complete.**
 
-1. **Transmission RPC `Engine`**: the same window driving a transmission-daemon on a seedbox or NAS;
+1. ✓ **Transmission RPC `Engine`**: the same window driving a transmission-daemon on a seedbox or NAS;
    session profiles in Settings; capabilities the daemon lacks are hidden, not faked.
+   (`engine.transmission.TransmissionEngine` + `RpcClient` + `Bencode` for `inspect`;
+   `Engine.Capabilities` read by the window through `ui.CapabilityRules`; `EngineProfile`,
+   `store.ProfileStore` (`profiles.json`, owner-only, never synced), `engine.profile`; Settings →
+   Engine with Test connection, Use at next start and Switch now; File → Switch engine profile…;
+   `TransmissionDaemonTest` against the real daemon where it is installed. Not mapped, since the
+   RPC has no word for them: torrent creation, the metadata fetch before adding, an IP filter from
+   ranges, first-and-last pieces, seed mode and stop conditions on add, upload slots, the proxy,
+   interface binding, anonymous mode, overhead counting, per-torrent storage choices, the total
+   active limit; the daemon's own session settings are shown as this machine's file and only a
+   changed key is sent.)
 
 ### 1.0 — Criteria
 

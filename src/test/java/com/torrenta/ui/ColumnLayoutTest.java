@@ -20,6 +20,17 @@ class ColumnLayoutTest {
     }
 
     @Test
+    void theQueueColumnIsHiddenByDefaultAndRemembered() {
+        // Hidden until shown from the header's menu; a layout that never heard of it leaves it hidden.
+        String stored = "name:360,-queue:60,size:90";
+        List<Column> parsed = ColumnLayout.parse(stored);
+        assertEquals(new Column("queue", 60, false), parsed.get(1));
+        assertEquals(stored, ColumnLayout.format(parsed));
+        assertTrue(ColumnLayout.parse("name:360,size:90").stream().noneMatch(c -> c.id().equals("queue")));
+        assertEquals("queue:72", ColumnLayout.format(List.of(new Column("queue", 72, true))), "shown and widened");
+    }
+
+    @Test
     void theCategoryAndTagsColumnsAreOrdinaryColumns() {
         // Hidden by default, so a stored layout carries them with a leading dash; nothing special.
         String stored = "name:360,-category:120,-tags:160,size:90";
