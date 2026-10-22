@@ -143,6 +143,9 @@ final class Icons {
             case "about" -> info();
             case "settings" -> settings();
             case "search" -> search();
+            case "rss" -> rss();
+            case "view-next" -> viewNext();
+            case "view-previous" -> viewPrevious();
             case "transfers" -> transfers();
             case "filter" -> find();
             case "select-all" -> selectAll();
@@ -395,5 +398,15 @@ final class Icons {
     /** A folder with an arrow into it: Set Location. */
     static Glyph folderMove() {
         return line("M2 12.5V3.5h4.2l1.5 2h5.8v7z M5.5 8.5h5M8.5 6.5l2 2-2 2");
+    }
+
+    /** An arrow right against a bar: the next view. */
+    static Glyph viewNext() {
+        return line("M2.5 8h9M8.5 5l3 3-3 3M13.5 3.5v9");
+    }
+
+    /** An arrow left against a bar: the previous view. */
+    static Glyph viewPrevious() {
+        return line("M13.5 8h-9M7.5 5l-3 3 3 3M2.5 3.5v9");
     }
 }

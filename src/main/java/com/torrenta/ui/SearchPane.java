@@ -249,10 +249,19 @@ final class SearchPane extends VBox {
         query.selectAll();
     }
 
+    /** The results when there are any, the first one selected; the query otherwise. */
     void focusResults() {
+        if (table.getItems().isEmpty()) {
+            focusQuery();
+            return;
+        }
         table.requestFocus();
-        if (table.getSelectionModel().isEmpty() && !table.getItems().isEmpty())
-            table.getSelectionModel().select(0);
+        if (table.getSelectionModel().isEmpty()) table.getSelectionModel().select(0);
+    }
+
+    /** Which of the pane's controls has the focus, for the capture's {@code view=} line. */
+    String focusForCapture(javafx.scene.Node owner) {
+        return owner == query ? "query" : owner == table ? "results" : "other";
     }
 
     void setQuery(String text) {
