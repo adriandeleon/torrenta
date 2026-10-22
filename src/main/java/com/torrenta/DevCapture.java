@@ -116,6 +116,7 @@ final class DevCapture {
         System.out.println("capture: capabilities-missing=" + window.capabilitiesLine());
         System.out.println("capture: javafx=" + System.getProperty("javafx.runtime.version", "?"));
         System.out.println("capture: status=" + window.statusText());
+        System.out.println("capture: statusbar=" + window.networkStatusText());
         for (String line : window.eventLines()) System.out.println("capture: event=" + line);
         if (!window.availableUpdateVersion().isEmpty())
             System.out.println("capture: update=" + window.availableUpdateVersion());

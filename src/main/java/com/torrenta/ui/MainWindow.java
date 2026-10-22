@@ -44,6 +44,7 @@ import javafx.scene.control.TableColumn;
 import javafx.scene.control.TableView;
 import javafx.scene.control.TextField;
 import javafx.scene.control.ToolBar;
+import javafx.scene.control.Tooltip;
 import javafx.scene.control.cell.ProgressBarTableCell;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
@@ -69,6 +70,7 @@ import com.torrenta.automation.Automation;
 import com.torrenta.automation.Notifiers;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
+import com.torrenta.engine.Connectivity;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
@@ -132,6 +134,20 @@ public final class MainWindow {
     private final Consumer<String> opener;
     private final Label status = new Label();
     private final Label rates = new Label();
+    // The status bar's network half (NetworkStatus): port with its dot, DHT, free space.
+    private final Label portStatus = new Label();
+    private final Region portDot = new Region();
+    private final Tooltip portTip = new Tooltip();
+    private final Label dhtStatus = new Label();
+    private final Label freeStatus = new Label();
+    private final Tooltip freeTip = new Tooltip();
+    /** Poll thread only: running time on an unproven port, and the last free-space reading. */
+    private final NetworkStatus.Clock portClock = new NetworkStatus.Clock();
+
+    /** 0 until the first reading. */
+    private long freeCheckedAt;
+
+    private Optional<NetworkStatus.Free> free = Optional.empty();
     private final TorrentRows rows = new TorrentRows();
     private final FilteredList<TorrentRow> filtered = new FilteredList<>(rows.list());
     private final TextField filter = new TextField();
@@ -170,6 +186,10 @@ public final class MainWindow {
 
     private final Label errorBadge = new Label();
     private TableView<TorrentRow> table;
+    /** The table and, over it until the first torrent, the welcome. */
+    private StackPane centre;
+
+    private Welcome welcome;
     /** Two-line or one-line rows; each remembers its own columns. */
     private Density density = Density.DEFAULT;
     /** The columns as built, before any remembered layout: compact's default. */
@@ -362,6 +382,7 @@ public final class MainWindow {
         statusBar = buildStatusBar();
         root.setBottom(statusBar);
         commands = buildCommands();
+        installWelcome();
         paletteChord =
                 PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT).chord();
         // The toolbar first: the View menu's check item binds to its visibility.
@@ -411,7 +432,11 @@ public final class MainWindow {
         });
         // Every save (a Settings change, a column drag) is a reason to sync soon; the service
         // ignores its own. Saves happen on the FX thread, but the listener does not assume it.
-        settings.setOnSaved(() -> Platform.runLater(sync::markDirty));
+        settings.setOnSaved(() -> Platform.runLater(() -> {
+            sync.markDirty();
+            // The download folder may have moved in Settings; the welcome's footer names it.
+            showDownloadFolder(welcome);
+        }));
         detail.setOnBanPeer(this::banPeer);
         log.installLogBridge(Platform::runLater);
         reportDefinitionProblems();
@@ -434,10 +459,14 @@ public final class MainWindow {
         scene.getAccelerators().put(shiftChord(KeyCode.G), this::chooseCategoryByChord);
         scene.setOnDragOver(this::onDragOver);
         scene.setOnDragDropped(this::onDragDropped);
+        scene.setOnDragExited(e -> welcome.setDragging(false));
         // A magnet copied elsewhere is the commonest way a torrent arrives; say so when the window
         // comes back to the front, once per link, and leave the adding to a keystroke.
         stage.focusedProperty().addListener((o, was, now) -> {
-            if (now) offerClipboard();
+            if (now) {
+                offerClipboard();
+                refreshWelcomeClipboard();
+            }
         });
         stage.setScene(scene);
         // The live setting, not one captured at startup: the checkbox can change while the window
@@ -722,6 +751,18 @@ public final class MainWindow {
         return trayStatus.line();
     }
 
+    /** The status bar's network entries as shown; read by the development capture. */
+    public String networkStatusText() {
+        String dot = portDot.getStyleClass().stream()
+                .filter(c -> c.startsWith("port-") && !c.equals("port-dot"))
+                .findFirst()
+                .orElse("none");
+        return "port=\"" + (portStatus.isVisible() ? portStatus.getText() : "") + "\" dot=" + dot + " dht=\""
+                + (dhtStatus.isVisible() ? dhtStatus.getText() : "") + "\" free=\""
+                + (freeStatus.isVisible() ? freeStatus.getText() : "") + "\" low="
+                + freeStatus.getStyleClass().contains("free-low");
+    }
+
     /** The status bar's text; read by the development capture. */
     public String statusText() {
         return status.getText();
@@ -872,6 +913,9 @@ public final class MainWindow {
             messagePopup.setFilterForCapture(action.substring("message-log:".length()));
         } else if (action.equals("debug-log")) {
             showDebugLog();
+        } else if (action.startsWith("welcome-clipboard:")) {
+            // The card as it would read with this on the clipboard, without touching the real one.
+            welcome.showClipboard(action.substring("welcome-clipboard:".length()));
         } else if (action.equals("settings")) {
             settingsWindow.show(stage);
         } else if (action.startsWith("settings-page:")) {
@@ -1101,6 +1145,7 @@ public final class MainWindow {
         System.out.println("capture: filter=" + sidebarSelection.describe() + " shown=" + filtered.size());
         System.out.println("capture: omnibox=" + omnibox.chips() + " text=\"" + filter.getText() + "\" mode="
                 + omnibox.mode() + " query=\"" + omnibox.query() + "\"");
+        System.out.println("capture: welcome=" + welcome.describeForCapture());
         System.out.println("capture: focus-sidebar=" + sidebar.hasFocus() + " cursor=" + sidebar.cursorForCapture());
         for (TorrentRow row : table.getItems()) {
             Torrent t = row.torrent();
@@ -2062,6 +2107,8 @@ public final class MainWindow {
     }
 
     private void offerClipboard() {
+        // The welcome's card says it already, with the link's name.
+        if (welcome != null && welcome.isVisible()) return;
         clipboardCandidate().ifPresent(text -> {
             if (text.equals(lastClipboardOffer)) return;
             lastClipboardOffer = text;
@@ -2083,11 +2130,13 @@ public final class MainWindow {
         Dragboard board = e.getDragboard();
         if (board.hasFiles() || (board.hasString() && Inputs.looksAddable(board.getString()))) {
             e.acceptTransferModes(TransferMode.COPY);
+            welcome.setDragging(true);
         }
         e.consume();
     }
 
     private void onDragDropped(DragEvent e) {
+        welcome.setDragging(false);
         Dragboard board = e.getDragboard();
         boolean taken = false;
         if (board.hasFiles()) {
@@ -2141,12 +2190,18 @@ public final class MainWindow {
             }
         }
         TorrentDetail shown = detailSnapshot;
+        Connectivity connectivity = engine.connectivity();
+        long unproven = portClock.tick(connectivity, NetworkStatus.anyRunning(snapshot), nowSeconds);
+        Optional<NetworkStatus.Port> port = NetworkStatus.port(connectivity, unproven);
+        Optional<String> dht = NetworkStatus.dht(connectivity, engine.stats().dhtNodes());
+        Optional<NetworkStatus.Free> space = freeSpace(nowSeconds);
         pushTray(TrayStatus.of(snapshot, current));
         pushBadge(BadgeState.of(snapshot, current.download()));
         Platform.runLater(() -> {
             rows.apply(snapshot, nowSeconds);
             refreshSidebar(snapshot);
             rates.setText(ratesText(current));
+            showNetwork(port, dht, space);
             if (detailWanted) {
                 if (shown != null && shown.general().id().equals(detailId)) {
                     detail.show(shown);
@@ -3091,6 +3146,7 @@ public final class MainWindow {
         });
         detail.applyCapabilities(caps);
         settingsWindow.applyCapabilities(caps);
+        if (welcome != null) showDownloadFolder(welcome);
     }
 
     /** The capabilities the engine lacks, one line, for the capture hook; empty for libtorrent. */
@@ -3311,19 +3367,6 @@ public final class MainWindow {
 
     private VBox buildCenter() {
         table = buildTable();
-        VBox empty = buildEmptyState();
-        // The empty state is the whole centre until the first torrent, and the table after it;
-        // a filter that matches nothing shows the table's own placeholder instead.
-        empty.visibleProperty().bind(Bindings.isEmpty(rows.list()));
-        empty.managedProperty().bind(empty.visibleProperty());
-        // The empty state never sizes the split: its height would push the divider down (see
-        // DetailSplit). The list appearing puts the saved position back.
-        empty.setMinHeight(0);
-        empty.setMinWidth(0); // and its width, with the pane beside the list
-        empty.visibleProperty().addListener((o, was, now) -> {
-            if (!now && detailWanted && !split.getDividers().isEmpty())
-                split.setDividerPositions(dividerFromSettings());
-        });
         table.visibleProperty().bind(Bindings.isNotEmpty(rows.list()));
         table.managedProperty().bind(table.visibleProperty());
         // The first torrent makes the table appear; it takes the focus then, unless the person is
@@ -3331,7 +3374,7 @@ public final class MainWindow {
         table.visibleProperty().addListener((o, was, now) -> {
             if (now && !filter.isFocused() && !searchShowing() && !rssShowing()) table.requestFocus();
         });
-        StackPane centre = new StackPane(table, empty);
+        centre = new StackPane(table);
         // The filter bar heads the list's side of the split, so a detail pane on the right runs
         // the full height beside both, and one at the bottom sits under both as it always did.
         VBox listColumn = new VBox(buildFilterBar(), centre);
@@ -4150,17 +4193,11 @@ public final class MainWindow {
         if (!on) classes.remove("state-colors");
     }
 
-    private VBox buildEmptyState() {
-        Label title = new Label(tr("window.empty.title"));
-        title.getStyleClass().add("empty-title");
-        Label hint = new Label(tr("window.empty.hint"));
-        hint.getStyleClass().add("empty-hint");
-        // A translation runs longer than the English line; a paragraph, never an ellipsis.
-        hint.setWrapText(true);
-        hint.setTextAlignment(javafx.scene.text.TextAlignment.CENTER);
-        hint.setMaxWidth(560);
-        // When the engine could not start: the reason, and the two ways out. Hidden otherwise, so
-        // the empty state keeps its shape; the palette offers both as commands as well.
+    /**
+     * When the engine could not start: the reason, and the two ways out, under the welcome's drop
+     * zone. Hidden otherwise; the palette offers both as commands as well.
+     */
+    private VBox buildEngineProblem() {
         engineProblemText = new Label();
         engineProblemText.getStyleClass().addAll("empty-hint", "engine-problem");
         engineProblemText.setWrapText(true);
@@ -4176,13 +4213,79 @@ public final class MainWindow {
         ways.setAlignment(Pos.CENTER);
         engineProblem = new VBox(10, engineProblemText, ways);
         engineProblem.setAlignment(Pos.CENTER);
-        engineProblem.setPadding(new Insets(12, 0, 0, 0));
         engineProblem.setVisible(false);
         engineProblem.setManaged(false);
-        VBox box = new VBox(8, title, hint, engineProblem);
-        box.setAlignment(Pos.CENTER);
-        box.getStyleClass().add("empty-state");
-        return box;
+        return engineProblem;
+    }
+
+    /**
+     * The welcome over the table: the whole centre until the first torrent, and the table after it;
+     * a filter that matches nothing shows the table's own placeholder instead. After the commands,
+     * since its keys are theirs.
+     */
+    private void installWelcome() {
+        welcome = buildWelcome();
+        welcome.setProblem(buildEngineProblem());
+        welcome.visibleProperty().bind(Bindings.isEmpty(rows.list()));
+        welcome.managedProperty().bind(welcome.visibleProperty());
+        welcome.visibleProperty().addListener((o, was, now) -> refreshWelcomeClipboard());
+        // The welcome never sizes the split: its height would push the divider down (see
+        // DetailSplit). The list appearing puts the saved position back.
+        welcome.setMinHeight(0);
+        welcome.setMinWidth(0); // and its width, with the pane beside the list
+        welcome.visibleProperty().addListener((o, was, now) -> {
+            if (!now && detailWanted && !split.getDividers().isEmpty())
+                split.setDividerPositions(dividerFromSettings());
+        });
+        centre.getChildren().add(welcome);
+        refreshWelcomeClipboard();
+    }
+
+    private Welcome buildWelcome() {
+        List<Welcome.Key> keys = new ArrayList<>();
+        for (var k : List.of(
+                Map.entry("add-file", "welcome.key.open"),
+                Map.entry("add-clipboard", "welcome.key.clipboard"),
+                Map.entry("filter", "welcome.key.omnibox"),
+                Map.entry("settings", "welcome.key.settings"))) {
+            Command c = command(k.getKey());
+            keys.add(new Welcome.Key(c.hint(), tr(k.getValue()), c.run()));
+        }
+        Welcome w = new Welcome(
+                keys, this::addFromClipboard, command("add-clipboard").hint(), this::changeDownloadFolder);
+        showDownloadFolder(w);
+        return w;
+    }
+
+    /**
+     * The welcome's footer: this machine's download folder with a "change", or, when the files are
+     * not here, the daemon's folder as it names it (a path on its machine, changed in its own
+     * Settings rows).
+     */
+    private void showDownloadFolder(Welcome w) {
+        Engine e = engine;
+        if (e != null && capabilities.lacks(Engine.Capability.LOCAL_FILES)) w.showRemoteFolder(e.downloadDir());
+        else w.showFolder(folderText(settings.downloadDir()));
+    }
+
+    /** The welcome's clipboard card, read now: the clipboard has no change event, so on each look. */
+    private void refreshWelcomeClipboard() {
+        if (welcome == null || !welcome.isVisible()) return;
+        welcome.showClipboard(clipboardCandidate().orElse(""));
+    }
+
+    /** The welcome footer's "change": the download folder, chosen and saved; the engine reads it live. */
+    private void changeDownloadFolder() {
+        javafx.stage.DirectoryChooser chooser = new javafx.stage.DirectoryChooser();
+        chooser.setTitle(tr("settings.general.downloadDir"));
+        java.io.File current = settings.downloadDir().toFile();
+        while (current != null && !current.isDirectory()) current = current.getParentFile();
+        if (current != null) chooser.setInitialDirectory(current);
+        java.io.File chosen = chooser.showDialog(stage);
+        if (chosen == null) return;
+        settings.downloadDir(chosen.toPath());
+        settings.saveQuietly();
+        showDownloadFolder(welcome);
     }
 
     private HBox buildStatusBar() {
@@ -4217,10 +4320,101 @@ public final class MainWindow {
         // The status text is the door to its own history: a click shows what scrolled past.
         status.getStyleClass().add("status-message");
         status.setOnMouseClicked(e -> messagePopup.toggle());
-        HBox bar = new HBox(12, status, spacer, altSpeedToggle, updateBadge, syncBadge, errorBadge, rates);
+        // The port and the DHT lead, quiet until the engine says something; a click opens the
+        // Settings page that changes them. Free space ends the row; a click opens the folder.
+        portDot.getStyleClass().add("port-dot");
+        portStatus.setGraphic(portDot);
+        portStatus.getStyleClass().add("network-status");
+        portStatus.setTooltip(portTip);
+        portStatus.setOnMouseClicked(e -> openSettingsPage("CONNECTION"));
+        dhtStatus.getStyleClass().add("network-status");
+        dhtStatus.setTooltip(new Tooltip(tr("status.dht.tip")));
+        dhtStatus.setOnMouseClicked(e -> openSettingsPage("PROTOCOL"));
+        freeStatus.getStyleClass().add("network-status");
+        freeStatus.setTooltip(freeTip);
+        freeStatus.setOnMouseClicked(
+                e -> opener.accept(settings.downloadDir().toUri().toString()));
+        for (Label l : List.of(portStatus, dhtStatus, freeStatus)) {
+            l.setMinWidth(Region.USE_PREF_SIZE);
+            reveal(l, false);
+        }
+        // The message gives way first when the window is narrow; the facts keep their width.
+        status.setMinWidth(0);
+        HBox bar = new HBox(
+                12,
+                portStatus,
+                dhtStatus,
+                status,
+                spacer,
+                altSpeedToggle,
+                updateBadge,
+                syncBadge,
+                errorBadge,
+                rates,
+                freeStatus);
         bar.setPadding(new Insets(4, 10, 4, 10));
         bar.getStyleClass().add("status-bar");
         return bar;
+    }
+
+    private void openSettingsPage(String page) {
+        settingsWindow.show(stage);
+        settingsWindow.selectPageForCapture(page);
+    }
+
+    /** FX thread: the network entries as the poll found them; an absent one is hidden. */
+    private void showNetwork(
+            Optional<NetworkStatus.Port> port, Optional<String> dht, Optional<NetworkStatus.Free> space) {
+        reveal(portStatus, port.isPresent());
+        port.ifPresent(p -> {
+            portStatus.setText(p.text());
+            portTip.setText(p.tooltip());
+            var classes = portDot.getStyleClass();
+            for (NetworkStatus.Dot d : NetworkStatus.Dot.values()) if (d != p.dot()) classes.remove(d.styleClass);
+            if (!classes.contains(p.dot().styleClass)) classes.add(p.dot().styleClass);
+        });
+        reveal(dhtStatus, dht.isPresent());
+        dht.ifPresent(dhtStatus::setText);
+        reveal(freeStatus, space.isPresent());
+        space.ifPresent(f -> {
+            freeStatus.setText(f.text());
+            freeTip.setText(f.tooltip());
+            if (f.low() != freeStatus.getStyleClass().contains("free-low")) {
+                if (f.low()) freeStatus.getStyleClass().add("free-low");
+                else freeStatus.getStyleClass().remove("free-low");
+            }
+        });
+    }
+
+    private static void reveal(javafx.scene.Node node, boolean shown) {
+        node.setVisible(shown);
+        node.setManaged(shown);
+    }
+
+    /**
+     * Poll thread: the free space where downloads go, read every five seconds (a file-store
+     * query, cheap but not free) and kept in between.
+     */
+    private Optional<NetworkStatus.Free> freeSpace(long nowSeconds) {
+        // A daemon's files are on its machine: this one's disk says nothing about them.
+        if (capabilities.lacks(Engine.Capability.LOCAL_FILES)) {
+            freeCheckedAt = 0;
+            return Optional.empty();
+        }
+        if (freeCheckedAt > 0 && nowSeconds - freeCheckedAt < 5) return free;
+        freeCheckedAt = nowSeconds;
+        Path dir = settings.downloadDir();
+        free = FreeSpace.disk(dir).map(d -> NetworkStatus.free(d, folderText(dir)));
+        return free;
+    }
+
+    /** A folder as the welcome and the status bar write it: {@code ~} under home, off Windows. */
+    private static String folderText(Path dir) {
+        String home = System.getProperty("user.home");
+        boolean tilde = !System.getProperty("os.name", "")
+                .toLowerCase(java.util.Locale.ROOT)
+                .startsWith("windows");
+        return WelcomeText.folder(dir, home == null ? null : Path.of(home), tilde);
     }
 
     private static String ratesText(Engine.Rates r) {
