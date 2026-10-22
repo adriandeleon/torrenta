@@ -913,6 +913,8 @@ public final class MainWindow {
             out.add("stats-graph=" + statsWindow.graph().summaryForCapture());
         }
         if (detailWanted && detail.activeTab().equals("speed")) out.add("speed-tab=" + detail.speedSummaryForCapture());
+        if (detailWanted && detail.activeTab().equals("files"))
+            for (String line : detail.fileLinesForCapture()) out.add("file=" + line);
         if (detailWanted && detail.activeTab().equals("overview"))
             for (String line : detail.overviewLines()) out.add("overview-" + line);
         out.add("status-bar=" + statusBarForCapture());
@@ -3571,9 +3573,17 @@ public final class MainWindow {
         });
         detail.setOnOpenFolder(row -> {
             Torrent t = detailTorrent();
-            if (t != null)
-                opener.accept(
-                        FileRows.folderOf(Path.of(t.savePath()), row).toUri().toString());
+            if (t == null || t.savePath() == null || t.savePath().isBlank()) return;
+            Path savePath = Path.of(t.savePath());
+            // A folder no piece has reached is not on the disk yet: the nearest one above it opens.
+            // Looking is disk I/O (a network mount can stall), so it is not done on the FX thread.
+            Thread.ofVirtual().name("open-folder").start(() -> {
+                String uri = FileRows.nearestFolder(
+                                savePath, FileRows.folderOf(savePath, row), java.nio.file.Files::isDirectory)
+                        .toUri()
+                        .toString();
+                Platform.runLater(() -> opener.accept(uri));
+            });
         });
         detail.setOnAddTrackers(urls -> {
             String id = detailId;

@@ -875,6 +875,11 @@ final class DetailPane extends VBox {
         Headers.uppercase(files);
 
         files.setContextMenu(buildFilesMenu());
+        // Nothing the menu could do (no row chosen, or the files are not on this machine): no menu,
+        // rather than an empty one.
+        files.addEventFilter(javafx.scene.input.ContextMenuEvent.CONTEXT_MENU_REQUESTED, e -> {
+            if (!localFiles || selectedFileRow().isEmpty()) e.consume();
+        });
         return files;
     }
 
@@ -935,12 +940,10 @@ final class DetailPane extends VBox {
      * extension stays, as the Add dialog's tree cuts them.
      */
     private static final class NameCell extends TreeTableCell<FileRows.Row, String> {
-        private final Icons.Glyph folder = Icons.folderSmall();
-        private final Icons.Glyph file = Icons.fileSmall();
+        /** One glyph per kind this cell has shown, so a reused cell swaps rather than rebuilds. */
+        private final java.util.EnumMap<FileKind, Icons.Glyph> glyphs = new java.util.EnumMap<>(FileKind.class);
 
         NameCell() {
-            folder.getStyleClass().add("file-glyph");
-            file.getStyleClass().add("file-glyph");
             setTextOverrun(javafx.scene.control.OverrunStyle.CENTER_ELLIPSIS);
             setGraphicTextGap(6);
         }
@@ -956,8 +959,25 @@ final class DetailPane extends VBox {
                 return;
             }
             setText(item);
-            setGraphic(row.isFile() ? file : folder);
+            setGraphic(glyphs.computeIfAbsent(FileKind.of(row.name(), !row.isFile()), kind -> {
+                Icons.Glyph glyph = kind.glyph();
+                glyph.getStyleClass().add("file-glyph");
+                if (kind == FileKind.FOLDER) glyph.getStyleClass().add("file-glyph-folder");
+                return glyph;
+            }));
         }
+    }
+
+    /** Capture only: the files tree's rows as shown, indented by depth, each with its kind. */
+    List<String> fileLinesForCapture() {
+        List<String> lines = new java.util.ArrayList<>();
+        for (int i = 0; i < files.getExpandedItemCount(); i++) {
+            var item = files.getTreeItem(i);
+            FileRows.Row row = item.getValue();
+            lines.add("  ".repeat(Math.max(0, files.getTreeItemLevel(item) - 1)) + row.name() + " ["
+                    + FileKind.of(row.name(), !row.isFile()).name().toLowerCase(java.util.Locale.ROOT) + "]");
+        }
+        return lines;
     }
 
     private javafx.scene.Node buildPeers() {

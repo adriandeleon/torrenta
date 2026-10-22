@@ -886,6 +886,11 @@
     -fx-stroke: -color-fg-default;
 }
 
+/* A folder's glyph in the accent's ink, so the tree's folders stand apart from its files. */
+.detail-pane .file-glyph-folder .icon-line {
+    -fx-stroke: -color-accent-fg;
+}
+
 .sidebar .tree-cell:filled:selected,
 .sidebar .tree-view:focused .tree-cell:filled:selected {
     -fx-background-color: transparent;

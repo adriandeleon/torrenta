@@ -61,7 +61,8 @@ class IconsTest {
                         "settings",
                         "palette",
                         "folderSmall",
-                        "fileSmall")),
+                        "folder",
+                        "file")),
                 seen.toString());
     }
 

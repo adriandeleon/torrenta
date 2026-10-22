@@ -74,4 +74,17 @@ class FileRowsTest {
         single.apply(List.of(f(0, "lone.iso", 10, 10)));
         assertEquals(save, FileRows.folderOf(save, single.get(0)));
     }
+
+    @Test
+    void theNearestFolderThatExistsOpensNeverAboveTheSavePath() {
+        Path save = Path.of("/data/dl");
+        Path wanted = Path.of("/data/dl/pair/sub");
+        assertEquals(wanted, FileRows.nearestFolder(save, wanted, p -> true));
+        assertEquals(
+                Path.of("/data/dl/pair"),
+                FileRows.nearestFolder(save, wanted, p -> p.equals(Path.of("/data/dl/pair"))));
+        assertEquals(save, FileRows.nearestFolder(save, wanted, p -> false), "nothing there yet");
+        assertEquals(save, FileRows.nearestFolder(save, save, p -> false));
+        assertEquals(save, FileRows.nearestFolder(save, Path.of("/data/dl/../../etc"), p -> true), "never climbs out");
+    }
 }

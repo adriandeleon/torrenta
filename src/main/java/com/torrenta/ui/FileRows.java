@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 
 import javafx.beans.property.LongProperty;
 import javafx.beans.property.ObjectProperty;
@@ -116,6 +117,19 @@ public final class FileRows {
         }
         refreshFolders(root);
         return false;
+    }
+
+    /**
+     * {@code wanted} (a {@link #folderOf}), or the nearest folder above it that exists: a folder no
+     * piece has reached yet is not on the disk, and the save path is the floor.
+     */
+    public static Path nearestFolder(Path savePath, Path wanted, Predicate<Path> isDirectory) {
+        Path floor = savePath.normalize();
+        Path folder = wanted.normalize();
+        // A path that climbs out of the save path (it should never, libtorrent sanitises) opens the floor.
+        if (!folder.startsWith(floor)) return floor;
+        while (!folder.equals(floor) && !isDirectory.test(folder)) folder = folder.getParent();
+        return folder;
     }
 
     public void clear() {
