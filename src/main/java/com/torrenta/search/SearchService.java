@@ -21,8 +21,9 @@ import java.util.concurrent.TimeUnit;
  * merged and ranked by {@link ResultRanker}, and what did not answer said in the outcome.
  *
  * <p>Polite to the indexers: a provider is asked at most once every {@link #MIN_INTERVAL}, and a
- * (provider, query, category) that was answered is not asked again for the life of the service.
- * Blocking; the window calls it off the FX thread.
+ * (provider, query, category) that was answered is not asked again for {@link #CACHE_LIFETIME}, so
+ * the same search run again a while later finds what was added since. Blocking; the window calls
+ * it off the FX thread.
  */
 public final class SearchService {
 
@@ -31,6 +32,9 @@ public final class SearchService {
 
     /** The least time between two requests to one provider. */
     public static final Duration MIN_INTERVAL = Duration.ofSeconds(2);
+
+    /** How long an answer is reused for the same (provider, query, category). */
+    public static final Duration CACHE_LIFETIME = Duration.ofMinutes(5);
 
     /** The clock and the sleep, so the rate limit is tested without waiting. */
     public interface Ticker {
@@ -54,6 +58,9 @@ public final class SearchService {
 
     private record Key(String provider, String query, SearchCategory category) {}
 
+    /** An answer and when it came, on the ticker's clock. */
+    private record Answer(List<SearchResult> results, long atNanos) {}
+
     /** When a provider was last asked, by name; the lock serialises requests to one provider. */
     private static final class Gate {
         long lastNanos;
@@ -63,7 +70,8 @@ public final class SearchService {
     private final Duration timeout;
     private final Duration minInterval;
     private final Ticker ticker;
-    private final Map<Key, List<SearchResult>> cache = new ConcurrentHashMap<>();
+    private final Duration lifetime;
+    private final Map<Key, Answer> cache = new ConcurrentHashMap<>();
     private final Map<String, Gate> gates = new ConcurrentHashMap<>();
 
     public SearchService() {
@@ -71,9 +79,31 @@ public final class SearchService {
     }
 
     public SearchService(Duration timeout, Duration minInterval, Ticker ticker) {
+        this(timeout, minInterval, ticker, CACHE_LIFETIME);
+    }
+
+    public SearchService(Duration timeout, Duration minInterval, Ticker ticker, Duration lifetime) {
         this.timeout = timeout;
         this.minInterval = minInterval;
         this.ticker = ticker;
+        this.lifetime = lifetime;
+    }
+
+    /**
+     * Whether an answer that came at {@code atNanos} may still stand in for asking at
+     * {@code nowNanos}: younger than the lifetime. Compared as a difference, as nanoTime must be.
+     */
+    static boolean fresh(long atNanos, long nowNanos, Duration lifetime) {
+        return nowNanos - atNanos < lifetime.toNanos();
+    }
+
+    /** The cached answer while it is fresh; a stale one is forgotten on the way. */
+    private List<SearchResult> cached(Key key) {
+        Answer answer = cache.get(key);
+        if (answer == null) return null;
+        if (fresh(answer.atNanos(), ticker.nanos(), lifetime)) return answer.results();
+        cache.remove(key, answer);
+        return null;
     }
 
     /**
@@ -122,7 +152,7 @@ public final class SearchService {
         Map<String, String> failures = new LinkedHashMap<>();
         List<SearchProvider> toAsk = new ArrayList<>();
         for (SearchProvider provider : providers) {
-            List<SearchResult> cached = cache.get(new Key(provider.name(), lower, cat));
+            List<SearchResult> cached = cached(new Key(provider.name(), lower, cat));
             if (cached != null) {
                 answers.add(cached);
                 progress.answered(provider.name(), cached);
@@ -153,7 +183,7 @@ public final class SearchService {
                     SearchProvider provider = pending.remove(future);
                     try {
                         List<SearchResult> results = future.get();
-                        cache.put(new Key(provider.name(), lower, cat), results);
+                        cache.put(new Key(provider.name(), lower, cat), new Answer(results, ticker.nanos()));
                         answers.add(results);
                         progress.answered(provider.name(), results);
                     } catch (CancellationException e) {

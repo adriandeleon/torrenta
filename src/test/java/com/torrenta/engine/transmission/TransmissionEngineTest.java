@@ -768,6 +768,8 @@ class TransmissionEngineTest {
                         true)));
         TorrentDetail d = TransmissionEngine.detailOf(t, 1_000_000L);
         assertEquals("abcd", d.general().id(), "ids are lower-case hex");
+        assertEquals("10.0.0.5:51413", d.peers().get(0).address());
+        assertEquals("[2001:db8::5]:51413", TransmissionEngine.peerAddress("2001:db8::5", 51413));
         assertArrayEquals(new boolean[] {true, true, false, false}, d.pieces());
         assertEquals(2, d.general().piecesHave());
         // Two pieces ours, one with two copies among peers, one with none: 0 whole copies + 3/4.

@@ -5,6 +5,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,7 +29,6 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckMenuItem;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Label;
@@ -133,7 +133,12 @@ public final class MainWindow {
     private final Settings settings;
     private final Consumer<String> opener;
     private final Label status = new Label();
-    private final Label rates = new Label();
+    /** The status bar's rates, each with its last minute drawn beside it. */
+    private final Label downRate = new Label();
+
+    private final Label upRate = new Label();
+    private final Sparkline downSpark = new Sparkline(Sparkline.Series.DOWN, 64, 14);
+    private final Sparkline upSpark = new Sparkline(Sparkline.Series.UP, 64, 14);
     // The status bar's network half (NetworkStatus): port with its dot, DHT, free space.
     private final Label portStatus = new Label();
     private final Region portDot = new Region();
@@ -240,8 +245,14 @@ public final class MainWindow {
     private final RssService rss;
 
     private RssPane rssPane;
-    /** The transfers (sidebar, filter, list, detail) and the Search tab share the centre. */
+    /** The transfers (sidebar, filter, list, detail), Search and RSS share the centre. */
     private javafx.scene.Node transfersView;
+    /** The centre's panes by view: the one for {@link #view} is shown and managed, the rest neither. */
+    private final Map<View, javafx.scene.Node> panes = new EnumMap<>(View.class);
+    /** The view showing; FX thread. */
+    private View view = View.TRANSFERS;
+    /** The row above the centre that says which view is showing. */
+    private ViewStrip viewStrip;
 
     private final UpdateService updates = new UpdateService();
     private final SettingsWindow settingsWindow;
@@ -251,6 +262,11 @@ public final class MainWindow {
     private final MenuItem skipUpdateItem = new MenuItem();
     private final Label updateBadge = new Label();
     private final Label altSpeedToggle = new Label();
+    /** View → Alternative Speed Limits, checked while they are in force. */
+    private CheckMenuItem altSpeedItem;
+    /** Whether the alternative limits were in force at the last refresh, on the FX thread. */
+    private boolean altSpeedOn;
+
     private ReleaseInfo availableUpdate;
     private SettingsSync sync;
     private final Label syncBadge = new Label(tr("status.syncProblem"));
@@ -391,6 +407,8 @@ public final class MainWindow {
         root.setBottom(statusBar);
         commands = buildCommands();
         installWelcome();
+        // The strip is built with the centre, before the chords it shows exist.
+        viewStrip.showChords(v -> viewChord(v).getDisplayText());
         paletteChord =
                 PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT).chord();
         // The toolbar first: the View menu's check item binds to its visibility.
@@ -401,6 +419,11 @@ public final class MainWindow {
         root.setTop(new VBox(
                 stage.getStyle() == StageStyle.EXTENDED ? ExtendedWindow.header(menuBar, stage) : menuBar, bar));
         table.setContextMenu(buildContextMenu());
+        // The detail header's buttons and the diagnosis's remedies run the same commands.
+        detail.setCommands(
+                id -> commands.stream().filter(c -> c.id().equals(id)).findFirst());
+        detail.setMoreMenu(buildContextMenu());
+        detail.setEvents(log.events());
         palette = new CommandPalette(host, this::focusList, paletteChord.getDisplayText());
         logWindow = new LogWindow(stage, log);
         statsWindow = new StatisticsWindow(stage, settings.statsWindowSeconds(), this::rememberStatsWindow);
@@ -446,6 +469,12 @@ public final class MainWindow {
             showDownloadFolder(welcome);
         }));
         detail.setOnBanPeer(this::banPeer);
+        detail.setOnCopyPeer(address -> {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(address);
+            Clipboard.getSystemClipboard().setContent(content);
+            setStatus(tr("status.copied.address", address));
+        });
         log.installLogBridge(Platform::runLater);
         reportDefinitionProblems();
         host.getChildren().add(root);
@@ -466,6 +495,18 @@ public final class MainWindow {
         scene.getAccelerators().put(chord(KeyCode.V), this::addFromClipboard);
         // Set Category is a submenu, and a submenu carries no accelerator: the chord is the scene's.
         scene.getAccelerators().put(shiftChord(KeyCode.G), this::chooseCategoryByChord);
+        // Ctrl+1, 2, 3: each view by its place on the strip, beside the views' own chords
+        // (Esc, Ctrl+Shift+F, Ctrl+R), which the menus keep showing.
+        for (View v : View.values()) scene.getAccelerators().put(viewChord(v), () -> show(v));
+        // Ctrl+Tab and Ctrl+Shift+Tab cycle the views. A filter, ahead of focus traversal, which
+        // would otherwise take Ctrl+Tab out of the table; Control on every platform, since Cmd+Tab
+        // is macOS's own application switcher and never reaches the window.
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+            if (e.getCode() == KeyCode.TAB && e.isControlDown() && !e.isAltDown() && !e.isMetaDown()) {
+                show(e.isShiftDown() ? ViewSwitch.previous(view) : ViewSwitch.next(view));
+                e.consume();
+            }
+        });
         scene.setOnDragOver(this::onDragOver);
         scene.setOnDragDropped(this::onDragDropped);
         scene.setOnDragExited(e -> welcome.setDragging(false));
@@ -493,7 +534,7 @@ public final class MainWindow {
             shutdown();
         });
         setStatus(tr("status.starting"));
-        rates.setText(ratesText(Engine.Rates.ZERO));
+        showRates(Engine.Rates.ZERO, 0);
     }
 
     public void show() {
@@ -855,6 +896,11 @@ public final class MainWindow {
     }
 
     /** The status bar's network entries as shown; read by the development capture. */
+    /** The status bar's alternative-speed toggle and View's check item, for the capture hook. */
+    public String altSpeedText() {
+        return "\"" + altSpeedToggle.getText() + "\" checked=" + (altSpeedItem != null && altSpeedItem.isSelected());
+    }
+
     public String networkStatusText() {
         String dot = portDot.getStyleClass().stream()
                 .filter(c -> c.startsWith("port-") && !c.equals("port-dot"))
@@ -872,23 +918,25 @@ public final class MainWindow {
      */
     private String statusBarFit() {
         StringBuilder out = new StringBuilder();
-        java.util.Map<String, Label> named = new java.util.LinkedHashMap<>();
+        java.util.Map<String, Region> named = new java.util.LinkedHashMap<>();
         named.put("port", portStatus);
         named.put("dht", dhtStatus);
         named.put("message", status);
+        // Each rate is a box of the number and its sparkline.
+        named.put("down", (Region) downRate.getParent());
+        named.put("up", (Region) upRate.getParent());
         named.put("alt", altSpeedToggle);
+        named.put("free", freeStatus);
         named.put("update", updateBadge);
         named.put("sync", syncBadge);
         named.put("errors", errorBadge);
-        named.put("rates", rates);
-        named.put("free", freeStatus);
-        named.forEach((name, l) -> {
-            if (!l.isVisible() || !l.isManaged()) return;
+        named.forEach((name, r) -> {
+            if (r == null || !r.isVisible() || !r.isManaged()) return;
             out.append(name)
                     .append('=')
-                    .append(Math.round(l.getWidth()))
+                    .append(Math.round(r.getWidth()))
                     .append('/')
-                    .append(Math.round(l.prefWidth(-1)))
+                    .append(Math.round(r.prefWidth(-1)))
                     .append(' ');
         });
         double right = statusBar.localToScene(statusBar.getLayoutBounds()).getMaxX();
@@ -1005,6 +1053,9 @@ public final class MainWindow {
             out.add("stats-graph=" + statsWindow.graph().summaryForCapture());
         }
         if (detailWanted && detail.activeTab().equals("speed")) out.add("speed-tab=" + detail.speedSummaryForCapture());
+        if (detailWanted && detail.activeTab().equals("overview"))
+            for (String line : detail.overviewLines()) out.add("overview-" + line);
+        out.add("status-bar=" + statusBarForCapture());
         if (!settingsWindow.profileDialogStatusForCapture().isEmpty()) {
             out.add("dialog=" + settingsWindow.dialogTitle());
             out.add("profile-test=" + settingsWindow.profileDialogStatusForCapture());
@@ -1074,6 +1125,11 @@ public final class MainWindow {
         } else if (action.startsWith("settings:")) {
             settingsWindow.show(stage);
             settingsWindow.searchForCapture(action.substring("settings:".length()));
+        } else if (action.startsWith("settings-key:")) {
+            // A key in the open Settings window, where its focus is (settings-key:ESCAPE).
+            settingsWindow.keyForCapture(KeyCode.valueOf(action.substring("settings-key:".length())));
+        } else if (action.equals("settings-close")) {
+            settingsWindow.hideForCapture();
         } else if (action.startsWith("settings-layout:")) {
             // settings-layout:<sidebar>/<detail>, e.g. right/hidden: the General page's two rows.
             String[] ids = action.substring("settings-layout:".length()).split("/", 2);
@@ -1109,6 +1165,9 @@ public final class MainWindow {
         } else if (action.equals("settings-definitions-reload")) {
             settingsWindow.show(stage);
             settingsWindow.reloadDefinitionsForCapture();
+        } else if (action.startsWith("view:")) {
+            ViewSwitch.parse(action.substring("view:".length()))
+                    .ifPresentOrElse(this::show, () -> System.err.println("capture: no view " + action));
         } else if (action.equals("rss")) {
             showRss();
         } else if (action.startsWith("rss:")) {
@@ -1221,11 +1280,38 @@ public final class MainWindow {
             table.requestFocus();
             KeyCode code = KeyCode.valueOf(action.substring("table-key:".length()));
             table.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false));
+        } else if (action.startsWith("focus-key:")) {
+            // focus-key:CTRL+SHIFT+TAB: a key pressed where the focus is, through the scene's
+            // filters, which is where Ctrl+Tab is caught.
+            List<String> parts = List.of(action.substring("focus-key:".length()).split("\\+"));
+            KeyCode code = KeyCode.valueOf(parts.getLast());
+            javafx.scene.Node owner = stage.getScene().getFocusOwner();
+            javafx.event.Event.fireEvent(
+                    owner == null ? stage.getScene().getRoot() : owner,
+                    new KeyEvent(
+                            KeyEvent.KEY_PRESSED,
+                            "",
+                            "",
+                            code,
+                            parts.contains("SHIFT"),
+                            parts.contains("CTRL"),
+                            parts.contains("ALT"),
+                            parts.contains("META")));
         } else if (action.equals("select-first")) {
             table.getSelectionModel().clearAndSelect(0);
         } else if (action.startsWith("detail:")) {
             showDetail();
             detail.selectTab(action.substring("detail:".length()));
+        } else if (action.equals("remedy") || action.startsWith("remedy:")) {
+            // remedy or remedy:<NAME> (SKIP_FILE, REANNOUNCE …): pressed once a card offers it.
+            showDetail();
+            detail.pressRemedyForCapture(
+                    action.equals("remedy") ? null : Diagnosis.Remedy.valueOf(action.substring("remedy:".length())));
+        } else if (action.startsWith("files-menu")) {
+            // files-menu or files-menu:<row>: the Files tab's context menu on that visible row.
+            int colon = action.indexOf(':');
+            showDetail();
+            detail.showFilesMenuForCapture(colon < 0 ? 0 : Integer.parseInt(action.substring(colon + 1)));
         } else if (action.startsWith("menu:")) {
             // Open a menu of the bar by its title (menu:File); the PNG is then of the popup.
             // menu:Torrent>Queue opens that submenu too; the PNG is then of the submenu.
@@ -1261,6 +1347,24 @@ public final class MainWindow {
                         .findFirst()
                         .orElseThrow(() -> new IllegalArgumentException("no submenu " + title));
             }
+        } else if (action.equals("peer-menu") || action.equals("peer-ban")) {
+            // The Peers tab's context menu about the first peer, its lines printed; peer-ban then
+            // presses Ban Peer. Two seconds on, so the detail poll has filled the tab after a
+            // select-first in the same batch (allow for it in captureAfterMs).
+            showDetail();
+            detail.selectTab("peers");
+            javafx.animation.PauseTransition later =
+                    new javafx.animation.PauseTransition(javafx.util.Duration.seconds(2));
+            later.setOnFinished(e -> {
+                if (action.equals("peer-menu")) {
+                    detail.showPeerMenuForCapture();
+                    System.out.println("capture: peer-menu=" + detail.peerMenuLines());
+                } else {
+                    System.out.println("capture: peer-ban=" + detail.banFirstPeerForCapture() + " bans="
+                            + settings.ipFilterBans());
+                }
+            });
+            later.play();
         } else if (action.equals("context-menu")) {
             // The list's context menu, as a right-click on it would open it.
             table.getContextMenu().show(table, javafx.geometry.Side.BOTTOM, 0, 0);
@@ -1307,6 +1411,8 @@ public final class MainWindow {
         if (detailWanted) System.out.println("capture: detail=" + detail.summary());
         if (settingsWindow.isShowing())
             System.out.println("capture: settings=" + settingsWindow.visibleRowsForCapture());
+        if (settingsWindow.isShowing())
+            System.out.println("capture: settings-search=" + settingsWindow.searchStateForCapture());
         if (!settingsWindow.dialogTitle().isEmpty())
             System.out.println("capture: dialog=" + settingsWindow.dialogTitle());
         if (!settingsWindow.searchStatus().isEmpty())
@@ -1314,6 +1420,8 @@ public final class MainWindow {
         if (settingsWindow.isShowing())
             for (String row : settingsWindow.definitionsForCapture()) System.out.println("capture: definition=" + row);
         if (watcher != null) System.out.println("capture: watch=" + watchStatusText());
+        System.out.println("capture: view=" + view.id() + " focus=" + focusForCapture());
+        System.out.println("capture: view-strip=" + viewStrip.describe());
         System.out.println("capture: search-tab=" + (searchShowing() ? "showing" : "hidden"));
         if (searchShowing()) {
             System.out.println("capture: search-query=" + searchPane.queryText());
@@ -1484,6 +1592,8 @@ public final class MainWindow {
             Platform.runLater(() -> {
                 altSpeedToggle.setText(alternative ? tr("status.altSpeed.on") : tr("status.altSpeed.off"));
                 altSpeedToggle.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("active"), alternative);
+                altSpeedOn = alternative;
+                if (altSpeedItem != null) altSpeedItem.setSelected(alternative);
             });
         } catch (EngineException ex) {
             Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
@@ -1582,9 +1692,7 @@ public final class MainWindow {
 
     /** From the Peers tab: the address (without its port) joins the manual bans, and the filter is on. */
     private void banPeer(String address) {
-        String ip = address;
-        if (ip.startsWith("[")) ip = ip.substring(1, ip.indexOf(']'));
-        else if (ip.chars().filter(c -> c == ':').count() == 1) ip = ip.substring(0, ip.indexOf(':'));
+        String ip = Actions.peerHost(address);
         List<String> bans = new ArrayList<>(settings.ipFilterBans());
         if (!bans.contains(ip)) bans.add(ip);
         settings.setIpFilterBans(bans);
@@ -1789,7 +1897,7 @@ public final class MainWindow {
         rows.apply(List.of(), now);
         refreshSidebar(List.of());
         detail.clear();
-        rates.setText(ratesText(Engine.Rates.ZERO));
+        showRates(Engine.Rates.ZERO, 0);
         if (old != null) Thread.ofVirtual().name("engine-stop").start(old::stop);
         startEngine(next);
     }
@@ -2352,11 +2460,16 @@ public final class MainWindow {
         Platform.runLater(() -> {
             rows.apply(snapshot, nowSeconds);
             refreshSidebar(snapshot);
-            rates.setText(ratesText(current));
+            showRates(current, nowSeconds);
             showNetwork(port, dht, space);
             if (detailWanted) {
                 if (shown != null && shown.general().id().equals(detailId)) {
-                    detail.show(shown);
+                    TorrentRow row = rows.get(detailId);
+                    detail.show(
+                            shown,
+                            row == null ? null : row.torrent(),
+                            row == null ? 0 : row.quietSeconds(),
+                            nowSeconds);
                     detail.showSpeed(torrentHistories.get(detailId), nowSeconds);
                 } else if (detailId == null) detail.clear();
             }
@@ -2567,15 +2680,12 @@ public final class MainWindow {
     private void remove(boolean deleteFiles) {
         List<Torrent> selected = selectedTorrents();
         if (selected.isEmpty()) return;
-        Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, Actions.removeQuestion(selected.size(), deleteFiles));
-        confirm.setHeaderText(deleteFiles ? tr("window.remove.header.delete") : tr("common.remove"));
-        confirm.initOwner(stage);
-        Fonts.installUiFont(confirm.getDialogPane());
-        ButtonType yes = new ButtonType(
-                deleteFiles ? tr("window.remove.button.delete") : tr("common.remove"), ButtonType.OK.getButtonData());
-        confirm.getButtonTypes().setAll(yes, ButtonType.CANCEL);
-        Optional<ButtonType> answer = confirm.showAndWait();
-        if (answer.isEmpty() || answer.get() != yes) return;
+        boolean yes = RemoveConfirm.ask(
+                stage,
+                deleteFiles ? tr("window.remove.header.delete") : tr("common.remove"),
+                Actions.removeQuestion(selected.size(), deleteFiles),
+                deleteFiles ? tr("window.remove.button.delete") : tr("common.remove"));
+        if (!yes) return;
         onSelection(tr("actions.verb.removed"), (e, t) -> {
             e.remove(t.id(), deleteFiles);
             Platform.runLater(() -> forgetOverride(t.id()));
@@ -2936,6 +3046,12 @@ public final class MainWindow {
         opener.accept(Path.of(path).toUri().toString());
     }
 
+    /** The torrent the detail pane shows, or null with no single selection or none in the list. */
+    private Torrent detailTorrent() {
+        String id = detailId;
+        TorrentRow row = id == null ? null : rows.get(id);
+        return row == null ? null : row.torrent();
+    }
     /** The Queue submenu's commands, top to bottom. */
     private static final List<String> QUEUE_COMMANDS = List.of("queue-top", "queue-up", "queue-down", "queue-bottom");
 
@@ -2945,6 +3061,18 @@ public final class MainWindow {
 
     private static KeyCombination shiftChord(KeyCode key) {
         return new KeyCodeCombination(key, KeyCombination.SHORTCUT_DOWN, KeyCombination.SHIFT_DOWN);
+    }
+
+    /** Shortcut and the view's place on the strip: Ctrl+1 for Transfers. */
+    private static KeyCombination viewChord(View v) {
+        return chord(KeyCode.valueOf("DIGIT" + v.number()));
+    }
+
+    /** Ctrl+Tab, or Ctrl+Shift+Tab: Control on macOS too, where Cmd+Tab belongs to the system. */
+    private static KeyCombination cycleChord(boolean backwards) {
+        return backwards
+                ? new KeyCodeCombination(KeyCode.TAB, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN)
+                : new KeyCodeCombination(KeyCode.TAB, KeyCombination.CONTROL_DOWN);
     }
 
     private List<Command> buildCommands() {
@@ -3095,6 +3223,14 @@ public final class MainWindow {
                 new Command("remove", tr("command.remove"), null, "Delete", selection, () -> remove(false)),
                 new Command(
                         "remove-data", tr("command.removeData"), null, "Shift+Delete", selection, () -> remove(true)),
+                new Command(
+                        "alt-speed",
+                        tr("command.altSpeed"),
+                        shiftChord(KeyCode.J),
+                        null,
+                        always,
+                        this::toggleAlternativeSpeed),
+                new Command("quit", tr("menu.file.quit"), chord(KeyCode.Q), null, always, this::quit),
                 new Command("check-updates", tr("command.checkUpdates"), null, null, always, this::checkForUpdatesNow),
                 new Command("about", tr("command.about", AppInfo.NAME), null, null, always, this::showAbout),
                 new Command(
@@ -3111,6 +3247,22 @@ public final class MainWindow {
                 new Command("rss", tr("command.rss"), chord(KeyCode.R), null, always, this::showRss),
                 new Command("rss-run-rules", tr("command.rssRunRules"), null, null, always, rss::runRulesNow),
                 new Command("transfers", tr("command.transfers"), null, "Esc", always, this::showTransfers),
+                // The cycling chords are a scene filter, not accelerators: Ctrl+Tab is focus
+                // traversal's key, and an accelerator would lose it to the focused control.
+                new Command(
+                        "view-next",
+                        tr("command.viewNext"),
+                        null,
+                        cycleChord(false).getDisplayText(),
+                        always,
+                        () -> show(ViewSwitch.next(view))),
+                new Command(
+                        "view-previous",
+                        tr("command.viewPrevious"),
+                        null,
+                        cycleChord(true).getDisplayText(),
+                        always,
+                        () -> show(ViewSwitch.previous(view))),
                 new Command(
                         "filter",
                         tr("command.filter"),
@@ -3345,10 +3497,7 @@ public final class MainWindow {
         MenuItem addMagnet = menuItem("add-magnet");
         MenuItem addClipboard = menuItem("add-clipboard");
 
-        MenuItem quit = new MenuItem(tr("menu.file.quit"));
-        quit.setGraphic(menuIcon(Icons.power()));
-        quit.setAccelerator(chord(KeyCode.Q));
-        quit.setOnAction(e -> quit());
+        MenuItem quit = menuItem("quit");
 
         Menu file = new Menu(tr("menu.file"));
         file.getItems()
@@ -3359,8 +3508,6 @@ public final class MainWindow {
                         addMagnet,
                         addClipboard,
                         new SeparatorMenuItem(),
-                        menuItem("search"),
-                        menuItem("rss"),
                         menuItem("rss-run-rules"),
                         menuItem("settings"),
                         menuItem("switch-profile"),
@@ -3389,6 +3536,16 @@ public final class MainWindow {
         detailItem.setAccelerator(shiftChord(KeyCode.D));
         detailItem.setSelected(detailPlace.shown());
         detailItem.setOnAction(e -> toggleDetail());
+        // Checked while the alternative limits are in force, by hand or by the schedule; the
+        // command flips the manual switch, as a click on the status bar's toggle does.
+        Command altSpeed = command("alt-speed");
+        altSpeedItem = new CheckMenuItem(altSpeed.label());
+        altSpeedItem.setGraphic(menuIcon(Icons.forCommand("alt-speed")));
+        altSpeedItem.setAccelerator(altSpeed.accelerator());
+        altSpeedItem.setOnAction(e -> {
+            altSpeedItem.setSelected(altSpeedOn);
+            altSpeed.run().run();
+        });
         detailRightItem = new CheckMenuItem(tr("menu.view.detailRight"));
         detailRightItem.setSelected(DetailPlace.of(true, settings.detailSide()).beside());
         detailRightItem.setOnAction(e -> switchDetailSide());
@@ -3404,6 +3561,12 @@ public final class MainWindow {
         Menu view = new Menu(tr("menu.view"));
         view.getItems()
                 .addAll(
+                        menuItem("transfers"),
+                        menuItem("search"),
+                        menuItem("rss"),
+                        menuItem("view-next"),
+                        menuItem("view-previous"),
+                        new SeparatorMenuItem(),
                         toolbarItem,
                         sidebarItem,
                         sidebarRightItem,
@@ -3413,8 +3576,9 @@ public final class MainWindow {
                         densityItems.get(Density.COMFORTABLE),
                         densityItems.get(Density.COMPACT),
                         new SeparatorMenuItem(),
+                        altSpeedItem,
+                        new SeparatorMenuItem(),
                         menuItem("filter"),
-                        menuItem("transfers"),
                         menuItem("focus-sidebar"),
                         menuItem("select-all"),
                         menuItem("event-log"),
@@ -3554,18 +3718,21 @@ public final class MainWindow {
                         });
                     if (detailId == null && detailWanted) detail.clear();
                 });
-        detail.selectTab(settings.get(Settings.DETAIL_TAB, "general"));
+        detail.selectTab(settings.get(Settings.DETAIL_TAB, "overview"));
         detail.setOnFilePriority((index, priority) -> {
             String id = detailId;
             if (id != null) onTorrent("status.prioritySet", id, (e, t) -> e.setFilePriority(t, index, priority));
         });
         detail.setOnOpenFile(row -> {
-            String id = detailId;
-            Torrent t = id == null
-                    ? null
-                    : rows.get(id) == null ? null : rows.get(id).torrent();
+            Torrent t = detailTorrent();
             if (t != null)
                 opener.accept(Path.of(t.savePath()).resolve(row.path()).toUri().toString());
+        });
+        detail.setOnOpenFolder(row -> {
+            Torrent t = detailTorrent();
+            if (t != null)
+                opener.accept(
+                        FileRows.folderOf(Path.of(t.savePath()), row).toUri().toString());
         });
         detail.setOnAddTrackers(urls -> {
             String id = detailId;
@@ -3605,13 +3772,18 @@ public final class MainWindow {
         transfersFrame = new BorderPane(split);
         placeSidebar(SidebarPlace.of(true, settings.sidebarSide()));
         transfersView = transfersFrame;
-        // The Search tab shares the centre with the transfers: one is shown and managed, the
-        // other neither, so the transfers look exactly as they did while Search is away.
+        // The views share the centre: the one showing is visible and managed, the others neither,
+        // so the transfers look exactly as they did while Search or RSS is away.
         searchPane = new SearchPane(new SearchHost(), settings);
         rssPane = new RssPane(new RssHost(), rss, settings);
+        panes.put(View.TRANSFERS, transfersView);
+        panes.put(View.SEARCH, searchPane);
+        panes.put(View.RSS, rssPane);
         StackPane centre2 = new StackPane(transfersFrame, searchPane, rssPane);
         VBox.setVgrow(centre2, Priority.ALWAYS);
-        return new VBox(centre2);
+        viewStrip = new ViewStrip(this::show);
+        place(View.TRANSFERS);
+        return new VBox(viewStrip, centre2);
     }
 
     // ---- the Search tab -------------------------------------------------------------------------
@@ -3659,7 +3831,7 @@ public final class MainWindow {
     }
 
     private boolean searchShowing() {
-        return searchPane != null && searchPane.isVisible();
+        return view == View.SEARCH;
     }
 
     // ---- the RSS tab ----------------------------------------------------------------------------
@@ -3761,22 +3933,40 @@ public final class MainWindow {
     }
 
     private boolean rssShowing() {
-        return rssPane != null && rssPane.isVisible();
+        return view == View.RSS;
     }
 
-    /** Ctrl+R: the RSS tab in place of the transfers, the articles focused. */
+    /** Ctrl+R: the RSS view in place of the transfers, the articles focused. */
     private void showRss() {
-        showView(rssPane);
-        rssPane.focusDefault();
+        show(View.RSS);
     }
 
-    /** One of the three centre views shown and managed, the other two neither. */
-    private void showView(javafx.scene.Node view) {
-        for (javafx.scene.Node n : List.of(transfersView, searchPane, rssPane)) {
-            boolean on = n == view;
-            n.setVisible(on);
-            n.setManaged(on);
+    // ---- the views ------------------------------------------------------------------------------
+
+    /**
+     * Show one view in the centre and give it the focus: the transfers' list, Search's query, the
+     * RSS articles (the feeds while there are none). The menu, the chords, Ctrl+Tab and the strip
+     * all come here.
+     */
+    private void show(View wanted) {
+        if (wanted == View.SEARCH) refreshSearchDefinitions();
+        place(wanted);
+        switch (wanted) {
+            case TRANSFERS -> table.requestFocus();
+            case SEARCH -> searchPane.focusQuery();
+            case RSS -> rssPane.focusDefault();
         }
+    }
+
+    /** The view's pane shown and managed, the others neither, and the strip marked; no focus. */
+    private void place(View wanted) {
+        view = wanted;
+        panes.forEach((v, pane) -> {
+            boolean on = v == wanted;
+            pane.setVisible(on);
+            pane.setManaged(on);
+        });
+        viewStrip.select(wanted);
     }
 
     /**
@@ -3799,28 +3989,43 @@ public final class MainWindow {
         }
     }
 
-    /** Ctrl+Shift+F: the Search tab in place of the transfers, the query field focused. */
+    /** Ctrl+Shift+F: the Search view in place of the transfers, the query field focused. */
     private void showSearch() {
-        // The folder is re-read when the tab opens, so a file dropped in is a chip at once.
+        show(View.SEARCH);
+    }
+
+    /** The folder is re-read when Search opens, so a definition dropped in is a chip at once. */
+    private void refreshSearchDefinitions() {
         if (definitionStore.refresh()) {
             reportDefinitionProblems();
             searchPane.reloadProviders();
         }
-        showView(searchPane);
-        searchPane.focusQuery();
     }
 
-    /** Escape in the query: the transfers back, as they were. */
+    /** Escape in the query or the articles, the strip, the menu: the transfers back, as they were. */
     private void showTransfers() {
-        showView(transfersView);
-        table.requestFocus();
+        show(View.TRANSFERS);
     }
 
-    /** The list that is showing takes the focus back: after a dialog, after the palette. */
+    /** Where the focus is in the view showing, for the capture's {@code view=} line. */
+    private String focusForCapture() {
+        // The scene's focus owner, not isFocused(): a capture's window may never get the desktop's
+        // focus, and a node is "focused" only while its window is.
+        javafx.scene.Node owner = stage.getScene().getFocusOwner();
+        return switch (view) {
+            case TRANSFERS -> owner == table ? "table" : owner == filter ? "filter" : "other";
+            case SEARCH -> searchPane.focusForCapture(owner);
+            case RSS -> rssPane.focusForCapture(owner);
+        };
+    }
+
+    /** The view that is showing takes the focus back: after a dialog, after the palette. */
     private void focusList() {
-        if (searchShowing()) searchPane.focusResults();
-        else if (rssShowing()) rssPane.focusArticles();
-        else table.requestFocus();
+        switch (view) {
+            case TRANSFERS -> table.requestFocus();
+            case SEARCH -> searchPane.focusResults();
+            case RSS -> rssPane.focusArticles();
+        }
     }
 
     /** An engine action on one torrent by id. */
@@ -4477,8 +4682,21 @@ public final class MainWindow {
         // The status text is the door to its own history: a click shows what scrolled past.
         status.getStyleClass().add("status-message");
         status.setOnMouseClicked(e -> messagePopup.toggle());
+        // The rates lead the right-hand group, as the redesign has them: each with its minute.
+        downRate.getStyleClass().add("status-rate-down");
+        upRate.getStyleClass().add("status-rate-up");
+        // The session starts idle, so the minute before it began is drawn as the zero it was.
+        downSpark.setZeroBefore(true);
+        upSpark.setZeroBefore(true);
+        HBox down = new HBox(6, downRate, downSpark);
+        HBox up = new HBox(6, upRate, upSpark);
+        down.setAlignment(Pos.CENTER_LEFT);
+        up.setAlignment(Pos.CENTER_LEFT);
+        down.getStyleClass().add("status-rate");
+        up.getStyleClass().add("status-rate");
         // The port and the DHT lead, quiet until the engine says something; a click opens the
-        // Settings page that changes them. Free space ends the row; a click opens the folder.
+        // Settings page that changes them. Free space follows the alternative-speed switch; a click
+        // opens the folder.
         portDot.getStyleClass().add("port-dot");
         portStatus.setGraphic(portDot);
         portStatus.getStyleClass().add("network-status");
@@ -4492,25 +4710,27 @@ public final class MainWindow {
         freeStatus.setOnMouseClicked(
                 e -> opener.accept(settings.downloadDir().toUri().toString()));
         for (Label l : List.of(portStatus, dhtStatus, freeStatus)) reveal(l, false);
-        // The message gives way when the bar is short, and alone: it elides while the facts keep
-        // their width. An HBox shrinks every child that can shrink, evenly, so a long tracker
-        // warning used to elide "Alt speed" and the rates as well and push free space off the edge.
-        for (Label l :
-                List.of(portStatus, dhtStatus, altSpeedToggle, updateBadge, syncBadge, errorBadge, rates, freeStatus))
-            l.setMinWidth(Region.USE_PREF_SIZE);
+        // The message is the one that gives way: the rates, the switch and the counts keep their width.
         status.setMinWidth(0);
+        status.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(status, Priority.SOMETIMES);
         HBox bar = new HBox(
                 12,
                 portStatus,
                 dhtStatus,
                 status,
                 spacer,
+                down,
+                up,
                 altSpeedToggle,
+                freeStatus,
                 updateBadge,
                 syncBadge,
-                errorBadge,
-                rates,
-                freeStatus);
+                errorBadge);
+        bar.setAlignment(Pos.CENTER_LEFT);
+        for (Region r : List.<Region>of(
+                portStatus, dhtStatus, down, up, altSpeedToggle, freeStatus, updateBadge, syncBadge, errorBadge))
+            r.setMinWidth(Region.USE_PREF_SIZE);
         bar.setPadding(new Insets(4, 10, 4, 10));
         bar.getStyleClass().add("status-bar");
         return bar;
@@ -4576,8 +4796,21 @@ public final class MainWindow {
         return WelcomeText.folder(dir, home == null ? null : Path.of(home), tilde);
     }
 
-    private static String ratesText(Engine.Rates r) {
-        return tr("status.rates", Bytes.rate(r.download()), Bytes.rate(r.upload()));
+    /** FX thread. The session's rates and their last minute, from the history the poll fills. */
+    private void showRates(Engine.Rates r, long nowSeconds) {
+        downRate.setText(tr("status.rateDown", Bytes.rate(r.download())));
+        upRate.setText(tr("status.rateUp", Bytes.rate(r.upload())));
+        List<SpeedHistory.Sample> minute = sessionHistory.samples(60, nowSeconds);
+        downSpark.show(minute, 60, nowSeconds);
+        upSpark.show(minute, 60, nowSeconds);
+    }
+
+    /** The status bar's right-hand group as words, for the capture hook. */
+    private String statusBarForCapture() {
+        List<String> parts = new ArrayList<>(List.of(downRate.getText(), upRate.getText(), altSpeedToggle.getText()));
+        if (freeStatus.isVisible()) parts.add(freeStatus.getText());
+        if (errorBadge.isVisible()) parts.add(errorBadge.getText());
+        return String.join(" | ", parts);
     }
 
     private void setStatus(String text) {

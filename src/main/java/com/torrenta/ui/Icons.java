@@ -141,8 +141,13 @@ final class Icons {
             case "remove-data" -> trashData();
             case "check-updates" -> download();
             case "about" -> info();
+            case "alt-speed" -> altSpeed();
+            case "quit" -> power();
             case "settings" -> settings();
             case "search" -> search();
+            case "rss" -> rss();
+            case "view-next" -> viewNext();
+            case "view-previous" -> viewPrevious();
             case "transfers" -> transfers();
             case "filter" -> find();
             case "select-all" -> selectAll();
@@ -205,9 +210,14 @@ final class Icons {
         return line("M2.7 4.7h10.6M6 4.7V2.7h4v2M4 4.7l.7 8.6h6.6l.7-8.6");
     }
 
-    /** A folder beside a category in the sidebar. */
+    /** A folder beside a category in the sidebar, and beside a folder in the Files tab. */
     static Glyph folderSmall() {
         return line("M2 12.5V3.5h4.2l1.5 2h5.8v2M2 12.5l2.2-5h10.3l-2.2 5z", SMALL_SCALE);
+    }
+
+    /** A sheet with its corner turned, beside a file in the Files tab: the tab's own glyph, bare. */
+    static Glyph fileSmall() {
+        return line("M4.5 2.5h4.6l2.9 2.9v8.1h-7.5zM9.1 2.5v2.9h2.9", SMALL_SCALE);
     }
 
     static Glyph find() {
@@ -279,6 +289,16 @@ final class Icons {
         return line(
                 "M7 5.5h5a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H7a1.5 1.5 0 0 1-1.5-1.5V7A1.5 1.5 0 0 1 7 5.5z"
                         + "M3 10.5V3.6A1.1 1.1 0 0 1 4.1 2.5H11");
+    }
+
+    /** A circle struck through: Ban Peer. */
+    static Glyph ban() {
+        return line("M2.8 8a5.2 5.2 0 1 0 10.4 0a5.2 5.2 0 1 0-10.4 0M4.3 4.3l7.4 7.4");
+    }
+
+    /** The gauge with its needle low: the alternative (slower) speed limits. */
+    static Glyph altSpeed() {
+        return line("M2.8 11.5a5.2 5.2 0 1 1 10.4 0M8 11.5L5.2 8.1M2.5 13.5h11");
     }
 
     /** A hash sign, for the info-hash. */
@@ -395,5 +415,15 @@ final class Icons {
     /** A folder with an arrow into it: Set Location. */
     static Glyph folderMove() {
         return line("M2 12.5V3.5h4.2l1.5 2h5.8v7z M5.5 8.5h5M8.5 6.5l2 2-2 2");
+    }
+
+    /** An arrow right against a bar: the next view. */
+    static Glyph viewNext() {
+        return line("M2.5 8h9M8.5 5l3 3-3 3M13.5 3.5v9");
+    }
+
+    /** An arrow left against a bar: the previous view. */
+    static Glyph viewPrevious() {
+        return line("M13.5 8h-9M7.5 5l-3 3 3 3M2.5 3.5v9");
     }
 }

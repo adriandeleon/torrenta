@@ -60,7 +60,8 @@ class IconsTest {
                         "history",
                         "settings",
                         "palette",
-                        "folderSmall")),
+                        "folderSmall",
+                        "fileSmall")),
                 seen.toString());
     }
 
@@ -106,12 +107,17 @@ class IconsTest {
                 "remove-data",
                 "filter",
                 "transfers",
+                "rss",
+                "view-next",
+                "view-previous",
                 "focus-sidebar",
                 "toggle-detail",
                 "select-all",
                 "event-log",
                 "check-updates",
-                "about"
+                "about",
+                "alt-speed",
+                "quit"
             })
     void everyMenuCommandHasAGlyph(String id) {
         Icons.Glyph a = Icons.forCommand(id);

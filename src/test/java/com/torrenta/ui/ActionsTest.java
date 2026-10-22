@@ -101,4 +101,20 @@ class ActionsTest {
         assertEquals(List.of(), Actions.trackerUrls("   \n "));
         assertEquals(List.of(), Actions.trackerUrls(null));
     }
+
+    /**
+     * Ban Peer bans the host, never the port or the scheme: libtorrent's Peers tab shows
+     * {@code tcp://host:port}, and the scheme once went into the bans, where the filter skipped it.
+     */
+    @Test
+    void aPeerIsBannedByItsHostAlone() {
+        assertEquals("127.0.0.3", Actions.peerHost("tcp://127.0.0.3:42549"));
+        assertEquals("::1", Actions.peerHost("utp://[::1]:6881"));
+        assertEquals("10.0.0.2", Actions.peerHost("10.0.0.2:6881"));
+        assertEquals("::1", Actions.peerHost("[::1]:6881"));
+        assertEquals("2001:db8::7", Actions.peerHost("[2001:db8::7]:51413"));
+        assertEquals("2001:db8::7", Actions.peerHost("2001:db8::7"));
+        assertEquals("10.0.0.2", Actions.peerHost("10.0.0.2"));
+        assertEquals("::1", Actions.peerHost("[::1"));
+    }
 }

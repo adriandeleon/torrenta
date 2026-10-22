@@ -77,4 +77,22 @@ public final class Actions {
     public static String removeQuestion(int count, boolean deleteFiles) {
         return deleteFiles ? tr("actions.removeQuestion.delete", count) : tr("actions.removeQuestion.keep", count);
     }
+
+    /**
+     * A peer's address as the Peers tab shows it, without its scheme or port: libtorrent writes
+     * {@code tcp://10.0.0.2:6881} (or {@code utp://[::1]:6881}), Transmission {@code 10.0.0.2:6881};
+     * either is {@code 10.0.0.2}. A bare IPv6 literal (more than one colon, no brackets) and an
+     * address with no port are kept whole.
+     */
+    public static String peerHost(String address) {
+        String ip = address.strip();
+        int scheme = ip.indexOf("://");
+        if (scheme >= 0) ip = ip.substring(scheme + 3);
+        if (ip.startsWith("[")) {
+            int close = ip.indexOf(']');
+            return close < 0 ? ip.substring(1) : ip.substring(1, close);
+        }
+        if (ip.chars().filter(c -> c == ':').count() == 1) return ip.substring(0, ip.indexOf(':'));
+        return ip;
+    }
 }

@@ -148,6 +148,10 @@ final class AddDialog {
     private final BooleanProperty hasFiles = new SimpleBooleanProperty();
     /** The person chose to wait in the dialog for a magnet's file list. */
     private final BooleanProperty waiting = new SimpleBooleanProperty();
+    /** A magnet's file list may still arrive: false once there is no fetch or it failed. */
+    private final BooleanProperty fetchAlive = new SimpleBooleanProperty(true);
+    /** The engine can add a torrent that stops once its metadata is in (Add now). */
+    private final BooleanProperty canStop = new SimpleBooleanProperty(true);
 
     private final Instant opened = Instant.now();
     /** The priorities a {@link #chooseFiles} tree starts with, by index; empty for an add. */
@@ -356,24 +360,32 @@ final class AddDialog {
         cancel.setCancelButton(true);
         cancel.setOnAction(e -> cancel());
 
-        // Which buttons show: Add and its partner once there are files (or while waiting for
-        // them), Add now and Wait while a magnet's metadata is still on its way.
-        var fetchingButtons = hasFiles.not().and(waiting.not());
-        for (Button b : List.of(addNow, wait)) {
-            b.visibleProperty().bind(fetchingButtons);
-            b.managedProperty().bind(fetchingButtons);
-        }
+        // Which buttons show is buttons(…), the rule: Add and its partner once there are files (or
+        // while waiting for them), Add now and Wait while a magnet's metadata is on its way, never
+        // Wait once it cannot come, never Add now on an engine that cannot stop after metadata.
+        java.util.function.Supplier<Buttons> rule =
+                () -> buttons(hasFiles.get(), waiting.get(), fetchAlive.get(), canStop.get());
+        Observable[] inputs = {hasFiles, waiting, fetchAlive, canStop};
+        var showAddNow = Bindings.createBooleanBinding(() -> rule.get().addNow(), inputs);
+        var showWait = Bindings.createBooleanBinding(() -> rule.get().waitHere(), inputs);
+        var showAdd = Bindings.createBooleanBinding(() -> rule.get().add(), inputs);
+        var blind = Bindings.createBooleanBinding(() -> rule.get().blind(), inputs);
+        addNow.visibleProperty().bind(showAddNow);
+        addNow.managedProperty().bind(showAddNow);
+        wait.visibleProperty().bind(showWait);
+        wait.managedProperty().bind(showWait);
         for (Button b : List.of(add, addOther)) {
-            b.visibleProperty().bind(fetchingButtons.not());
-            b.managedProperty().bind(fetchingButtons.not());
+            b.visibleProperty().bind(showAdd);
+            b.managedProperty().bind(showAdd);
         }
-        add.defaultButtonProperty().bind(fetchingButtons.not());
-        addNow.defaultButtonProperty().bind(fetchingButtons);
+        add.defaultButtonProperty().bind(showAddNow.not());
+        addNow.defaultButtonProperty().bind(showAddNow);
         var noPath = existing
                 ? new SimpleBooleanProperty(false)
                 : savePath.textProperty().isEmpty();
-        add.disableProperty().bind(noPath.or(hasFiles.not()));
-        addOther.disableProperty().bind(noPath.or(hasFiles.not()));
+        var noFiles = hasFiles.not().and(blind.not());
+        add.disableProperty().bind(noPath.or(noFiles));
+        addOther.disableProperty().bind(noPath.or(noFiles));
         addNow.disableProperty().bind(noPath);
 
         Region spacer = new Region();
@@ -391,11 +403,12 @@ final class AddDialog {
             Runnable place = () -> {
                 above.getChildren().clear();
                 buttons.getChildren().remove(withoutAsking);
-                if (fetchingButtons.get()) above.getChildren().add(withoutAsking);
+                if (!showAdd.get()) above.getChildren().add(withoutAsking);
                 else buttons.getChildren().add(0, withoutAsking);
-                above.setManaged(fetchingButtons.get());
+                above.setManaged(!showAdd.get());
             };
-            fetchingButtons.addListener((o, was, now) -> place.run());
+            // showAdd, not a negation of it: the buttons' visibility holds it, so it cannot be collected.
+            showAdd.addListener((o, was, now) -> place.run());
             place.run();
         } else {
             above.setManaged(false);
@@ -487,6 +500,7 @@ final class AddDialog {
         if (hasFiles.get()) return;
         fetching.setText(message);
         waiting.set(false);
+        fetchAlive.set(false);
     }
 
     /**
@@ -499,6 +513,7 @@ final class AddDialog {
         boolean stopping = caps.has(com.torrenta.engine.Engine.Capability.STOP_CONDITION);
         shown(stop, stopping);
         shown(stopLabel, stopping);
+        canStop.set(stopping);
         shown(firstLast, caps.has(com.torrenta.engine.Engine.Capability.FIRST_LAST_PIECES));
         shown(sequential, caps.has(com.torrenta.engine.Engine.Capability.SEQUENTIAL_DOWNLOAD));
         boolean local = caps.has(com.torrenta.engine.Engine.Capability.LOCAL_FILES);
@@ -518,6 +533,7 @@ final class AddDialog {
         fetching.setText(message);
         fetching.getStyleClass().add("add-fetch-failed");
         waiting.set(false);
+        fetchAlive.set(false);
     }
 
     /** The dialog's scene, for the capture hook to photograph. */
@@ -546,7 +562,7 @@ final class AddDialog {
 
     /** Presses the default button (Add, or Add now while fetching), for the capture hook. */
     void confirm() {
-        fire(hasFiles.get() || waiting.get() ? add : addNow);
+        fire(addNow.isVisible() ? addNow : add);
     }
 
     /** Presses a button by name ({@code paused}, {@code now}, {@code wait}), for the capture hook. */
@@ -587,7 +603,9 @@ final class AddDialog {
     }
 
     private void confirm(boolean paused) {
-        if (!hasFiles.get() || (!existing && savePath.getText().isBlank())) return;
+        boolean blind = buttons(hasFiles.get(), waiting.get(), fetchAlive.get(), canStop.get())
+                .blind();
+        if ((!hasFiles.get() && !blind) || (!existing && savePath.getText().isBlank())) return;
         Path destination = existing ? Path.of("") : Path.of(savePath.getText().trim());
         result = new Choice(
                 new AddRequest(
@@ -910,6 +928,26 @@ final class AddDialog {
     }
 
     // ---- the rules -------------------------------------------------------------------------------
+
+    /**
+     * The footer's buttons: {@code addNow} (Add now, pick files when ready), {@code waitHere} (Wait
+     * here for the file list), {@code add} (Add and its partner), and {@code blind} when Add takes
+     * the magnet without its file list.
+     */
+    record Buttons(boolean addNow, boolean waitHere, boolean add, boolean blind) {}
+
+    /**
+     * Which buttons the footer shows. With files, Add. Waiting on a fetch that may still answer,
+     * Add, off until the files come. Otherwise Wait only while the fetch is alive (a failed or
+     * absent fetch never answers, and waiting on it was a dead end), and Add now only where the
+     * engine can stop the torrent once its metadata is in; an engine that cannot gets the plain
+     * Add and Add paused, adding the magnet blind, since Add now would download every file.
+     */
+    static Buttons buttons(boolean hasFiles, boolean waiting, boolean fetchAlive, boolean canStop) {
+        if (hasFiles) return new Buttons(false, false, true, false);
+        if (waiting && fetchAlive) return new Buttons(false, false, true, false);
+        return new Buttons(canStop, fetchAlive, !canStop, !canStop);
+    }
 
     /** "ADD TORRENT · FROM FILE", or "CHOOSE FILES" for a torrent already in the list. */
     static String kicker(Via via, boolean existing) {

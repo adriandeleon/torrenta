@@ -985,7 +985,7 @@ public final class TransmissionEngine implements Engine {
         for (Object o : Json.list(t, "peers")) {
             Map<String, Object> p = Json.obj(o);
             peers.add(new TorrentDetail.Peer(
-                    Json.str(p, "address", "") + ":" + Json.lng(p, "port", 0),
+                    peerAddress(Json.str(p, "address", ""), Json.lng(p, "port", 0)),
                     Json.str(p, "clientName", ""),
                     Json.str(p, "flagStr", ""),
                     Json.dbl(p, "progress", 0),
@@ -1033,6 +1033,11 @@ public final class TransmissionEngine implements Engine {
     }
 
     /** Transmission's -1/0/1 as the dialog's ladder. */
+    /** {@code 10.0.0.5:51413}, or {@code [2001:db8::5]:51413}: an IPv6 address is bracketed. */
+    static String peerAddress(String address, long port) {
+        return (address.contains(":") ? "[" + address + "]" : address) + ":" + port;
+    }
+
     static Priority priority(int value) {
         return value < 0 ? Priority.LOW : value > 0 ? Priority.HIGH : Priority.NORMAL;
     }
