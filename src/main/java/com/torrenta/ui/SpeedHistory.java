@@ -88,6 +88,24 @@ public final class SpeedHistory {
         return out;
     }
 
+    /**
+     * A window longer than the fine one drawn as finely as the history allows: minute averages up
+     * to where the seconds begin, then every second. A torrent selected a moment ago has a line at
+     * once rather than a single minute's dot.
+     */
+    public synchronized List<Sample> blended(int windowSeconds, long nowSeconds) {
+        if (windowSeconds <= FINE_SECONDS) return samples(windowSeconds, nowSeconds);
+        List<Sample> fine = samples(FINE_SECONDS, nowSeconds);
+        long fineStart = fine.isEmpty() ? nowSeconds + 1 : fine.getFirst().at();
+        List<Sample> out = new ArrayList<>();
+        for (Sample s : samples(windowSeconds, nowSeconds)) {
+            // A minute that reaches into the seconds is told by them instead.
+            if (s.at() + 60 <= fineStart) out.add(s);
+        }
+        out.addAll(fine);
+        return out;
+    }
+
     /** The last sample added, whatever its age. */
     public synchronized Optional<Sample> latest() {
         return Optional.ofNullable(latest);

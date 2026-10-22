@@ -78,6 +78,17 @@ public final class FileRows {
         }
     }
 
+    /**
+     * The folder a row's "open folder" shows: a folder row is that folder under the save path, a
+     * file row its containing folder, which for a single-file torrent is the save path itself.
+     */
+    public static Path folderOf(Path savePath, Row row) {
+        Path own = savePath.resolve(row.path());
+        if (!row.isFile()) return own;
+        Path parent = own.getParent();
+        return parent == null ? savePath : parent;
+    }
+
     private final Map<Integer, Row> byIndex = new LinkedHashMap<>();
     private Row root;
     private TreeItem<Row> rootItem;
@@ -109,23 +120,12 @@ public final class FileRows {
     }
 
     /**
-     * The folder inside the torrent that Open Folder (a folder row) or Open Parent Folder (a file
-     * row) shows, forward slashes: the folder's own path, or the file's minus its name, empty for a
-     * file at the top, which is the save path itself.
+     * {@code wanted} (a {@link #folderOf}), or the nearest folder above it that exists: a folder no
+     * piece has reached yet is not on the disk, and the save path is the floor.
      */
-    public static String folderOf(Row row) {
-        if (!row.isFile()) return row.path();
-        int slash = row.path().lastIndexOf('/');
-        return slash < 0 ? "" : row.path().substring(0, slash);
-    }
-
-    /**
-     * {@code relative} under {@code savePath}, or the nearest folder above it that exists: a
-     * folder no piece has reached yet is not on the disk, and the save path is the floor.
-     */
-    public static Path nearestFolder(Path savePath, String relative, Predicate<Path> isDirectory) {
+    public static Path nearestFolder(Path savePath, Path wanted, Predicate<Path> isDirectory) {
         Path floor = savePath.normalize();
-        Path folder = floor.resolve(relative).normalize();
+        Path folder = wanted.normalize();
         // A path that climbs out of the save path (it should never, libtorrent sanitises) opens the floor.
         if (!folder.startsWith(floor)) return floor;
         while (!folder.equals(floor) && !isDirectory.test(folder)) folder = folder.getParent();
