@@ -404,6 +404,39 @@
     -fx-text-fill: -torrenta-error;
 }
 
+/*
+ * The view strip (ui.ViewStrip): which of Transfers, Search and RSS fills the centre, and the
+ * mouse's way to another. A flat row on the subtle background like the toolbar; the entry showing
+ * is in the default foreground with a hairline of the accent under it, the rest muted.
+ */
+.view-strip {
+    -fx-background-color: -color-bg-subtle;
+    -fx-border-color: transparent transparent -color-border-default transparent;
+    -fx-padding: 0 8 0 8;
+    -fx-spacing: 2;
+}
+
+.view-tab {
+    -fx-padding: 6 10 5 10;
+    -fx-spacing: 6;
+    -fx-border-color: transparent;
+    -fx-border-width: 0 0 2 0;
+    -fx-cursor: hand;
+}
+
+.view-tab .view-tab-name {
+    -fx-text-fill: -color-fg-muted;
+}
+
+.view-tab:hover .view-tab-name,
+.view-tab:selected .view-tab-name {
+    -fx-text-fill: -color-fg-default;
+}
+
+.view-tab:selected {
+    -fx-border-color: transparent transparent -color-accent-emphasis transparent;
+}
+
 .key-badge {
     -fx-font-size: 11px;
     -fx-text-fill: -color-fg-muted;

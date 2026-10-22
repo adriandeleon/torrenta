@@ -715,6 +715,11 @@ final class RssPane extends VBox {
 
     // ---- for the capture ------------------------------------------------------------------------
 
+    /** Which of the pane's controls has the focus, for the capture's {@code view=} line. */
+    String focusForCapture(javafx.scene.Node owner) {
+        return owner == table ? "articles" : owner == feedList ? "feeds" : "other";
+    }
+
     String statusText() {
         return status.getText();
     }
