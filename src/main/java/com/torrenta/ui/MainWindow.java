@@ -128,7 +128,17 @@ public final class MainWindow {
     private final Settings settings;
     private final Consumer<String> opener;
     private final Label status = new Label();
-    private final Label rates = new Label();
+    /** The status bar's rates, each with its last minute drawn beside it. */
+    private final Label downRate = new Label();
+
+    private final Label upRate = new Label();
+    private final Sparkline downSpark = new Sparkline(Sparkline.Series.DOWN, 64, 14);
+    private final Sparkline upSpark = new Sparkline(Sparkline.Series.UP, 64, 14);
+    /** "412 GB free on /data": the download folder's volume, read every {@link #FREE_SPACE_EVERY} polls. */
+    private final Label freeSpace = new Label();
+
+    private static final int FREE_SPACE_EVERY = 10;
+    private int pollsSinceFreeSpace = FREE_SPACE_EVERY;
     private final TorrentRows rows = new TorrentRows();
     private final FilteredList<TorrentRow> filtered = new FilteredList<>(rows.list());
     private final TextField filter = new TextField();
@@ -317,6 +327,11 @@ public final class MainWindow {
         root.setTop(new VBox(
                 stage.getStyle() == StageStyle.EXTENDED ? ExtendedWindow.header(menuBar, stage) : menuBar, bar));
         table.setContextMenu(buildContextMenu());
+        // The detail header's buttons and the diagnosis's remedies run the same commands.
+        detail.setCommands(
+                id -> commands.stream().filter(c -> c.id().equals(id)).findFirst());
+        detail.setMoreMenu(buildContextMenu());
+        detail.setEvents(log.events());
         palette = new CommandPalette(host, this::focusList, paletteChord.getDisplayText());
         logWindow = new LogWindow(stage, log);
         statsWindow = new StatisticsWindow(stage, settings.statsWindowSeconds(), this::rememberStatsWindow);
@@ -396,7 +411,7 @@ public final class MainWindow {
             shutdown();
         });
         setStatus(tr("status.starting"));
-        rates.setText(ratesText(Engine.Rates.ZERO));
+        showRates(Engine.Rates.ZERO, 0);
     }
 
     public void show() {
@@ -751,6 +766,9 @@ public final class MainWindow {
             out.add("stats-graph=" + statsWindow.graph().summaryForCapture());
         }
         if (detailWanted && detail.activeTab().equals("speed")) out.add("speed-tab=" + detail.speedSummaryForCapture());
+        if (detailWanted && detail.activeTab().equals("overview"))
+            for (String line : detail.overviewLines()) out.add("overview-" + line);
+        out.add("status-bar=" + statusBarForCapture());
         if (!settingsWindow.ruleMatchesForCapture().isEmpty()) {
             out.add("dialog=" + settingsWindow.dialogTitle());
             out.add("rule-matches=" + settingsWindow.ruleMatchesForCapture());
@@ -930,6 +948,10 @@ public final class MainWindow {
         } else if (action.startsWith("detail:")) {
             setDetailVisible(true);
             detail.selectTab(action.substring("detail:".length()));
+        } else if (action.equals("remedy")) {
+            // The diagnosis card's first remedy, pressed; the card arrives with the first poll.
+            setDetailVisible(true);
+            detail.pressFirstRemedyForCapture();
         } else if (action.startsWith("files-menu")) {
             // files-menu or files-menu:<row>: the Files tab's context menu on that visible row.
             int colon = action.indexOf(':');
@@ -1800,15 +1822,30 @@ public final class MainWindow {
             }
         }
         TorrentDetail shown = detailSnapshot;
+        // A filesystem call, so not every tick; the folder can change in Settings at any time.
+        String free = null;
+        if (++pollsSinceFreeSpace >= FREE_SPACE_EVERY) {
+            pollsSinceFreeSpace = 0;
+            free = FreeSpace.disk(settings.downloadDir())
+                    .map(d -> FreeSpace.sentence(d, -1))
+                    .orElse("");
+        }
+        String freeText = free;
         pushTray(TrayStatus.of(snapshot, current));
         pushBadge(BadgeState.of(snapshot, current.download()));
         Platform.runLater(() -> {
             rows.apply(snapshot, nowSeconds);
             refreshSidebar(snapshot);
-            rates.setText(ratesText(current));
+            showRates(current, nowSeconds);
+            if (freeText != null) freeSpace.setText(freeText);
             if (detailWanted) {
                 if (shown != null && shown.general().id().equals(detailId)) {
-                    detail.show(shown);
+                    TorrentRow row = rows.get(detailId);
+                    detail.show(
+                            shown,
+                            row == null ? null : row.torrent(),
+                            row == null ? 0 : row.quietSeconds(),
+                            nowSeconds);
                     detail.showSpeed(torrentHistories.get(detailId), nowSeconds);
                 } else if (detailId == null) detail.clear();
             }
@@ -2714,7 +2751,7 @@ public final class MainWindow {
                     if (detailId != null) torrentHistories.computeIfAbsent(detailId, k -> new SpeedHistory());
                     if (detailId == null && detailWanted) detail.clear();
                 });
-        detail.selectTab(settings.get(Settings.DETAIL_TAB, "general"));
+        detail.selectTab(settings.get(Settings.DETAIL_TAB, "overview"));
         detail.setOnFilePriority((index, priority) -> {
             String id = detailId;
             if (id != null) onTorrent("status.prioritySet", id, (e, t) -> e.setFilePriority(t, index, priority));
@@ -3559,14 +3596,51 @@ public final class MainWindow {
         // The status text is the door to its own history: a click shows what scrolled past.
         status.getStyleClass().add("status-message");
         status.setOnMouseClicked(e -> messagePopup.toggle());
-        HBox bar = new HBox(12, status, spacer, altSpeedToggle, updateBadge, syncBadge, errorBadge, rates);
+        // The rates lead the right-hand group, as the redesign has them: each with its minute.
+        downRate.getStyleClass().add("status-rate-down");
+        upRate.getStyleClass().add("status-rate-up");
+        // The session starts idle, so the minute before it began is drawn as the zero it was.
+        downSpark.setZeroBefore(true);
+        upSpark.setZeroBefore(true);
+        HBox down = new HBox(6, downRate, downSpark);
+        HBox up = new HBox(6, upRate, upSpark);
+        down.setAlignment(Pos.CENTER_LEFT);
+        up.setAlignment(Pos.CENTER_LEFT);
+        down.getStyleClass().add("status-rate");
+        up.getStyleClass().add("status-rate");
+        // Free space on the download folder's volume: hidden until it has been read once.
+        freeSpace.getStyleClass().add("free-space");
+        freeSpace.visibleProperty().bind(freeSpace.textProperty().isNotEmpty());
+        freeSpace.managedProperty().bind(freeSpace.visibleProperty());
+        status.setMinWidth(0);
+        status.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(status, Priority.SOMETIMES);
+        HBox bar =
+                new HBox(14, status, spacer, down, up, altSpeedToggle, freeSpace, updateBadge, syncBadge, errorBadge);
+        bar.setAlignment(Pos.CENTER_LEFT);
+        // The message is the one that gives way: the rates, the switch and the counts keep their width.
+        for (Region r : List.<Region>of(down, up, altSpeedToggle, freeSpace, updateBadge, syncBadge, errorBadge))
+            r.setMinWidth(Region.USE_PREF_SIZE);
         bar.setPadding(new Insets(4, 10, 4, 10));
         bar.getStyleClass().add("status-bar");
         return bar;
     }
 
-    private static String ratesText(Engine.Rates r) {
-        return tr("status.rates", Bytes.rate(r.download()), Bytes.rate(r.upload()));
+    /** FX thread. The session's rates and their last minute, from the history the poll fills. */
+    private void showRates(Engine.Rates r, long nowSeconds) {
+        downRate.setText(tr("status.rateDown", Bytes.rate(r.download())));
+        upRate.setText(tr("status.rateUp", Bytes.rate(r.upload())));
+        List<SpeedHistory.Sample> minute = sessionHistory.samples(60, nowSeconds);
+        downSpark.show(minute, 60, nowSeconds);
+        upSpark.show(minute, 60, nowSeconds);
+    }
+
+    /** The status bar's right-hand group as words, for the capture hook. */
+    private String statusBarForCapture() {
+        List<String> parts = new ArrayList<>(List.of(downRate.getText(), upRate.getText(), altSpeedToggle.getText()));
+        if (freeSpace.isVisible()) parts.add(freeSpace.getText());
+        if (errorBadge.isVisible()) parts.add(errorBadge.getText());
+        return String.join(" | ", parts);
     }
 
     private void setStatus(String text) {

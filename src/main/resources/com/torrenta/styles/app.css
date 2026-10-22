@@ -941,6 +941,7 @@
 .debug-log-file {
     -fx-text-fill: -color-fg-muted;
     -fx-font-size: 11px;
+}
 
 /* An article whose torrent has been added, by a rule or by Download: the glyph before its title. */
 .rss-downloaded-glyph {
@@ -1013,4 +1014,302 @@
 
 .stats-value {
     -fx-text-fill: -color-fg-default;
+}
+
+/*
+ * The detail pane's header (ui.DetailPane): the state disc, the name over its line, the actions
+ * with their chords. The disc takes the row's state colour through the same st-* pseudo-class.
+ */
+.detail-header {
+    -fx-padding: 14 16 12 16;
+    -fx-border-color: transparent transparent -color-border-muted transparent;
+}
+
+.detail-header .state-glyph {
+    -fx-min-width: 30;
+    -fx-pref-width: 30;
+    -fx-max-width: 30;
+    -fx-min-height: 30;
+    -fx-pref-height: 30;
+    -fx-max-height: 30;
+    -fx-alignment: center;
+    -fx-background-radius: 15;
+    -fx-background-color: -torrenta-idle-chip;
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -color-fg-default;
+}
+
+.state-colors .detail-header:st-downloading .state-glyph {
+    -fx-text-fill: -torrenta-down;
+    -fx-background-color: -torrenta-down-chip;
+}
+
+.state-colors .detail-header:st-seeding .state-glyph {
+    -fx-text-fill: -torrenta-up;
+    -fx-background-color: -torrenta-up-chip;
+}
+
+.state-colors .detail-header:st-stalled .state-glyph {
+    -fx-text-fill: -torrenta-stall;
+    -fx-background-color: -torrenta-stall-chip;
+}
+
+.state-colors .detail-header:st-error .state-glyph {
+    -fx-text-fill: -torrenta-error;
+    -fx-background-color: -torrenta-error-chip;
+}
+
+.state-colors .detail-header:st-done .state-glyph {
+    -fx-text-fill: -torrenta-done;
+    -fx-background-color: -torrenta-done-chip;
+}
+
+.detail-title {
+    -fx-font-size: 15px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -color-fg-default;
+}
+
+.detail-subtitle {
+    -fx-font-size: 12.5px;
+    -fx-text-fill: -color-fg-muted;
+}
+
+.detail-action {
+    -fx-background-color: -color-bg-subtle;
+    -fx-background-radius: 7;
+    -fx-background-insets: 0;
+    -fx-border-width: 0;
+    -fx-padding: 5 12 5 12;
+    -fx-text-fill: -color-fg-default;
+    -fx-cursor: hand;
+}
+
+.detail-action:hover {
+    -fx-background-color: -torrenta-chosen;
+}
+
+.detail-action .action-key {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 12px;
+}
+
+.detail-more {
+    -fx-font-weight: bold;
+}
+
+/* "Files 4": the count after a tab's title, muted. */
+.detail-pane .tab .tab-title .label {
+    -fx-text-fill: -color-fg-muted;
+}
+
+.detail-pane .tab:selected .tab-title .label {
+    -fx-text-fill: -color-fg-default;
+}
+
+.detail-pane .tab .tab-title .tab-count,
+.detail-pane .tab:selected .tab-title .tab-count {
+    -fx-text-fill: -color-fg-subtle;
+    -fx-font-size: 11.5px;
+}
+
+.overview-scroll,
+.overview-scroll > .viewport {
+    -fx-background-color: transparent;
+}
+
+.overview-caption {
+    -fx-text-fill: -color-fg-muted;
+}
+
+.overview-caption-value {
+    -fx-text-fill: -color-fg-default;
+}
+
+.overview-rate-down {
+    -fx-text-fill: -torrenta-down;
+}
+
+.overview-rate-up {
+    -fx-text-fill: -torrenta-up;
+}
+
+.overview-facts .fact-name {
+    -fx-text-fill: -color-fg-muted;
+}
+
+.overview-copy {
+    -fx-text-fill: -color-accent-fg;
+    -fx-padding: 0;
+    -fx-border-width: 0;
+}
+
+/*
+ * The diagnosis card: amber for a stall, red for an error, neutral for a torrent waiting its turn.
+ * The first remedy is the emphasised one; every remedy row is a button.
+ */
+.diagnosis-card {
+    -fx-padding: 14 16 12 16;
+    -fx-background-color: -color-warning-muted, -color-warning-subtle;
+    -fx-background-insets: 0, 1;
+    -fx-background-radius: 10, 9;
+}
+
+.diagnosis-card.diagnosis-error {
+    -fx-background-color: -color-danger-muted, -color-danger-subtle;
+}
+
+.diagnosis-card.diagnosis-queued {
+    -fx-background-color: -color-border-default, -color-bg-subtle;
+}
+
+.diagnosis-title {
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+    -fx-text-fill: -color-warning-fg;
+}
+
+.diagnosis-error .diagnosis-title {
+    -fx-text-fill: -color-danger-fg;
+}
+
+.diagnosis-queued .diagnosis-title {
+    -fx-text-fill: -color-fg-default;
+}
+
+.diagnosis-body .diagnosis-text {
+    -fx-fill: -color-fg-default;
+    -fx-font-size: 13px;
+}
+
+.diagnosis-body .diagnosis-file {
+    -fx-font-family: "JetBrains Mono", "monospace";
+    -fx-font-size: 12px;
+}
+
+.diagnosis-card .remedy {
+    -fx-padding: 7 12 7 12;
+    -fx-background-radius: 6;
+    -fx-cursor: hand;
+}
+
+.diagnosis-card .remedy:hover {
+    -fx-background-color: -torrenta-stall-chip;
+}
+
+.diagnosis-card .remedy.primary {
+    -fx-background-color: -torrenta-stall-chip;
+}
+
+.diagnosis-card .remedy.primary .remedy-label {
+    -fx-text-fill: -torrenta-stall;
+}
+
+.diagnosis-error .remedy.primary,
+.diagnosis-error .remedy:hover {
+    -fx-background-color: -torrenta-error-chip;
+}
+
+.diagnosis-error .remedy.primary .remedy-label {
+    -fx-text-fill: -torrenta-error;
+}
+
+.diagnosis-queued .remedy.primary,
+.diagnosis-queued .remedy:hover {
+    -fx-background-color: -torrenta-idle-chip;
+}
+
+.diagnosis-queued .remedy.primary .remedy-label {
+    -fx-text-fill: -color-fg-default;
+}
+
+.diagnosis-card .remedy-label {
+    -fx-text-fill: -color-fg-default;
+}
+
+.diagnosis-card .remedy-key {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 12px;
+}
+
+/* The pieces map: a square per run of pieces (ui.PieceStrip). */
+.piece-cell {
+    -fx-background-radius: 1.5;
+    -fx-background-color: -color-bg-subtle;
+}
+
+.piece-cell.have {
+    -fx-background-color: -torrenta-down;
+}
+
+.piece-cell.missing {
+    -fx-background-color: -color-border-default;
+}
+
+.piece-cell.rare {
+    -fx-background-color: -torrenta-stall;
+}
+
+/* Sparklines (ui.Sparkline): the status bar's minute and the Overview's half hour. */
+.spark-down {
+    -fx-stroke: -torrenta-down;
+    -fx-stroke-width: 1.5;
+    -fx-stroke-line-join: round;
+    -fx-fill: transparent;
+}
+
+.spark-up {
+    -fx-stroke: -torrenta-up;
+    -fx-stroke-width: 1.5;
+    -fx-stroke-line-join: round;
+    -fx-fill: transparent;
+}
+
+.spark-fill {
+    -fx-fill: -torrenta-down-chip;
+    -fx-stroke: transparent;
+}
+
+/* The Log tab: this torrent's lines from the event log. */
+.detail-log .log-time {
+    -fx-text-fill: -color-fg-muted;
+}
+
+.detail-log .list-cell.log-warning .log-message {
+    -fx-text-fill: -color-warning-fg;
+}
+
+.detail-log .list-cell.log-error .log-message {
+    -fx-text-fill: -color-danger-fg;
+}
+
+/*
+ * The status bar's right-hand group: the rates in their colours with their minute, the
+ * alternative-speed switch and the error count as pills, the free space as plain words.
+ */
+.status-bar .status-rate-down {
+    -fx-text-fill: -torrenta-down;
+}
+
+.status-bar .status-rate-up {
+    -fx-text-fill: -torrenta-up;
+}
+
+.status-bar .alt-speed {
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 6;
+    -fx-padding: 1 8 1 8;
+}
+
+.status-bar .alt-speed:active {
+    -fx-border-color: -color-accent-emphasis;
+}
+
+.status-bar .error-badge {
+    -fx-text-fill: -torrenta-error;
+    -fx-background-color: -torrenta-error-chip;
+    -fx-background-radius: 6;
+    -fx-padding: 1 8 1 8;
+    -fx-font-weight: bold;
 }

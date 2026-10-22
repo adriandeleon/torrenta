@@ -1237,8 +1237,12 @@ public final class LibtorrentEngine implements Engine {
                 if (storage.padFileAt(i)) continue;
                 long done = i < progress.length ? progress[i] : 0;
                 Priority priority = i < priorities.length ? fromLibtorrent(priorities[i]) : Priority.NORMAL;
+                long size = storage.fileSize(i);
+                // An empty file touches no piece; asking libtorrent for its range answers with a neighbour's.
+                int first = size == 0 ? -1 : storage.pieceIndexAtFile(i);
+                int last = size == 0 ? -1 : storage.lastPieceIndexAtFile(i);
                 files.add(new TorrentDetail.FileStatus(
-                        i, storage.filePath(i).replace('\\', '/'), storage.fileSize(i), done, priority));
+                        i, storage.filePath(i).replace('\\', '/'), size, done, priority, first, last));
             }
         }
 
@@ -1258,6 +1262,10 @@ public final class LibtorrentEngine implements Engine {
         List<TorrentDetail.Tracker> trackers = new ArrayList<>();
         for (AnnounceEntry entry : trackers(h)) trackers.add(tracker(entry));
 
+        // Counted only while downloading: a seed has no use for it, and libtorrent answers a paused
+        // torrent with an empty vector anyway.
+        int[] availability = status.isSeeding() || !status.hasMetadata() ? new int[0] : h.pieceAvailability();
+
         PieceIndexBitfield bits = status.pieces();
         boolean[] pieces = new boolean[Math.max(0, bits.size())];
         for (int i = 0; i < pieces.length; i++) pieces[i] = bits.getBit(i);
@@ -1266,7 +1274,8 @@ public final class LibtorrentEngine implements Engine {
                 id,
                 status.swig().getSave_path(),
                 info != null && info.isPrivate(),
-                status.numPieces() > 0 ? status.numPieces() : (info == null ? 0 : info.numPieces()),
+                // status.numPieces() is how many it has, not how many there are.
+                info != null ? info.numPieces() : pieces.length,
                 info == null ? 0 : info.pieceLength(),
                 bits.count(),
                 status.distributedCopies(),
@@ -1288,7 +1297,7 @@ public final class LibtorrentEngine implements Engine {
         // The bitfield and the file storage point into these two; keep them until the end.
         Reference.reachabilityFence(status);
         Reference.reachabilityFence(info);
-        return new TorrentDetail(general, files, peers, trackers, pieces);
+        return new TorrentDetail(general, files, peers, trackers, pieces, availability);
     }
 
     /**
@@ -1354,7 +1363,9 @@ public final class LibtorrentEngine implements Engine {
         boolean anyFailed = false;
         for (AnnounceEndpoint endpoint : entry.endpoints()) {
             for (AnnounceInfohash hash : List.of(endpoint.infohashV1(), endpoint.infohashV2())) {
-                if (hash.isWorking()) anyWorking = true;
+                // is_working() is also true of a slot never tried, and a v1 torrent's v2 slot never
+                // is: without start_sent every tracker of every v1 torrent read "working".
+                if (hash.isWorking() && hash.swig().getStart_sent()) anyWorking = true;
                 if (hash.updating()) anyUpdating = true;
                 if (hash.fails() > 0) {
                     anyFailed = true;
@@ -2003,8 +2014,9 @@ public final class LibtorrentEngine implements Engine {
                 status.numSeeds(),
                 status.allTimeUpload(),
                 status.allTimeDownload(),
-                status.addedTime(),
-                status.completedTime(),
+                // Epoch milliseconds from libtorrent4j (its time2millis); the record promises seconds.
+                status.addedTime() / 1000,
+                status.completedTime() / 1000,
                 tracker == null ? "" : tracker,
                 status.swig().getSave_path(),
                 // Paused by a person, not parked by the queue: the queue pauses auto-managed ones.
