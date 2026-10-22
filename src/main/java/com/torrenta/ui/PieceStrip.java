@@ -21,7 +21,9 @@ final class PieceStrip extends Pane {
         HAVE("have"),
         MISSING("missing"),
         /** Some piece of the run is missing and on no connected peer. */
-        RARE("rare");
+        RARE("rare"),
+        /** What is missing belongs only to files left out: never coming, and nobody minds. */
+        SKIPPED("skipped");
 
         final String styleClass;
 
@@ -36,6 +38,7 @@ final class PieceStrip extends Pane {
 
     private boolean[] have = new boolean[0];
     private int[] availability = new int[0];
+    private boolean[] skipped = new boolean[0];
     private Cell[] shown = new Cell[0];
 
     PieceStrip() {
@@ -56,25 +59,61 @@ final class PieceStrip extends Pane {
      * used only when there is one per piece.
      */
     static Cell[] cells(boolean[] have, int[] availability, int count) {
+        return cells(have, availability, new boolean[0], count);
+    }
+
+    /**
+     * As {@link #cells(boolean[], int[], int)}, with the pieces that belong only to skipped files
+     * ({@link #skipped}): a run is the worst of its wanted pieces (rare, then missing), and skipped
+     * when all it lacks is unwanted.
+     */
+    static Cell[] cells(boolean[] have, int[] availability, boolean[] skipped, int count) {
         int n = have.length;
         if (n == 0 || count <= 0) return new Cell[0];
         int cells = Math.min(count, n);
         boolean counted = availability != null && availability.length == n;
+        boolean masked = skipped != null && skipped.length == n;
         Cell[] out = new Cell[cells];
         for (int c = 0; c < cells; c++) {
             int from = (int) ((long) c * n / cells);
             int to = (int) ((long) (c + 1) * n / cells);
             Cell cell = Cell.HAVE;
-            for (int i = from; i < to; i++) {
+            for (int i = from; i < to && cell != Cell.RARE; i++) {
                 if (have[i]) continue;
-                if (counted && availability[i] == 0) {
+                if (masked && skipped[i]) {
+                    if (cell == Cell.HAVE) cell = Cell.SKIPPED;
+                } else if (counted && availability[i] == 0) {
                     cell = Cell.RARE;
-                    break;
+                } else {
+                    cell = Cell.MISSING;
                 }
-                cell = Cell.MISSING;
             }
             out[c] = cell;
         }
+        return out;
+    }
+
+    /**
+     * The pieces that hold bytes of skipped files only, by index; all false when some file's piece
+     * range is unknown (an engine that does not say), so nothing is wrongly waved away.
+     */
+    static boolean[] skipped(com.torrenta.engine.TorrentDetail d) {
+        boolean[] out = new boolean[d.pieces().length];
+        if (d.files().isEmpty() || d.files().stream().anyMatch(f -> f.firstPiece() < 0 && f.size() > 0)) return out;
+        boolean[] wanted = new boolean[out.length];
+        boolean anySkipped = false;
+        for (var f : d.files()) {
+            if (f.firstPiece() < 0) continue;
+            boolean skip = f.priority() == com.torrenta.engine.Priority.IGNORE;
+            anySkipped |= skip;
+            for (int i = f.firstPiece(); i <= f.lastPiece() && i < out.length; i++) {
+                if (skip) out[i] = true;
+                else wanted[i] = true;
+            }
+        }
+        if (!anySkipped) return new boolean[out.length];
+        // A piece shared with a wanted file is wanted.
+        for (int i = 0; i < out.length; i++) if (wanted[i]) out[i] = false;
         return out;
     }
 
@@ -83,28 +122,30 @@ final class PieceStrip extends Pane {
         return Math.max(1, (int) ((width + GAP) / (CELL + GAP)));
     }
 
-    void show(boolean[] pieces, int[] counts) {
+    void show(boolean[] pieces, int[] counts, boolean[] unwanted) {
         have = pieces;
         availability = counts;
+        skipped = unwanted;
         rebuild();
     }
 
     /** The cells as shown, for the capture hook: {@code have/missing/rare} counts. */
     String summary() {
-        int h = 0, m = 0, r = 0;
+        int h = 0, m = 0, r = 0, s = 0;
         for (Cell c : shown) {
             switch (c) {
                 case HAVE -> h++;
                 case MISSING -> m++;
                 case RARE -> r++;
+                case SKIPPED -> s++;
             }
         }
-        return shown.length + " cells (" + h + " have, " + m + " missing, " + r + " rare)";
+        return shown.length + " cells (" + h + " have, " + m + " missing, " + r + " rare, " + s + " skipped)";
     }
 
     private void rebuild() {
         int columns = columns(getWidth());
-        Cell[] next = cells(have, availability, columns * ROWS);
+        Cell[] next = cells(have, availability, skipped, columns * ROWS);
         List<javafx.scene.Node> kids = getChildren();
         while (kids.size() > next.length) kids.removeLast();
         while (kids.size() < next.length) {
@@ -116,7 +157,7 @@ final class PieceStrip extends Pane {
         for (int i = 0; i < next.length; i++) {
             Region r = (Region) kids.get(i);
             if (i < shown.length && shown[i] == next[i]) continue;
-            r.getStyleClass().removeAll("have", "missing", "rare");
+            r.getStyleClass().removeAll("have", "missing", "rare", "skipped");
             r.getStyleClass().add(next[i].styleClass);
         }
         shown = next;

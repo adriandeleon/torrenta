@@ -1130,10 +1130,11 @@ public final class MainWindow {
         } else if (action.startsWith("detail:")) {
             showDetail();
             detail.selectTab(action.substring("detail:".length()));
-        } else if (action.equals("remedy")) {
-            // The diagnosis card's first remedy, pressed; the card arrives with the first poll.
+        } else if (action.equals("remedy") || action.startsWith("remedy:")) {
+            // remedy or remedy:<NAME> (SKIP_FILE, REANNOUNCE …): pressed once a card offers it.
             showDetail();
-            detail.pressFirstRemedyForCapture();
+            detail.pressRemedyForCapture(
+                    action.equals("remedy") ? null : Diagnosis.Remedy.valueOf(action.substring("remedy:".length())));
         } else if (action.startsWith("files-menu")) {
             // files-menu or files-menu:<row>: the Files tab's context menu on that visible row.
             int colon = action.indexOf(':');

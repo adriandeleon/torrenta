@@ -109,6 +109,10 @@ final class DetailPane extends VBox {
     private final TextFlow cardBody = new TextFlow();
     private final VBox remedies = new VBox(2);
     private Diagnosis shownDiagnosis;
+    /** The capture hook asked for a remedy before a card offered it: pressed when one does. */
+    private Diagnosis.Remedy remedyPending;
+
+    private boolean remedyPendingAny;
     private final Label piecesValue = new Label();
     private final PieceStrip pieceStrip = new PieceStrip();
     private final VBox piecesBox = new VBox(8);
@@ -353,7 +357,7 @@ final class DetailPane extends VBox {
                         : Diagnosis.of(torrent, RowState.of(torrent, quietSeconds), detail, quietSeconds));
 
         piecesValue.setText(g.pieceCount() == 0 ? "—" : OverviewText.pieces(g.piecesHave(), g.pieceCount()));
-        pieceStrip.show(detail.pieces(), detail.availability());
+        pieceStrip.show(detail.pieces(), detail.availability(), PieceStrip.skipped(detail));
         if (torrent != null) {
             overviewDown.setText("↓ " + Bytes.rate(torrent.downloadRate()));
             overviewUp.setText("↑ " + Bytes.rate(torrent.uploadRate()));
@@ -402,7 +406,7 @@ final class DetailPane extends VBox {
         peerItems.clear();
         trackerItems.clear();
         lastPieces = new boolean[0];
-        pieceStrip.show(lastPieces, new int[0]);
+        pieceStrip.show(lastPieces, new int[0], new boolean[0]);
         if (logItems != null) logItems.setPredicate(e -> false);
         speedHistory = null;
         speed.clear();
@@ -634,6 +638,7 @@ final class DetailPane extends VBox {
         card.getStyleClass().removeAll("diagnosis-stalled", "diagnosis-error", "diagnosis-queued");
         if (d == null) return;
         card.getStyleClass().add("diagnosis-" + d.title().name().toLowerCase(java.util.Locale.ROOT));
+        pressPending(d);
         cardTitle.setText(d.title().label());
         cardBody.getChildren().clear();
         String[] parts = d.body().split(Diagnosis.MARK, -1);
@@ -691,10 +696,27 @@ final class DetailPane extends VBox {
         }
     }
 
-    /** For the capture hook: presses the card's first remedy, as a click would. */
-    void pressFirstRemedyForCapture() {
-        if (shownDiagnosis != null && !shownDiagnosis.remedies().isEmpty())
-            apply(shownDiagnosis, shownDiagnosis.remedies().getFirst());
+    /**
+     * For the capture hook: presses a remedy on the card, as a click would: {@code wanted}, or the
+     * first when null. The hook acts before a stall has had its minute, so with no card offering it
+     * yet, it is pressed when one first does.
+     */
+    void pressRemedyForCapture(Diagnosis.Remedy wanted) {
+        remedyPending = wanted;
+        remedyPendingAny = wanted == null;
+        if (shownDiagnosis != null) pressPending(shownDiagnosis);
+    }
+
+    private void pressPending(Diagnosis d) {
+        if (!remedyPendingAny && remedyPending == null) return;
+        Diagnosis.Remedy r = remedyPendingAny
+                ? d.remedies().stream().findFirst().orElse(null)
+                : d.remedies().contains(remedyPending) ? remedyPending : null;
+        if (r == null) return;
+        remedyPending = null;
+        remedyPendingAny = false;
+        System.out.println("capture: remedy-pressed=" + r + " (" + d.text() + ")");
+        javafx.application.Platform.runLater(() -> apply(d, r));
     }
 
     // ---- log ------------------------------------------------------------------------------------

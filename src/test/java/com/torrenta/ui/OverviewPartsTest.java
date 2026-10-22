@@ -14,6 +14,7 @@ class OverviewPartsTest {
     private static final PieceStrip.Cell H = PieceStrip.Cell.HAVE;
     private static final PieceStrip.Cell M = PieceStrip.Cell.MISSING;
     private static final PieceStrip.Cell R = PieceStrip.Cell.RARE;
+    private static final PieceStrip.Cell S = PieceStrip.Cell.SKIPPED;
 
     private static boolean[] bits(String s) {
         boolean[] out = new boolean[s.length()];
@@ -42,6 +43,49 @@ class OverviewPartsTest {
         assertArrayEquals(new PieceStrip.Cell[] {H, R, M, H}, PieceStrip.cells(bits("11101011"), availability, 4));
         // A had piece with no copies elsewhere is no trouble of ours.
         assertArrayEquals(new PieceStrip.Cell[] {H, H, H, H}, PieceStrip.cells(bits("11111111"), availability, 4));
+    }
+
+    @Test
+    void whatASkippedFileLacksIsNeitherMissingNorRare() {
+        boolean[] skipped = {false, false, false, false, false, true, true, true};
+        int[] none = {3, 3, 3, 3, 3, 0, 0, 0};
+        // Pieces 5–7 are the skipped file's, missing and on nobody: still no cause for alarm.
+        assertArrayEquals(new PieceStrip.Cell[] {H, H, S, S}, PieceStrip.cells(bits("11111000"), none, skipped, 4));
+        // A wanted piece missing beside a skipped one makes the run missing, or rare.
+        assertArrayEquals(new PieceStrip.Cell[] {H, M, S, S}, PieceStrip.cells(bits("11011000"), none, skipped, 4));
+        assertArrayEquals(
+                new PieceStrip.Cell[] {H, H, R, S},
+                PieceStrip.cells(bits("11110000"), new int[] {3, 3, 3, 3, 0, 0, 0, 0}, skipped, 4));
+    }
+
+    @Test
+    void piecesOfSkippedFilesOnlyAreTheSkippedOnes() {
+        var general = new com.torrenta.engine.TorrentDetail.General(
+                "id", "/d", false, 8, 1024, 0, 1, 0, 0, 0, 0, 0, 0, 0, "", "", "");
+        java.util.function.Function<com.torrenta.engine.Priority, com.torrenta.engine.TorrentDetail> detail =
+                p -> new com.torrenta.engine.TorrentDetail(
+                        general,
+                        List.of(
+                                new com.torrenta.engine.TorrentDetail.FileStatus(
+                                        0, "a", 4500, 0, com.torrenta.engine.Priority.NORMAL, 0, 4),
+                                new com.torrenta.engine.TorrentDetail.FileStatus(1, "b", 3000, 0, p, 4, 7)),
+                        List.of(),
+                        List.of(),
+                        new boolean[8]);
+        // Piece 4 is shared with the wanted file, so it is wanted.
+        assertArrayEquals(
+                new boolean[] {false, false, false, false, false, true, true, true},
+                PieceStrip.skipped(detail.apply(com.torrenta.engine.Priority.IGNORE)));
+        assertArrayEquals(new boolean[8], PieceStrip.skipped(detail.apply(com.torrenta.engine.Priority.NORMAL)));
+        // Unknown ranges (an engine that does not say): nothing is waved away.
+        var unknown = new com.torrenta.engine.TorrentDetail(
+                general,
+                List.of(new com.torrenta.engine.TorrentDetail.FileStatus(
+                        0, "a", 4500, 0, com.torrenta.engine.Priority.IGNORE)),
+                List.of(),
+                List.of(),
+                new boolean[8]);
+        assertArrayEquals(new boolean[8], PieceStrip.skipped(unknown));
     }
 
     @Test

@@ -1438,6 +1438,12 @@
     -fx-background-color: -torrenta-stall;
 }
 
+/* Left out on purpose: an outline, not a gap to worry about. */
+.piece-cell.skipped {
+    -fx-background-color: -color-border-default, -color-bg-default;
+    -fx-background-insets: 0, 1;
+}
+
 /* Sparklines (ui.Sparkline): the status bar's minute and the Overview's half hour. */
 .spark-down {
     -fx-stroke: -torrenta-down;
