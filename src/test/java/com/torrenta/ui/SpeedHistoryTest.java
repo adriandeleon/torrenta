@@ -116,4 +116,37 @@ class SpeedHistoryTest {
         assertEquals(2, h.samples(60, -99).size());
         assertEquals(1, h.samples(3600, -99).size());
     }
+
+    @Test
+    void aRecentHistoryKeepsOnlyItsLastSecondsWhateverTheWindow() {
+        SpeedHistory h = SpeedHistory.recent();
+        for (long t = 1000; t < 1500; t++) h.add(t, t, 0);
+        List<SpeedHistory.Sample> ten = h.samples(600, 1499);
+        assertEquals(SpeedHistory.RECENT_SECONDS, ten.size());
+        assertEquals(1500L - SpeedHistory.RECENT_SECONDS, ten.get(0).at());
+        assertEquals(SpeedHistory.RECENT_SECONDS, h.samples(86400, 1499).size(), "no averages: the seconds it has");
+        assertEquals(List.of(1497L, 1498L, 1499L), times(h.samples(3, 1499)));
+    }
+
+    @Test
+    void widenedStartsTheFullHistoryFromTheRecentOne() {
+        SpeedHistory recent = SpeedHistory.recent();
+        for (long t = 1000; t < 1030; t++) recent.add(t, 100, 10);
+        SpeedHistory full = recent.widened();
+        assertEquals(30, full.samples(600, 1029).size());
+        assertEquals(new SpeedHistory.Sample(1029, 100, 10), full.latest().orElseThrow());
+        // And it goes on from there, at full length.
+        for (long t = 1030; t < 1700; t++) full.add(t, 200, 20);
+        assertEquals(600, full.samples(600, 1699).size());
+        assertTrue(full.samples(3600, 1699).size() >= 11, "minute averages from the first second on");
+        assertEquals(30, recent.samples(600, 1029).size(), "the recent one is untouched");
+    }
+
+    @Test
+    void widenedFromNothingIsAnEmptyFullHistory() {
+        SpeedHistory full = SpeedHistory.recent().widened();
+        assertTrue(full.isEmpty());
+        full.add(5, 1, 1);
+        assertEquals(1, full.samples(600, 5).size());
+    }
 }

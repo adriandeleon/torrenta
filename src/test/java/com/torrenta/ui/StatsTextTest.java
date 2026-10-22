@@ -113,6 +113,14 @@ class StatsTextTest {
     }
 
     @Test
+    void theColumnsHoldEverySectionOnceInOrder() {
+        List<Integer> all = StatsText.columns().stream().flatMap(List::stream).toList();
+        assertEquals(List.of(0, 1, 2, 3, 4), all);
+        assertEquals(StatsText.sections().size(), all.size());
+        assertEquals(List.of(0, 1), StatsText.columns().get(0), "the two about bytes share the left column");
+    }
+
+    @Test
     void ratioUsesTheColumnsRule() {
         assertEquals(
                 "∞",

@@ -32,8 +32,10 @@ selected torrent, `select-first`, `message-log` / `message-log:<query>` (the sta
   for the Search tab (the keys go where the focus is, once the search has ended; a stand-in server is
   `java scripts/torznab-stub.java 9696 <search.xml> [caps.xml]`), `stats` for the Statistics window
   (the PNG is of it; `stats=` and `stats-graph=` lines after the shot), `detail:speed` for the Speed
-  tab (a `speed-tab=` line), or `settings` / `settings:<query>` /
-  `settings-page:<category>` to open the Settings window (the PNG is then of it) and print the
+  tab (a `speed-tab=` line), `window:<w>x<h>+<x>+<y>` / `window:maximize` to move the main window
+  (a `window=` line after every shot has its bounds, what is saved and whether the list's
+  horizontal scrollbar shows; a `statusbar-fit=` line has each status-bar entry as width/needed),
+  or `settings` / `settings:<query>` / `settings-page:<category>` to open the Settings window (the PNG is then of it) and print the
   visible rows, `settings-layout:<left|right|hidden>/<bottom|right|hidden>` to choose the sidebar's
   and the detail pane's places on the General page (a `layout=` line after every action); the palette's ranking, the
   open dialog's title and the log window's state are printed, and when a dialog is open the PNG is

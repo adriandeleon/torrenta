@@ -40,7 +40,7 @@ final class LogWindow {
 
     private final Stage stage = new Stage();
     private final EventLog log;
-    private final FilteredList<EngineEvent> visible;
+    private final FilteredList<EventLog.Line> visible;
     private final CheckBox info = new CheckBox(tr("eventLog.info"));
     private final CheckBox warnings = new CheckBox(tr("eventLog.warnings"));
     private final CheckBox errors = new CheckBox(tr("eventLog.errors"));
@@ -51,19 +51,19 @@ final class LogWindow {
         stage.initOwner(owner);
         stage.setTitle(tr("eventLog.title", AppInfo.NAME));
 
-        TableView<EngineEvent> table = new TableView<>(visible);
+        TableView<EventLog.Line> table = new TableView<>(visible);
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         table.setPlaceholder(new Label(tr("eventLog.empty")));
         table.getStyleClass().add("event-table");
-        TableColumn<EngineEvent, String> time =
+        TableColumn<EventLog.Line, String> time =
                 column(tr("eventLog.column.time"), 80, e -> TIME.format(e.at().atZone(ZoneId.systemDefault())));
-        TableColumn<EngineEvent, String> level = column(tr("eventLog.column.level"), 80, e -> levelLabel(e.level()));
-        TableColumn<EngineEvent, String> torrent = column(tr("eventLog.column.torrent"), 200, EngineEvent::torrent);
-        TableColumn<EngineEvent, String> message = column(tr("eventLog.column.message"), 400, EngineEvent::message);
+        TableColumn<EventLog.Line, String> level = column(tr("eventLog.column.level"), 80, e -> levelLabel(e.level()));
+        TableColumn<EventLog.Line, String> torrent = column(tr("eventLog.column.torrent"), 200, EventLog.Line::torrent);
+        TableColumn<EventLog.Line, String> message = column(tr("eventLog.column.message"), 400, EventLog.Line::text);
         table.getColumns().addAll(List.of(time, level, torrent, message));
         table.setRowFactory(v -> new TableRow<>() {
             @Override
-            protected void updateItem(EngineEvent item, boolean empty) {
+            protected void updateItem(EventLog.Line item, boolean empty) {
                 super.updateItem(item, empty);
                 getStyleClass().removeAll("event-warning", "event-error");
                 if (!empty && item != null) {
@@ -74,7 +74,7 @@ final class LogWindow {
             }
         });
         // New events at the bottom: follow them, as a log does.
-        log.events().addListener((javafx.collections.ListChangeListener<EngineEvent>) c -> {
+        log.events().addListener((javafx.collections.ListChangeListener<EventLog.Line>) c -> {
             if (!visible.isEmpty()) table.scrollTo(visible.size() - 1);
         });
 
@@ -144,14 +144,14 @@ final class LogWindow {
 
     private void copyVisible() {
         StringBuilder text = new StringBuilder();
-        for (EngineEvent e : visible) {
+        for (EventLog.Line e : visible) {
             text.append(TIME.format(e.at().atZone(ZoneId.systemDefault())))
                     .append('\t')
                     .append(levelLabel(e.level()))
                     .append('\t')
                     .append(e.torrent())
                     .append('\t')
-                    .append(e.message())
+                    .append(e.text())
                     .append('\n');
         }
         ClipboardContent content = new ClipboardContent();
@@ -159,9 +159,9 @@ final class LogWindow {
         Clipboard.getSystemClipboard().setContent(content);
     }
 
-    private static TableColumn<EngineEvent, String> column(
-            String title, double width, Function<EngineEvent, String> text) {
-        TableColumn<EngineEvent, String> column = new TableColumn<>(title);
+    private static TableColumn<EventLog.Line, String> column(
+            String title, double width, Function<EventLog.Line, String> text) {
+        TableColumn<EventLog.Line, String> column = new TableColumn<>(title);
         column.setPrefWidth(width);
         column.setCellValueFactory(
                 cell -> new javafx.beans.property.ReadOnlyObjectWrapper<>(text.apply(cell.getValue())));

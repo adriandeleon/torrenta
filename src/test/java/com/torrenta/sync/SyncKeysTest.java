@@ -32,6 +32,8 @@ class SyncKeysTest {
         assertFalse(SyncKeys.isSynced("ui.sidebar.category"), "names this machine's categories");
         assertFalse(SyncKeys.isSynced("ui.sidebar.status"), "what this machine is looking at");
         assertFalse(SyncKeys.isSynced("ui.sidebar.collapsed"));
+        assertFalse(SyncKeys.isSynced("ui.window.bounds"), "this machine's screens");
+        assertFalse(SyncKeys.isSynced("ui.window.maximized"));
         assertFalse(SyncKeys.isSynced("engine.profile"), "which daemon this machine drives");
         assertTrue(SyncKeys.isSynced("ui.sidebar"), "but whether the sidebar shows travels");
         assertTrue(SyncKeys.isSynced("share.ratio"), "the global share limit travels");

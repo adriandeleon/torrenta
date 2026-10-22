@@ -34,6 +34,25 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Fixed
 
+- **A long status message no longer pushes the rest of the status bar off the window.** A
+  tracker warning used to elide "Alt speed" and the rates as well and push free space off the
+  right edge; now the message alone shortens, with an ellipsis, and the port, DHT, rates and free
+  space keep their width.
+- **The same message is one line with a count.** libtorrent reports a tracker's error once per
+  listen interface, so one unreachable tracker logged the same warning about seven times per
+  torrent; the event log and the status bar's history now keep one line ("… ×7") for the same
+  level, torrent and words within ten seconds of the last time.
+- **"IP filter cleared" no longer appears (twice) at every start.** The start applied the stored
+  filter and then refreshed, which applied it again; a refresh now runs only when a download is
+  due, and the engine says nothing when clearing a filter that was never set.
+- **The window remembers its size, its place and whether it was maximised**, on this machine
+  only (never synced), and comes back on a screen that is still there, made to fit it. The first
+  window is wide enough for the default columns, with no horizontal scrollbar.
+- **The Statistics window's sections are spaced and aligned**: a gap between sections, the values
+  of a column starting at one place in every section, and the window as tall as its graph needs
+  instead of cutting it at the baseline.
+- **A torrent's Speed tab is no longer empty the first time it is chosen**: every torrent keeps
+  its last two minutes of rates, and the tab starts from them.
 - **Every style after the debug log's in the stylesheet was ignored** (the RSS rule dialog's among
   them, with a CSS warning at every start): a merge had dropped a closing brace.
 - **The detail pane opening collapsed to its tab strip.** The empty "No torrents yet" state,
