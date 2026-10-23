@@ -125,7 +125,8 @@ public final class TransmissionEngine implements Engine {
             "files",
             "fileStats",
             "peers",
-            "trackerStats");
+            "trackerStats",
+            "webseeds");
 
     private final EngineProfile profile;
     private final RpcClient rpc;
@@ -999,6 +1000,23 @@ public final class TransmissionEngine implements Engine {
     }
 
     @Override
+    public List<String> webSeeds(String id) throws EngineException {
+        checkRunning();
+        return webSeedsOf(get(id, List.of("webseeds")));
+    }
+
+    /** {@code torrent-set} has no word for web seeds; the capability is missing and the window hides the controls. */
+    @Override
+    public void addWebSeeds(String id, List<String> urls) throws EngineException {
+        throw new EngineException(tr("engine.error.transmissionWebSeeds"));
+    }
+
+    @Override
+    public void removeWebSeed(String id, String url) throws EngineException {
+        throw new EngineException(tr("engine.error.transmissionWebSeeds"));
+    }
+
+    @Override
     public TorrentDetail detail(String id) throws EngineException {
         checkRunning();
         return detailOf(get(id, DETAIL_FIELDS), System.currentTimeMillis() / 1000);
@@ -1098,7 +1116,7 @@ public final class TransmissionEngine implements Engine {
                 current,
                 id,
                 "");
-        return new TorrentDetail(general, files, peers, trackers, pieces);
+        return new TorrentDetail(general, files, peers, trackers, pieces, new int[0], webSeedsOf(t));
     }
 
     /** Transmission's -1/0/1 as the dialog's ladder. */
@@ -1134,6 +1152,15 @@ public final class TransmissionEngine implements Engine {
 
     static final int ANNOUNCE_QUEUED = 2;
     static final int ANNOUNCE_ACTIVE = 3;
+
+    /** The {@code webseeds} field: a list of URLs, as the daemon keeps them. Pure. */
+    static List<String> webSeedsOf(Map<String, Object> t) {
+        List<String> out = new ArrayList<>();
+        for (Object o : Json.list(t, "webseeds")) {
+            if (o instanceof String url && !url.isBlank()) out.add(url);
+        }
+        return out;
+    }
 
     /** One {@code trackerStats} entry as the pane's row, worded as libtorrent's are. Pure. */
     static TorrentDetail.Tracker tracker(Map<String, Object> s) {

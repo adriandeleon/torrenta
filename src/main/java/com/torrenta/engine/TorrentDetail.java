@@ -12,6 +12,7 @@ import java.util.List;
  * @param pieces which pieces are complete, by index
  * @param availability how many connected peers have each piece, by index; empty when libtorrent
  *     keeps no count (a seed, a paused torrent, one without metadata)
+ * @param webSeeds the web seeds (BEP 19 HTTP sources), as {@link Engine#webSeeds} lists them
  */
 public record TorrentDetail(
         General general,
@@ -19,16 +20,29 @@ public record TorrentDetail(
         List<Peer> peers,
         List<Tracker> trackers,
         boolean[] pieces,
-        int[] availability) {
+        int[] availability,
+        List<String> webSeeds) {
 
     public TorrentDetail {
         availability = availability == null ? new int[0] : availability;
+        webSeeds = webSeeds == null ? List.of() : List.copyOf(webSeeds);
     }
 
-    /** A detail with no availability counts: what most tests want. */
+    /** A detail with no web seeds. */
+    public TorrentDetail(
+            General general,
+            List<FileStatus> files,
+            List<Peer> peers,
+            List<Tracker> trackers,
+            boolean[] pieces,
+            int[] availability) {
+        this(general, files, peers, trackers, pieces, availability, List.of());
+    }
+
+    /** A detail with no availability counts and no web seeds: what most tests want. */
     public TorrentDetail(
             General general, List<FileStatus> files, List<Peer> peers, List<Tracker> trackers, boolean[] pieces) {
-        this(general, files, peers, trackers, pieces, new int[0]);
+        this(general, files, peers, trackers, pieces, new int[0], List.of());
     }
 
     /**

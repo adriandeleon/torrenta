@@ -43,6 +43,7 @@ import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.engine.TorrentStorage;
 import com.torrenta.engine.TrackerHost;
+import com.torrenta.engine.WebSeeds;
 import com.torrenta.store.StatsStore;
 import com.torrenta.store.TorrentStore;
 import org.libtorrent4j.AddTorrentParams;
@@ -1496,7 +1497,7 @@ public final class LibtorrentEngine implements Engine {
         // The bitfield and the file storage point into these two; keep them until the end.
         Reference.reachabilityFence(status);
         Reference.reachabilityFence(info);
-        return new TorrentDetail(general, files, peers, trackers, pieces, availability);
+        return new TorrentDetail(general, files, peers, trackers, pieces, availability, h.urlSeeds());
     }
 
     /**
@@ -1632,6 +1633,30 @@ public final class LibtorrentEngine implements Engine {
         trackerHosts.put(id, hostsOf(kept));
         Set<String> errors = trackerErrors.get(id);
         if (errors != null) errors.remove(url);
+    }
+
+    @Override
+    public synchronized List<String> webSeeds(String id) throws EngineException {
+        return List.copyOf(handle(id).urlSeeds());
+    }
+
+    @Override
+    public synchronized void addWebSeeds(String id, List<String> urls) throws EngineException {
+        List<String> invalid = WebSeeds.invalid(urls);
+        if (!invalid.isEmpty()) throw new EngineException(tr("engine.error.notAWebSeed", String.join(", ", invalid)));
+        TorrentHandle h = handle(id);
+        List<String> fresh = WebSeeds.fresh(h.urlSeeds(), urls);
+        if (fresh.isEmpty()) return;
+        for (String url : fresh) h.addUrlSeed(url);
+        requestSave(h, false);
+    }
+
+    @Override
+    public synchronized void removeWebSeed(String id, String url) throws EngineException {
+        TorrentHandle h = handle(id);
+        if (!h.urlSeeds().contains(url)) return;
+        h.removeUrlSeed(url);
+        requestSave(h, false);
     }
 
     private static Priority fromLibtorrent(org.libtorrent4j.Priority priority) {

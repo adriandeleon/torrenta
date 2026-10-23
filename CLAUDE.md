@@ -36,6 +36,8 @@ selected torrent, `select-first`, `message-log` / `message-log:<query>` (the sta
   …), waiting for a card that offers it (prints `remedy-pressed=`),
   `export-to:<folder>` for Export .torrent past its native chooser, `rename:<name>` (`~` for a
   space) to fill and confirm the Rename dialog, `files-rename:<row>:<name>` for a Files-tab row,
+  `web-seeds-add:<urls>` (`~` between URLs) and `web-seed-remove:<row>` for the Trackers tab's web
+  seeds (a `web-seeds=` line, with `editable=`, while that tab shows),
   `files-menu[:<row>]` for the Files tab's context menu on that visible row (it waits for the
   rows, which arrive with the first detail poll; on the Files tab a `file=` line per row shown
   names its `FileKind`, the glyph's rule by extension), `welcome-clipboard:<text>` (the welcome's
@@ -67,7 +69,7 @@ to try one on purpose).
 | Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Engine.fetchMetadata` (a magnet's file list while the dialog is open), `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL), `FileRenames.Layout` (the content layout, `add.contentLayout`); `ui.AddDialog` (rules as statics), `FileTree` (wanted + priority ladder), `FreeSpace` (disk bar and sentence) | `com.torrenta.engine`, `com.torrenta.net`, `ui` |
 | Create | `CreateRequest` (path, `Format` v1/v2/hybrid, piece size or 0, private, tracker tiers, web seeds, comment, `source` tag, align, seed), `CreatedTorrent` (bytes, engine id, both hashes, counts, magnet, the seeding torrent or the add's problem), `PieceSize` (the automatic rule: ~1,500 pieces, 16 KiB … 16 MiB; `count` packed or aligned), `Engine.create(request, CreateProgress)` blocking on the caller's worker, cancellable at the next piece; `libtorrent.PieceHasher` (v1 pieces and v2 piece layers in Java, bit for bit libtorrent's); `ui.CreateDialog` (modeless, sizes the source live, Save as…, atomic write), `CreateText` (tier parser, summary, outcome) | `com.torrenta.engine`, `.libtorrent`, `ui` |
 | Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags, the name a person gave; JSON for the `<hash>.labels` sidecar), `Engine.rename`, `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `ui.FilterQuery` (the filter box's `key:value` language → predicate + chips), `Sidebar` (a tree: All, Categories, Tags; Status and Tracker sections later), `TagsDialog` | `com.torrenta.engine`, `store`, `ui` |
-| Detail | `TorrentDetail` (general, files with their piece range, peers, trackers, pieces, per-piece availability) from `Engine.detail(id)`; `ui.Diagnosis` (why it is not moving + remedies), `OverviewText`, `PieceStrip`, `Sparkline`; `setFilePriority`, `renamePath` (`FileRenames.plan`/`problem`), `addTrackers`, `removeTracker`; `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
+| Detail | `TorrentDetail` (general, files with their piece range, peers, trackers, pieces, per-piece availability, web seeds) from `Engine.detail(id)`; `ui.Diagnosis` (why it is not moving + remedies), `OverviewText`, `PieceStrip`, `Sparkline`; `setFilePriority`, `renamePath` (`FileRenames.plan`/`problem`), `addTrackers`, `removeTracker`, `webSeeds`/`addWebSeeds`/`removeWebSeed` (`WebSeeds`: an http(s) URL with a host, `fresh` against what the torrent has; `Capability.WEB_SEEDS` to edit); `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
 | Engine settings | `EngineSettings` (engine-neutral record; `listenInterfaces()` is the tested string), `Settings.engineSettings()` clamps the `connection.*` and `proxy.*` keys, `LibtorrentEngine.toPack` maps onto `settings_pack`; applied at start (`SessionParams`) and live (`applySettings`) | `com.torrenta.engine`, `store`, `.libtorrent` |
 | IP filter | `IpRange` (literals only, never resolves), `Blocklist` (pure parser for .p2p/.dat/CIDR/plain), `net.BlocklistFetch` (gzip by magic), `ui.IpFilterController` (cache, schedule, bans → `Engine.setIpFilter`), `peer_blocked` alerts counted | `com.torrenta.engine`, `net`, `ui` |
 | Watch folders | `WatchFolder` (entry + pure rules: destination, request, names, `.magnet` lines, magnet id, `Growth`), `WatchFolders` (the service: `configure`, `start`, `stop`, `poll`), `store.WatchFolderStore` (`watch-folders.json`), `ui.WatchFolderDialog`, Settings → Watch folders | `com.torrenta.engine`, `store`, `ui` |
@@ -205,6 +207,11 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   added **without its trackers**, silently. The Add dialog shows comment and creator from the
   preview; General cannot read them back (the handle has no accessor), and `AnnounceInfohash` has
   no scrape counts.
+- **Web seeds live in the resume data once added**, so a seed removed from a `.torrent`'s
+  `url-list` stays removed across a restart. `addUrlSeed`/`removeUrlSeed` are posted to the
+  network thread (read them back with `await`), and the engine asks for resume data right after,
+  queued behind the change. A batch with one non-web-seed is refused whole. Transmission lists
+  `webseeds` but its `torrent-set` cannot change them, hence the capability.
 - **Durations from libtorrent4j are milliseconds** (`activeDuration`, `seedingDuration`,
   `nextAnnounce`), **and so are its times** (`addedTime`, `completedTime` go through
   `time2millis`); the engine divides, the records promise seconds. The Added and Completed columns
@@ -578,7 +585,7 @@ Queue and share limits), the per-torrent Limits dialog, queue moves, Set Locatio
 export `.torrent` and rename (a torrent's own name, files and folders, the content layout on add)
 are in. Transmission maps the file rename (`torrent-rename-path`); super seeding, export, a name of
 its own and the layout are capabilities it lacks (`SUPER_SEEDING`, `EXPORT_TORRENT`,
-`RENAME_TORRENT`, `CONTENT_LAYOUT`), hidden for it. Left from 0.4: web seeds shown and editable in
-the detail pane. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
+`RENAME_TORRENT`, `CONTENT_LAYOUT`), hidden for it; web seeds are listed on both and edited on
+libtorrent's alone (`WEB_SEEDS`, the Trackers tab). 0.4 is feature-complete. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
 run of release.yml, and the Homebrew/winget packagers need a `PACKAGES_TOKEN` secret (a PAT with
 `repo` scope; Termina has none either) before they do anything.

@@ -163,6 +163,15 @@ final class DetailPane extends VBox {
     private String renameForCapture;
 
     private Consumer<List<String>> onAddTrackers = urls -> {};
+    private Consumer<List<String>> onAddWebSeeds = urls -> {};
+    private Consumer<String> onRemoveWebSeed = url -> {};
+    private final ObservableList<String> webSeedItems = FXCollections.observableArrayList();
+    private final TableView<String> webSeeds = new TableView<>(webSeedItems);
+    /** Add and Remove for the web seeds: hidden for an engine that only lists them. */
+    private final HBox webSeedBar = new HBox(8);
+    /** What the capture hook types into the next Add Web Seeds dialog before pressing OK. */
+    private String webSeedsForCapture;
+
     private Consumer<String> onRemoveTracker = url -> {};
     private Runnable onReannounce = () -> {};
     private Consumer<String> onBanPeer = address -> {};
@@ -249,6 +258,14 @@ final class DetailPane extends VBox {
         onAddTrackers = handler;
     }
 
+    void setOnAddWebSeeds(Consumer<List<String>> handler) {
+        onAddWebSeeds = handler;
+    }
+
+    void setOnRemoveWebSeed(Consumer<String> handler) {
+        onRemoveWebSeed = handler;
+    }
+
     void setOnRemoveTracker(Consumer<String> handler) {
         onRemoveTracker = handler;
     }
@@ -274,6 +291,9 @@ final class DetailPane extends VBox {
         openButton.setVisible(localFiles);
         openButton.setManaged(localFiles);
         if (banItem != null) banItem.setVisible(caps.has(com.torrenta.engine.Engine.Capability.IP_FILTER));
+        boolean editSeeds = caps.has(com.torrenta.engine.Engine.Capability.WEB_SEEDS);
+        webSeedBar.setVisible(editSeeds);
+        webSeedBar.setManaged(editSeeds);
     }
 
     /** For the capture hook: the Peers tab's context menu, about the first peer when there is one. */
@@ -356,7 +376,7 @@ final class DetailPane extends VBox {
                 ? 0
                 : fileRows.rootItem().getChildren().size();
         return activeTab() + " files=" + fileCount + " peers=" + peerItems.size() + " trackers=" + trackerItems.size()
-                + " pieces=" + count(lastPieces) + "/" + lastPieces.length;
+                + " pieces=" + count(lastPieces) + "/" + lastPieces.length + " webseeds=" + webSeedItems;
     }
 
     /** The Overview as words, for the capture hook: header, card, map, graph, facts. */
@@ -435,6 +455,7 @@ final class DetailPane extends VBox {
         else
             for (int i = 0; i < trackerItems.size(); i++)
                 trackerItems.set(i, detail.trackers().get(i));
+        if (another || !webSeedItems.equals(detail.webSeeds())) webSeedItems.setAll(detail.webSeeds());
         lastPieces = detail.pieces();
         filesCount.setText(count(detail.files().size()));
         peersCount.setText(count(detail.peers().size()));
@@ -451,6 +472,7 @@ final class DetailPane extends VBox {
         files.setRoot(null);
         peerItems.clear();
         trackerItems.clear();
+        webSeedItems.clear();
         lastPieces = new boolean[0];
         pieceStrip.show(lastPieces, new int[0], new boolean[0]);
         if (logItems != null) logItems.setPredicate(e -> false);
@@ -1117,9 +1139,85 @@ final class DetailPane extends VBox {
         reannounce.setOnAction(e -> onReannounce.run());
         HBox bar = new HBox(8, add, remove, reannounce);
         bar.setPadding(new Insets(6));
-        VBox box = new VBox(bar, trackers);
+
+        // The web seeds under the trackers: HTTP sources are the other place pieces come from.
+        webSeeds.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
+        webSeeds.setPlaceholder(new Label(tr("detail.webSeeds.empty")));
+        webSeeds.getColumns().add(column(tr("detail.webSeeds.title"), 360, url -> url));
+        webSeeds.setPrefHeight(100);
+        Button addSeeds = new Button(tr("detail.webSeeds.add"));
+        addSeeds.setOnAction(e -> askWebSeeds());
+        Button removeSeed = new Button(tr("common.remove"));
+        removeSeed
+                .disableProperty()
+                .bind(webSeeds.getSelectionModel().selectedItemProperty().isNull());
+        removeSeed.setOnAction(
+                e -> onRemoveWebSeed.accept(webSeeds.getSelectionModel().getSelectedItem()));
+        webSeedBar.getChildren().setAll(addSeeds, removeSeed);
+        webSeedBar.setPadding(new Insets(6));
+
+        VBox box = new VBox(bar, trackers, webSeedBar, webSeeds);
+        // The two share the height: in a short pane the web seeds must not be pushed off the end.
         VBox.setVgrow(trackers, Priority.ALWAYS);
+        VBox.setVgrow(webSeeds, Priority.ALWAYS);
+        trackers.setMinHeight(60);
+        webSeeds.setMinHeight(60);
         return box;
+    }
+
+    private void askWebSeeds() {
+        TextInputDialog prompt = new TextInputDialog();
+        prompt.initOwner(getScene() == null ? null : getScene().getWindow());
+        Fonts.installUiFont(prompt.getDialogPane());
+        prompt.setTitle(tr("detail.webSeeds.addDialog.title"));
+        prompt.setHeaderText(tr("detail.webSeeds.addDialog.header"));
+        prompt.setContentText(tr("detail.trackers.addDialog.prompt"));
+        StockButtons.translate(prompt);
+        prompt.getEditor().setPrefColumnCount(48);
+        String typed = webSeedsForCapture;
+        webSeedsForCapture = null;
+        if (typed != null) {
+            Platform.runLater(() -> {
+                prompt.getEditor().setText(typed);
+                StockButtons.okButton(prompt).fire();
+            });
+        }
+        Optional<String> text = prompt.showAndWait();
+        text.map(Actions::trackerUrls).filter(urls -> !urls.isEmpty()).ifPresent(onAddWebSeeds);
+    }
+
+    /** For the capture hook: the web seeds listed, and whether Add and Remove are offered. */
+    String webSeedLineForCapture() {
+        return webSeedItems + " editable=" + webSeedBar.isVisible();
+    }
+
+    /** For the capture hook: the Trackers tab's Add Web Seeds dialog, {@code urls} typed and confirmed. */
+    void addWebSeedsForCapture(String urls) {
+        selectTab("trackers");
+        webSeedsForCapture = urls;
+        // On the next pulse: a nested event loop cannot start inside an animation or layout pass.
+        Platform.runLater(this::askWebSeeds);
+    }
+
+    /**
+     * For the capture hook: the web seed at {@code row} removed, as Remove under the list does;
+     * once the list has that many rows.
+     */
+    void removeWebSeedForCapture(int row) {
+        selectTab("trackers");
+        if (row < webSeedItems.size()) {
+            onRemoveWebSeed.accept(webSeedItems.get(row));
+            return;
+        }
+        // The list arrives with the first detail poll, after the hook's actions have run.
+        webSeedItems.addListener(new javafx.collections.ListChangeListener<String>() {
+            @Override
+            public void onChanged(Change<? extends String> c) {
+                if (row >= webSeedItems.size()) return;
+                webSeedItems.removeListener(this);
+                onRemoveWebSeed.accept(webSeedItems.get(row));
+            }
+        });
     }
 
     private void askTrackers() {

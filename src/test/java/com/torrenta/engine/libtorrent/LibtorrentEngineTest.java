@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import com.torrenta.engine.AddRequest;
@@ -720,6 +721,59 @@ class LibtorrentEngineTest {
                     "added after the existing tier");
             engine.removeTracker(t.id(), "http://t.example.com/announce");
             await("two trackers", () -> engine.detail(t.id()).trackers().size() == 2);
+        }
+    }
+
+    @Test
+    void webSeedsAreAddedAndRemovedAndTheChangeSurvivesARestart(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        Path root = downloads.resolve("mirrored");
+        Files.createDirectories(root);
+        Files.write(root.resolve("a.bin"), new byte[64 * 1024]);
+        NativeLibrary.ensureAvailable();
+        // .invalid hosts: a seed never asks them, and nothing leaves the machine if it did.
+        String fromFile = "http://seed-a.invalid/pub/";
+        byte[] torrent = new TorrentBuilder()
+                .path(root.toFile())
+                .addUrlSeed(fromFile)
+                .generate()
+                .entry()
+                .bencode();
+        String added = "https://seed-b.invalid/pub/";
+        String second = "http://seed-c.invalid/pub/";
+        String id;
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            Torrent t = engine.add(downloadsTorrent(dir, torrent));
+            id = t.id();
+            assertEquals(List.of(fromFile), engine.webSeeds(id), "the .torrent's url-list reaches the session");
+            assertEquals(List.of(fromFile), engine.detail(id).webSeeds());
+
+            EngineException refused = assertThrows(
+                    EngineException.class, () -> engine.addWebSeeds(t.id(), List.of(added, "ftp://x.invalid/")));
+            assertTrue(refused.getMessage().contains("ftp://x.invalid/"), refused.getMessage());
+            assertEquals(List.of(fromFile), engine.webSeeds(id), "a refused batch adds none of it");
+
+            engine.addWebSeeds(id, List.of(fromFile, " " + added + " ", "", second, added));
+            await("two seeds added, no duplicate", () -> engine.webSeeds(t.id()).size() == 3);
+            assertTrue(engine.webSeeds(id).containsAll(List.of(fromFile, added, second)));
+
+            engine.removeWebSeed(id, fromFile);
+            engine.removeWebSeed(id, "http://never.invalid/");
+            await("the file's seed removed", () -> !engine.webSeeds(t.id()).contains(fromFile));
+            assertEquals(Set.of(added, second), Set.copyOf(engine.webSeeds(id)));
+
+            // Export writes the list as it is now, not the .torrent's.
+            String exported = new String(engine.exportTorrent(id), java.nio.charset.StandardCharsets.ISO_8859_1);
+            assertTrue(exported.contains(added) && exported.contains(second), exported);
+            assertFalse(exported.contains(fromFile), "the removed seed does not come back with the export");
+        }
+        try (LibtorrentEngine again = engine(dir)) {
+            again.start();
+            assertEquals(
+                    Set.of(added, second),
+                    Set.copyOf(again.webSeeds(id)),
+                    "the resume data holds the list as changed, not the .torrent's");
         }
     }
 
