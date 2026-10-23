@@ -97,12 +97,22 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 
 ## Releasing
 
-`release.yml` on a `v*` tag: three targets only (linux-x64, macos-arm64, windows-x64 — the engine's
-native exists for no others), each smoke-tests its packaged app before uploading. `jreleaser.yml`
-publishes the release with `.github/release-notes.tpl` ahead of the changelog; the cask and winget
-templates under `src/jreleaser/distributions/` override JReleaser's stock ones (see the NOTES.md
-there: the stock cask names a `binary` that a bundle does not have). Everything here is Termina's
-release process with the names changed; Termina's README and memory hold the war stories.
+`docs/release.md` is the checklist. `release.yml` on a version-shaped tag (`v[0-9]+.[0-9]+.[0-9]+*`):
+a preflight (tag = pom, no snapshot, a `## X.Y.Z` section in CHANGELOG.md, CI passed on the commit,
+started on the tag and waited for when there is none), then three targets only (linux-x64,
+macos-arm64, windows-x64 — the engine's native exists for no others), each smoke-testing its
+packaged app before uploading, then JReleaser 1.26.0 (pinned, like every action: SHAs, Dependabot).
+A manual run is a dry run that runs `full-release --dry-run`, so jreleaser.yml, the cask and the
+winget manifests are exercised before a tag ever is. The body is `changelog.external`:
+`scripts/release/ReleaseNotes.java` writes `.github/release-notes.md` plus the version's changelog
+section, summarised to its bold leads when it passes JReleaser's 10,000-character body limit (the
+commit list was mostly merge lines, and the first one ran past it). `immutableRelease` (Editora's)
+creates a draft, uploads, publishes. The cask and winget templates under `src/jreleaser/distributions/`
+override JReleaser's stock ones (`src/jreleaser/NOTES.md` says why, and is outside the template
+directory because JReleaser copies every file there into the tap). JReleaser also copies the
+project LICENSE into each packager's repository (`skipLicenseFile` on winget) and JGit renormalises
+winget-pkgs' CRLF files: docs/release.md has the checks before `PACKAGES_TOKEN` is added. JReleaser's
+CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Editora's hardening.
 
 ## Things that will bite you
 
@@ -552,5 +562,5 @@ are in. Transmission maps the file rename (`torrent-rename-path`); super seeding
 its own and the layout are capabilities it lacks (`SUPER_SEEDING`, `EXPORT_TORRENT`,
 `RENAME_TORRENT`, `CONTENT_LAYOUT`), hidden for it. Left from 0.4: web seeds shown and editable in
 the detail pane. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
-run of release.yml, and the Homebrew/winget packagers need the `PACKAGES_TOKEN` secret copied from
-Termina's repository (the same PAT) before they do anything.
+run of release.yml, and the Homebrew/winget packagers need a `PACKAGES_TOKEN` secret (a PAT with
+`repo` scope; Termina has none either) before they do anything.
