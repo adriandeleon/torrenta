@@ -5,6 +5,8 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+## 0.1.0 — 2026-10-22
+
 ### Added
 
 - **A view strip, and keys that name the view.** Transfers, Search and RSS share the window's
@@ -16,118 +18,6 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   RSS Feeds moved there from the File menu. Each view takes the focus as it opens: the list, the
   query, the articles (the feeds while there are none). Returning to Search after a dialog lands
   in the query when there are no results to land in.
-
-### Changed
-
-- **The sidebar and the details pane go where you want them.** The sidebar sits on the left or
-  the right of the list, or is hidden; the details pane sits under the list, beside it on the
-  right (running the full height, General in one column), or is collapsed. View has "Sidebar on
-  the Right", "Details Pane" (`Ctrl+Shift+D`) and "Details Pane on the Right", the palette has
-  the same, and Settings → General → Appearance has both as choices. Hiding either keeps its
-  place, and each place of the details pane keeps its own size.
-
-- **The filter box is an omnibox** (`Ctrl+K`, `Ctrl+F` still works): a `key:value` term becomes a
-  chip the moment the space after it is typed, one the box cannot read becomes a red chip saying
-  why, `Backspace` on an empty box hands the last chip back for editing and a click removes one;
-  `>` then a name runs a command through the palette; a pasted magnet, `.torrent` link or path
-  opens the Add dialog; `Enter` selects every match and returns to the list, so the next key acts
-  on all of them. `Esc` peels one layer at a time: the box, then the list's filter, then its
-  selection. The Search tab moved from `Ctrl+K` to `Ctrl+Shift+F`.
-
-- **`Ctrl+N` is New Torrent in the RSS tab too**; `N` still adds a feed there.
-- **Reset to defaults asks first**, puts the theme back as well, and re-applies what the reset
-  keys drive (the engine's connection, speed and queue settings, the IP filter, and the tray,
-  file handlers and badge where those switches changed) instead of leaving them as they were
-  until the next restart.
-
-- **A magnet added from the Add dialog starts with the peers its file-list fetch found**, both
-  with "Add now, pick files when ready" and after the files arrived, instead of looking for the
-  swarm again from nothing.
-
-- **Alternative speed limits have a command**: View → Alternative Speed Limits (`Ctrl+Shift+J`),
-  checked while they are in force, and in the palette. Quit is in the palette too.
-- **Settings search opens the page that answers it best**: a row whose title matches beats one
-  whose description does, which beats a keyword, so "proxy" opens Connection rather than Sync.
-  A section's heading counts as a keyword of its rows ("proxy" lists the whole Proxy section).
-  `Esc` in a search clears it before it closes the window, and the window opens again unfiltered.
-- **Every removal asks first.** Feeds, rules, watched folders, search providers, engine profiles,
-  categories and tags in Settings are removed after the same question the torrent list and the
-  RSS tab ask; the categories' and tags' buttons say Remove, like the rest.
-- **A search asks the providers again after five minutes.** An answer was reused for as long as
-  the window stayed open, so running the same search later never found anything new.
-
-### Fixed
-
-- **The rest of the interface speaks the chosen language.** Engine errors and events (the status
-  bar, the Add dialog, the Event Log, the notifications), search and feed failures, a search
-  definition's problem in Settings → Search, the RSS rule dialog's problem line, the rule and
-  watch-folder log lines, the tray and badge reasons, the Trackers tab's status column and the
-  run-on-event lines were English whatever the language. Every confirmation and prompt has a
-  translated title and OK/Cancel (JavaFX's stock buttons followed the system locale instead), and
-  key names in hints come from the catalogue or the platform (`⌘V` on macOS, `Leertaste` and
-  `Entf` in German menus) rather than a fixed "Ctrl+V" or "Space". The UI string sweep now also
-  fails on English handed to an engine exception or event, or returned from a method whose result
-  the window shows.
-- **A long status message no longer pushes the rest of the status bar off the window.** A
-  tracker warning used to elide "Alt speed" and the rates as well and push free space off the
-  right edge; now the message alone shortens, with an ellipsis, and the port, DHT, rates and free
-  space keep their width.
-- **The same message is one line with a count.** libtorrent reports a tracker's error once per
-  listen interface, so one unreachable tracker logged the same warning about seven times per
-  torrent; the event log and the status bar's history now keep one line ("… ×7") for the same
-  level, torrent and words within ten seconds of the last time.
-- **"IP filter cleared" no longer appears (twice) at every start.** The start applied the stored
-  filter and then refreshed, which applied it again; a refresh now runs only when a download is
-  due, and the engine says nothing when clearing a filter that was never set.
-- **The window remembers its size, its place and whether it was maximised**, on this machine
-  only (never synced), and comes back on a screen that is still there, made to fit it. The first
-  window is wide enough for the default columns, with no horizontal scrollbar.
-- **The Statistics window's sections are spaced and aligned**: a gap between sections, the values
-  of a column starting at one place in every section, and the window as tall as its graph needs
-  instead of cutting it at the baseline.
-- **A torrent's Speed tab is no longer empty the first time it is chosen**: every torrent keeps
-  its last two minutes of rates, and the tab starts from them.
-- **Ban Peer was unreachable**: the Peers tab has a context menu, Ban Peer and Copy Address
-  (Ban Peer only for an engine that takes our IP filter), as Settings → IP filter promised. It
-  bans the host alone: libtorrent's addresses read `tcp://host:port`, and the scheme went into the
-  ban, which the filter then skipped. Transmission's IPv6 peers are shown in brackets.
-- **The Add dialog's "Wait here for the file list" led nowhere once the fetch had failed**: it hid
-  Add now and left Add disabled for good. Wait is offered only while the file list can still come.
-- **"Add now, pick files when ready" downloaded every file on Transmission**, which has no stop
-  condition. A daemon gets plain Add and Add paused for a magnet instead.
-- **Spinners dropped a number typed before Tab or a click elsewhere**: the RSS refresh interval,
-  the sync interval, a feed's own interval and a rule's "ignore for" days now keep it, as the
-  other spinners do; text that is not a number puts the old value back instead of throwing.
-- **Settings → Connection → Proxy port** had no description, no keywords, and showed for an engine
-  without a proxy.
-
-- **Every style after the debug log's in the stylesheet was ignored** (the RSS rule dialog's among
-  them, with a CSS warning at every start): a merge had dropped a closing brace.
-- **The detail pane opening collapsed to its tab strip.** The empty "No torrents yet" state,
-  which stands in for the list at every launch until the engine's first poll, could push the
-  divider down while the window was being laid out, and that position was saved. The divider is
-  no longer remembered while the empty state shows, the saved one is put back when the list
-  appears, and a saved position that leaves the pane its tabs and nothing more is ignored.
-- **Add Trackers took several URLs as one**: the prompt split on a literal `\s` rather than on
-  whitespace, so two URLs on two lines reached the engine as a single announce URL.
-- **The menus now show `Space`, `Delete`, `Shift+Delete`, `Ctrl+V`, `Ctrl+K`, `Esc`, `Ctrl+A`,
-  `Ctrl+Shift+L`, `Ctrl+Shift+T` and `Ctrl+Shift+M`** beside their items; the keys stay where they
-  were (Space and Delete on the list only, so a space typed into the filter does not pause).
-- **`Ctrl+Shift+G` opens Set Category**, as the palette always said it did.
-- **A poll racing a profile switch** could read the engine field after the switch had cleared
-  it; the poll now works on its own copy and skips a tick with no engine.
-- **A crash, any time after a file of 40 pieces or more was checked, downloaded or seeded** (exit
-  139, no error file, "Segmentation fault" from the shell, usually at a garbage collection):
-  libtorrent's memory-mapped disk I/O installs a SIGSEGV/SIGBUS handler of its own in place of
-  the JVM's once it maps a file, and the JVM's next safepoint poll died under it. The engine now
-  sets libtorrent's mmap cutoff above every file, so the same disk I/O reads with `pread` and
-  installs nothing. Found while making the torrent creator, whose hashing met the same handler;
-  a test seeds a 2 MiB file while a thread drives the collector.
-- **A crash at quit with a torrent in the list** (exit 139, no error file, every few runs): the
-  window's poll could still be reading the torrents while the engine deleted the native session
-  under it. Every engine call now finishes before the session goes, and a later one is refused.
-
-### Added
 
 - **Torrent → Choose Files…** (the context menu and the palette too) for a torrent added with
   "Add now, pick files when ready": it opens the file tree to choose the files and starts the
@@ -459,18 +349,6 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   update when one is known, and a monospace block with the build, the engine, Java, JavaFX, the OS
   and the config folder, with "Copy details". Also in the palette.
 
-### Fixed
-
-- **A JVM crash in the engine** (`SIGSEGV` in `libtorrent4j.so` while reading a torrent's detail,
-  seen once on CI): libtorrent4j's vector proxies hand out pointers that its finalizer frees. The
-  engine now keeps only handles, trackers and peers it owns.
-
-### Changed
-
-- **JavaFX 27**, as Editora; was 26.0.2.
-
-### Added
-
 - **Themes**, in Settings → General → Appearance, applied at once: Editora Light and Dark (Caret &
   Ink, as before), Nord Light and Dark, Cupertino Light and Dark. The last four are AtlantaFX's own,
   now a dependency, as in Editora. Kept as `ui.theme` in the settings file.
@@ -537,3 +415,120 @@ Ink themes carried over from Editora and Termina; the development screen capture
 platforms. The engine is libtorrent through libtorrent4j 2.1.0-39, behind a small `Engine`
 interface; torrents from the command line are added and listed with size, progress, rates, peers
 and state. No dialogs, resume data, limits or settings yet.
+
+### Changed
+
+- **The sidebar and the details pane go where you want them.** The sidebar sits on the left or
+  the right of the list, or is hidden; the details pane sits under the list, beside it on the
+  right (running the full height, General in one column), or is collapsed. View has "Sidebar on
+  the Right", "Details Pane" (`Ctrl+Shift+D`) and "Details Pane on the Right", the palette has
+  the same, and Settings → General → Appearance has both as choices. Hiding either keeps its
+  place, and each place of the details pane keeps its own size.
+
+- **The filter box is an omnibox** (`Ctrl+K`, `Ctrl+F` still works): a `key:value` term becomes a
+  chip the moment the space after it is typed, one the box cannot read becomes a red chip saying
+  why, `Backspace` on an empty box hands the last chip back for editing and a click removes one;
+  `>` then a name runs a command through the palette; a pasted magnet, `.torrent` link or path
+  opens the Add dialog; `Enter` selects every match and returns to the list, so the next key acts
+  on all of them. `Esc` peels one layer at a time: the box, then the list's filter, then its
+  selection. The Search tab moved from `Ctrl+K` to `Ctrl+Shift+F`.
+
+- **`Ctrl+N` is New Torrent in the RSS tab too**; `N` still adds a feed there.
+- **Reset to defaults asks first**, puts the theme back as well, and re-applies what the reset
+  keys drive (the engine's connection, speed and queue settings, the IP filter, and the tray,
+  file handlers and badge where those switches changed) instead of leaving them as they were
+  until the next restart.
+
+- **A magnet added from the Add dialog starts with the peers its file-list fetch found**, both
+  with "Add now, pick files when ready" and after the files arrived, instead of looking for the
+  swarm again from nothing.
+
+- **Alternative speed limits have a command**: View → Alternative Speed Limits (`Ctrl+Shift+J`),
+  checked while they are in force, and in the palette. Quit is in the palette too.
+- **Settings search opens the page that answers it best**: a row whose title matches beats one
+  whose description does, which beats a keyword, so "proxy" opens Connection rather than Sync.
+  A section's heading counts as a keyword of its rows ("proxy" lists the whole Proxy section).
+  `Esc` in a search clears it before it closes the window, and the window opens again unfiltered.
+- **Every removal asks first.** Feeds, rules, watched folders, search providers, engine profiles,
+  categories and tags in Settings are removed after the same question the torrent list and the
+  RSS tab ask; the categories' and tags' buttons say Remove, like the rest.
+- **A search asks the providers again after five minutes.** An answer was reused for as long as
+  the window stayed open, so running the same search later never found anything new.
+
+- **JavaFX 27**, as Editora; was 26.0.2.
+
+### Fixed
+
+- **The rest of the interface speaks the chosen language.** Engine errors and events (the status
+  bar, the Add dialog, the Event Log, the notifications), search and feed failures, a search
+  definition's problem in Settings → Search, the RSS rule dialog's problem line, the rule and
+  watch-folder log lines, the tray and badge reasons, the Trackers tab's status column and the
+  run-on-event lines were English whatever the language. Every confirmation and prompt has a
+  translated title and OK/Cancel (JavaFX's stock buttons followed the system locale instead), and
+  key names in hints come from the catalogue or the platform (`⌘V` on macOS, `Leertaste` and
+  `Entf` in German menus) rather than a fixed "Ctrl+V" or "Space". The UI string sweep now also
+  fails on English handed to an engine exception or event, or returned from a method whose result
+  the window shows.
+- **A long status message no longer pushes the rest of the status bar off the window.** A
+  tracker warning used to elide "Alt speed" and the rates as well and push free space off the
+  right edge; now the message alone shortens, with an ellipsis, and the port, DHT, rates and free
+  space keep their width.
+- **The same message is one line with a count.** libtorrent reports a tracker's error once per
+  listen interface, so one unreachable tracker logged the same warning about seven times per
+  torrent; the event log and the status bar's history now keep one line ("… ×7") for the same
+  level, torrent and words within ten seconds of the last time.
+- **"IP filter cleared" no longer appears (twice) at every start.** The start applied the stored
+  filter and then refreshed, which applied it again; a refresh now runs only when a download is
+  due, and the engine says nothing when clearing a filter that was never set.
+- **The window remembers its size, its place and whether it was maximised**, on this machine
+  only (never synced), and comes back on a screen that is still there, made to fit it. The first
+  window is wide enough for the default columns, with no horizontal scrollbar.
+- **The Statistics window's sections are spaced and aligned**: a gap between sections, the values
+  of a column starting at one place in every section, and the window as tall as its graph needs
+  instead of cutting it at the baseline.
+- **A torrent's Speed tab is no longer empty the first time it is chosen**: every torrent keeps
+  its last two minutes of rates, and the tab starts from them.
+- **Ban Peer was unreachable**: the Peers tab has a context menu, Ban Peer and Copy Address
+  (Ban Peer only for an engine that takes our IP filter), as Settings → IP filter promised. It
+  bans the host alone: libtorrent's addresses read `tcp://host:port`, and the scheme went into the
+  ban, which the filter then skipped. Transmission's IPv6 peers are shown in brackets.
+- **The Add dialog's "Wait here for the file list" led nowhere once the fetch had failed**: it hid
+  Add now and left Add disabled for good. Wait is offered only while the file list can still come.
+- **"Add now, pick files when ready" downloaded every file on Transmission**, which has no stop
+  condition. A daemon gets plain Add and Add paused for a magnet instead.
+- **Spinners dropped a number typed before Tab or a click elsewhere**: the RSS refresh interval,
+  the sync interval, a feed's own interval and a rule's "ignore for" days now keep it, as the
+  other spinners do; text that is not a number puts the old value back instead of throwing.
+- **Settings → Connection → Proxy port** had no description, no keywords, and showed for an engine
+  without a proxy.
+
+- **Every style after the debug log's in the stylesheet was ignored** (the RSS rule dialog's among
+  them, with a CSS warning at every start): a merge had dropped a closing brace.
+- **The detail pane opening collapsed to its tab strip.** The empty "No torrents yet" state,
+  which stands in for the list at every launch until the engine's first poll, could push the
+  divider down while the window was being laid out, and that position was saved. The divider is
+  no longer remembered while the empty state shows, the saved one is put back when the list
+  appears, and a saved position that leaves the pane its tabs and nothing more is ignored.
+- **Add Trackers took several URLs as one**: the prompt split on a literal `\s` rather than on
+  whitespace, so two URLs on two lines reached the engine as a single announce URL.
+- **The menus now show `Space`, `Delete`, `Shift+Delete`, `Ctrl+V`, `Ctrl+K`, `Esc`, `Ctrl+A`,
+  `Ctrl+Shift+L`, `Ctrl+Shift+T` and `Ctrl+Shift+M`** beside their items; the keys stay where they
+  were (Space and Delete on the list only, so a space typed into the filter does not pause).
+- **`Ctrl+Shift+G` opens Set Category**, as the palette always said it did.
+- **A poll racing a profile switch** could read the engine field after the switch had cleared
+  it; the poll now works on its own copy and skips a tick with no engine.
+- **A crash, any time after a file of 40 pieces or more was checked, downloaded or seeded** (exit
+  139, no error file, "Segmentation fault" from the shell, usually at a garbage collection):
+  libtorrent's memory-mapped disk I/O installs a SIGSEGV/SIGBUS handler of its own in place of
+  the JVM's once it maps a file, and the JVM's next safepoint poll died under it. The engine now
+  sets libtorrent's mmap cutoff above every file, so the same disk I/O reads with `pread` and
+  installs nothing. Found while making the torrent creator, whose hashing met the same handler;
+  a test seeds a 2 MiB file while a thread drives the collector.
+- **A crash at quit with a torrent in the list** (exit 139, no error file, every few runs): the
+  window's poll could still be reading the torrents while the engine deleted the native session
+  under it. Every engine call now finishes before the session goes, and a later one is refused.
+
+- **A JVM crash in the engine** (`SIGSEGV` in `libtorrent4j.so` while reading a torrent's detail,
+  seen once on CI): libtorrent4j's vector proxies hand out pointers that its finalizer frees. The
+  engine now keeps only handles, trackers and peers it owns.
+
