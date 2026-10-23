@@ -3,14 +3,14 @@ package com.torrenta.ui;
 import static com.torrenta.i18n.Messages.tr;
 
 /**
- * Where the detail pane sits: under the list, beside it on the right, or collapsed away. The
+ * Where the detail pane sits: beside the list on the right (the default), under it, or collapsed away. The
  * settings keep it as two keys, whether it shows ({@code detail.visible}) and where
  * ({@code detail.side}), so collapsing it and bringing it back keeps the place; each place keeps
  * its own divider, since a fraction of the height means nothing as a fraction of the width.
  */
 public enum DetailPlace {
-    BOTTOM("bottom", DetailSplit.DEFAULT),
     RIGHT("right", 0.58),
+    BOTTOM("bottom", DetailSplit.DEFAULT),
     HIDDEN("hidden", DetailSplit.DEFAULT);
 
     private final String id;
@@ -34,10 +34,10 @@ public enum DetailPlace {
         return this == RIGHT;
     }
 
-    /** The place the two keys describe; a side that is not {@code right} is the bottom. */
+    /** The place the two keys describe; a side that is not {@code bottom} is the right. */
     public static DetailPlace of(boolean shown, String side) {
         if (!shown) return HIDDEN;
-        return side != null && side.trim().equalsIgnoreCase(RIGHT.id) ? RIGHT : BOTTOM;
+        return side != null && side.trim().equalsIgnoreCase(BOTTOM.id) ? BOTTOM : RIGHT;
     }
 
     /** The other place it can show in; hidden stays hidden. */

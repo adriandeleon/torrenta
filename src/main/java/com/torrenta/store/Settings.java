@@ -71,7 +71,7 @@ public final class Settings {
     public static final String WINDOW_BOUNDS = "ui.window.bounds";
 
     public static final String WINDOW_MAXIMIZED = "ui.window.maximized";
-    /** Where the detail pane shows, {@code bottom} or {@code right}; kept while it is collapsed. */
+    /** Where the detail pane shows, {@code right} (the default) or {@code bottom}; kept while it is collapsed. */
     public static final String DETAIL_SIDE = "detail.side";
     /** The divider while the pane is on the right: the list's share of the width. */
     public static final String DETAIL_DIVIDER_RIGHT = "detail.dividerRight";
