@@ -244,12 +244,15 @@ in the settings file turns the automatic check off.
 
 ### Releasing
 
-A release is a tag. Set `<version>` in `pom.xml` to the release number (no `-SNAPSHOT`), commit,
-tag `v<version>`, push the tag. `release.yml` builds the installers on all three platforms, smoke
-tests each packaged app, and JReleaser publishes the GitHub release with install notes and a
-changelog, then updates the Homebrew cask and opens the winget pull request when the
-`PACKAGES_TOKEN` secret is present. A manual run of the workflow is a dry run: it builds and uploads
-everything and publishes nothing. Afterwards, reopen `master` at the next `-SNAPSHOT`.
+A release is a tag. Set `<version>` in `pom.xml` to the release number (no `-SNAPSHOT`) and turn
+`## Unreleased` in the changelog into that version's section, commit, tag `v<version>` once CI is
+green, push the tag. `release.yml` checks the tag against the pom and the changelog and requires CI
+on the commit, builds the installers on all three platforms, smoke tests each packaged app, and
+JReleaser publishes the GitHub release with the install notes and the changelog's section, then
+updates the Homebrew cask and opens the winget pull request when the `PACKAGES_TOKEN` secret is
+present. A manual run of the workflow is a dry run: it builds everything and runs JReleaser with
+`--dry-run`. Afterwards, reopen `master` at the next `-SNAPSHOT`. The checklist, and what to check
+before the package managers are switched on, is [docs/release.md](docs/release.md).
 
 ## Keyboard
 
@@ -396,8 +399,8 @@ scripts/render-icon.py            branding/torrenta-icon.svg → torrenta.png (P
 - **A port test** in Settings → Connection: libtorrent has none, it needs an outside service.
 - **Renaming a torrent or its paths** for a Transmission daemon: the RPC has it, the `Engine`
   interface does not yet.
-- **A first release.** The pipeline (JReleaser, Homebrew cask, winget) is in place and dry-run
-  pending; the 1.0 criteria in [docs/ROADMAP.md](docs/ROADMAP.md) (a week of daily use on each
+- **A first release.** The pipeline (JReleaser, Homebrew cask, winget) is in place, its JReleaser
+  step dry-run locally, the workflow's own dry run pending; the 1.0 criteria in [docs/ROADMAP.md](docs/ROADMAP.md) (a week of daily use on each
   platform, resume data proven across upgrades, signed installers) are what stands between the
   code and a tag.
 

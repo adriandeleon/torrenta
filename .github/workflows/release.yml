@@ -1,44 +1,52 @@
 # Build the app image on every platform and attach the installers to a GitHub release.
 #
-# Triggered by a v* tag. The pom's version is the single source of truth: the tag has to agree with
-# it, and the build fails loudly if it does not — artifacts labelled with a version they were not
-# built from are worse than no artifacts.
+# Triggered by a version tag. The pom's version is the single source of truth: the tag has to agree
+# with it, and the preflight fails in seconds if it does not — artifacts labelled with a version
+# they were not built from are worse than no artifacts. docs/release.md is the checklist.
 #
 # Three targets, not five: the engine's native library exists for Linux x86_64, macOS arm64 and
 # Windows x86_64 only, and -Pdist fails at the unpack step on any other platform.
+#
+# The hardening is Editora's, which met each of these first: version-shaped tags only, a read-only
+# token everywhere but the job that publishes, actions and JReleaser pinned, CI required on the
+# tagged commit, and a dry run that runs JReleaser rather than stopping before it.
 name: Release
 
 on:
   push:
-    tags: ['v*']
-  # For a dry run: builds and uploads artifacts, creates no release.
+    # Version-shaped tags only (vX.Y.Z, optionally with a suffix such as -rc1). A bare `v*` also
+    # fires on a tag like `v-test`, and everything downstream assumes the tag is a version.
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  # A dry run: builds and uploads every installer, then runs JReleaser with --dry-run, which
+  # renders the notes, the cask and the winget manifests and publishes nothing.
   workflow_dispatch:
 
+# Read-only by default. Only the job that publishes asks for more, in its own block: the build legs
+# run third-party actions and the platforms' packaging tools, and must not hold a token that can
+# write to the repository. Actions are pinned to a commit with the version in a trailing comment
+# (Dependabot moves both, .github/dependabot.yml): a tag is mutable, a SHA is not.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
-    name: ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+  preflight:
+    name: Preflight (version, changelog, CI)
+    runs-on: ubuntu-latest
+    # Waits up to an hour for CI on the tagged commit (macOS and Windows runners can queue).
+    timeout-minutes: 75
+    permissions:
+      contents: read
+      # Read CI's runs on the commit, and start one when there is none.
+      actions: write
     outputs:
       version: ${{ steps.version.outputs.version }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: linux-x64
-          - os: macos-latest
-            target: macos-arm64
-          - os: windows-latest
-            target: windows-x64
-
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up JDK 25
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '25'
@@ -51,9 +59,12 @@ jobs:
           set -euo pipefail
           pom=$(./mvnw -B -q --no-transfer-progress help:evaluate -Dexpression=project.version -DforceStdout)
           public="${pom%-SNAPSHOT}"
+          # A dry run from a -SNAPSHOT pom is validated as the plain version: JReleaser refuses a
+          # snapshot for an immutable release even with --dry-run (Editora found it). The installers
+          # still carry the build's own identity.
           echo "version=$public" >> "$GITHUB_OUTPUT"
 
-          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             tag="${GITHUB_REF_NAME#v}"
             if [ "$tag" != "$public" ]; then
               echo "::error::tag v$tag does not match the pom version $pom"
@@ -65,7 +76,112 @@ jobs:
               exit 1
             fi
           fi
-          echo "Building $public for ${{ matrix.target }}"
+          echo "Releasing $public (pom $pom)"
+
+      # The release body: the install text and this version's CHANGELOG.md section. A tag whose
+      # changelog still says "Unreleased" stops here; a dry run takes "Unreleased" as it is.
+      - name: Write the release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          java scripts/release/ReleaseNotesTest.java
+          unreleased=""
+          [ "$GITHUB_REF_TYPE" = "tag" ] || unreleased="--unreleased"
+          java scripts/release/ReleaseNotes.java $unreleased "${{ steps.version.outputs.version }}" \
+            CHANGELOG.md .github/release-notes.md out/release-notes.md
+          cat out/release-notes.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the release notes
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-notes
+          path: out/release-notes.md
+          retention-days: 14
+          if-no-files-found: error
+
+      # The build legs run no tests and a tag can be pushed on any commit, so this is what keeps a
+      # release from being cut from code CI never passed. The newest CI run on the commit decides:
+      # success passes, a failure stops the release at once, and none at all (or one cancelled,
+      # which a newer push to master does to the older commit's run) starts CI on the tag and waits
+      # for it. A dry run only reports. A failure unrelated to the code: re-run CI on the commit,
+      # then re-run this workflow.
+      - name: Require CI on this commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          enforce=false
+          [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_TYPE" = "tag" ] && enforce=true
+          newest() {
+            gh run list --workflow ci.yml --commit "$GITHUB_SHA" --limit 20 \
+              --json databaseId,status,conclusion,createdAt \
+              --jq 'sort_by(.createdAt) | last | if . == null then "" else "\(.databaseId) \(.status) \(.conclusion)" end'
+          }
+          dispatched=false
+          deadline=$((SECONDS + 60 * 60))
+          while :; do
+            read -r id status conclusion <<< "$(newest)" || true
+            if [ -n "${id:-}" ] && [ "$status" = "completed" ]; then
+              case "$conclusion" in
+                success)
+                  echo "CI passed on $GITHUB_SHA (run $id)."; exit 0 ;;
+                cancelled|skipped|stale) ;;
+                *)
+                  level=warning; $enforce && level=error
+                  echo "::$level::CI ended '$conclusion' on $GITHUB_SHA: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$id"
+                  $enforce && exit 1 || exit 0 ;;
+              esac
+            elif [ -n "${id:-}" ]; then
+              $enforce || { echo "::notice::CI is still running on $GITHUB_SHA (run $id)."; exit 0; }
+              echo "CI is $status on $GITHUB_SHA (run $id); waiting."
+            fi
+            if [ -z "${id:-}" ] || [ "$status" = "completed" ]; then
+              if ! $enforce; then
+                echo "::warning::No finished CI run on $GITHUB_SHA. A tag would start one and wait for it."
+                exit 0
+              fi
+              if ! $dispatched; then
+                echo "No usable CI run on $GITHUB_SHA; starting one on $GITHUB_REF_NAME."
+                gh workflow run ci.yml --ref "$GITHUB_REF_NAME"
+                dispatched=true
+              fi
+            fi
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "::error::CI did not finish on $GITHUB_SHA within an hour."
+              exit 1
+            fi
+            sleep 30
+          done
+
+  build:
+    name: ${{ matrix.target }}
+    needs: preflight
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: macos-latest
+            target: macos-arm64
+          - os: windows-latest
+            target: windows-x64
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
 
       # jpackage shells out to each platform's own packaging tools, and none of them are a given on
       # a fresh runner.
@@ -115,12 +231,13 @@ jobs:
 
       # jpackage names its output after the version it was given, which on macOS is the bumped
       # placeholder (1.1.0 for a 0.1.0 release) and everywhere else carries no target. Renaming to
-      # one scheme is what makes three platforms' downloads legible on a single release page.
+      # one scheme is what makes three platforms' downloads legible on a single release page, and
+      # it is the scheme jreleaser.yml names file by file.
       - name: Name the installers
         shell: bash
         run: |
           set -euo pipefail
-          version="${{ steps.version.outputs.version }}"
+          version="${{ needs.preflight.outputs.version }}"
           cd target/installers
           shopt -s nullglob
           produced=0
@@ -136,7 +253,7 @@ jobs:
           ls -la
 
       - name: Upload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: Torrenta-${{ matrix.target }}
           path: target/installers/*
@@ -144,43 +261,59 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Publish
+    # A tag publishes; a manual run is the dry run of the same step.
+    name: ${{ github.ref_type == 'tag' && 'Publish' || 'Publish (dry run)' }}
     runs-on: ubuntu-latest
-    needs: build
-    # Only a tag publishes. A manual run is a dry run: it builds everything and stops.
-    if: github.ref_type == 'tag'
+    needs: [preflight, build]
+    timeout-minutes: 30
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v5
+      # JReleaser talks to the API with its own token and only reads the local history; nothing
+      # here pushes with git, so the checkout's token is not left in .git/config.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # JReleaser reads the git history to build the changelog, and warns that a shallow copy
-          # may fail. The default checkout is depth 1.
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          pattern: Torrenta-*
           path: artifacts
           merge-multiple: true
 
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-notes
+          path: out
+
       - name: Set up JDK 25
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: '25'
 
+      # jreleaser.yml names each file, so a missing one fails the checksum step before anything is
+      # created; this only puts the list where the run page shows it.
       - name: List what will be released
-        run: ls -la artifacts
+        run: ls -la artifacts out
 
       # Decided here rather than by editing config: with no token the package managers are excluded
       # outright, and the moment PACKAGES_TOKEN exists they are included again with no change to
-      # anything. A skipped packager says so in one line; a failed one buries the reason.
-      - name: Decide which packagers can run
+      # anything. A skipped packager says so in one line; a failed one buries the reason. A dry run
+      # keeps them: it renders the cask and the manifests, reading the tap and the winget fork with
+      # the workflow's own token, and pushes nothing.
+      - name: Decide what JReleaser runs
         id: packagers
         shell: bash
         env:
           PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
         run: |
           set -euo pipefail
-          if [ -n "${PACKAGES_TOKEN:-}" ]; then
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "args=full-release --dry-run" >> "$GITHUB_OUTPUT"
+            echo "Dry run: nothing is published."
+          elif [ -n "${PACKAGES_TOKEN:-}" ]; then
             echo "args=full-release" >> "$GITHUB_OUTPUT"
             echo "PACKAGES_TOKEN is set: the Homebrew cask and winget PR will be published."
           else
@@ -188,27 +321,34 @@ jobs:
             echo "::notice::No PACKAGES_TOKEN — publishing the GitHub release only. No Homebrew cask, no winget pull request."
           fi
 
-      - name: Publish release
-        uses: jreleaser/release-action@v2
+      - name: JReleaser
+        # The action's v2 is a branch, not a tag: pinned to its head as of 2026-10-22.
+        uses: jreleaser/release-action@97b5e2f0e845de2fe1dbbdf451ac6a21233fafff # v2
         with:
+          # The JReleaser the action downloads; its default is whatever was published last.
+          version: 1.26.0
           arguments: ${{ steps.packagers.outputs.args }}
         env:
-          JRELEASER_PROJECT_VERSION: ${{ needs.build.outputs.version }}
+          JRELEASER_PROJECT_VERSION: ${{ needs.preflight.outputs.version }}
           # Creates the release in this repository.
           JRELEASER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Pushes to the Homebrew tap and opens the winget pull request. Those live in other
-          # repositories, which the default GITHUB_TOKEN cannot write to — a PAT with repo scope,
-          # the same one Termina uses. Without it both packagers are excluded above.
-          JRELEASER_BREW_GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
-          JRELEASER_WINGET_GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+          # repositories, which the default GITHUB_TOKEN cannot write to — a PAT with repo scope.
+          # Without it a release excludes both packagers above; a dry run reads with the default.
+          JRELEASER_BREW_GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
+          JRELEASER_WINGET_GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Upload JReleaser output
-        # The trace is the only way to tell a packager that was skipped from one that failed.
+        # The trace is the only way to tell a packager that was skipped from one that failed, and
+        # the package directory holds the cask and manifests a dry run rendered.
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: jreleaser-logs
+          name: jreleaser-output
           path: |
             out/jreleaser/trace.log
             out/jreleaser/output.properties
+            out/jreleaser/release/CHANGELOG.md
+            out/jreleaser/package/
           retention-days: 7
+          if-no-files-found: ignore

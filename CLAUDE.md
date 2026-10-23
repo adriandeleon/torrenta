@@ -99,12 +99,22 @@ list; `addInput` runs on a virtual thread. Inputs that arrive before the engine 
 
 ## Releasing
 
-`release.yml` on a `v*` tag: three targets only (linux-x64, macos-arm64, windows-x64 — the engine's
-native exists for no others), each smoke-tests its packaged app before uploading. `jreleaser.yml`
-publishes the release with `.github/release-notes.tpl` ahead of the changelog; the cask and winget
-templates under `src/jreleaser/distributions/` override JReleaser's stock ones (see the NOTES.md
-there: the stock cask names a `binary` that a bundle does not have). Everything here is Termina's
-release process with the names changed; Termina's README and memory hold the war stories.
+`docs/release.md` is the checklist. `release.yml` on a version-shaped tag (`v[0-9]+.[0-9]+.[0-9]+*`):
+a preflight (tag = pom, no snapshot, a `## X.Y.Z` section in CHANGELOG.md, CI passed on the commit,
+started on the tag and waited for when there is none), then three targets only (linux-x64,
+macos-arm64, windows-x64 — the engine's native exists for no others), each smoke-testing its
+packaged app before uploading, then JReleaser 1.26.0 (pinned, like every action: SHAs, Dependabot).
+A manual run is a dry run that runs `full-release --dry-run`, so jreleaser.yml, the cask and the
+winget manifests are exercised before a tag ever is. The body is `changelog.external`:
+`scripts/release/ReleaseNotes.java` writes `.github/release-notes.md` plus the version's changelog
+section, summarised to its bold leads when it passes JReleaser's 10,000-character body limit (the
+commit list was mostly merge lines, and the first one ran past it). `immutableRelease` (Editora's)
+creates a draft, uploads, publishes. The cask and winget templates under `src/jreleaser/distributions/`
+override JReleaser's stock ones (`src/jreleaser/NOTES.md` says why, and is outside the template
+directory because JReleaser copies every file there into the tap). JReleaser also copies the
+project LICENSE into each packager's repository (`skipLicenseFile` on winget) and JGit renormalises
+winget-pkgs' CRLF files: docs/release.md has the checks before `PACKAGES_TOKEN` is added. JReleaser's
+CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Editora's hardening.
 
 ## Things that will bite you
 
@@ -447,6 +457,24 @@ release process with the names changed; Termina's README and memory hold the war
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
   write under `~/.torrenta`. `LibtorrentEngineTest` starts a real session on purpose: it is the one
   test that proves the native loads on each CI platform.
+- **On macOS the test JVM ends with `_exit`, because libtorrent4j's OpenSSL can abort at `exit()`.**
+  libtorrent4j 2.1.0-39 links OpenSSL 3.5.5 statically, and OpenSSL registers its cleanup with
+  `atexit`. About one macOS CI run in twenty, that cleanup freed a pointer that was not allocated
+  and libmalloc aborted the fork *after every test had reported*: `Abort trap: 6`, no hs_err, nothing
+  on stderr, and surefire's "Error occurred in starting fork" (the store tests' expected exceptions
+  were only the last lines printed). macOS's crash report named it: the VM thread in `exit()` →
+  `__cxa_finalize_ranges` → libtorrent4j's OpenSSL code → `___BUG_IN_CLIENT_OF_LIBMALLOC_POINTER_BEING_FREED_WAS_NOT_ALLOCATED`,
+  with no libtorrent thread alive. `com.torrenta.NativeTeardownSkip` (a `LauncherSessionListener`
+  in `META-INF/services`, macOS only) waits for the other shutdown hooks (JaCoCo's) once the test
+  session closed and calls `_exit(0)` through FFM, so the C exit handlers never run; hence
+  `--add-opens java.base/java.lang` in the argLine. The JDK starts the hooks one by one and
+  `join` returns at once on a thread not yet started, so `awaitOthers` waits for each to start
+  first: joining straight away cut `jacoco.exec` short (`EOFException` in the report) in eight
+  of twelve shards of a 72-run macOS loop. The packaged app quits through the same `exit()`
+  and has not been seen to crash there. A failing macOS job copies `java*.ips` from
+  `~/Library/Logs/DiagnosticReports` into the uploaded reports and prints the crashed thread
+  (`.github/scripts/ips-summary.py`); surefire drops a fork's stderr once it has said goodbye, so the
+  crash report is the only witness to an exit-time crash.
 - **Palantir 2.92 does not run on JDK 27.** Build with a JDK 25. The enforcer rule in the pom says so
   at `validate`, so `mvn javafx:run` under the sdkman default of 27 stops with the reason instead of
   running a mix the project never tests (one such run crashed at quit).
@@ -559,5 +587,5 @@ are in. Transmission maps the file rename (`torrent-rename-path`); super seeding
 its own and the layout are capabilities it lacks (`SUPER_SEEDING`, `EXPORT_TORRENT`,
 `RENAME_TORRENT`, `CONTENT_LAYOUT`), hidden for it; web seeds are listed on both and edited on
 libtorrent's alone (`WEB_SEEDS`, the Trackers tab). 0.4 is feature-complete. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
-run of release.yml, and the Homebrew/winget packagers need the `PACKAGES_TOKEN` secret copied from
-Termina's repository (the same PAT) before they do anything.
+run of release.yml, and the Homebrew/winget packagers need a `PACKAGES_TOKEN` secret (a PAT with
+`repo` scope; Termina has none either) before they do anything.

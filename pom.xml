@@ -27,6 +27,7 @@
         <jacoco.version>0.8.13</jacoco.version>
         <javafx.plugin.version>0.0.8</javafx.plugin.version>
         <junit.version>5.14.4</junit.version>
+        <junit.platform.version>1.14.4</junit.platform.version>
         <!-- The update check reads a GitHub release payload: a large JSON document with
              user-authored text in it, so it gets a real parser. jackson-core only — no databind —
              and it is a proper JPMS module, so jlink links it without moditect. -->
@@ -114,6 +115,14 @@
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
             <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- For com.torrenta.NativeTeardownSkip, a LauncherSessionListener; the same release as
+             the one surefire would pick for this Jupiter. -->
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-launcher</artifactId>
+            <version>${junit.platform.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
@@ -282,8 +291,10 @@
                     </systemPropertyVariables>
                     <!-- The engine's JNI class calls System.load; see the javafx plugin options.
                          A crash report goes beside the test reports, which CI uploads on failure,
-                         rather than into whatever directory the fork happened to start in. -->
-                    <argLine>@{argLine} --enable-native-access=ALL-UNNAMED -XX:ErrorFile=${project.build.directory}/surefire-reports/hs_err_pid%p.log</argLine>
+                         rather than into whatever directory the fork happened to start in.
+                         NativeTeardownSkip calls _exit through FFM and reads the JDK's table of
+                         shutdown hooks, hence the opens. -->
+                    <argLine>@{argLine} --enable-native-access=ALL-UNNAMED --add-opens java.base/java.lang=ALL-UNNAMED -XX:ErrorFile=${project.build.directory}/surefire-reports/hs_err_pid%p.log</argLine>
                 </configuration>
             </plugin>
 

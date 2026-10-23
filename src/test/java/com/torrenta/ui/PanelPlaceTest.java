@@ -28,9 +28,11 @@ class PanelPlaceTest {
 
     @Test
     void theDetailPaneIsReadFromWhetherItShowsAndItsSide() {
-        assertEquals(DetailPlace.BOTTOM, DetailPlace.of(true, ""));
-        assertEquals(DetailPlace.BOTTOM, DetailPlace.of(true, "left"));
+        assertEquals(DetailPlace.RIGHT, DetailPlace.of(true, ""), "a fresh install has it on the right");
+        assertEquals(DetailPlace.RIGHT, DetailPlace.of(true, null));
+        assertEquals(DetailPlace.RIGHT, DetailPlace.of(true, "left"));
         assertEquals(DetailPlace.RIGHT, DetailPlace.of(true, "RIGHT"));
+        assertEquals(DetailPlace.BOTTOM, DetailPlace.of(true, " Bottom "));
         assertEquals(DetailPlace.HIDDEN, DetailPlace.of(false, "right"));
         assertTrue(DetailPlace.RIGHT.beside());
         assertFalse(DetailPlace.BOTTOM.beside());
