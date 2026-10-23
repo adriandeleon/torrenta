@@ -1,0 +1,54 @@
+# Scratch workflow: runs the macOS test suite many times to catch the fork's SIGABRT at exit and
+# keep macOS's crash report. Not for merging.
+name: Repro macOS exit abort
+
+on:
+  push:
+    branches: [repro/macos-exit-abort-2]
+
+jobs:
+  repro:
+    name: Repro ${{ matrix.shard }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Loop the tests
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          ./mvnw -B -q --no-transfer-progress test-compile
+          fails=0
+          for i in 1 2 3 4 5 6; do
+            echo "=== iteration $i"
+            rm -f target/jacoco*.exec
+            if ./mvnw -B --no-transfer-progress test > "$RUNNER_TEMP/evidence/run-$i.log" 2>&1; then
+              echo "iteration $i passed"
+            else
+              fails=$((fails+1))
+              echo "::warning::iteration $i failed"
+              grep -E "Abort trap|Segmentation|goodbye|starting fork|EOFException|Incompatible execution|There are test failures|^\\[ERROR\\]   " "$RUNNER_TEMP/evidence/run-$i.log" | head -20
+              cp -R target/surefire-reports "$RUNNER_TEMP/evidence/reports-$i" || true
+            fi
+          done
+          echo "failures: $fails"
+          ls -la ~/Library/Logs/DiagnosticReports/ /Library/Logs/DiagnosticReports/ 2>/dev/null || true
+          for f in ~/Library/Logs/DiagnosticReports/java* /Library/Logs/DiagnosticReports/java*; do
+            [ -f "$f" ] || continue
+            echo "--- $f"; head -c 60000 "$f"; cp "$f" "$RUNNER_TEMP/evidence/"
+          done
+          ls "$RUNNER_TEMP/evidence"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evidence-${{ matrix.shard }}
+          path: ${{ runner.temp }}/evidence/
+          retention-days: 7
