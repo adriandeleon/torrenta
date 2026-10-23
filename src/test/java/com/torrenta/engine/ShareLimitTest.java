@@ -107,6 +107,46 @@ class ShareLimitTest {
                 "an override of none means seed forever, whatever the global limit says");
     }
 
+    /** Super seeding keeps the torrent running, so the action is taken once and then not again. */
+    @Test
+    void superSeedingIsTheActionOnce() {
+        ShareLimit global = new ShareLimit(1, 0, ShareLimit.Action.SUPER_SEED);
+        Torrent done = torrent(TorrentState.SEEDING, false, 100, 100, 100, 0);
+        assertEquals(Optional.of(ShareLimit.Action.SUPER_SEED), ShareLimit.decide(done, global, null));
+        Torrent already = new Torrent(
+                done.id(),
+                done.name(),
+                done.size(),
+                done.done(),
+                done.progress(),
+                done.state(),
+                0,
+                0,
+                0,
+                0,
+                done.uploaded(),
+                done.downloaded(),
+                0,
+                0,
+                "",
+                "",
+                false,
+                false,
+                0,
+                "",
+                List.of(),
+                "",
+                List.of(),
+                false,
+                false,
+                -1,
+                false,
+                true);
+        assertEquals(Optional.empty(), ShareLimit.decide(already, global, null));
+        assertEquals(
+                Optional.of(new ShareLimit(2, 0, ShareLimit.Action.REMOVE_DATA)), ShareLimit.parse("2,0,REMOVE_DATA"));
+    }
+
     @Test
     void formatAndParseRoundTrip() {
         ShareLimit limit = new ShareLimit(1.5, 90, ShareLimit.Action.REMOVE);

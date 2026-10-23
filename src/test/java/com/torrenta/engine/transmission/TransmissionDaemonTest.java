@@ -261,6 +261,15 @@ class TransmissionDaemonTest {
             e.removeTracker(seed.id(), "udp://b.example.org:1/announce");
             assertEquals(1, e.detail(seed.id()).trackers().size());
 
+            // A folder renamed on the daemon's disk, a clash refused before the daemon is asked.
+            assertThrows(EngineException.class, () -> e.renamePath(seed.id(), "pair/sub", "a.bin"));
+            e.renamePath(seed.id(), "pair/sub", "extras");
+            await(
+                    "the folder renamed",
+                    () -> e.detail(seed.id()).files().stream()
+                            .anyMatch(f -> f.path().equals("pair/extras/b.bin")));
+            assertTrue(Files.exists(seeds.resolve("pair").resolve("extras").resolve("b.bin")));
+
             e.pause(seed.id());
             await("paused", () -> find(e, preview.id()).paused());
             e.resume(seed.id());

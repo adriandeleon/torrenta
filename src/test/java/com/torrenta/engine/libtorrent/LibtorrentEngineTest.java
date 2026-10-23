@@ -195,6 +195,106 @@ class LibtorrentEngineTest {
     }
 
     @Test
+    void superSeedingIsAFlagOfTheSeedAndSurvivesARestart(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        Files.createDirectories(downloads);
+        Path payload = downloads.resolve("seed.bin");
+        byte[] bytes = new byte[64 * 1024];
+        new Random(7).nextBytes(bytes);
+        Files.write(payload, bytes);
+        NativeLibrary.ensureAvailable();
+        Path torrentFile = dir.resolve("seed.torrent");
+        Files.write(
+                torrentFile,
+                new TorrentBuilder().path(payload.toFile()).generate().entry().bencode());
+
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        String id;
+        try (LibtorrentEngine engine = new LibtorrentEngine(downloads, store)) {
+            engine.start();
+            id = engine.add(torrentFile.toString()).id();
+            await("seeding", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+            assertFalse(engine.torrents().get(0).superSeeding());
+            engine.setSuperSeeding(id, true);
+            await("super seeding", () -> engine.torrents().get(0).superSeeding());
+        }
+        try (LibtorrentEngine again = new LibtorrentEngine(downloads, store)) {
+            again.start();
+            assertTrue(again.torrents().get(0).superSeeding(), "kept in the resume data");
+            again.setSuperSeeding(id, false);
+            await("off again", () -> !again.torrents().get(0).superSeeding());
+        }
+    }
+
+    /** An exported torrent is the same torrent: same hash, its trackers in their tiers, its web seed. */
+    @Test
+    void anExportedTorrentReadsBackAsTheSameTorrent(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        Files.createDirectories(downloads);
+        Path payload = downloads.resolve("export.bin");
+        byte[] bytes = new byte[48 * 1024];
+        new Random(11).nextBytes(bytes);
+        Files.write(payload, bytes);
+        NativeLibrary.ensureAvailable();
+        Path torrentFile = dir.resolve("export.torrent");
+        Files.write(
+                torrentFile,
+                new TorrentBuilder()
+                        .path(payload.toFile())
+                        .addTracker("udp://one.example.org:6969/announce", 0)
+                        .addUrlSeed("http://seed.example.org/files/")
+                        .generate()
+                        .entry()
+                        .bencode());
+
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            String id = engine.add(torrentFile.toString()).id();
+            engine.addTrackers(id, List.of("udp://two.example.org:6969/announce"));
+            byte[] exported = engine.exportTorrent(id);
+
+            TorrentPreview back = engine.inspect(exported);
+            assertEquals(id, back.id(), "the info dictionary is the one that was added");
+            assertEquals(
+                    List.of("udp://one.example.org:6969/announce", "udp://two.example.org:6969/announce"),
+                    back.trackers());
+            String text = new String(exported, java.nio.charset.StandardCharsets.ISO_8859_1);
+            assertTrue(text.contains("url-list"), "the web seed goes along");
+            assertTrue(text.contains("http://seed.example.org/files/"));
+            assertTrue(
+                    text.contains("ll35:udp://one.example.org:6969/announceel35:udp://two"),
+                    "two tiers, one tracker each: " + text.substring(0, Math.min(200, text.length())));
+
+            engine.add(MAGNET);
+            assertThrows(EngineException.class, () -> engine.exportTorrent(MAGNET_ID), "no file list yet");
+        }
+    }
+
+    /** A torrent's given name is the engine's everywhere, and survives a restart; empty undoes it. */
+    @Test
+    void aRenamedTorrentKeepsItsNameAcrossARestart(@TempDir Path dir) throws Exception {
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine engine = engine(dir, store)) {
+            engine.start();
+            engine.add(MAGNET);
+            engine.rename(MAGNET_ID, "My test");
+            assertEquals("My test", engine.torrents().get(0).name());
+        }
+        try (LibtorrentEngine again = engine(dir, store)) {
+            again.addListener(events::add);
+            again.start();
+            assertEquals("My test", again.torrents().get(0).name());
+            await(
+                    "the log uses it",
+                    () -> events.stream().anyMatch(e -> e.message().equals("Restored My test")));
+            again.rename(MAGNET_ID, "");
+            assertEquals("Torrenta test", again.torrents().get(0).name(), "its own name back");
+            assertTrue(store.loadLabels(MAGNET_ID).isEmpty(), "nothing left to keep");
+        }
+    }
+
+    @Test
     void eventsForTheLifeOfATorrent(@TempDir Path dir) throws Exception {
         Path downloads = dir.resolve("downloads");
         Files.createDirectories(downloads);
@@ -1191,6 +1291,141 @@ class LibtorrentEngineTest {
                     "the move is in the log",
                     () -> events.stream().anyMatch(e -> e.message().equals("Moved pair to " + downloads)));
             assertEquals(downloads.toString(), engine.detail(t.id()).general().savePath());
+        }
+    }
+
+    /**
+     * libtorrent 2.1 renames on disk and finds the file on a recheck, but its resume data reads a
+     * renamed file back relative to the save path and torrent_file() never shows the new name:
+     * without the engine's own record a restart lost the file and the Files tab showed the old one.
+     */
+    @Test
+    void renamedFilesAndFoldersAreFoundAfterARecheckAndARestart(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "pair");
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        String id;
+        try (LibtorrentEngine engine = engine(dir, store)) {
+            engine.start();
+            id = engine.add(downloadsTorrent(dir, torrent)).id();
+            await("seeding", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+
+            engine.renamePath(id, "pair/a.bin", "x.bin");
+            engine.renamePath(id, "pair/sub", "deep");
+            await(
+                    "renamed on disk",
+                    () -> Files.isRegularFile(downloads.resolve("pair/x.bin"))
+                            && Files.isRegularFile(downloads.resolve("pair/deep/b.bin")));
+            await("the emptied folder went", () -> !Files.exists(downloads.resolve("pair/sub")));
+            assertFalse(Files.exists(downloads.resolve("pair/a.bin")));
+            assertEquals(List.of("pair/x.bin", "pair/deep/b.bin"), paths(engine, id), "the Files tab's names");
+            assertThrows(EngineException.class, () -> engine.renamePath(id, "pair/x.bin", "deep"), "a folder is there");
+
+            engine.recheck(id);
+            await("checked", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+            assertEquals(1.0, engine.torrents().get(0).progress(), 1e-6);
+        }
+        try (LibtorrentEngine again = engine(dir, store)) {
+            again.start();
+            await(
+                    "complete under the new names",
+                    () -> again.torrents().get(0).progress() >= 1.0 - 1e-6
+                            && again.torrents().get(0).state() == TorrentState.SEEDING);
+            assertEquals(List.of("pair/x.bin", "pair/deep/b.bin"), paths(again, id));
+
+            again.renamePath(id, "pair", "top");
+            await("the root folder renamed", () -> Files.isRegularFile(downloads.resolve("top/deep/b.bin")));
+            await("and the old one gone", () -> !Files.exists(downloads.resolve("pair")));
+            again.renamePath(id, "top/x.bin", "a.bin");
+            assertEquals(List.of("top/a.bin", "top/deep/b.bin"), paths(again, id));
+        }
+    }
+
+    private static List<String> paths(LibtorrentEngine engine, String id) throws EngineException {
+        return engine.detail(id).files().stream()
+                .map(TorrentDetail.FileStatus::path)
+                .toList();
+    }
+
+    /** The content layout is renamed files in the add parameters: the add's own check finds them. */
+    @Test
+    void theContentLayoutFindsTheFilesWhereItPutsThemAndKeepsThem(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] pair = twoFileTorrent(dir.resolve("made"), "pair");
+        Files.createDirectories(downloads.resolve("sub"));
+        Files.copy(dir.resolve("made/pair/a.bin"), downloads.resolve("a.bin"));
+        Files.copy(dir.resolve("made/pair/sub/b.bin"), downloads.resolve("sub/b.bin"));
+
+        Path made = dir.resolve("made/solo.bin");
+        Files.write(made, new byte[40 * 1024]);
+        byte[] solo =
+                new TorrentBuilder().path(made.toFile()).generate().entry().bencode();
+        Files.createDirectories(downloads.resolve("solo"));
+        Files.copy(made, downloads.resolve("solo/solo.bin"));
+
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        try (LibtorrentEngine engine = engine(dir, store)) {
+            engine.start();
+            String flat = engine.add(downloadsTorrent(dir, pair)
+                            .withStorage(AddRequest.Storage.DEFAULT.withLayout(
+                                    com.torrenta.engine.FileRenames.Layout.NO_SUBFOLDER)))
+                    .id();
+            String boxed = engine.add(new AddRequest(
+                                    new AddRequest.TorrentFile(solo, "solo.torrent"),
+                                    downloads,
+                                    false,
+                                    false,
+                                    false,
+                                    AddRequest.StopCondition.NONE,
+                                    Map.of(),
+                                    TorrentLabels.NONE)
+                            .withStorage(AddRequest.Storage.DEFAULT.withLayout(
+                                    com.torrenta.engine.FileRenames.Layout.SUBFOLDER)))
+                    .id();
+            await(
+                    "both found complete",
+                    () -> engine.torrents().stream().allMatch(t -> t.state() == TorrentState.SEEDING));
+            assertEquals(List.of("a.bin", "sub/b.bin"), paths(engine, flat));
+            assertEquals(List.of("solo/solo.bin"), paths(engine, boxed));
+        }
+        try (LibtorrentEngine again = engine(dir, store)) {
+            again.start();
+            await(
+                    "still complete after a restart",
+                    () -> again.torrents().stream()
+                            .allMatch(t -> t.progress() >= 1.0 - 1e-6 && t.state() == TorrentState.SEEDING));
+        }
+    }
+
+    /** A rename while the suffix is on: the .part goes on the new name and comes off it at the end. */
+    @Test
+    void aFileRenamedWhileItCarriesTheSuffixEndsUnderItsNewName(@TempDir Path dir) throws Exception {
+        byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
+        Path downloads = dir.resolve("downloads");
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        try (LibtorrentEngine seed = seeder(dir, torrent);
+                LibtorrentEngine engine = engine(dir, store)) {
+            engine.start();
+            String id = engine.add(
+                            downloadsTorrent(dir, torrent).withStorage(new AddRequest.Storage(null, true, false)))
+                    .id();
+            await("the suffix is on", () -> engine.storageForTest(id).suffixed().size() == 2);
+            engine.renamePath(id, "pair/a.bin", "x.bin");
+            assertEquals("pair/x.bin", engine.storageForTest(id).renamed().get(0));
+
+            awaitDownload(
+                    "downloaded",
+                    engine,
+                    id,
+                    seed,
+                    () -> engine.torrents().get(0).progress() >= 1.0 - 1e-6);
+            await(
+                    "the suffix is off",
+                    () -> engine.storageForTest(id).suffixed().isEmpty());
+            await("under the new name", () -> Files.isRegularFile(downloads.resolve("pair/x.bin")));
+            assertFalse(Files.exists(downloads.resolve("pair/x.bin.part")));
+            assertFalse(Files.exists(downloads.resolve("pair/a.bin")));
+            assertFalse(Files.exists(downloads.resolve("pair/a.bin.part")));
         }
     }
 

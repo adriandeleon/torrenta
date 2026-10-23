@@ -14,7 +14,8 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 
 /**
- * What a torrent is filed under: one category or none, and any number of tags.
+ * What a torrent is filed under: one category or none, and any number of tags; and the name it is
+ * shown under when a person renamed it, which is Torrenta's alone (the files keep theirs).
  *
  * <p>Normalised on construction so two spellings of the same thing cannot coexist: names are
  * trimmed, tags are trimmed, split on commas (a tag never holds one; the dialogs and the Tags column
@@ -24,28 +25,40 @@ import com.fasterxml.jackson.core.JsonToken;
  *
  * @param category the category's name, or empty for none
  * @param tags sorted, distinct, never blank
+ * @param name the name it is shown under, or empty for the torrent's own
  */
-public record TorrentLabels(String category, List<String> tags) {
+public record TorrentLabels(String category, List<String> tags, String name) {
 
-    public static final TorrentLabels NONE = new TorrentLabels("", List.of());
+    public static final TorrentLabels NONE = new TorrentLabels("", List.of(), "");
 
     private static final JsonFactory JSON = new JsonFactory();
 
     public TorrentLabels {
         category = normalizeName(category);
         tags = normalizeTags(tags);
+        name = normalizeName(name);
+    }
+
+    /** Filed under a category and tags, under the torrent's own name. */
+    public TorrentLabels(String category, List<String> tags) {
+        this(category, tags, "");
     }
 
     public boolean isEmpty() {
-        return category.isEmpty() && tags.isEmpty();
+        return category.isEmpty() && tags.isEmpty() && name.isEmpty();
     }
 
-    public TorrentLabels withCategory(String name) {
-        return new TorrentLabels(name, tags);
+    public TorrentLabels withCategory(String category) {
+        return new TorrentLabels(category, tags, name);
     }
 
     public TorrentLabels withTags(Collection<String> names) {
-        return new TorrentLabels(category, names == null ? List.of() : List.copyOf(names));
+        return new TorrentLabels(category, names == null ? List.of() : List.copyOf(names), name);
+    }
+
+    /** Shown under {@code name}; empty goes back to the torrent's own. */
+    public TorrentLabels withName(String name) {
+        return new TorrentLabels(category, tags, name);
     }
 
     /** Trimmed; null is none. */
@@ -67,7 +80,7 @@ public record TorrentLabels(String category, List<String> tags) {
         return List.copyOf(out);
     }
 
-    /** {@code {"category":"…","tags":["…"]}}. */
+    /** {@code {"category":"…","tags":["…"]}}, with {@code "name":"…"} when it was renamed. */
     public byte[] encode() {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         try (JsonGenerator g = JSON.createGenerator(out)) {
@@ -76,6 +89,7 @@ public record TorrentLabels(String category, List<String> tags) {
             g.writeArrayFieldStart("tags");
             for (String tag : tags) g.writeString(tag);
             g.writeEndArray();
+            if (!name.isEmpty()) g.writeStringField("name", name);
             g.writeEndObject();
         } catch (IOException e) {
             throw new IllegalStateException(e); // a byte array does not fail
@@ -86,6 +100,7 @@ public record TorrentLabels(String category, List<String> tags) {
     /** The inverse of {@link #encode()}; fields it does not know are skipped. */
     public static TorrentLabels decode(byte[] bytes) throws IOException {
         String category = "";
+        String name = "";
         List<String> tags = new ArrayList<>();
         try (JsonParser p = JSON.createParser(new String(bytes, StandardCharsets.UTF_8))) {
             if (p.nextToken() != JsonToken.START_OBJECT) throw new IOException("not a labels object");
@@ -94,6 +109,8 @@ public record TorrentLabels(String category, List<String> tags) {
                 JsonToken value = p.nextToken();
                 if (field.equals("category") && value == JsonToken.VALUE_STRING) {
                     category = p.getText();
+                } else if (field.equals("name") && value == JsonToken.VALUE_STRING) {
+                    name = p.getText();
                 } else if (field.equals("tags") && value == JsonToken.START_ARRAY) {
                     JsonToken entry;
                     while ((entry = p.nextToken()) != JsonToken.END_ARRAY) {
@@ -108,6 +125,6 @@ public record TorrentLabels(String category, List<String> tags) {
         } catch (RuntimeException e) {
             throw new IOException("not a labels object: " + e.getMessage(), e);
         }
-        return new TorrentLabels(category, tags);
+        return new TorrentLabels(category, tags, name);
     }
 }

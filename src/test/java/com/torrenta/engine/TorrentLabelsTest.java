@@ -32,6 +32,20 @@ class TorrentLabelsTest {
         assertEquals(new TorrentLabels("Movies", List.of()), l.withTags(null));
     }
 
+    /** A name a person gave goes along with the filing, and only when there is one. */
+    @Test
+    void theGivenNameRoundTripsAndKeepsTheRest() throws IOException {
+        TorrentLabels l = new TorrentLabels("Movies", List.of("hd")).withName("  My film ");
+        assertEquals("My film", l.name());
+        assertEquals(l, TorrentLabels.decode(l.encode()));
+        assertEquals("My film", l.withCategory("").withTags(List.of()).name());
+        assertTrue(!TorrentLabels.NONE.withName("x").isEmpty(), "a name alone is worth a sidecar");
+        assertEquals(
+                "{\"category\":\"\",\"tags\":[]}",
+                new String(TorrentLabels.NONE.encode(), StandardCharsets.UTF_8),
+                "no name, no field: older sidecars and newer ones read the same");
+    }
+
     @Test
     void encodeDecodeRoundTrip() throws IOException {
         TorrentLabels l = new TorrentLabels("Linux \"ISOs\"", List.of("ubuntu", "ünïcödé"));

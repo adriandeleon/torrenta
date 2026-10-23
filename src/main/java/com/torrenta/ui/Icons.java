@@ -129,6 +129,7 @@ final class Icons {
             case "queue" -> queue();
             case "set-location" -> folderMove();
             case "choose-files" -> files();
+            case "super-seed" -> superSeed();
             case "limits" -> gauge();
             case "set-category" -> open();
             case "edit-tags" -> tag();
@@ -136,6 +137,8 @@ final class Icons {
             case "copy-name" -> copy();
             case "copy-hash" -> hash();
             case "copy-magnet" -> magnet();
+            case "rename" -> rename();
+            case "export-torrent" -> exportFile();
             case "open-folder" -> open();
             case "remove" -> trash();
             case "remove-data" -> trashData();
@@ -203,6 +206,21 @@ final class Icons {
     /** Recheck: an open arc with an arrowhead, in the line style like the rest of the row. */
     static Glyph refresh() {
         return line("M13.3 8A5.3 5.3 0 1 1 11.8 4.2M13.3 2.7V6H10");
+    }
+
+    /** Super seeding: an arrow up out of a seed's dot, fanning to three. */
+    static Glyph superSeed() {
+        return line("M8 13.5a1.5 1.5 0 1 0 0-3a1.5 1.5 0 1 0 0 3M8 10.5V4M8 4L4 7.5M8 4l4 3.5M5.5 2.5L8 4l2.5-1.5");
+    }
+
+    /** Rename: a text cursor beside a line of text. */
+    static Glyph rename() {
+        return line("M2.5 8h6.5M2.5 5h4M11.5 3v10M10 3h3M10 13h3");
+    }
+
+    /** Export .torrent: a page with an arrow leaving it. */
+    static Glyph exportFile() {
+        return line("M9.5 13.5h-5v-11h4.6l2.9 2.9v2.6M9.1 2.5v2.9h2.9M9 11h5.5M12.3 8.8l2.2 2.2-2.2 2.2");
     }
 
     /** Remove: a lid over an outlined bin, in the line style. */

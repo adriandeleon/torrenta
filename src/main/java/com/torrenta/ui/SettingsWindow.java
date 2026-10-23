@@ -150,6 +150,7 @@ final class SettingsWindow {
                 Settings.UPDATE_CHECK,
                 Settings.ADD_START_PAUSED,
                 Settings.ADD_SEQUENTIAL,
+                Settings.ADD_CONTENT_LAYOUT,
                 Settings.ADD_WITHOUT_ASKING,
                 Settings.UI_STATE_COLORS,
                 Settings.UI_DENSITY,
@@ -524,6 +525,7 @@ final class SettingsWindow {
     private CheckBox osBadge;
     private CheckBox addStartPaused;
     private CheckBox addSequential;
+    private ChoiceBox<com.torrenta.engine.FileRenames.Layout> addLayout;
     private CheckBox addWithoutAsking;
     private Spinner<Integer> port;
     private CheckBox randomPort;
@@ -1247,6 +1249,15 @@ final class SettingsWindow {
      * engine that has it all.
      */
     void applyCapabilities(Engine.Capabilities caps) {
+        boolean wasLoading = loading;
+        loading = true;
+        try {
+            ShareLimit.Action chosen = shareAction.getValue();
+            shareAction.getItems().setAll(CapabilityRules.shareActions(caps));
+            shareAction.setValue(chosen);
+        } finally {
+            loading = wasLoading;
+        }
         engineHiddenRows.clear();
         engineHiddenPages.clear();
         for (Row row : rows) {
@@ -2920,6 +2931,21 @@ final class SettingsWindow {
                 addSequential,
                 tr("settings.adding.sequential.keywords"),
                 Engine.Capability.SEQUENTIAL_DOWNLOAD);
+        addLayout = new ChoiceBox<>();
+        addLayout.getItems().addAll(com.torrenta.engine.FileRenames.Layout.values());
+        addLayout.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setAddContentLayout(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.ADDING,
+                defaults,
+                tr("settings.adding.layout"),
+                tr("settings.adding.layout.desc"),
+                addLayout,
+                tr("settings.adding.layout.keywords"),
+                Engine.Capability.CONTENT_LAYOUT);
         addWithoutAsking = new CheckBox();
         addWithoutAsking.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -3565,6 +3591,7 @@ final class SettingsWindow {
             syncInterval.getValueFactory().setValue(settings.syncIntervalMinutes());
             addStartPaused.setSelected(settings.addStartPaused());
             addSequential.setSelected(settings.addSequential());
+            addLayout.setValue(settings.addContentLayout());
             addWithoutAsking.setSelected(settings.addWithoutAsking());
             AutomationSettings a = settings.automation();
             onAdded.setText(a.onAdded());

@@ -29,6 +29,7 @@ package com.torrenta.engine;
  * @param queued parked by the queue (paused and auto-managed), waiting for a slot
  * @param queuePosition its place in the download or seed queue, 0 first; -1 when not queued
  * @param moving its files are being moved to a new location
+ * @param superSeeding a seed that offers each peer only pieces nobody else has yet
  */
 public record Torrent(
         String id,
@@ -57,7 +58,8 @@ public record Torrent(
         boolean trackerError,
         boolean queued,
         int queuePosition,
-        boolean moving) {
+        boolean moving,
+        boolean superSeeding) {
 
     public Torrent {
         category = category == null ? "" : category;
@@ -119,6 +121,7 @@ public record Torrent(
                 trackerError,
                 false,
                 -1,
+                false,
                 false);
     }
 }

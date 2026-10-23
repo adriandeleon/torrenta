@@ -193,7 +193,10 @@ final class LimitsDialog {
 
     /** Blocks on a nested event loop, as a dialog does; empty when cancelled. */
 
-    /** Hides the rows the engine has no capability for: upload slots, first and last pieces. Before showing. */
+    /**
+     * Hides the rows the engine has no capability for: upload slots, first and last pieces, the
+     * super seeding action. Before showing.
+     */
     void applyCapabilities(com.torrenta.engine.Engine.Capabilities caps) {
         boolean slots = caps.has(com.torrenta.engine.Engine.Capability.UPLOAD_SLOTS);
         for (javafx.scene.Node n : java.util.List.of(uploadSlotsLabel, uploadSlotsField)) {
@@ -205,6 +208,9 @@ final class LimitsDialog {
             n.setVisible(pieces);
             n.setManaged(pieces);
         }
+        ShareLimit.Action chosen = action.getValue();
+        action.getItems().setAll(CapabilityRules.shareActions(caps));
+        action.setValue(chosen);
     }
 
     Optional<Result> showAndWait() {

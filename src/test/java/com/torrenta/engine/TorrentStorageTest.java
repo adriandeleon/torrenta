@@ -57,4 +57,17 @@ class TorrentStorageTest {
                 IOException.class, () -> TorrentStorage.decode("{\"suffixed\":[1".getBytes(StandardCharsets.UTF_8)));
         assertThrows(IOException.class, () -> TorrentStorage.decode("nope".getBytes(StandardCharsets.UTF_8)));
     }
+
+    @Test
+    void namesAreKeptWithTheSuffixOnTopAndAnOwnNameIsNoRename() throws java.io.IOException {
+        java.util.Map<Integer, String> originals = java.util.Map.of(0, "pair/a.bin", 1, "pair/b.bin");
+        TorrentStorage owed = new TorrentStorage("", true, Set.of(1))
+                .withRenamed(java.util.Map.of(0, "pair/x.bin", 1, "pair/y.bin"), originals);
+        assertEquals("pair/x.bin", owed.name(0, "pair/a.bin"));
+        assertEquals("pair/y.bin.part", owed.onDisk(1, "pair/b.bin"));
+        assertEquals(owed, TorrentStorage.decode(owed.encode()));
+        TorrentStorage back = owed.withRenamed(java.util.Map.of(0, "pair/a.bin"), originals);
+        assertEquals(java.util.Map.of(1, "pair/y.bin"), back.renamed(), "its own name again");
+        assertFalse(new TorrentStorage("", false, Set.of(), java.util.Map.of(0, "x")).isEmpty(), "a name to keep");
+    }
 }

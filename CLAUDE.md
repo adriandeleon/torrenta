@@ -34,6 +34,8 @@ selected torrent, `select-first`, `message-log` / `message-log:<query>` (the sta
   `overview-diagnosis=`, `overview-pieces=`, `overview-graph=`, `overview-facts=` after the shot;
   every capture prints `status-bar=`), `remedy` / `remedy:<NAME>` to press the diagnosis card's first remedy or a named one (`SKIP_FILE`
   …), waiting for a card that offers it (prints `remedy-pressed=`),
+  `export-to:<folder>` for Export .torrent past its native chooser, `rename:<name>` (`~` for a
+  space) to fill and confirm the Rename dialog, `files-rename:<row>:<name>` for a Files-tab row,
   `files-menu[:<row>]` for the Files tab's context menu on that visible row (it waits for the
   rows, which arrive with the first detail poll; on the Files tab a `file=` line per row shown
   names its `FileKind`, the glyph's rule by extension), `welcome-clipboard:<text>` (the welcome's
@@ -62,10 +64,10 @@ to try one on purpose).
 |---|---|---|
 | Entry | `--help`/`--version`, toolkit start, theme | `com.torrenta.App`, `com.torrenta.cli` |
 | Events | `EngineEvent` (level, torrent, message), raised by the engine from libtorrent alerts and by its own start/stop/remove; `Engine.addListener` | `com.torrenta.engine` |
-| Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Engine.fetchMetadata` (a magnet's file list while the dialog is open), `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL); `ui.AddDialog` (rules as statics), `FileTree` (wanted + priority ladder), `FreeSpace` (disk bar and sentence) | `com.torrenta.engine`, `com.torrenta.net`, `ui` |
+| Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Engine.fetchMetadata` (a magnet's file list while the dialog is open), `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL), `FileRenames.Layout` (the content layout, `add.contentLayout`); `ui.AddDialog` (rules as statics), `FileTree` (wanted + priority ladder), `FreeSpace` (disk bar and sentence) | `com.torrenta.engine`, `com.torrenta.net`, `ui` |
 | Create | `CreateRequest` (path, `Format` v1/v2/hybrid, piece size or 0, private, tracker tiers, web seeds, comment, `source` tag, align, seed), `CreatedTorrent` (bytes, engine id, both hashes, counts, magnet, the seeding torrent or the add's problem), `PieceSize` (the automatic rule: ~1,500 pieces, 16 KiB … 16 MiB; `count` packed or aligned), `Engine.create(request, CreateProgress)` blocking on the caller's worker, cancellable at the next piece; `libtorrent.PieceHasher` (v1 pieces and v2 piece layers in Java, bit for bit libtorrent's); `ui.CreateDialog` (modeless, sizes the source live, Save as…, atomic write), `CreateText` (tier parser, summary, outcome) | `com.torrenta.engine`, `.libtorrent`, `ui` |
-| Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags; JSON for the `<hash>.labels` sidecar), `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `ui.FilterQuery` (the filter box's `key:value` language → predicate + chips), `Sidebar` (a tree: All, Categories, Tags; Status and Tracker sections later), `TagsDialog` | `com.torrenta.engine`, `store`, `ui` |
-| Detail | `TorrentDetail` (general, files with their piece range, peers, trackers, pieces, per-piece availability) from `Engine.detail(id)`; `ui.Diagnosis` (why it is not moving + remedies), `OverviewText`, `PieceStrip`, `Sparkline`; `setFilePriority`, `addTrackers`, `removeTracker`; `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
+| Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags, the name a person gave; JSON for the `<hash>.labels` sidecar), `Engine.rename`, `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `ui.FilterQuery` (the filter box's `key:value` language → predicate + chips), `Sidebar` (a tree: All, Categories, Tags; Status and Tracker sections later), `TagsDialog` | `com.torrenta.engine`, `store`, `ui` |
+| Detail | `TorrentDetail` (general, files with their piece range, peers, trackers, pieces, per-piece availability) from `Engine.detail(id)`; `ui.Diagnosis` (why it is not moving + remedies), `OverviewText`, `PieceStrip`, `Sparkline`; `setFilePriority`, `renamePath` (`FileRenames.plan`/`problem`), `addTrackers`, `removeTracker`; `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
 | Engine settings | `EngineSettings` (engine-neutral record; `listenInterfaces()` is the tested string), `Settings.engineSettings()` clamps the `connection.*` and `proxy.*` keys, `LibtorrentEngine.toPack` maps onto `settings_pack`; applied at start (`SessionParams`) and live (`applySettings`) | `com.torrenta.engine`, `store`, `.libtorrent` |
 | IP filter | `IpRange` (literals only, never resolves), `Blocklist` (pure parser for .p2p/.dat/CIDR/plain), `net.BlocklistFetch` (gzip by magic), `ui.IpFilterController` (cache, schedule, bans → `Engine.setIpFilter`), `peer_blocked` alerts counted | `com.torrenta.engine`, `net`, `ui` |
 | Watch folders | `WatchFolder` (entry + pure rules: destination, request, names, `.magnet` lines, magnet id, `Growth`), `WatchFolders` (the service: `configure`, `start`, `stop`, `poll`), `store.WatchFolderStore` (`watch-folders.json`), `ui.WatchFolderDialog`, Settings → Watch folders | `com.torrenta.engine`, `store`, `ui` |
@@ -165,9 +167,22 @@ release process with the names changed; Termina's README and memory hold the war
   a test that wants "file 1" must read the index off the preview. `totalSize()` counts padding;
   the preview sums the real files.
 - **`add_torrent` checks the files at once, paused or not, and a `force_recheck` issued during that
-  check is dropped.** Renames through the handle are confirmed by `file_renamed_alert` but a
-  recheck afterwards still did not find the files under the new names in 2.1.0-39. That is why the
-  "no root folder" layout is not in the Add dialog; see the roadmap before trying again.
+  check is dropped.** So the content layout is never renames through the handle after the add: it
+  is `renamed_files` in the add parameters (`FileRenames.layout`), which the add's own check
+  already looks under. Needs the file list: a magnet added before its metadata keeps its own.
+- **libtorrent 2.1.0-39 keeps file renames badly, so the engine keeps them itself.** Measured: a
+  `rename_file` through the handle renames on disk and a recheck in the same session finds the
+  file, but `torrent_file()` keeps showing the old name, and the resume data writes the new one
+  relative to the root folder while reading it back relative to the save path, so a restart lost
+  the file (33 %, re-downloading). `TorrentStorage.renamed` (the `.storage` sidecar) holds every
+  renamed file's full path; `restoreNames` puts them all back before the add, `detail()` shows
+  them, and the `.part` suffix goes on and off the recorded name (`onDisk`), never the original.
+  `Engine.renamePath` does a file or a folder (`FileRenames.plan`/`problem`, tested); the
+  `file_renamed_alert` handler removes the folders a rename emptied, never the save path. A
+  name given back as the original is no longer a rename, and an empty record drops the sidecar.
+  Transmission renames through `torrent-rename-path` (checked by the same `FileRenames.problem`
+  first), so the Files tab's Rename is on both engines; the layout on add is
+  `Capability.CONTENT_LAYOUT`, libtorrent's only, and the hidden choice falls back to the torrent's own.
 - **Test compilation patches the module**, so a test that needs a JDK module the main code does
   not (`jdk.httpserver`, for the fetch test's local server) gets `--add-modules` and `--add-reads`
   in the compiler plugin's test execution. At run time the tests are on the classpath.
@@ -531,8 +546,11 @@ release process with the names changed; Termina's README and memory hold the war
 ## Not done
 
 0.2 through 0.9 are feature-complete; 0.4's Settings pages (Connection, Protocol, IP filter, Speed,
-Queue and share limits), the per-torrent Limits dialog, queue moves and Set Location are in. Left
-from 0.4: super seeding, rename, export `.torrent` (none of them in the `Engine` interface, so the
-Transmission engine maps none either). The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
+Queue and share limits), the per-torrent Limits dialog, queue moves, Set Location, super seeding,
+export `.torrent` and rename (a torrent's own name, files and folders, the content layout on add)
+are in. Transmission maps the file rename (`torrent-rename-path`); super seeding, export, a name of
+its own and the layout are capabilities it lacks (`SUPER_SEEDING`, `EXPORT_TORRENT`,
+`RENAME_TORRENT`, `CONTENT_LAYOUT`), hidden for it. Left from 0.4: web seeds shown and editable in
+the detail pane. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
 run of release.yml, and the Homebrew/winget packagers need the `PACKAGES_TOKEN` secret copied from
 Termina's repository (the same PAT) before they do anything.
