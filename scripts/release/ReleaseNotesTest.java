@@ -83,11 +83,13 @@ final class ReleaseNotesTest {
             return;
         }
         String log = Files.readString(changelog);
-        Optional<String> next = ReleaseNotes.section(log, "Unreleased");
+        Optional<String> next = ReleaseNotes.section(log, "Unreleased").filter(s -> !s.isEmpty());
         if (next.isEmpty()) {
-            // Between a release commit and the next change there is no Unreleased section: the
-            // newest version's is the one to check.
-            var newest = log.lines().filter(l -> l.startsWith("## ")).findFirst();
+            // From a release commit until the next change, Unreleased is empty (or gone): the
+            // newest version's section is the one to check.
+            var newest = log.lines()
+                    .filter(l -> l.startsWith("## ") && !l.startsWith("## Unreleased"))
+                    .findFirst();
             next = newest.flatMap(h -> ReleaseNotes.section(log, h.substring(3).split("[\\s\\]]")[0].replace("[", "")));
         }
         if (next.isEmpty()) {

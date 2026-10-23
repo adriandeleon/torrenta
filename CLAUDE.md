@@ -586,6 +586,8 @@ export `.torrent` and rename (a torrent's own name, files and folders, the conte
 are in. Transmission maps the file rename (`torrent-rename-path`); super seeding, export, a name of
 its own and the layout are capabilities it lacks (`SUPER_SEEDING`, `EXPORT_TORRENT`,
 `RENAME_TORRENT`, `CONTENT_LAYOUT`), hidden for it; web seeds are listed on both and edited on
-libtorrent's alone (`WEB_SEEDS`, the Trackers tab). 0.4 is feature-complete. The `v0.3.0` tag waits on the release dry run. **No release has been cut yet**: the first tag must be preceded by a `workflow_dispatch` dry
-run of release.yml, and the Homebrew/winget packagers need a `PACKAGES_TOKEN` secret (a PAT with
-`repo` scope; Termina has none either) before they do anything.
+libtorrent's alone (`WEB_SEEDS`, the Trackers tab). 0.4 is feature-complete. **0.1.0 is the first release** (the
+roadmap's numbers are milestones, not tags), after a green `workflow_dispatch` dry run of
+release.yml on 2026-10-23; master goes back to `0.1.1-SNAPSHOT` after the tag. The Homebrew/winget
+packagers need a `PACKAGES_TOKEN` secret (a PAT with `repo` scope; Termina has none either) before
+they do anything.

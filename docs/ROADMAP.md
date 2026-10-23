@@ -213,8 +213,8 @@ What a first public release needs.
    Help, Download and Skip Version items, no draft or pre-release offered, snapshots count as
    their release.
 
-**0.3 is feature-complete.** What is left before the `v0.3.0` tag is the release pipeline's dry
-run and the `PACKAGES_TOKEN` secret; see the README's Releasing section.
+**0.3 is feature-complete.** The first release is 0.1.0, cut with everything through 0.9 in it:
+the numbers here name milestones, not tags. See docs/release.md.
 
 ### 0.4 — Network, bandwidth, queue
 Everything in Settings that the engine already knows how to do.

@@ -14,7 +14,7 @@
 
 A keyboard-first, cross-platform BitTorrent client built on JavaFX.
 
-Status: **feature-complete against the roadmap (0.2 through 0.9), not yet released**. A themed window with a menu bar, an icon toolbar, a torrent list, a status bar that keeps its history, an event log, a debug log,
+Status: **feature-complete against the roadmap (0.2 through 0.9); 0.1.0 is the first release**. A themed window with a menu bar, an icon toolbar, a torrent list, a status bar that keeps its history, an event log, a debug log,
 on a real engine: libtorrent, through [libtorrent4j](https://github.com/aldenml/libtorrent4j).
 Torrents arrive from a file, a magnet link, a URL, a drop or the clipboard through an Add dialog
 (file selection and priorities, save path with what the torrent leaves free, category, tags, stop
@@ -399,10 +399,11 @@ scripts/render-icon.py            branding/torrenta-icon.svg → torrenta.png (P
 - **A port test** in Settings → Connection: libtorrent has none, it needs an outside service.
 - **Renaming a torrent or its paths** for a Transmission daemon: the RPC has it, the `Engine`
   interface does not yet.
-- **A first release.** The pipeline (JReleaser, Homebrew cask, winget) is in place, its JReleaser
-  step dry-run locally, the workflow's own dry run pending; the 1.0 criteria in [docs/ROADMAP.md](docs/ROADMAP.md) (a week of daily use on each
-  platform, resume data proven across upgrades, signed installers) are what stands between the
-  code and a tag.
+- **Homebrew and winget.** 0.1.0 is published on GitHub only: the packagers wait for a
+  `PACKAGES_TOKEN` secret and the checks in [docs/release.md](docs/release.md).
+- **1.0.** The criteria in [docs/ROADMAP.md](docs/ROADMAP.md) (a week of daily use on each
+  platform, resume data proven across upgrades, signed installers) are what stands between 0.x
+  and 1.0.
 
 ## License
 
