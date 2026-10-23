@@ -3106,15 +3106,14 @@ public final class MainWindow {
             Fonts.installUiFont(prompt.getDialogPane());
             prompt.setTitle(tr("window.rename.title"));
             prompt.setHeaderText(tr("window.rename.header"));
+            StockButtons.translate(prompt);
             prompt.getEditor().setPrefColumnCount(40);
             String typed = renameForCapture;
             renameForCapture = null;
             if (typed != null) {
                 Platform.runLater(() -> {
                     prompt.getEditor().setText(typed);
-                    ((javafx.scene.control.Button)
-                                    prompt.getDialogPane().lookupButton(javafx.scene.control.ButtonType.OK))
-                            .fire();
+                    StockButtons.okButton(prompt).fire();
                 });
             }
             promptDialog = prompt;

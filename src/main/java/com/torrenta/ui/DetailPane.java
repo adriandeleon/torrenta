@@ -939,6 +939,7 @@ final class DetailPane extends VBox {
             Fonts.installUiFont(prompt.getDialogPane());
             prompt.setTitle(tr(row.isFile() ? "detail.files.renameFile" : "detail.files.renameFolder"));
             prompt.setHeaderText(row.path());
+            StockButtons.translate(prompt);
             prompt.getEditor().setPrefColumnCount(40);
             int dot = row.isFile() ? row.name().lastIndexOf('.') : -1;
             prompt.setOnShown(e ->
@@ -948,7 +949,7 @@ final class DetailPane extends VBox {
             if (typed != null) {
                 Platform.runLater(() -> {
                     prompt.getEditor().setText(typed);
-                    ((Button) prompt.getDialogPane().lookupButton(javafx.scene.control.ButtonType.OK)).fire();
+                    StockButtons.okButton(prompt).fire();
                 });
             }
             prompt.showAndWait()
