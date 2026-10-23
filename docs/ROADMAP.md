@@ -262,7 +262,7 @@ Everything in Settings that the engine already knows how to do.
    folders (`torrent-rename-path`); a name of its own and the layout are libtorrent's
    (`RENAME_TORRENT`, `CONTENT_LAYOUT`).
 
-**0.4 is feature-complete.**
+**0.4 is feature-complete** but for web seeds shown and editable in the detail pane.
 
 ### 0.5 — Organisation and automation
 **0.5 is feature-complete.**
