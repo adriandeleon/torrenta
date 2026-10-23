@@ -52,6 +52,7 @@ import javafx.util.StringConverter;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
 import com.torrenta.engine.DownloadPlan;
+import com.torrenta.engine.FileRenames;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 
@@ -120,6 +121,8 @@ final class AddDialog {
     private final ChoiceBox<AddRequest.StopCondition> stop = new ChoiceBox<>();
     private Label stopLabel;
     private Button browse;
+    private final ChoiceBox<FileRenames.Layout> layout = new ChoiceBox<>();
+    private Label layoutLabel;
     private final ChoiceBox<String> category = new ChoiceBox<>();
     private final TextField tags = new TextField();
     private final CheckBox withoutAsking = new CheckBox(tr("dialog.add.withoutAsking"));
@@ -171,6 +174,7 @@ final class AddDialog {
      * @param incompleteDir that folder
      * @param partSuffix whether incomplete files carry {@code .part}
      * @param preallocate whether files are allocated in full at the start
+     * @param layout how the files sit under the save path
      */
     record Defaults(
             Path savePath,
@@ -179,7 +183,24 @@ final class AddDialog {
             boolean incompleteEnabled,
             Path incompleteDir,
             boolean partSuffix,
-            boolean preallocate) {
+            boolean preallocate,
+            FileRenames.Layout layout) {
+
+        Defaults {
+            if (layout == null) layout = FileRenames.Layout.ORIGINAL;
+        }
+
+        /** In the torrent's own layout. */
+        Defaults(
+                Path savePath,
+                boolean startPaused,
+                boolean sequential,
+                boolean incompleteEnabled,
+                Path incompleteDir,
+                boolean partSuffix,
+                boolean preallocate) {
+            this(savePath, startPaused, sequential, incompleteEnabled, incompleteDir, partSuffix, preallocate, null);
+        }
 
         static Defaults from(com.torrenta.store.Settings settings) {
             return new Defaults(
@@ -189,7 +210,8 @@ final class AddDialog {
                     settings.incompleteEnabled(),
                     settings.incompleteDir(),
                     settings.partSuffix(),
-                    settings.preallocate());
+                    settings.preallocate(),
+                    settings.addContentLayout());
         }
 
         /** The same defaults with another folder: a remote engine's own, when the files are not here. */
@@ -204,7 +226,8 @@ final class AddDialog {
         }
 
         AddRequest.Storage storage(Path destination) {
-            return AddRequest.Storage.of(plan(destination), partSuffix, preallocate);
+            return AddRequest.Storage.of(plan(destination), partSuffix, preallocate)
+                    .withLayout(layout);
         }
     }
 
@@ -320,6 +343,15 @@ final class AddDialog {
         stopLabel = muted(tr("dialog.add.stopWhen"));
         filing.addRow(0, muted(tr("dialog.common.category")), stopLabel);
         filing.addRow(1, category, stop);
+        // The layout renames files, which needs the file list: not for "Add now".
+        layout.getItems().addAll(FileRenames.Layout.values());
+        layout.setValue(defaults.layout());
+        layout.setMaxWidth(Double.MAX_VALUE);
+        layout.disableProperty().bind(hasFiles.not());
+        layoutLabel = muted(tr("dialog.add.layout"));
+        GridPane.setMargin(layoutLabel, new Insets(8, 0, 0, 0));
+        filing.add(layoutLabel, 0, 2, 2, 1);
+        filing.add(layout, 0, 3, 2, 1);
 
         // First-and-last is piece priorities, which need the metadata: not for "Add now".
         firstLast.disableProperty().bind(hasFiles.not());
@@ -516,6 +548,11 @@ final class AddDialog {
         canStop.set(stopping);
         shown(firstLast, caps.has(com.torrenta.engine.Engine.Capability.FIRST_LAST_PIECES));
         shown(sequential, caps.has(com.torrenta.engine.Engine.Capability.SEQUENTIAL_DOWNLOAD));
+        boolean laidOut = caps.has(com.torrenta.engine.Engine.Capability.CONTENT_LAYOUT);
+        shown(layout, laidOut);
+        shown(layoutLabel, laidOut);
+        // Hidden is the torrent's own: a default from Settings must not reach an engine without it.
+        if (!laidOut) layout.setValue(FileRenames.Layout.ORIGINAL);
         boolean local = caps.has(com.torrenta.engine.Engine.Capability.LOCAL_FILES);
         shown(browse, local);
         shown(diskBar, local);
@@ -617,7 +654,9 @@ final class AddDialog {
                         stop.getValue(),
                         root == null ? Map.of() : FileTree.priorities(root),
                         labels(),
-                        existing ? AddRequest.Storage.DEFAULT : defaults.storage(destination)),
+                        existing
+                                ? AddRequest.Storage.DEFAULT
+                                : defaults.storage(destination).withLayout(layout.getValue())),
                 firstLast.isSelected(),
                 false,
                 withoutAsking.isSelected());

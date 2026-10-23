@@ -6,6 +6,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -1299,6 +1301,13 @@ public final class MainWindow {
                             parts.contains("CTRL"),
                             parts.contains("ALT"),
                             parts.contains("META")));
+        } else if (action.startsWith("rename:")) {
+            // rename:<name>: the selection's Rename dialog, filled and confirmed ("~" is a space).
+            renameForCapture = action.substring("rename:".length()).replace('~', ' ');
+            renameTorrent();
+        } else if (action.startsWith("export-to:")) {
+            // The selection exported into a folder, as Export does past its (native) chooser.
+            export(exportTargets(selectedTorrents(), Path.of(action.substring("export-to:".length()))));
         } else if (action.equals("select-first")) {
             table.getSelectionModel().clearAndSelect(0);
         } else if (action.startsWith("detail:")) {
@@ -1309,6 +1318,11 @@ public final class MainWindow {
             showDetail();
             detail.pressRemedyForCapture(
                     action.equals("remedy") ? null : Diagnosis.Remedy.valueOf(action.substring("remedy:".length())));
+        } else if (action.startsWith("files-rename:")) {
+            // files-rename:<row>:<name>: that visible row of the Files tab renamed ("~" is a space).
+            String[] parts = action.substring("files-rename:".length()).split(":", 2);
+            showDetail();
+            detail.renameFileForCapture(Integer.parseInt(parts[0]), parts[1].replace('~', ' '));
         } else if (action.startsWith("files-menu")) {
             // files-menu or files-menu:<row>: the Files tab's context menu on that visible row.
             int colon = action.indexOf(':');
@@ -2484,7 +2498,7 @@ public final class MainWindow {
     /**
      * Poll thread. libtorrent ranks seeds by the share limits but pauses nothing by them, so the
      * rule is applied here, once a second: a finished torrent past its own or the global limit is
-     * paused or removed, and the log says so. A paused one no longer qualifies, so it is done once;
+     * paused, removed (with its files or without) or super seeded, and the log says so. A paused one no longer qualifies, so it is done once;
      * resuming it by hand seeds it until the next tick, raising the limit seeds it for good.
      */
     private void enforceShareLimits(Engine engine, List<Torrent> snapshot) {
@@ -2495,24 +2509,35 @@ public final class MainWindow {
         for (Torrent t : snapshot) {
             Optional<ShareLimit.Action> due = ShareLimit.decide(t, global, overrides.get(t.id()));
             if (due.isEmpty()) continue;
+            // A synced setting can ask a daemon for super seeding, which it lacks; failing that
+            // every second would fill the log, so the limit does nothing there.
+            if (due.get() == ShareLimit.Action.SUPER_SEED && capabilities.lacks(Engine.Capability.SUPER_SEEDING))
+                continue;
             String text;
             try {
-                switch (due.get()) {
+                text = switch (due.get()) {
                     case PAUSE -> {
                         engine.pause(t.id());
-                        text = tr("log.shareLimit.paused", t.name());
+                        yield tr("log.shareLimit.paused", t.name());
                     }
                     case REMOVE -> {
                         engine.remove(t.id(), false);
-                        text = tr("log.shareLimit.removed", t.name());
+                        yield tr("log.shareLimit.removed", t.name());
                     }
-                    default -> throw new IllegalStateException(due.get().name());
-                }
+                    case REMOVE_DATA -> {
+                        engine.remove(t.id(), true);
+                        yield tr("log.shareLimit.removedData", t.name());
+                    }
+                    case SUPER_SEED -> {
+                        engine.setSuperSeeding(t.id(), true);
+                        yield tr("log.shareLimit.superSeeding", t.name());
+                    }
+                };
             } catch (EngineException e) {
                 text = tr("log.shareLimit.failed", t.name(), e.getMessage());
             }
             String message = text;
-            boolean removed = due.get() == ShareLimit.Action.REMOVE;
+            boolean removed = due.get() == ShareLimit.Action.REMOVE || due.get() == ShareLimit.Action.REMOVE_DATA;
             EngineEvent event =
                     EngineEvent.of(EngineEvent.Kind.SEEDING_DONE, EngineEvent.Level.INFO, t.id(), t.name(), message);
             // The snapshot goes along: a removed torrent cannot be looked up for the placeholders.
@@ -2672,6 +2697,23 @@ public final class MainWindow {
         if (Actions.shouldResume(selectedTorrents()))
             onSelection(tr("actions.verb.resumed"), (e, t) -> e.resume(t.id()));
         else onSelection(tr("actions.verb.paused"), (e, t) -> e.pause(t.id()));
+    }
+
+    /**
+     * Super seeding on the complete torrents of the selection (it means nothing for one still
+     * downloading): on unless every one of them has it already.
+     */
+    private void toggleSuperSeeding() {
+        List<Torrent> seeds = Actions.superSeedTargets(selectedTorrents());
+        if (seeds.isEmpty()) {
+            setStatus(tr("status.superSeed.none"));
+            return;
+        }
+        boolean on = Actions.shouldEnableSuperSeeding(seeds);
+        onTorrents(
+                on ? tr("actions.verb.superSeedOn") : tr("actions.verb.superSeedOff"),
+                seeds,
+                (e, t) -> e.setSuperSeeding(t.id(), on));
     }
 
     private void toggleSequential() {
@@ -3044,6 +3086,106 @@ public final class MainWindow {
         });
     }
 
+    /**
+     * Torrent → Rename… (F2): the name the list, the log and run-on-event show; the files keep
+     * theirs (the Files tab renames those). Empty goes back to the torrent's own name. One torrent
+     * at a time, since one name for several says nothing.
+     */
+    private void renameTorrent() {
+        List<Torrent> selected = selectedTorrents();
+        if (selected.isEmpty() || engine == null || (promptDialog != null && promptDialog.isShowing())) return;
+        if (selected.size() > 1) {
+            setStatus(tr("status.rename.one"));
+            return;
+        }
+        Torrent t = selected.get(0);
+        // On the next pulse: a nested event loop cannot start inside an animation or layout pass.
+        Platform.runLater(() -> {
+            javafx.scene.control.TextInputDialog prompt = new javafx.scene.control.TextInputDialog(t.name());
+            prompt.initOwner(stage);
+            Fonts.installUiFont(prompt.getDialogPane());
+            prompt.setTitle(tr("window.rename.title"));
+            prompt.setHeaderText(tr("window.rename.header"));
+            StockButtons.translate(prompt);
+            prompt.getEditor().setPrefColumnCount(40);
+            String typed = renameForCapture;
+            renameForCapture = null;
+            if (typed != null) {
+                Platform.runLater(() -> {
+                    prompt.getEditor().setText(typed);
+                    StockButtons.okButton(prompt).fire();
+                });
+            }
+            promptDialog = prompt;
+            prompt.showAndWait()
+                    .map(String::strip)
+                    .filter(name -> !name.equals(t.name()))
+                    .ifPresent(name -> renameTo(t, name));
+        });
+    }
+
+    /** What the capture hook types into the next Rename dialog before pressing OK. */
+    private String renameForCapture;
+
+    private void renameTo(Torrent t, String name) {
+        onTorrents(
+                name.isEmpty() ? tr("actions.verb.nameRestored") : tr("actions.verb.renamed", name),
+                List.of(t),
+                (e, x) -> e.rename(x.id(), name));
+    }
+
+    /**
+     * Torrent → Export .torrent…: one torrent to a file chosen in a save dialog, several into a
+     * folder under their own names, never over a file already there. The bytes come from the
+     * engine on a worker and are written beside their final name, then moved into place.
+     */
+    private void exportTorrents() {
+        List<Torrent> selected = selectedTorrents();
+        if (selected.isEmpty() || engine == null) return;
+        Map<Torrent, Path> targets = new LinkedHashMap<>();
+        if (selected.size() == 1) {
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle(tr("window.export.title"));
+            chooser.getExtensionFilters()
+                    .add(new FileChooser.ExtensionFilter(tr("window.addFile.filter"), "*.torrent"));
+            chooser.setInitialFileName(Actions.exportFileName(selected.get(0).name()));
+            java.io.File file = chooser.showSaveDialog(stage);
+            if (file == null) return;
+            targets.put(selected.get(0), file.toPath());
+        } else {
+            javafx.stage.DirectoryChooser chooser = new javafx.stage.DirectoryChooser();
+            chooser.setTitle(tr("window.export.folderTitle", selected.size()));
+            java.io.File dir = chooser.showDialog(stage);
+            if (dir == null) return;
+            targets.putAll(exportTargets(selected, dir.toPath()));
+        }
+        export(targets);
+    }
+
+    /** Each torrent's file in {@code dir}: its own name, made unique against what is there. */
+    private static Map<Torrent, Path> exportTargets(List<Torrent> torrents, Path dir) {
+        Set<String> taken = new HashSet<>();
+        String[] present = dir.toFile().list();
+        if (present != null) taken.addAll(List.of(present));
+        Map<Torrent, Path> targets = new LinkedHashMap<>();
+        for (Torrent t : torrents) {
+            String name = Actions.unusedName(Actions.exportFileName(t.name()), taken);
+            taken.add(name);
+            targets.put(t, dir.resolve(name));
+        }
+        return targets;
+    }
+
+    private void export(Map<Torrent, Path> targets) {
+        onTorrents(tr("actions.verb.exported"), List.copyOf(targets.keySet()), (e, t) -> {
+            try {
+                CreateDialog.write(targets.get(t), e.exportTorrent(t.id()));
+            } catch (IOException ex) {
+                throw new EngineException(tr("status.export.writeFailed", targets.get(t), ex.getMessage()), ex);
+            }
+        });
+    }
+
     private void openFolder() {
         List<Torrent> selected = selectedTorrents();
         if (selected.isEmpty()) return;
@@ -3142,6 +3284,13 @@ public final class MainWindow {
                         null,
                         gate("sequential", selection),
                         this::toggleSequential),
+                new Command(
+                        "super-seed",
+                        tr("command.superSeed"),
+                        null,
+                        null,
+                        gate("super-seed", selection),
+                        this::toggleSuperSeeding),
                 new Command("limits", tr("command.limits"), chord(KeyCode.L), null, selection, this::editLimits),
                 // The four chords are also taken on the table itself (onTableChord): its own
                 // Ctrl+Shift+arrow bindings would consume them before the accelerators saw them.
@@ -3220,6 +3369,15 @@ public final class MainWindow {
                         null,
                         selection,
                         this::copyMagnetLinks),
+                // F2 is handled on the table, like Space and Delete: a text field takes it too.
+                new Command("rename", tr("command.rename"), null, "F2", gate("rename", selection), this::renameTorrent),
+                new Command(
+                        "export-torrent",
+                        tr("command.exportTorrent"),
+                        shiftChord(KeyCode.E),
+                        null,
+                        gate("export-torrent", selection),
+                        this::exportTorrents),
                 new Command(
                         "open-folder",
                         tr("command.openFolder"),
@@ -3504,6 +3662,11 @@ public final class MainWindow {
         } else if (e.getCode() == KeyCode.SPACE) {
             command("pause-resume").run().run();
             e.consume();
+        } else if (e.getCode() == KeyCode.F2 && !e.isShortcutDown() && !e.isAltDown()) {
+            // Behind its capability, unlike Space: a daemon has no name of its own to give.
+            Command rename = command("rename");
+            if (rename.enabled().get()) rename.run().run();
+            e.consume();
         } else if (e.getCode() == KeyCode.DELETE || e.getCode() == KeyCode.BACK_SPACE) {
             command(e.isShiftDown() ? "remove-data" : "remove").run().run();
             e.consume();
@@ -3631,7 +3794,15 @@ public final class MainWindow {
     /** The Torrent menu and the context menu show the same items in the same order. */
     private List<MenuItem> torrentItems() {
         List<MenuItem> items = new ArrayList<>();
-        for (String id : List.of("pause-resume", "force-resume", "recheck", "reannounce", "sequential", "limits")) {
+        for (String id : List.of(
+                "pause-resume",
+                "force-resume",
+                "recheck",
+                "reannounce",
+                "sequential",
+                "super-seed",
+                "limits",
+                "rename")) {
             items.add(menuItem(id));
         }
         items.add(queueMenu());
@@ -3641,7 +3812,7 @@ public final class MainWindow {
         items.add(categoryMenu());
         items.add(menuItem("edit-tags"));
         items.add(new SeparatorMenuItem());
-        for (String id : List.of("copy-name", "copy-hash", "copy-magnet", "open-folder")) {
+        for (String id : List.of("copy-name", "copy-hash", "copy-magnet", "export-torrent", "open-folder")) {
             items.add(menuItem(id));
         }
         items.add(new SeparatorMenuItem());
@@ -3759,6 +3930,10 @@ public final class MainWindow {
                         .toString();
                 Platform.runLater(() -> opener.accept(uri));
             });
+        });
+        detail.setOnRename((row, name) -> {
+            String id = detailId;
+            if (id != null) onTorrent("status.fileRenamed", id, (e, t) -> e.renamePath(t, row.path(), name));
         });
         detail.setOnAddTrackers(urls -> {
             String id = detailId;

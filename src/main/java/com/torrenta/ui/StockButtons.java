@@ -36,6 +36,15 @@ final class StockButtons {
                 .replaceAll(b -> b == ButtonType.OK ? ok() : b == ButtonType.CANCEL ? cancel() : b);
     }
 
+    /** The dialog's OK button, stock or translated; for the capture hook, which presses it. */
+    static javafx.scene.control.Button okButton(Dialog<?> dialog) {
+        for (ButtonType b : dialog.getDialogPane().getButtonTypes()) {
+            if (b.getButtonData() == ButtonBar.ButtonData.OK_DONE)
+                return (javafx.scene.control.Button) dialog.getDialogPane().lookupButton(b);
+        }
+        throw new IllegalStateException("no OK button");
+    }
+
     /** Whether the answer is the dialog's OK, whichever object that button is. */
     static boolean confirmed(Optional<ButtonType> answer) {
         return answer.map(b -> b.getButtonData() == ButtonBar.ButtonData.OK_DONE)

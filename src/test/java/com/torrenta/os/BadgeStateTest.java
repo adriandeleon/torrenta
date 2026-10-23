@@ -68,6 +68,6 @@ class BadgeStateTest {
     private static Torrent torrent(TorrentState state, boolean paused, boolean queued, String error) {
         return new Torrent(
                 "id", "name", 1000, 0, 0, state, 0, 0, 0, 0, 0, 0, 0, 0, "", "/data", paused, false, 0, "", List.of(),
-                error, List.of(), false, queued, -1, false);
+                error, List.of(), false, queued, -1, false, false);
     }
 }

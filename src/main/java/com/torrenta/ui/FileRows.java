@@ -19,7 +19,8 @@ import com.torrenta.engine.TorrentDetail;
 /**
  * The Files tab's rows: one stable object per file, updated in place each tick, in a tree of
  * folders whose progress is the sum of their files'. The tree is rebuilt only when the set of
- * files changes (the metadata arrived, a different torrent was selected); otherwise the rows
+ * files changes (the metadata arrived, a different torrent was selected, a file was renamed);
+ * otherwise the rows
  * keep their identity so the selection and the expanded folders survive.
  */
 public final class FileRows {
@@ -103,8 +104,11 @@ public final class FileRows {
 
     /** True when the tree was rebuilt (so the view should re-root), false when updated in place. */
     public boolean apply(List<TorrentDetail.FileStatus> files) {
-        boolean sameSet =
-                files.size() == byIndex.size() && files.stream().allMatch(f -> byIndex.containsKey(f.index()));
+        // The same files under the same names: a rename moves a row in the tree, so it rebuilds.
+        boolean sameSet = files.size() == byIndex.size()
+                && files.stream()
+                        .allMatch(f -> byIndex.containsKey(f.index())
+                                && byIndex.get(f.index()).path().equals(f.path()));
         if (!sameSet) {
             rebuild(files);
             return true;

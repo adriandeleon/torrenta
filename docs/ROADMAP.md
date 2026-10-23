@@ -85,7 +85,7 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Feature | T | Q | Torrenta |
 |---|---|---|---|
 | General: hash, save path, pieces, availability, times, counters (limits in 0.4; comment/creator are in the Add dialog, not readable back from a handle) | ✓ | ✓ | 0.3 |
-| Files: tree with progress, priority per file, open (rename: 0.4, with the content layout) | ✓ | ✓ | 0.3 |
+| Files: tree with progress, priority per file, open, rename (0.4, with the content layout) | ✓ | ✓ | 0.3 |
 | Peers: IP, client, flags, progress, rates (country via offline GeoIP: 0.8) | ✓ | ✓ | 0.3 |
 | Trackers: status, message; add, remove, reannounce (scrape counts not exposed by the binding) | ✓ | ✓ | 0.3 |
 | Pieces map: downloaded and in-progress pieces | ✓ | ✓ | 0.3 |
@@ -189,16 +189,18 @@ with nothing to download is not one.
 ### 0.3 — Add, inspect, install
 What a first public release needs.
 
-1. **Add dialog** — done, except content layout. Files, magnets and URLs; save path with
+1. **Add dialog** — done; the content layout came in 0.4. Files, magnets and URLs; save path with
    free-space readout; start paused, sequential, skip check, stop condition; file tree with
    checkboxes and priorities; drag and drop; clipboard detection with `Ctrl+V`; the command line
    goes through it. **Content layout (no root folder) moved to 0.4**: libtorrent4j 2.1.0-39 has no
    `torrent_info::rename_file`, and renaming through the handle after adding is confirmed by
    libtorrent's alerts yet a recheck afterwards never found the files under their new names; it
    needs either a binding change or a different sequence, and was not worth holding the dialog.
+   (It was the different sequence: `renamed_files` in the add parameters, see 0.4's item 10.)
 2. **Detail pane** — done: General, Files, Peers, Trackers, Pieces; collapsible, remembered. Not
    in it: file rename (same binding limitation as the content layout: names read back through
-   `torrentFile()` do not reflect renames in 2.1.0-39), peers' country (needs an offline GeoIP
+   `torrentFile()` do not reflect renames in 2.1.0-39; in since 0.4, from the engine's own record),
+   peers' country (needs an offline GeoIP
    database, 0.8 with OS integration), per-torrent limits in General (0.4), and comment/creator in
    General (libtorrent 2.1 keeps them outside `torrent_info`; the Add dialog shows them).
 3. **Native app image and installers** — done: jlink plus jpackage, the native unpacked and
@@ -239,11 +241,28 @@ Everything in Settings that the engine already knows how to do.
    -1), the slow-torrent rule, and a global ratio and seeding-time limit with its action (pause or
    remove). libtorrent reads `share_ratio_limit`/`seed_time_limit` only to rank seeds for the queue,
    so the window applies the rule from its poll (`ShareLimit.decide`, pure). Queue positions are in
-   (Torrent → Queue, the Queue column); super seeding is not.
+   (Torrent → Queue, the Queue column). The action also takes remove with data and super seed
+   (once, then left alone; libtorrent's only).
 7. **Per-torrent limits dialog** — done (Torrent → Limits…, `Ctrl+L`): rate caps, connections,
    upload slots, first and last pieces first (edge-piece priorities, in the resume data), and a
    share limit of the torrent's own kept as `torrent.<hash>.share`. Set location is in (Torrent →
-   Set Location…); rename torrent and files, export `.torrent` are still to come.
+   Set Location…).
+8. ✓ **Super seeding**: Torrent → Super Seeding on the complete torrents of the selection, kept in
+   the resume data. Transmission's RPC has none (`Capability.SUPER_SEEDING`).
+9. ✓ **Export `.torrent`** (Shortcut+Shift+E): the info dictionary as loaded (same hash, renames
+   never reach it), the trackers in their tiers, the web seeds; one file or a folder of them.
+   Transmission hands out the file's path on its machine, never the bytes (`EXPORT_TORRENT`).
+10. ✓ **Rename**: a torrent's name (F2; the list, the log and run-on-event, kept in `.labels`,
+   qBittorrent's way: the files keep theirs), files and folders from the Files tab, and the content
+   layout on add (as the torrent has it, in a folder of its own, without its root folder; default
+   in Settings → Adding). libtorrent 2.1 reads renamed files back from the resume data relative
+   to the wrong folder and never shows them through `torrent_file()`, so the engine records every
+   name in the `.storage` sidecar and puts them back itself; the layout is `renamed_files` in the
+   add parameters, which the add's own check already honours. Transmission renames files and
+   folders (`torrent-rename-path`); a name of its own and the layout are libtorrent's
+   (`RENAME_TORRENT`, `CONTENT_LAYOUT`).
+
+**0.4 is feature-complete** but for web seeds shown and editable in the detail pane.
 
 ### 0.5 — Organisation and automation
 **0.5 is feature-complete.**

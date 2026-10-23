@@ -30,6 +30,7 @@ import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineSettings;
+import com.torrenta.engine.FileRenames;
 import com.torrenta.engine.IpRange;
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.SessionStats;
@@ -344,7 +345,7 @@ public final class LibtorrentEngine implements Engine {
                 LOG.warning("Resume data for " + entry.getKey() + " is unreadable (" + ec.message() + "); skipped");
                 continue;
             }
-            restoreSuffixes(entry.getKey(), params);
+            restoreNames(entry.getKey(), params);
             error_code added = new error_code();
             s.swig().add_torrent(params, added);
             if (added.value() != 0) {
@@ -390,24 +391,31 @@ public final class LibtorrentEngine implements Engine {
     /**
      * libtorrent 2.1 writes a renamed file into the resume data relative to the torrent's root
      * folder ({@code a.bin.part}) but reads it back relative to the save path, so a multi-file
-     * torrent restarted with suffixed names would write them beside its folder, not in it. The
-     * sidecar knows which files carry the suffix; their full names are put back here, before the
-     * add, from the original names in the info dictionary.
+     * torrent restarted with renamed files (the suffix, a name a person gave, the content
+     * layout) would look for them beside its folder, not in it, and find nothing. The sidecar
+     * knows every name; the full ones are put back here, before the add.
      */
-    private void restoreSuffixes(String id, add_torrent_params params) {
+    private void restoreNames(String id, add_torrent_params params) {
         TorrentStorage owed = storage.get(id);
-        if (owed == null || owed.suffixed().isEmpty()) return;
+        if (owed == null || (owed.suffixed().isEmpty() && owed.renamed().isEmpty())) return;
         org.libtorrent4j.swig.torrent_info info = params.ti_ptr();
         if (info == null || !info.is_valid()) return;
         org.libtorrent4j.swig.int_string_map renamed =
                 new org.libtorrent4j.swig.int_string_map(params.get_renamed_files());
         org.libtorrent4j.swig.file_storage files = info.files_impl();
-        for (int index : owed.suffixed()) {
+        Set<Integer> indices = new java.util.TreeSet<>(owed.suffixed());
+        indices.addAll(owed.renamed().keySet());
+        for (int index : indices) {
             if (index < 0 || index >= files.num_files()) continue;
-            renamed.put(index, TorrentStorage.suffixed(files.file_path(index)));
+            renamed.put(index, owed.onDisk(index, slashes(files.file_path(index))));
         }
         params.set_renamed_files(renamed);
         Reference.reachabilityFence(info);
+    }
+
+    /** A path inside a torrent with forward slashes, as the interface and the sidecar keep them. */
+    private static String slashes(String path) {
+        return path.replace('\\', '/');
     }
 
     @Override
@@ -484,8 +492,6 @@ public final class LibtorrentEngine implements Engine {
         if (choices.preallocate()) params.setStorageMode(StorageMode.STORAGE_MODE_ALLOCATE);
         params.setMaxConnections(engineSettings.maxConnectionsPerTorrent());
 
-        // Renaming files for the layout needs the handle, so such a torrent is added paused and
-        // resumed below once the names are right; a plain "start paused" stays paused.
         // A .torrent already has its metadata, so "stop after metadata" means "start paused".
         boolean pauseNow = request.startPaused()
                 || (info != null && request.stopCondition() == AddRequest.StopCondition.METADATA_RECEIVED);
@@ -506,6 +512,20 @@ public final class LibtorrentEngine implements Engine {
                 priorities[i] = toLibtorrent(request.filePriorities().getOrDefault(i, Priority.NORMAL));
             }
             params.filePriorities(priorities);
+        }
+
+        // The layout as renamed files in the add parameters, so the add's own check already looks
+        // for them under the new names (renaming through the handle during that check was lost).
+        Map<Integer, String> laidOut = Map.of();
+        Map<Integer, String> originals = Map.of();
+        if (info != null && choices.layout() != FileRenames.Layout.ORIGINAL) {
+            originals = originalNames(info.files());
+            laidOut = FileRenames.layout(originals, info.name(), choices.layout());
+            if (!laidOut.isEmpty()) {
+                org.libtorrent4j.swig.int_string_map renamed = new org.libtorrent4j.swig.int_string_map();
+                laidOut.forEach(renamed::put);
+                params.swig().set_renamed_files(renamed);
+            }
         }
 
         String id = params.getInfoHashes().getBest().toHex();
@@ -540,7 +560,8 @@ public final class LibtorrentEngine implements Engine {
         TorrentHandle handle = new TorrentHandle(raw);
         if (!request.labels().isEmpty()) writeLabels(id, request.labels());
         TorrentStorage owed = new TorrentStorage(
-                start.equals(destination) ? "" : destination.toString(), choices.partSuffix(), Set.of());
+                        start.equals(destination) ? "" : destination.toString(), choices.partSuffix(), Set.of())
+                .withRenamed(laidOut, originals);
         if (!owed.isEmpty()) writeStorage(id, owed);
 
         return snapshot(handle);
@@ -609,10 +630,11 @@ public final class LibtorrentEngine implements Engine {
                 if (files.padFileAt(i) || files.fileSize(i) <= 0) continue;
                 boolean wanted = i >= priorities.length || priorities[i] != org.libtorrent4j.Priority.IGNORE;
                 boolean complete = i < progress.length && progress[i] >= files.fileSize(i);
-                String path = files.filePath(i);
+                // The name it has now: torrent_file() shows the torrent's own, never a rename.
+                String path = owed.name(i, slashes(files.filePath(i)));
                 if (suffixed.contains(i)) {
                     if (complete) {
-                        h.renameFile(i, TorrentStorage.unsuffixed(path));
+                        h.renameFile(i, path);
                         suffixed.remove(i);
                     }
                 } else if (wanted && !complete && !path.endsWith(TorrentStorage.SUFFIX)) {
@@ -634,7 +656,7 @@ public final class LibtorrentEngine implements Engine {
         if (info == null || !info.isValid()) return;
         try {
             FileStorage files = info.files();
-            if (index < files.numFiles()) h.renameFile(index, TorrentStorage.unsuffixed(files.filePath(index)));
+            if (index < files.numFiles()) h.renameFile(index, owed.name(index, slashes(files.filePath(index))));
         } finally {
             Reference.reachabilityFence(info);
         }
@@ -732,6 +754,11 @@ public final class LibtorrentEngine implements Engine {
     @Override
     public synchronized void setTags(String id, List<String> tags) throws EngineException {
         writeLabels(id, labelsOf(id).withTags(tags));
+    }
+
+    @Override
+    public synchronized void rename(String id, String name) throws EngineException {
+        writeLabels(id, labelsOf(id).withName(name));
     }
 
     /** The torrent's labels, none if it has none; an id the session lacks is an error. */
@@ -1171,6 +1198,68 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
+    public synchronized void renamePath(String id, String path, String name) throws EngineException {
+        TorrentHandle h = handle(id);
+        TorrentStatus status = h.status(StatusQuery.FLAGS);
+        if (!status.hasMetadata()) throw new EngineException(tr("engine.error.renameNoMetadata"));
+        TorrentInfo info = h.torrentFile();
+        try {
+            Map<Integer, String> originals = originalNames(info.files());
+            TorrentStorage owed = storage.getOrDefault(id, TorrentStorage.NONE);
+            Map<Integer, String> names = new java.util.TreeMap<>();
+            originals.forEach((index, original) -> names.put(index, owed.name(index, original)));
+            java.util.Optional<String> problem = FileRenames.problem(names, path, name);
+            if (problem.isPresent()) throw new EngineException(problem.get());
+            Map<Integer, String> changes = FileRenames.plan(names, path, name);
+            TorrentStorage next = owed.withRenamed(changes, originals);
+            // Recorded first: the rename alerts, and a restart, read the names from the record.
+            writeStorage(id, next);
+            changes.forEach((index, renamed) -> h.renameFile(index, next.onDisk(index, originals.get(index))));
+            String shown = displayName(id, status.name());
+            emit(EngineEvent.info(id, shown, tr("engine.event.pathRenamed", shown, path, name.strip())));
+        } finally {
+            Reference.reachabilityFence(info);
+        }
+    }
+
+    /**
+     * The folders above a renamed file's old place that are empty now, from the deepest up,
+     * stopping at the save path (never removed) and at the first folder that still holds anything.
+     */
+    private static void removeEmptyFolders(String savePath, String oldName) {
+        try {
+            Path save = Path.of(savePath).toAbsolutePath().normalize();
+            Path dir = save.resolve(oldName).normalize().getParent();
+            while (dir != null && dir.startsWith(save) && !dir.equals(save)) {
+                try (var entries = Files.list(dir)) {
+                    if (entries.findAny().isPresent()) return;
+                }
+                Files.delete(dir);
+                dir = dir.getParent();
+            }
+        } catch (IOException | RuntimeException e) {
+            LOG.fine("empty folders after a rename stay: " + e.getMessage());
+        }
+    }
+
+    /** Every real file's own path by index, forward slashes; padding files left out. */
+    private static Map<Integer, String> originalNames(FileStorage files) {
+        Map<Integer, String> out = new java.util.TreeMap<>();
+        for (int i = 0; i < files.numFiles(); i++) {
+            if (!files.padFileAt(i)) out.put(i, slashes(files.filePath(i)));
+        }
+        return out;
+    }
+
+    @Override
+    public synchronized void setSuperSeeding(String id, boolean on) throws EngineException {
+        TorrentHandle h = handle(id);
+        if (on) h.setFlags(Flags.SUPER_SEEDING);
+        else h.unsetFlags(Flags.SUPER_SEEDING);
+        requestSave(h, false);
+    }
+
+    @Override
     public synchronized void queueMove(String id, QueueMove move) throws EngineException {
         TorrentHandle h = handle(id);
         switch (move) {
@@ -1206,8 +1295,7 @@ public final class LibtorrentEngine implements Engine {
             TorrentStatus status = h.status(StatusQuery.FLAGS);
             if (!status.isFinished()) {
                 writeStorage(id, owed.withDestination(target.toString()));
-                String name = status.name();
-                if (name == null || name.isEmpty()) name = id;
+                String name = displayName(id, status.name());
                 emit(EngineEvent.info(id, name, tr("engine.event.moveWhenComplete", name, target)));
                 return;
             }
@@ -1297,6 +1385,35 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
+    public synchronized byte[] exportTorrent(String id) throws EngineException {
+        TorrentHandle h = handle(id);
+        if (!h.status(StatusQuery.FLAGS).hasMetadata()) throw new EngineException(tr("engine.error.exportNoMetadata"));
+        TorrentInfo info = h.torrentFile();
+        try {
+            AddTorrentParams params = new AddTorrentParams();
+            // write_torrent_file writes the info section as it was loaded, so renames (the .part
+            // suffix, a file renamed by hand) never reach the exported file and the hash holds.
+            params.setTorrentInfo(info);
+            List<String> urls = new ArrayList<>();
+            List<Integer> tiers = new ArrayList<>();
+            for (AnnounceEntry tracker : trackers(h)) {
+                urls.add(tracker.url());
+                tiers.add(tracker.tier());
+            }
+            params.setTrackers(urls);
+            params.setTrackerTiers(tiers);
+            params.setUrlSeeds(h.urlSeeds());
+            return Vectors.byte_vector2bytes(libtorrent
+                    .write_torrent_file(params.swig(), libtorrent.getAllow_missing_piece_layer())
+                    .bencode());
+        } catch (RuntimeException e) {
+            throw new EngineException(tr("engine.error.exportWrite", e.getMessage()), e);
+        } finally {
+            Reference.reachabilityFence(info);
+        }
+    }
+
+    @Override
     public synchronized String magnetLink(String id) throws EngineException {
         return handle(id).makeMagnetUri();
     }
@@ -1311,6 +1428,8 @@ public final class LibtorrentEngine implements Engine {
         TorrentInfo info = status.hasMetadata() ? h.torrentFile() : null;
         if (info != null && info.isValid()) {
             FileStorage storage = info.files();
+            // The names a person or the layout gave: torrent_file() shows the torrent's own.
+            TorrentStorage owed = this.storage.getOrDefault(id, TorrentStorage.NONE);
             long[] progress = h.fileProgress();
             org.libtorrent4j.Priority[] priorities = h.filePriorities();
             for (int i = 0; i < storage.numFiles(); i++) {
@@ -1322,7 +1441,7 @@ public final class LibtorrentEngine implements Engine {
                 int first = size == 0 ? -1 : storage.pieceIndexAtFile(i);
                 int last = size == 0 ? -1 : storage.lastPieceIndexAtFile(i);
                 files.add(new TorrentDetail.FileStatus(
-                        i, storage.filePath(i).replace('\\', '/'), size, done, priority, first, last));
+                        i, owed.name(i, slashes(storage.filePath(i))), size, done, priority, first, last));
             }
         }
 
@@ -1981,12 +2100,21 @@ public final class LibtorrentEngine implements Engine {
         return bestHash(handle.swig()).to_hex();
     }
 
-    /** The name, or the hash while there is none; empty for a handle that is already gone. */
-    private static String nameOf(TorrentHandle handle) {
+    /**
+     * The name a person gave it, else its own, else the hash while there is none; empty for a
+     * handle that is already gone.
+     */
+    private String nameOf(TorrentHandle handle) {
         if (!handle.isValid()) return "";
         TorrentStatus status = handle.status(StatusQuery.FLAGS);
-        String name = status.name();
-        return name == null || name.isEmpty() ? status.getInfoHashes().getBest().toHex() : name;
+        String id = status.getInfoHashes().getBest().toHex();
+        return displayName(id, status.name());
+    }
+
+    private String displayName(String id, String own) {
+        String given = labels.getOrDefault(id, TorrentLabels.NONE).name();
+        if (!given.isEmpty()) return given;
+        return own == null || own.isEmpty() ? id : own;
     }
 
     /**
@@ -2059,6 +2187,7 @@ public final class LibtorrentEngine implements Engine {
         static final torrent_flags_t STOP_WHEN_READY = TorrentFlags.STOP_WHEN_READY;
         static final torrent_flags_t DISABLE_PEX = TorrentFlags.DISABLE_PEX;
         static final torrent_flags_t UPLOAD_MODE = TorrentFlags.UPLOAD_MODE;
+        static final torrent_flags_t SUPER_SEEDING = TorrentFlags.SUPER_SEEDING;
     }
 
     /**
@@ -2094,8 +2223,7 @@ public final class LibtorrentEngine implements Engine {
         TorrentStatus status = handle.status(StatusQuery.FLAGS);
         torrent_flags_t flags = status.flags();
         String id = status.getInfoHashes().getBest().toHex();
-        String name = status.name();
-        if (name == null || name.isEmpty()) name = id;
+        String name = displayName(id, status.name());
         String tracker = status.currentTracker();
         TorrentLabels l = labels.getOrDefault(id, TorrentLabels.NONE);
         ErrorCode error = status.errorCode();
@@ -2133,7 +2261,8 @@ public final class LibtorrentEngine implements Engine {
                 // Parked by the queue: paused, but auto-managed, so libtorrent resumes it itself.
                 has(flags, Flags.PAUSED) && has(flags, Flags.AUTO_MANAGED),
                 status.queuePosition(),
-                status.isMovingStorage());
+                status.isMovingStorage(),
+                has(flags, Flags.SUPER_SEEDING));
     }
 
     /** libtorrent's seven states folded into the list's six. Package-private for the test. */
@@ -2265,17 +2394,13 @@ public final class LibtorrentEngine implements Engine {
                     }
                     case FILE_RENAMED -> {
                         FileRenamedAlert t = (FileRenamedAlert) alert;
-                        // The suffix going on and off is the engine's own doing, one line per file
-                        // each way: not worth the log window's space.
-                        TorrentStorage owed = t.handle().isValid() ? storage.get(id(t.handle())) : null;
-                        if (owed == null || !owed.partSuffix()) {
-                            torrentEvent(
-                                    t,
-                                    EngineEvent.Level.INFO,
-                                    "engine.event.fileRenamed",
-                                    String.valueOf(t.index()),
-                                    t.newName());
-                        }
+                        // No line per file: the suffix going on and off is the engine's own doing,
+                        // and a person's rename says itself once, from renamePath. A folder that
+                        // the rename emptied goes, as it would in a file manager.
+                        if (t.handle().isValid())
+                            removeEmptyFolders(
+                                    t.handle().status(StatusQuery.FLAGS).swig().getSave_path(),
+                                    t.swig().old_name());
                     }
                     case FILE_RENAME_FAILED -> {
                         FileRenameFailedAlert t = (FileRenameFailedAlert) alert;

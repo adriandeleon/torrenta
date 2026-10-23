@@ -140,12 +140,19 @@ class TransmissionEngineTest {
                 Capability.STORAGE_OPTIONS,
                 Capability.ACTIVE_TOTAL_LIMIT,
                 Capability.SEED_MODE,
-                Capability.STOP_CONDITION)) {
+                Capability.STOP_CONDITION,
+                Capability.SUPER_SEEDING,
+                Capability.EXPORT_TORRENT,
+                Capability.RENAME_TORRENT,
+                Capability.CONTENT_LAYOUT)) {
             assertTrue(caps.lacks(missing), missing + " is not Transmission's");
         }
         assertThrows(EngineException.class, () -> e.create(null, null));
         assertThrows(EngineException.class, () -> e.fetchMetadata("magnet:?xt=urn:btih:" + MAGNET_ID));
         assertThrows(EngineException.class, () -> e.setIpFilter(List.of()));
+        assertThrows(EngineException.class, () -> e.setSuperSeeding(MAGNET_ID, true));
+        assertThrows(EngineException.class, () -> e.exportTorrent(MAGNET_ID));
+        assertThrows(EngineException.class, () -> e.rename(MAGNET_ID, "x"));
         e.stop();
         assertTrue(e.torrents().isEmpty(), "a stopped engine lists nothing");
     }
@@ -906,6 +913,15 @@ class TransmissionEngineTest {
                 assertThrows(EngineException.class, () -> e.setBlocklist("http://list.example/x", true));
         assertEquals("Couldn't fetch blocklist: Not Found (404)", failed.getMessage());
         assertEquals(0, e.blockedPeers());
+    }
+
+    @Test
+    void theFilesFieldReadsAsPathsByIndex() {
+        Map<String, Object> t = Map.of(
+                "files",
+                List.of(Map.of("name", "pair/a.bin", "length", 1L), Map.of("name", "pair\\sub\\b.bin", "length", 2L)));
+        assertEquals(Map.of(0, "pair/a.bin", 1, "pair/sub/b.bin"), TransmissionEngine.fileNames(t));
+        assertEquals(Map.of(), TransmissionEngine.fileNames(Map.of()), "a magnet before its metadata");
     }
 
     @Test

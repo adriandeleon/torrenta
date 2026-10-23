@@ -56,6 +56,26 @@ class ActionsTest {
     }
 
     @Test
+    void superSeedingIsForTheCompleteOnesAndTurnsOnUnlessAllHaveIt() {
+        Torrent seed = T.seeding().build();
+        Torrent superSeed = T.seeding().superSeeding().build();
+        Torrent downloading = T.downloading().build();
+        assertEquals(List.of(seed), Actions.superSeedTargets(List.of(seed, downloading)));
+        assertTrue(Actions.shouldEnableSuperSeeding(List.of(seed, superSeed)));
+        assertFalse(Actions.shouldEnableSuperSeeding(List.of(superSeed)));
+    }
+
+    @Test
+    void anExportIsNamedAfterTheTorrentSafelyAndNeverOverAnotherFile() {
+        assertEquals("Big Buck Bunny.torrent", Actions.exportFileName("Big Buck Bunny"));
+        assertEquals("a_b_c_.torrent", Actions.exportFileName("a/b:c?"));
+        assertEquals("hidden.torrent", Actions.exportFileName("..hidden. "));
+        assertEquals("torrent.torrent", Actions.exportFileName("..."));
+        assertEquals("a.torrent", Actions.unusedName("a.torrent", java.util.Set.of("b.torrent")));
+        assertEquals("a (3).torrent", Actions.unusedName("a.torrent", java.util.Set.of("a.torrent", "a (2).torrent")));
+    }
+
+    @Test
     void outcomes() {
         assertEquals("Paused 1 torrent", Actions.outcome("Paused", 1, List.of()));
         assertEquals("Paused 3 torrents", Actions.outcome("Paused", 3, List.of()));

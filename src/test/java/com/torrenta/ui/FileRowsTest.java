@@ -59,6 +59,15 @@ class FileRowsTest {
         assertEquals(2, rows.rootItem().getChildren().size());
     }
 
+    @Test
+    void aRenamedFileRebuildsTheTree() {
+        FileRows rows = new FileRows();
+        rows.apply(List.of(f(0, "pair/a.bin", 1, 0), f(1, "pair/b.bin", 1, 0)));
+        assertFalse(rows.apply(List.of(f(0, "pair/a.bin", 1, 1), f(1, "pair/b.bin", 1, 0))), "progress only");
+        assertTrue(rows.apply(List.of(f(0, "pair/x.bin", 1, 1), f(1, "pair/b.bin", 1, 0))), "a new name");
+        assertEquals("pair/x.bin", rows.get(0).path());
+    }
+
     /** Open Folder: a folder is itself, a file its parent, a single-file torrent's the save path. */
     @Test
     void theFolderToOpenIsTheRowsOwnOrItsParent() {

@@ -8,6 +8,7 @@ import java.util.Set;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.Engine.Capabilities;
 import com.torrenta.engine.Engine.Capability;
+import com.torrenta.engine.ShareLimit;
 
 /**
  * What the window hides for an engine that lacks a capability: the one rule, pure, so the menus,
@@ -20,15 +21,18 @@ import com.torrenta.engine.Engine.Capability;
 final class CapabilityRules {
 
     /** Commands that need a capability; any other command is for every engine. */
-    private static final Map<String, Capability> COMMANDS = Map.of(
-            "create", Capability.CREATE_TORRENT,
-            "open-folder", Capability.LOCAL_FILES,
-            "sequential", Capability.SEQUENTIAL_DOWNLOAD,
-            "queue-top", Capability.QUEUE_ORDER,
-            "queue-up", Capability.QUEUE_ORDER,
-            "queue-down", Capability.QUEUE_ORDER,
-            "queue-bottom", Capability.QUEUE_ORDER,
-            "set-location", Capability.MOVE_STORAGE);
+    private static final Map<String, Capability> COMMANDS = Map.ofEntries(
+            Map.entry("create", Capability.CREATE_TORRENT),
+            Map.entry("open-folder", Capability.LOCAL_FILES),
+            Map.entry("sequential", Capability.SEQUENTIAL_DOWNLOAD),
+            Map.entry("super-seed", Capability.SUPER_SEEDING),
+            Map.entry("queue-top", Capability.QUEUE_ORDER),
+            Map.entry("queue-up", Capability.QUEUE_ORDER),
+            Map.entry("queue-down", Capability.QUEUE_ORDER),
+            Map.entry("queue-bottom", Capability.QUEUE_ORDER),
+            Map.entry("set-location", Capability.MOVE_STORAGE),
+            Map.entry("export-torrent", Capability.EXPORT_TORRENT),
+            Map.entry("rename", Capability.RENAME_TORRENT));
 
     /** Settings pages that need one of a set of capabilities; the rest are for every engine. */
     private static final Map<String, Set<Capability>> PAGES =
@@ -60,6 +64,13 @@ final class CapabilityRules {
     /** A row, tab or dialog choice tagged with a capability shows when the engine has it. */
     static boolean shown(Capability needed, Capabilities caps) {
         return needed == null || caps.has(needed);
+    }
+
+    /** The share-limit actions to offer: super seeding only where the engine can do it. */
+    static List<ShareLimit.Action> shareActions(Capabilities caps) {
+        return java.util.Arrays.stream(ShareLimit.Action.values())
+                .filter(a -> a != ShareLimit.Action.SUPER_SEED || caps.has(Capability.SUPER_SEEDING))
+                .toList();
     }
 
     /** The missing capabilities as one line, for the capture hook and the status line. */
