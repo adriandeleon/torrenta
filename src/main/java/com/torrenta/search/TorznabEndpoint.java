@@ -4,6 +4,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Optional;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * One Torznab server as the Settings page lists it: Prowlarr's {@code http://host:9696/1/api},
  * Jackett's {@code http://host:9117/api/v2.0/indexers/all/results/torznab/api}, with its API key.
@@ -39,7 +41,7 @@ public record TorznabEndpoint(String name, String url, String apiKey, boolean en
 
     /** The key shown without giving it away: {@code ••••} or "none". */
     public String maskedKey() {
-        return apiKey.isEmpty() ? "none" : "••••••••";
+        return apiKey.isEmpty() ? tr("search.endpoint.noKey") : "••••••••";
     }
 
     /**
@@ -49,17 +51,17 @@ public record TorznabEndpoint(String name, String url, String apiKey, boolean en
      */
     public static Optional<String> problem(String url) {
         String u = url == null ? "" : url.trim();
-        if (u.isEmpty()) return Optional.of("The URL is needed: Prowlarr's is http://host:9696/1/api");
+        if (u.isEmpty()) return Optional.of(tr("search.endpoint.urlNeeded"));
         URI uri;
         try {
             uri = new URI(u);
         } catch (URISyntaxException e) {
-            return Optional.of("That is not a URL");
+            return Optional.of(tr("search.endpoint.notAUrl"));
         }
         String scheme = uri.getScheme();
         if (scheme == null || !(scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https")))
-            return Optional.of("The URL must start with http:// or https://");
-        if (uri.getHost() == null || uri.getHost().isEmpty()) return Optional.of("The URL names no host");
+            return Optional.of(tr("search.endpoint.scheme"));
+        if (uri.getHost() == null || uri.getHost().isEmpty()) return Optional.of(tr("search.endpoint.noHost"));
         return Optional.empty();
     }
 

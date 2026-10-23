@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The BitTorrent engine, as the interface sees it.
  *
@@ -197,7 +199,7 @@ public interface Engine extends AutoCloseable {
      * is handed to it range by range through {@link #setIpFilter}.
      */
     default long setBlocklist(String url, boolean enabled) throws EngineException {
-        throw new EngineException("This engine takes no blocklist URL");
+        throw new EngineException(tr("engine.error.noBlocklistUrl"));
     }
 
     /**

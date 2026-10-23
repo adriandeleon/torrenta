@@ -7,6 +7,8 @@ import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Optional;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * One subscribed feed: a stable id (the articles file is named after it), its URL, what to call it
  * (blank: the feed's own title once fetched, else its host), and how often to ask it, in minutes,
@@ -59,17 +61,16 @@ public record Feed(String id, String url, String name, int refreshMinutes) {
     /** Why {@code url} cannot be a feed's, in a sentence; empty when it can. The dialog's rule. */
     public static Optional<String> problem(String url) {
         String u = url == null ? "" : url.trim();
-        if (u.isEmpty()) return Optional.of("a URL is needed");
+        if (u.isEmpty()) return Optional.of(tr("rss.feedUrl.needed"));
         URI uri;
         try {
             uri = new URI(u);
         } catch (URISyntaxException e) {
-            return Optional.of("not a URL");
+            return Optional.of(tr("rss.feedUrl.notAUrl"));
         }
         String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
-        if (!scheme.equals("http") && !scheme.equals("https"))
-            return Optional.of("the URL must start with http:// or https://");
-        if (uri.getHost() == null || uri.getHost().isEmpty()) return Optional.of("the URL names no host");
+        if (!scheme.equals("http") && !scheme.equals("https")) return Optional.of(tr("rss.feedUrl.scheme"));
+        if (uri.getHost() == null || uri.getHost().isEmpty()) return Optional.of(tr("rss.feedUrl.noHost"));
         return Optional.empty();
     }
 

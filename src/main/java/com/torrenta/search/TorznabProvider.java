@@ -22,6 +22,8 @@ import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * A Torznab server: Jackett or Prowlarr, which put hundreds of indexers behind one RSS-shaped API.
  *
@@ -77,7 +79,7 @@ public final class TorznabProvider implements SearchProvider {
         try (InputStream in = fetch(uri)) {
             return parseResults(in, name());
         } catch (IOException | XMLStreamException e) {
-            throw new SearchException("could not read the answer: " + reason(e), e);
+            throw new SearchException(tr("search.error.unreadable", reason(e)), e);
         }
     }
 
@@ -87,7 +89,7 @@ public final class TorznabProvider implements SearchProvider {
         try (InputStream in = fetch(uri)) {
             return parseCaps(in);
         } catch (IOException | XMLStreamException e) {
-            throw new SearchException("could not read the answer: " + reason(e), e);
+            throw new SearchException(tr("search.error.unreadable", reason(e)), e);
         }
     }
 
@@ -98,7 +100,7 @@ public final class TorznabProvider implements SearchProvider {
                 client,
                 uri,
                 Map.of("Accept", "application/rss+xml, application/xml, text/xml, */*"),
-                "the API key was refused");
+                tr("search.error.apiKeyRefused"));
     }
 
     /** An exception's message, as a status line should say it. */
@@ -298,8 +300,9 @@ public final class TorznabProvider implements SearchProvider {
     private static SearchException torznabError(XMLStreamReader r) {
         String code = attribute(r, "code");
         String description = attribute(r, "description");
-        if (description.isEmpty()) description = "the server reported an error";
-        return new SearchException(code.isEmpty() ? description : description + " (error " + code + ")");
+        if (description.isEmpty()) description = tr("search.error.serverError");
+        return new SearchException(
+                code.isEmpty() ? description : tr("search.error.serverErrorCode", description, code));
     }
 
     private static String attribute(XMLStreamReader r, String name) {

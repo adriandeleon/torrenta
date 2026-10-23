@@ -19,6 +19,8 @@ import javafx.scene.control.TextField;
 import javafx.scene.input.Clipboard;
 import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyCodeCombination;
+import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -102,7 +104,8 @@ final class MessageLogPopup {
         });
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        Label hint = new Label(tr("messageLog.hint"));
+        Label hint = new Label(tr(
+                "messageLog.hint", new KeyCodeCombination(KeyCode.C, KeyCombination.SHORTCUT_DOWN).getDisplayText()));
         hint.getStyleClass().add("message-log-hint");
         HBox footer = new HBox(8, copy, clear, spacer, hint);
         footer.getStyleClass().add("message-log-footer");

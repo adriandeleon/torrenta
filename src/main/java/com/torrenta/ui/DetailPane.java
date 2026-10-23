@@ -1027,7 +1027,7 @@ final class DetailPane extends VBox {
                 .addAll(List.of(
                         column(tr("detail.trackers.column.url"), 360, TorrentDetail.Tracker::url),
                         column(tr("detail.trackers.column.tier"), 50, t -> String.valueOf(t.tier())),
-                        column(tr("detail.trackers.column.status"), 100, TorrentDetail.Tracker::status),
+                        column(tr("detail.trackers.column.status"), 100, t -> trackerStatus(t.status())),
                         column(tr("detail.trackers.column.message"), 240, TorrentDetail.Tracker::message)));
         Button add = new Button(tr("detail.trackers.add"));
         add.setOnAction(e -> askTrackers());
@@ -1052,9 +1052,21 @@ final class DetailPane extends VBox {
         prompt.setTitle(tr("detail.trackers.addDialog.title"));
         prompt.setHeaderText(tr("detail.trackers.addDialog.header"));
         prompt.setContentText(tr("detail.trackers.addDialog.prompt"));
+        StockButtons.translate(prompt);
         prompt.getEditor().setPrefColumnCount(48);
         Optional<String> text = prompt.showAndWait();
         text.map(Actions::trackerUrls).filter(urls -> !urls.isEmpty()).ifPresent(onAddTrackers);
+    }
+
+    /** A tracker's status word: the engines report working, updating, not contacted or error. */
+    static String trackerStatus(String status) {
+        return switch (status) {
+            case "working" -> tr("detail.trackers.status.working");
+            case "updating" -> tr("detail.trackers.status.updating");
+            case "not contacted" -> tr("detail.trackers.status.notContacted");
+            case "error" -> tr("detail.trackers.status.error");
+            default -> status;
+        };
     }
 
     private static <T> TableColumn<T, String> column(String title, double width, Function<T, String> text) {

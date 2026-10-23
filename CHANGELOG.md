@@ -58,6 +58,16 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Fixed
 
+- **The rest of the interface speaks the chosen language.** Engine errors and events (the status
+  bar, the Add dialog, the Event Log, the notifications), search and feed failures, a search
+  definition's problem in Settings → Search, the RSS rule dialog's problem line, the rule and
+  watch-folder log lines, the tray and badge reasons, the Trackers tab's status column and the
+  run-on-event lines were English whatever the language. Every confirmation and prompt has a
+  translated title and OK/Cancel (JavaFX's stock buttons followed the system locale instead), and
+  key names in hints come from the catalogue or the platform (`⌘V` on macOS, `Leertaste` and
+  `Entf` in German menus) rather than a fixed "Ctrl+V" or "Space". The UI string sweep now also
+  fails on English handed to an engine exception or event, or returned from a method whose result
+  the window shows.
 - **A long status message no longer pushes the rest of the status bar off the window.** A
   tracker warning used to elide "Alt speed" and the rates as well and push free space off the
   right edge; now the message alone shortens, with an ellipsis, and the port, DHT, rates and free

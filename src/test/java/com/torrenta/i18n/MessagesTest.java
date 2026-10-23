@@ -17,6 +17,8 @@ import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.torrenta.engine.WatchFolders;
+import com.torrenta.rss.EpisodeFilter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -167,6 +169,25 @@ class MessagesTest {
         assertNotEquals(english.getProperty(key), Messages.tr(key), "the Spanish word differs from the English one");
         Messages.init("en");
         assertEquals(english.getProperty(key), Messages.tr(key));
+    }
+
+    @Test
+    void textsBuiltOutsideTheWindowFollowTheLanguageToo() {
+        // Engine, rule and watch-folder texts are composed far from any control; they used to be
+        // English under every language because nothing in a text position gave them away.
+        Messages.init("de");
+        assertEquals("Es werden keine Ordner überwacht.", WatchFolders.statusText(0, List.of(), true));
+        assertEquals(
+                "2 Ordner überwacht, alle 60 Sekunden und sobald Dateien erscheinen.",
+                WatchFolders.statusText(2, List.of(), true));
+        assertEquals(
+                java.util.Optional.of("„1x5-2“ läuft rückwärts: der Bereich endet, bevor er beginnt"),
+                EpisodeFilter.problem("1x5-2"));
+        Messages.init("fr");
+        assertEquals(
+                "Ajouté, mais impossible de renommer a.torrent du dossier surveillé /w : x",
+                Messages.tr("engine.watch.renameFailed", "a.torrent", "/w", "x"));
+        assertEquals(" ; renommé en a.torrent.invalid", Messages.tr("engine.watch.setAside", "a.torrent.invalid"));
     }
 
     @Test

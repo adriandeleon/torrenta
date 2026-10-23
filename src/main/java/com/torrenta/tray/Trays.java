@@ -4,6 +4,10 @@ import java.awt.GraphicsEnvironment;
 import java.util.Locale;
 import java.util.Optional;
 
+import com.torrenta.AppInfo;
+
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Backend chooser. Linux speaks StatusNotifierItem over D-Bus and nothing else: the legacy AWT tray
  * is XEmbed, which GNOME dropped in 3.26 and Wayland never had, so there is no fallback worth the
@@ -56,7 +60,7 @@ public final class Trays {
         // Turned on while running: the headless guard was latched at launch, so only a restart can
         // lift it. Said as such, not as "unsupported".
         if (GraphicsEnvironment.isHeadless()) {
-            return Attempt.none("restart Torrenta to show the tray icon");
+            return Attempt.none(tr("tray.reason.restart", AppInfo.NAME));
         }
         try {
             return Attempt.of(new AwtTray(onActivate, onQuit));

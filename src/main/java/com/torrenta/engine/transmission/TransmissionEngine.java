@@ -43,6 +43,8 @@ import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.engine.TrackerHost;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * A Transmission daemon as the engine: the same window, driving {@code transmission-daemon} on a
  * seedbox or a NAS over its RPC.
@@ -188,15 +190,13 @@ public final class TransmissionEngine implements Engine {
         started = true;
         stopped = false;
         emit(EngineEvent.session(
-                EngineEvent.Level.INFO,
-                "Engine started: " + description() + ", downloading to " + remoteDownloadDir
-                        + "; the daemon keeps its own settings"));
+                EngineEvent.Level.INFO, tr("engine.event.daemonStarted", description(), remoteDownloadDir)));
         readStats();
     }
 
     @Override
     public String description() {
-        return "Transmission " + version + " (RPC " + rpcVersion + ") at " + profile.hostLine();
+        return tr("engine.transmission.description", version, String.valueOf(rpcVersion), profile.hostLine());
     }
 
     /** The daemon's version alone, for the window title and the profile page. */
@@ -238,12 +238,12 @@ public final class TransmissionEngine implements Engine {
     public void stop() {
         if (!started || stopped) return;
         stopped = true;
-        emit(EngineEvent.session(EngineEvent.Level.INFO, "Engine stopped"));
+        emit(EngineEvent.session(EngineEvent.Level.INFO, tr("engine.event.stopped")));
     }
 
     private void checkRunning() throws EngineException {
-        if (!started) throw new EngineException("The engine has not started");
-        if (stopped) throw new EngineException("The engine stopped");
+        if (!started) throw new EngineException(tr("engine.error.notStarted"));
+        if (stopped) throw new EngineException(tr("engine.error.stopped"));
     }
 
     // ---- adding ---------------------------------------------------------------------------------
@@ -255,11 +255,11 @@ public final class TransmissionEngine implements Engine {
             source = new AddRequest.Magnet(input);
         } else {
             Path file = Path.of(input);
-            if (!Files.isRegularFile(file)) throw new EngineException("No such file: " + input);
+            if (!Files.isRegularFile(file)) throw new EngineException(tr("engine.error.noSuchFile", input));
             try {
                 source = new AddRequest.TorrentFile(Files.readAllBytes(file), input);
             } catch (IOException e) {
-                throw new EngineException("Could not read " + input + ": " + e.getMessage(), e);
+                throw new EngineException(tr("engine.error.couldNotRead", input, e.getMessage()), e);
             }
         }
         return add(AddRequest.defaults(source, localDownloadDir.get()));
@@ -272,17 +272,17 @@ public final class TransmissionEngine implements Engine {
         Map<String, Object> answer = rpc.call("torrent-add", args);
         if (Json.has(answer, "torrent-duplicate")) {
             Map<String, Object> dup = Json.obj(answer, "torrent-duplicate");
-            throw new EngineException(
-                    Json.str(dup, "name", Json.str(dup, "hashString", "That torrent")) + " is already in the list");
+            String which = Json.str(dup, "name", Json.str(dup, "hashString", tr("engine.error.thatTorrent")));
+            throw new EngineException(tr("engine.error.duplicate", which));
         }
         Map<String, Object> added = Json.obj(answer, "torrent-added");
         String id = Json.str(added, "hashString", "").toLowerCase(Locale.ROOT);
-        if (id.isEmpty()) throw new EngineException("The daemon added nothing");
+        if (id.isEmpty()) throw new EngineException(tr("engine.error.daemonAddedNothing"));
         String name = Json.str(added, "name", id);
         synchronized (pollLock) {
             announced.add(id);
         }
-        emit(EngineEvent.of(EngineEvent.Kind.ADDED, EngineEvent.Level.INFO, id, name, "Added " + name));
+        emit(EngineEvent.of(EngineEvent.Kind.ADDED, EngineEvent.Level.INFO, id, name, tr("engine.event.added", name)));
         Torrent fresh = one(id);
         if (fresh != null) return fresh;
         return placeholder(id, name, request);
@@ -382,18 +382,18 @@ public final class TransmissionEngine implements Engine {
         try {
             return Bencode.preview(torrent);
         } catch (IOException | RuntimeException e) {
-            throw new EngineException("Not a torrent: " + e.getMessage(), e);
+            throw new EngineException(tr("engine.error.notATorrent", e.getMessage()), e);
         }
     }
 
     @Override
     public CreatedTorrent create(CreateRequest request, CreateProgress progress) throws EngineException {
-        throw new EngineException("Transmission cannot create a torrent; the files would have to be on its machine");
+        throw new EngineException(tr("engine.error.transmissionCreate"));
     }
 
     @Override
     public MetadataFetch fetchMetadata(String magnet) throws EngineException {
-        throw new EngineException("Transmission lists a magnet's files once it is added, not before");
+        throw new EngineException(tr("engine.error.transmissionFetch"));
     }
 
     // ---- per-torrent actions --------------------------------------------------------------------
@@ -409,7 +409,8 @@ public final class TransmissionEngine implements Engine {
         synchronized (pollLock) {
             removedByUs.add(id);
         }
-        emit(EngineEvent.info(id, name, deleteFiles ? "Removed " + name + " and its files" : "Removed " + name));
+        emit(EngineEvent.info(
+                id, name, deleteFiles ? tr("engine.event.removedWithFiles", name) : tr("engine.event.removed", name)));
     }
 
     @Override
@@ -446,7 +447,7 @@ public final class TransmissionEngine implements Engine {
     public void setSequential(String id, boolean sequential) throws EngineException {
         checkRunning();
         if (capabilities.lacks(Capability.SEQUENTIAL_DOWNLOAD)) {
-            throw new EngineException("This daemon (RPC " + rpcVersion + ") has no sequential download; 4.1 does");
+            throw new EngineException(tr("engine.error.noSequential", String.valueOf(rpcVersion)));
         }
         set(id, Map.of("sequential_download", sequential));
     }
@@ -466,7 +467,7 @@ public final class TransmissionEngine implements Engine {
     @Override
     public void moveStorage(String id, String destination, boolean moveFiles) throws EngineException {
         checkRunning();
-        if (destination == null || destination.isBlank()) throw new EngineException("No destination folder");
+        if (destination == null || destination.isBlank()) throw new EngineException(tr("engine.error.noDestination"));
         String name = nameOf(id);
         Map<String, Object> args = new LinkedHashMap<>();
         args.put("ids", List.of(id));
@@ -477,8 +478,8 @@ public final class TransmissionEngine implements Engine {
                 id,
                 name,
                 moveFiles
-                        ? "Moving " + name + " to " + destination.trim()
-                        : "Pointed " + name + " at " + destination.trim()));
+                        ? tr("engine.event.moving", name, destination.trim())
+                        : tr("engine.event.pointed", name, destination.trim())));
     }
 
     private void set(String id, Map<String, Object> fields) throws EngineException {
@@ -661,7 +662,7 @@ public final class TransmissionEngine implements Engine {
         args.put("ids", List.of(id));
         args.put("fields", fields);
         List<Object> torrents = Json.list(rpc.call("torrent-get", args), "torrents");
-        if (torrents.isEmpty()) throw new EngineException("No torrent " + id + " on the daemon");
+        if (torrents.isEmpty()) throw new EngineException(tr("engine.error.notOnDaemon", id));
         return Json.obj(torrents.get(0));
     }
 
@@ -740,18 +741,26 @@ public final class TransmissionEngine implements Engine {
             if (was == null) {
                 if (!announced.contains(t.id())) {
                     out.add(EngineEvent.of(
-                            EngineEvent.Kind.ADDED, EngineEvent.Level.INFO, t.id(), t.name(), "Added " + t.name()));
+                            EngineEvent.Kind.ADDED,
+                            EngineEvent.Level.INFO,
+                            t.id(),
+                            t.name(),
+                            tr("engine.event.added", t.name())));
                 }
                 continue;
             }
             if (was.state() == TorrentState.FETCHING_METADATA && t.state() != TorrentState.FETCHING_METADATA) {
-                out.add(EngineEvent.info(t.id(), t.name(), "Metadata received for " + t.name()));
+                out.add(EngineEvent.info(t.id(), t.name(), tr("engine.event.metadata", t.name())));
             }
             boolean doneNow = t.size() > 0 && t.done() >= t.size();
             boolean doneBefore = was.size() > 0 && was.done() >= was.size();
             if (doneNow && !doneBefore && was.state() != TorrentState.CHECKING) {
                 out.add(EngineEvent.of(
-                        EngineEvent.Kind.FINISHED, EngineEvent.Level.INFO, t.id(), t.name(), t.name() + " finished"));
+                        EngineEvent.Kind.FINISHED,
+                        EngineEvent.Level.INFO,
+                        t.id(),
+                        t.name(),
+                        tr("engine.event.finished", t.name())));
             }
             if (!t.error().isEmpty() && !t.error().equals(was.error())) {
                 out.add(EngineEvent.of(
@@ -759,12 +768,12 @@ public final class TransmissionEngine implements Engine {
                         t.trackerError() ? EngineEvent.Level.WARNING : EngineEvent.Level.ERROR,
                         t.id(),
                         t.name(),
-                        t.name() + ": " + t.error()));
+                        tr("engine.event.torrentError", t.name(), t.error())));
             }
         }
         for (Torrent was : before.values()) {
             if (!after.containsKey(was.id()) && !removedByUs.contains(was.id())) {
-                out.add(EngineEvent.info(was.id(), was.name(), "Removed " + was.name()));
+                out.add(EngineEvent.info(was.id(), was.name(), tr("engine.event.removed", was.name())));
             }
         }
         return out;
@@ -1100,7 +1109,7 @@ public final class TransmissionEngine implements Engine {
         if (changed.isEmpty()) return;
         rpc.call("session-set", changed);
         emit(EngineEvent.session(
-                EngineEvent.Level.INFO, "Daemon settings changed: " + String.join(", ", changed.keySet())));
+                EngineEvent.Level.INFO, tr("engine.event.daemonSettings", String.join(", ", changed.keySet()))));
     }
 
     /**
@@ -1215,7 +1224,7 @@ public final class TransmissionEngine implements Engine {
 
     @Override
     public void setIpFilter(List<IpRange> ranges) throws EngineException {
-        throw new EngineException("Transmission takes a blocklist URL, not a list of ranges");
+        throw new EngineException(tr("engine.error.transmissionRanges"));
     }
 
     @Override
@@ -1233,7 +1242,7 @@ public final class TransmissionEngine implements Engine {
         if (!enabled || url == null || url.isBlank()) return 0;
         Map<String, Object> answer = rpc.call("blocklist-update", Map.of());
         long size = Json.lng(answer, "blocklist-size", -1);
-        emit(EngineEvent.session(EngineEvent.Level.INFO, "The daemon fetched its blocklist: " + size + " ranges"));
+        emit(EngineEvent.session(EngineEvent.Level.INFO, tr("engine.event.daemonBlocklist", size)));
         return size;
     }
 

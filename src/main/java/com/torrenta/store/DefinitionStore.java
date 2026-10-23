@@ -18,6 +18,8 @@ import java.util.stream.Stream;
 import com.torrenta.search.Definition;
 import com.torrenta.search.DefinitionException;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The declarative search providers: {@code search-providers/<id>.json} in the config folder, one
  * file per provider, written by hand (or dropped in) and only read here. Every {@code *.json}
@@ -189,16 +191,13 @@ public final class DefinitionStore {
         try {
             text = Files.readString(file, StandardCharsets.UTF_8);
         } catch (IOException e) {
-            return new Entry(file, stem, null, fileName + ": could not be read: " + e.getMessage());
+            return new Entry(file, stem, null, fileName + ": " + tr("search.def.unreadable", e.getMessage()));
         }
         try {
             Definition definition = Definition.parse(text, fileName);
             if (!definition.id().equals(stem)) {
                 return new Entry(
-                        file,
-                        stem,
-                        null,
-                        fileName + ": id: is \"" + definition.id() + "\" but the file is " + fileName);
+                        file, stem, null, fileName + ": id: " + tr("search.def.idMismatch", definition.id(), fileName));
             }
             return new Entry(file, stem, definition, "");
         } catch (DefinitionException e) {

@@ -1923,6 +1923,7 @@ public final class MainWindow {
         dialog.setTitle(tr("dialog.switchProfile.title"));
         dialog.setHeaderText(tr("dialog.switchProfile.header"));
         dialog.setContentText(tr("dialog.switchProfile.content"));
+        StockButtons.translate(dialog);
         promptDialog = dialog;
         Optional<Choice> picked = dialog.showAndWait();
         promptDialog = null;
@@ -2352,6 +2353,7 @@ public final class MainWindow {
         prompt.setTitle(tr("window.addMagnet.title"));
         prompt.setHeaderText(tr("window.addMagnet.header"));
         prompt.setContentText(tr("window.addMagnet.link"));
+        StockButtons.translate(prompt);
         prompt.getEditor().setPrefColumnCount(48);
         prompt.showAndWait().map(String::trim).filter(t -> !t.isEmpty()).ifPresent(this::addInput);
     }
@@ -2374,8 +2376,8 @@ public final class MainWindow {
             lastClipboardOffer = text;
             setStatus(
                     Inputs.classify(text) == Inputs.Kind.MAGNET
-                            ? tr("status.clipboard.magnet")
-                            : tr("status.clipboard.torrent"));
+                            ? tr("status.clipboard.magnet", chord(KeyCode.V).getDisplayText())
+                            : tr("status.clipboard.torrent", chord(KeyCode.V).getDisplayText()));
         });
     }
 
@@ -2832,6 +2834,7 @@ public final class MainWindow {
         prompt.setTitle(tr("window.category.title"));
         prompt.setHeaderText(tr("window.category.header"));
         prompt.setContentText(tr("window.category.label"));
+        StockButtons.translate(prompt);
         promptDialog = prompt;
         Optional<String> answer = prompt.showAndWait();
         promptDialog = null;
@@ -2863,6 +2866,7 @@ public final class MainWindow {
         prompt.setTitle(tr("window.newCategory.title"));
         prompt.setHeaderText(tr("window.newCategory.header"));
         prompt.setContentText(tr("window.newCategory.name"));
+        StockButtons.translate(prompt);
         promptDialog = prompt;
         Optional<String> name = prompt.showAndWait().map(String::trim).filter(n -> !n.isEmpty());
         promptDialog = null;
@@ -3108,7 +3112,8 @@ public final class MainWindow {
                         chord(KeyCode.V).getDisplayText(),
                         always,
                         this::addFromClipboard),
-                new Command("pause-resume", tr("command.pauseResume"), null, "Space", selection, this::togglePause),
+                new Command(
+                        "pause-resume", tr("command.pauseResume"), null, tr("key.space"), selection, this::togglePause),
                 new Command(
                         "force-resume",
                         tr("command.forceResume"),
@@ -3222,9 +3227,14 @@ public final class MainWindow {
                         null,
                         gate("open-folder", selection),
                         this::openFolder),
-                new Command("remove", tr("command.remove"), null, "Delete", selection, () -> remove(false)),
+                new Command("remove", tr("command.remove"), null, tr("key.delete"), selection, () -> remove(false)),
                 new Command(
-                        "remove-data", tr("command.removeData"), null, "Shift+Delete", selection, () -> remove(true)),
+                        "remove-data",
+                        tr("command.removeData"),
+                        null,
+                        tr("key.shiftDelete"),
+                        selection,
+                        () -> remove(true)),
                 new Command(
                         "alt-speed",
                         tr("command.altSpeed"),
@@ -3248,7 +3258,13 @@ public final class MainWindow {
                 new Command("search", tr("command.search"), shiftChord(KeyCode.F), null, always, this::showSearch),
                 new Command("rss", tr("command.rss"), chord(KeyCode.R), null, always, this::showRss),
                 new Command("rss-run-rules", tr("command.rssRunRules"), null, null, always, rss::runRulesNow),
-                new Command("transfers", tr("command.transfers"), null, "Esc", always, this::showTransfers),
+                new Command(
+                        "transfers",
+                        tr("command.transfers"),
+                        null,
+                        tr("dialog.common.key.esc"),
+                        always,
+                        this::showTransfers),
                 // The cycling chords are a scene filter, not accelerators: Ctrl+Tab is focus
                 // traversal's key, and an accelerator would lose it to the focused control.
                 new Command(

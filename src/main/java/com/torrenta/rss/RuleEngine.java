@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The rules over a batch of articles: which to download, under which rule, and how the rules
  * remember it. Pure; the service runs it on the fetch thread and does the downloading.
@@ -66,13 +68,15 @@ public final class RuleEngine {
 
     /** The event-log line for an add: "Rule 'Linux ISOs' added Debian 12.7.0 from feed Tracker". */
     public static String describe(Rule rule, Article article, String feedName) {
-        return "Rule '" + rule.name() + "' added " + article.displayTitle()
-                + (feedName.isEmpty() ? "" : " from feed " + feedName);
+        return feedName.isEmpty()
+                ? tr("rss.rule.added", rule.name(), article.displayTitle())
+                : tr("rss.rule.addedFrom", rule.name(), article.displayTitle(), feedName);
     }
 
     /** The line for an add that failed. */
     public static String describeFailure(Rule rule, Article article, String feedName, String reason) {
-        return "Rule '" + rule.name() + "' could not add " + article.displayTitle()
-                + (feedName.isEmpty() ? "" : " from feed " + feedName) + ": " + reason;
+        return feedName.isEmpty()
+                ? tr("rss.rule.addFailed", rule.name(), article.displayTitle(), reason)
+                : tr("rss.rule.addFailedFrom", rule.name(), article.displayTitle(), feedName, reason);
     }
 }

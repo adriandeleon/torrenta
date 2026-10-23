@@ -56,11 +56,12 @@ final class RemoveConfirm {
     /** FX thread. The question itself, for a removal worded its own way; true on {@code button}. */
     static boolean ask(Window owner, String header, String text, String button) {
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, text);
+        confirm.setTitle(header);
         confirm.setHeaderText(header);
         if (owner != null) confirm.initOwner(owner);
         Fonts.installUiFont(confirm.getDialogPane());
         ButtonType yes = new ButtonType(button, ButtonType.OK.getButtonData());
-        confirm.getButtonTypes().setAll(yes, ButtonType.CANCEL);
+        confirm.getButtonTypes().setAll(yes, StockButtons.cancel());
         Optional<ButtonType> answer = confirm.showAndWait();
         return answer.isPresent() && answer.get() == yes;
     }

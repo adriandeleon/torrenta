@@ -79,17 +79,14 @@ public final class EpisodeFilter {
             if (term.isEmpty()) continue;
             Matcher m = TERM.matcher(term);
             if (!m.matches()) {
-                throw new IllegalArgumentException("\"" + term + "\" is not season x episode: write 1x2, 1x2-5 or 1x2-"
-                        + " (from episode 2 on), several separated by ;");
+                throw new IllegalArgumentException(tr("rss.episodes.notATerm", term));
             }
             int season = Integer.parseInt(m.group(1));
             int from = Integer.parseInt(m.group(2));
             int to;
             if (m.group(3) != null) {
                 to = Integer.parseInt(m.group(3));
-                if (to < from)
-                    throw new IllegalArgumentException(
-                            "\"" + term + "\" runs backwards: the range ends before it starts");
+                if (to < from) throw new IllegalArgumentException(tr("rss.episodes.backwards", term));
             } else if (term.endsWith("-")) {
                 to = Integer.MAX_VALUE;
             } else {
@@ -97,8 +94,7 @@ public final class EpisodeFilter {
             }
             out.add(new Term(season, from, to));
         }
-        if (out.isEmpty())
-            throw new IllegalArgumentException("only separators: write 1x2, 1x2-5 or 1x2-, several separated by ;");
+        if (out.isEmpty()) throw new IllegalArgumentException(tr("rss.episodes.onlySeparators"));
         return new EpisodeFilter(out);
     }
 

@@ -24,6 +24,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Watches the {@link WatchFolder}s and adds what appears in them, silently: no dialog, one event
  * per file.
@@ -104,7 +106,7 @@ public final class WatchFolders implements AutoCloseable {
         for (WatchFolder entry : entries) if (!Files.isDirectory(entry.path())) absent.add(entry.path());
         missing = List.copyOf(absent);
         for (Path dir : absent)
-            host.report(EngineEvent.session(EngineEvent.Level.WARNING, "Watch folder " + dir + " does not exist"));
+            host.report(EngineEvent.session(EngineEvent.Level.WARNING, tr("engine.watch.missing", dir)));
     }
 
     /** Begins watching these folders: the first poll at once, then the service and the schedule. */
@@ -176,23 +178,16 @@ public final class WatchFolders implements AutoCloseable {
 
     /** The Settings page's status line. Pure. */
     public static String statusText(int folders, List<Path> missing, boolean running) {
-        if (folders == 0) return "No folders are watched.";
-        if (!running) return "Watching starts once the engine is up.";
-        StringBuilder sb = new StringBuilder("Watching ")
-                .append(folders)
-                .append(folders == 1 ? " folder" : " folders")
-                .append(", every ")
-                .append(POLL_SECONDS)
-                .append(" seconds and as files appear.");
-        if (!missing.isEmpty()) {
-            sb.append(" Not found: ");
-            for (int i = 0; i < missing.size(); i++) {
-                if (i > 0) sb.append(", ");
-                sb.append(missing.get(i));
-            }
-            sb.append('.');
+        if (folders == 0) return tr("engine.watch.none");
+        if (!running) return tr("engine.watch.waiting");
+        String watching = tr("engine.watch.watching", folders, POLL_SECONDS);
+        if (missing.isEmpty()) return watching;
+        StringBuilder list = new StringBuilder();
+        for (int i = 0; i < missing.size(); i++) {
+            if (i > 0) list.append(", ");
+            list.append(missing.get(i));
         }
-        return sb.toString();
+        return watching + " " + tr("engine.watch.notFound", list);
     }
 
     // ---- the threads ----------------------------------------------------------------------------
@@ -291,7 +286,7 @@ public final class WatchFolders implements AutoCloseable {
 
     /** Reads, adds, and deletes or renames; every outcome is one event. */
     private void handle(WatchFolder entry, Path file) {
-        String where = " from watch folder " + entry.path();
+        String where = entry.path().toString();
         String name = file.getFileName().toString();
         byte[] bytes;
         try {
@@ -300,7 +295,7 @@ public final class WatchFolders implements AutoCloseable {
             giveUp(
                     file,
                     EngineEvent.session(
-                            EngineEvent.Level.ERROR, "Could not read " + name + where + ": " + e.getMessage()));
+                            EngineEvent.Level.ERROR, tr("engine.watch.couldNotRead", name, where, e.getMessage())));
             return;
         }
         // Parsing first, so a file that is not a torrent is set aside before anything is added.
@@ -308,7 +303,7 @@ public final class WatchFolders implements AutoCloseable {
         try {
             if (WatchFolder.isMagnetFile(file)) {
                 List<String> magnets = WatchFolder.magnetLines(new String(bytes, StandardCharsets.UTF_8));
-                if (magnets.isEmpty()) throw new EngineException("no magnet links in it");
+                if (magnets.isEmpty()) throw new EngineException(tr("engine.watch.noMagnets"));
                 for (String magnet : magnets)
                     candidates.add(new Candidate(new AddRequest.Magnet(magnet), WatchFolder.magnetId(magnet)));
             } else {
@@ -325,7 +320,7 @@ public final class WatchFolders implements AutoCloseable {
         boolean trouble = false;
         for (Candidate candidate : candidates) {
             if (candidate.id().isPresent() && present.contains(candidate.id().get())) {
-                host.report(EngineEvent.info(candidate.id().get(), "", "Already in the session: " + name + where));
+                host.report(EngineEvent.info(candidate.id().get(), "", tr("engine.watch.already", name, where)));
                 continue;
             }
             Path destination = entry.destination(host.defaultDownloadDir(), host.category(entry.category()));
@@ -333,11 +328,11 @@ public final class WatchFolders implements AutoCloseable {
             try {
                 Torrent added = engine.add(request);
                 present.add(added.id());
-                host.report(EngineEvent.info(added.id(), added.name(), "Added " + added.name() + where));
+                host.report(EngineEvent.info(added.id(), added.name(), tr("engine.watch.added", added.name(), where)));
             } catch (EngineException | RuntimeException e) {
                 trouble = true;
                 host.report(EngineEvent.session(
-                        EngineEvent.Level.ERROR, "Could not add " + name + where + ": " + e.getMessage()));
+                        EngineEvent.Level.ERROR, tr("engine.watch.addFailed", name, where, e.getMessage())));
             }
         }
         if (trouble) {
@@ -355,9 +350,13 @@ public final class WatchFolders implements AutoCloseable {
                     file,
                     EngineEvent.session(
                             EngineEvent.Level.WARNING,
-                            "Added, but could not "
-                                    + (entry.afterAdd() == WatchFolder.AfterAdd.DELETE ? "delete " : "rename ") + name
-                                    + where + ": " + e.getMessage()));
+                            tr(
+                                    entry.afterAdd() == WatchFolder.AfterAdd.DELETE
+                                            ? "engine.watch.deleteFailed"
+                                            : "engine.watch.renameFailed",
+                                    name,
+                                    where,
+                                    e.getMessage())));
         }
     }
 
@@ -368,13 +367,13 @@ public final class WatchFolders implements AutoCloseable {
         String renamed;
         try {
             Files.move(file, WatchFolder.invalid(file), StandardCopyOption.REPLACE_EXISTING);
-            renamed = "; renamed " + WatchFolder.invalid(file).getFileName();
+            renamed = tr("engine.watch.setAside", WatchFolder.invalid(file).getFileName());
         } catch (IOException e) {
             failed.add(file);
-            renamed = "; could not rename it: " + e.getMessage();
+            renamed = tr("engine.watch.setAsideFailed", e.getMessage());
         }
         host.report(EngineEvent.session(
-                EngineEvent.Level.WARNING, "Not a torrent: " + name + where + " (" + reason + ")" + renamed));
+                EngineEvent.Level.WARNING, tr("engine.watch.notATorrent", name, where, reason, renamed)));
     }
 
     private void giveUp(Path file, EngineEvent event) {

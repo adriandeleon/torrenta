@@ -4,6 +4,10 @@ import java.awt.GraphicsEnvironment;
 import java.awt.Taskbar;
 import java.util.Optional;
 
+import com.torrenta.AppInfo;
+
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Backend chooser, by {@code os.name}: the dock badge through AWT's {@link Taskbar} on macOS, the
  * Unity LauncherEntry signal on the session bus on Linux (KDE's task manager, GNOME's Dash to
@@ -40,12 +44,12 @@ public final class Badges {
                 }
             }
             case MAC -> {
-                if (GraphicsEnvironment.isHeadless()) return Attempt.none("restart Torrenta to show the dock badge");
+                if (GraphicsEnvironment.isHeadless()) return Attempt.none(tr("os.badge.restart", AppInfo.NAME));
                 try {
-                    if (!Taskbar.isTaskbarSupported()) return Attempt.none("no taskbar support here");
+                    if (!Taskbar.isTaskbarSupported()) return Attempt.none(tr("os.badge.noTaskbar"));
                     Taskbar taskbar = Taskbar.getTaskbar();
                     if (!taskbar.isSupported(Taskbar.Feature.ICON_BADGE_TEXT)) {
-                        return Attempt.none("the dock does not take a text badge");
+                        return Attempt.none(tr("os.badge.noText"));
                     }
                     return Attempt.of(new AwtBadge(taskbar));
                 } catch (Throwable t) {
@@ -54,7 +58,7 @@ public final class Badges {
                 }
             }
             default -> {
-                return Attempt.none("the Windows taskbar badges only AWT's own windows");
+                return Attempt.none(tr("os.badge.windows"));
             }
         }
     }

@@ -13,6 +13,8 @@ import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Runs the person's commands and shows notifications when a torrent is added, finishes or is
  * done seeding, and notifies on errors. Owned by the window, fed every engine event on whatever
@@ -79,23 +81,27 @@ public final class Automation {
 
     /** {@code <name> finished}, {@code <name> added}, {@code <name> finished seeding}, or the error. */
     public static String notificationText(EngineEvent event) {
-        String name = event.torrent() == null || event.torrent().isBlank() ? "A torrent" : event.torrent();
+        String name =
+                event.torrent() == null || event.torrent().isBlank() ? tr("automation.aTorrent") : event.torrent();
         return switch (event.kind()) {
-            case ADDED -> name + " added";
-            case FINISHED -> name + " finished";
-            case SEEDING_DONE -> name + " finished seeding";
-            case ERROR, OTHER -> event.message().startsWith(name) ? event.message() : name + ": " + event.message();
+            case ADDED -> tr("automation.notify.added", name);
+            case FINISHED -> tr("automation.notify.finished", name);
+            case SEEDING_DONE -> tr("automation.notify.seedingDone", name);
+            case ERROR, OTHER ->
+                event.message().startsWith(name)
+                        ? event.message()
+                        : tr("automation.notify.error", name, event.message());
         };
     }
 
     /** "On finished", for the log. */
     static String label(EngineEvent.Kind kind) {
         return switch (kind) {
-            case ADDED -> "On added";
-            case FINISHED -> "On finished";
-            case SEEDING_DONE -> "On seeding done";
-            case ERROR -> "On error";
-            case OTHER -> "On event";
+            case ADDED -> tr("settings.automation.onAdded");
+            case FINISHED -> tr("settings.automation.onFinished");
+            case SEEDING_DONE -> tr("settings.automation.onSeedingDone");
+            case ERROR -> tr("automation.label.error");
+            case OTHER -> tr("automation.label.other");
         };
     }
 
@@ -123,7 +129,8 @@ public final class Automation {
                 plan.notification().ifPresent(this::notify);
                 if (!plan.command().isEmpty()) runCommand(event, plan.command(), known);
             } catch (RuntimeException e) {
-                host.report(EngineEvent.error(event.torrentId(), event.torrent(), label(event.kind()) + ": " + e));
+                host.report(EngineEvent.error(
+                        event.torrentId(), event.torrent(), tr("automation.failed", label(event.kind()), e)));
             } finally {
                 inFlight.decrementAndGet();
             }
@@ -142,13 +149,13 @@ public final class Automation {
         inFlight.incrementAndGet();
         Thread.ofVirtual().name("automation-test").start(() -> {
             try {
-                Optional<String> problem = notifier.show(TITLE, "Test notification");
+                Optional<String> problem = notifier.show(TITLE, tr("settings.automation.testNotification"));
                 host.report(
                         problem.isEmpty()
                                 ? EngineEvent.session(
-                                        EngineEvent.Level.INFO, "Test notification shown through " + notifier.name())
+                                        EngineEvent.Level.INFO, tr("automation.testShown", notifier.name()))
                                 : EngineEvent.session(
-                                        EngineEvent.Level.WARNING, "Desktop notification failed: " + problem.get()));
+                                        EngineEvent.Level.WARNING, tr("automation.testFailed", problem.get())));
             } finally {
                 inFlight.decrementAndGet();
             }
@@ -169,8 +176,7 @@ public final class Automation {
         Optional<String> problem = notifier.show(TITLE, text);
         // Said once: a machine without notify-send would otherwise hear about it on every event.
         if (problem.isPresent() && notifierReported.compareAndSet(false, true)) {
-            host.report(EngineEvent.session(
-                    EngineEvent.Level.WARNING, "Desktop notifications are unavailable: " + problem.get()));
+            host.report(EngineEvent.session(EngineEvent.Level.WARNING, tr("automation.unavailable", problem.get())));
         }
     }
 
@@ -186,20 +192,24 @@ public final class Automation {
         }
         if (torrent == null) torrent = placeholder(event);
         List<String> argv = EventCommand.substitute(tokens, EventCommand.subject(torrent, detail));
-        String what = label(event.kind()) + " for " + torrent.name() + ": " + argv.get(0);
+        String what = tr("automation.command", label(event.kind()), torrent.name(), argv.get(0));
         Subprocess.Result result = Subprocess.run(argv, COMMAND_CEILING, KEEP_CHARS);
         if (!result.started()) {
-            host.report(
-                    EngineEvent.error(torrent.id(), torrent.name(), what + " could not be run: " + result.failure()));
+            host.report(EngineEvent.error(
+                    torrent.id(), torrent.name(), tr("automation.couldNotRun", what, result.failure())));
             return;
         }
         if (result.timedOut()) {
             host.report(EngineEvent.warning(
-                    torrent.id(), torrent.name(), what + " killed after " + COMMAND_CEILING.toMinutes() + " min"));
+                    torrent.id(), torrent.name(), tr("automation.killed", what, COMMAND_CEILING.toMinutes())));
         } else {
             EngineEvent.Level level = result.code() == 0 ? EngineEvent.Level.INFO : EngineEvent.Level.WARNING;
             host.report(EngineEvent.of(
-                    EngineEvent.Kind.OTHER, level, torrent.id(), torrent.name(), what + " exited " + result.code()));
+                    EngineEvent.Kind.OTHER,
+                    level,
+                    torrent.id(),
+                    torrent.name(),
+                    tr("automation.exited", what, String.valueOf(result.code()))));
         }
         for (String line : result.firstLines(LOG_LINES)) {
             host.report(EngineEvent.info(torrent.id(), torrent.name(), OUTPUT_PREFIX + line));

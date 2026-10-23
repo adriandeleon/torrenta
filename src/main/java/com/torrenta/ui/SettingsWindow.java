@@ -19,7 +19,6 @@ import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
-import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ChoiceBox;
 import javafx.scene.control.Label;
@@ -691,10 +690,12 @@ final class SettingsWindow {
                                 "settings.sync.connectQuestion",
                                 report.received().size(),
                                 report.conflicts().size()));
+                ask.setTitle(tr("settings.sync.connectHeader"));
                 ask.setHeaderText(tr("settings.sync.connectHeader"));
                 ask.initOwner(stage);
                 Fonts.installUiFont(ask.getDialogPane());
-                if (ask.showAndWait().filter(b -> b == ButtonType.OK).isEmpty()) {
+                StockButtons.translate(ask);
+                if (!StockButtons.confirmed(ask.showAndWait())) {
                     settings.setSyncEnabled(false);
                     settings.saveQuietly();
                     reload();
@@ -713,6 +714,7 @@ final class SettingsWindow {
         ask.setTitle(tr("settings.sync.create.title"));
         ask.setHeaderText(tr("settings.sync.create.header"));
         ask.setContentText(tr("settings.sync.create.name"));
+        StockButtons.translate(ask);
         Fonts.installUiFont(ask.getDialogPane());
         ask.showAndWait().map(String::trim).filter(n -> !n.isEmpty()).ifPresent(name -> {
             if (sync == null) return;
@@ -730,10 +732,12 @@ final class SettingsWindow {
 
     private void disconnectSync() {
         Alert ask = new Alert(Alert.AlertType.CONFIRMATION, tr("settings.sync.disconnectQuestion"));
+        ask.setTitle(tr("settings.sync.disconnect"));
         ask.setHeaderText(tr("settings.sync.disconnect"));
         ask.initOwner(stage);
         Fonts.installUiFont(ask.getDialogPane());
-        if (ask.showAndWait().filter(b -> b == ButtonType.OK).isEmpty()) return;
+        StockButtons.translate(ask);
+        if (!StockButtons.confirmed(ask.showAndWait())) return;
         if (sync != null) sync.disconnect();
         reload();
     }
@@ -1031,10 +1035,12 @@ final class SettingsWindow {
      */
     private void resetToDefaults() {
         Alert ask = new Alert(Alert.AlertType.CONFIRMATION, tr("settings.reset.question"));
+        ask.setTitle(tr("settings.reset"));
         ask.setHeaderText(tr("settings.reset.header"));
         ask.initOwner(stage);
         Fonts.installUiFont(ask.getDialogPane());
-        if (ask.showAndWait().filter(b -> b == ButtonType.OK).isEmpty()) return;
+        StockButtons.translate(ask);
+        if (!StockButtons.confirmed(ask.showAndWait())) return;
         Map<String, String> before = ownedValues();
         settings.reset(OWNED_KEYS);
         settings.saveQuietly();
@@ -1776,6 +1782,9 @@ final class SettingsWindow {
     /** A failed write has nowhere to go but a dialog here: the window's status bar is not ours. */
     private void report(String message) {
         Alert alert = new Alert(Alert.AlertType.WARNING, message);
+        alert.setTitle(tr("settings.title", AppInfo.NAME));
+        alert.setHeaderText(null);
+        StockButtons.translate(alert);
         alert.initOwner(stage);
         Fonts.installUiFont(alert.getDialogPane());
         alert.showAndWait();

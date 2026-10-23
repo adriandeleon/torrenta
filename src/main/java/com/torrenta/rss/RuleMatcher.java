@@ -9,6 +9,8 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * Whether a rule wants an article: the feed, the must-contain and must-not-contain expressions
  * against the title, the episode filter, the age, and the smart filter's memory, in that order.
@@ -70,23 +72,24 @@ public final class RuleMatcher {
 
     /** Why the rule cannot be evaluated, in a sentence; empty when it can. The dialog's rule. */
     public static Optional<String> problem(Rule rule) {
-        if (rule.name().isEmpty()) return Optional.of("a name is needed");
+        if (rule.name().isEmpty()) return Optional.of(tr("rss.rule.problem.name"));
         if (rule.useRegex()) {
-            Optional<String> bad = regexProblem(rule.mustContain(), "must contain");
+            Optional<String> bad = regexProblem(rule.mustContain(), "rss.rule.problem.mustContain");
             if (bad.isPresent()) return bad;
-            bad = regexProblem(rule.mustNotContain(), "must not contain");
+            bad = regexProblem(rule.mustNotContain(), "rss.rule.problem.mustNotContain");
             if (bad.isPresent()) return bad;
         }
-        return EpisodeFilter.problem(rule.episodeFilter()).map(p -> "episode filter: " + p);
+        return EpisodeFilter.problem(rule.episodeFilter()).map(p -> tr("rss.rule.problem.episodes", p));
     }
 
-    private static Optional<String> regexProblem(String expression, String field) {
+    /** {@code key}'s text names the field and takes the regular expression's complaint as {0}. */
+    private static Optional<String> regexProblem(String expression, String key) {
         if (expression.isEmpty()) return Optional.empty();
         try {
             regex(expression);
             return Optional.empty();
         } catch (PatternSyntaxException e) {
-            return Optional.of(field + " is not a regular expression: " + e.getDescription());
+            return Optional.of(tr(key, e.getDescription()));
         }
     }
 
