@@ -1,0 +1,10 @@
+# Keeps the workflows' pinned actions current. They are pinned to a commit with the version in a
+# trailing comment (`uses: owner/action@<sha> # vX.Y.Z`), and Dependabot rewrites both together.
+# Actions only: the Maven side is bumped by hand, against the libtorrent4j pin in CLAUDE.md.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

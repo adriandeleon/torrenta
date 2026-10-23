@@ -1,5 +1,9 @@
 # Why the cask template is overridden
 
+(This file sits outside `distributions/torrenta/brew/` on purpose: JReleaser copies every file in a
+packager's template directory into the repository it publishes to, and a dry run showed this one
+on its way into the tap.)
+
 JReleaser's stock cask template emits
 
     binary "<artifact-root>/bin/<executable>"
@@ -32,4 +36,6 @@ this template to a single line.
 
 Regenerate and inspect after any change:
 
-    jreleaser package --basedir .
+    jreleaser package --basedir .   (needs a clone, not a worktree: JGit reads no .git file)
+
+The output is under `out/jreleaser/package/torrenta/brew/Casks/`.

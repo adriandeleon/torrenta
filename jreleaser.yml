@@ -43,16 +43,23 @@ release:
     name: torrenta
     # This repository is on master; JReleaser defaults to main and fails the publish outright.
     branch: master
+    tagName: 'v{{projectVersion}}'
+    releaseName: 'Torrenta {{projectVersion}}'
+    # Editora's flow: the release is created as a draft, every asset is uploaded while it is still
+    # mutable, then it is published. Required once GitHub's Immutable Releases are turned on for the
+    # repository (an upload to a published release is refused with 422), harmless while they are
+    # off. It excludes `overwrite`: a re-run on the same tag needs the release deleted first
+    # (`gh release delete vX.Y.Z`, which keeps the tag).
+    immutableRelease: true
     # A tag that carries a suffix (-rc1, -beta2) is published as a pre-release.
     prerelease:
       pattern: .*-.*
     changelog:
-      formatted: ALWAYS
-      preset: conventional-commits
-      contributors:
-        enabled: false
-      # Install instructions ahead of the commit list.
-      contentTemplate: .github/release-notes.tpl
+      # Written by scripts/release/ReleaseNotes.java in release.yml: the install text
+      # (.github/release-notes.md) and this version's section of CHANGELOG.md, read as-is. The
+      # commits are mostly "Merge pull request" lines, and the first release's list ran past the
+      # 10,000 characters JReleaser allows a body, which it trims and attaches as a file instead.
+      external: out/release-notes.md
 
 checksum:
   individual: false
@@ -70,6 +77,10 @@ distributions:
       active: RELEASE
       # A token problem costs the tap, not the release.
       continueOnError: true
+      # The tap is shared with Termina and has a README of its own; JReleaser's stock one, written
+      # over it on every release, describes formulae the tap does not have.
+      skipTemplates:
+        - README.md.tpl
       cask:
         enabled: true
         name: torrenta
@@ -112,6 +123,10 @@ distributions:
         type: MSI
         scope: USER
         upgradeBehavior: INSTALL
+      # JReleaser copies the project's LICENSE into every packager's repository; in the winget
+      # fork that replaces Microsoft's own, and the pull request would carry it (seen in a dry run).
+      extraProperties:
+        skipLicenseFile: true
       # A fork of microsoft/winget-pkgs under this account; the pull request is opened from it.
       repository:
         active: RELEASE

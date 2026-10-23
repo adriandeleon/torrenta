@@ -14,9 +14,3 @@ below. The build is unsigned, so SmartScreen may warn on first run.
 `sudo apt install ./Torrenta-*.deb`; on Fedora, install with `sudo dnf install ./Torrenta-*.rpm`.
 
 Verify a download against `checksums_sha256.txt`.
-
-## Changes
-
-{{changelogChanges}}
-
-{{changelogContributors}}

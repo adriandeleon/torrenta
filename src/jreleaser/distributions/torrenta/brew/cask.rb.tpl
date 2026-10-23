@@ -1,6 +1,5 @@
 # {{jreleaserCreationStamp}}
-{{! Overrides JReleaser's stock cask template. Why, and what changed, is in NOTES.md beside this
-    file — kept out of here so the rationale does not end up in the cask every user reads. }}
+{{! Overrides JReleaser's stock cask template. Why, and what changed: src/jreleaser/NOTES.md. }}
 cask "{{brewCaskName}}" do
   desc "{{projectDescription}}"
   homepage "{{projectLinkHomepage}}"
