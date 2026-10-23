@@ -283,7 +283,7 @@ public final class MainWindow {
     private DetailPlace detailPlace = DetailPlace.HIDDEN;
 
     private CheckMenuItem detailItem;
-    private CheckMenuItem detailRightItem;
+    private CheckMenuItem detailBottomItem;
     private CheckMenuItem sidebarRightItem;
     private volatile String detailId;
     private volatile boolean detailWanted;
@@ -2591,8 +2591,8 @@ public final class MainWindow {
         settings.saveQuietly();
         if (detailItem != null) {
             detailItem.setSelected(place.shown());
-            detailRightItem.setSelected(
-                    DetailPlace.of(true, settings.detailSide()).beside());
+            detailBottomItem.setSelected(
+                    !DetailPlace.of(true, settings.detailSide()).beside());
         }
     }
 
@@ -3727,9 +3727,10 @@ public final class MainWindow {
             altSpeedItem.setSelected(altSpeedOn);
             altSpeed.run().run();
         });
-        detailRightItem = new CheckMenuItem(tr("menu.view.detailRight"));
-        detailRightItem.setSelected(DetailPlace.of(true, settings.detailSide()).beside());
-        detailRightItem.setOnAction(e -> switchDetailSide());
+        detailBottomItem = new CheckMenuItem(tr("menu.view.detailBottom"));
+        detailBottomItem.setSelected(
+                !DetailPlace.of(true, settings.detailSide()).beside());
+        detailBottomItem.setOnAction(e -> switchDetailSide());
         for (Density d : Density.values()) {
             javafx.scene.control.RadioMenuItem item =
                     new javafx.scene.control.RadioMenuItem(tr("menu.view.densityRows", d.toString()));
@@ -3752,7 +3753,7 @@ public final class MainWindow {
                         sidebarItem,
                         sidebarRightItem,
                         detailItem,
-                        detailRightItem,
+                        detailBottomItem,
                         new SeparatorMenuItem(),
                         densityItems.get(Density.COMFORTABLE),
                         densityItems.get(Density.COMPACT),
