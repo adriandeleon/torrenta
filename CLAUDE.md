@@ -435,7 +435,10 @@ release process with the names changed; Termina's README and memory hold the war
   with no libtorrent thread alive. `com.torrenta.NativeTeardownSkip` (a `LauncherSessionListener`
   in `META-INF/services`, macOS only) waits for the other shutdown hooks (JaCoCo's) once the test
   session closed and calls `_exit(0)` through FFM, so the C exit handlers never run; hence
-  `--add-opens java.base/java.lang` in the argLine. The packaged app quits through the same `exit()`
+  `--add-opens java.base/java.lang` in the argLine. The JDK starts the hooks one by one and
+  `join` returns at once on a thread not yet started, so `awaitOthers` waits for each to start
+  first: joining straight away cut `jacoco.exec` short (`EOFException` in the report) in eight
+  of twelve shards of a 72-run macOS loop. The packaged app quits through the same `exit()`
   and has not been seen to crash there. A failing macOS job copies `java*.ips` from
   `~/Library/Logs/DiagnosticReports` into the uploaded reports and prints the crashed thread
   (`.github/scripts/ips-summary.py`); surefire drops a fork's stderr once it has said goodbye, so the

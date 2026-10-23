@@ -32,6 +32,8 @@ import org.junit.platform.launcher.LauncherSessionListener;
 public final class NativeTeardownSkip implements LauncherSessionListener {
 
     private static final long HOOK_WAIT_MS = 30_000;
+    /** The JDK starts the hooks one after another in a loop; one still unstarted after this was removed. */
+    private static final long HOOK_START_WAIT_MS = 2_000;
 
     private static volatile boolean registered;
     /** The other hooks, read when the tests end: the JDK empties its table before running them. */
@@ -65,9 +67,7 @@ public final class NativeTeardownSkip implements LauncherSessionListener {
         List<Thread> hooks = hooksAtEnd;
         if (hooks == null) return;
         try {
-            for (Thread hook : hooks) {
-                if (hook != Thread.currentThread()) hook.join(HOOK_WAIT_MS);
-            }
+            awaitOthers(hooks, HOOK_START_WAIT_MS, HOOK_WAIT_MS);
             System.out.flush();
             System.err.flush();
             Linker linker = Linker.nativeLinker();
@@ -78,6 +78,22 @@ public final class NativeTeardownSkip implements LauncherSessionListener {
         } catch (Throwable e) {
             // Anything unexpected: fall back to the ordinary exit, which is what ran before.
             System.err.println("native-teardown-skip: " + e);
+        }
+    }
+
+    /**
+     * Waits for each hook but this thread to finish. {@code Thread.join} returns at once for a thread
+     * not yet started, and the JDK starts the hooks one by one in no set order, so a hook started
+     * after this one is first waited for until it has started: joining it straight away let
+     * {@code _exit} cut JaCoCo's {@code jacoco.exec} short (an {@code EOFException} in the report)
+     * in eight of twelve macOS loops of six runs.
+     */
+    static void awaitOthers(List<Thread> hooks, long startWaitMs, long finishWaitMs) throws InterruptedException {
+        for (Thread hook : hooks) {
+            if (hook == Thread.currentThread()) continue;
+            long startBy = System.nanoTime() + startWaitMs * 1_000_000;
+            while (hook.getState() == Thread.State.NEW && System.nanoTime() < startBy) Thread.sleep(1);
+            hook.join(finishWaitMs);
         }
     }
 
