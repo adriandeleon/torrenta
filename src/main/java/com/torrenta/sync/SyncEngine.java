@@ -7,12 +7,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * One settings sync between this machine and the user's repository; Editora's engine, for one
- * file. Blocking and free of JavaFX; the caller picks the thread.
+ * One settings sync between this machine and the user's repository; Editora's engine, for the
+ * settings file and the labels file ({@link SyncLabels}). Blocking and free of JavaFX; the caller
+ * picks the thread.
  *
  * <p>Git only carries the data. Torrenta keeps a clone of its own ({@code sync/repo} in the config
  * directory) that nothing else reads, and never asks git to merge: the working tree is set to what
@@ -24,6 +26,11 @@ import java.util.regex.Pattern;
  * after the push succeeded and the live settings were written, so a sync interrupted anywhere is
  * simply repeated by the next one: until then this machine's edits still differ from the base and
  * are sent again.
+ *
+ * <p>The labels file is merged the same way against {@value #LABELS_BASE_REF}, a base of its own: a
+ * machine whose last sync was by a build that did not sync labels has a {@value #BASE_REF} whose
+ * labels file it never applied, and against that base its own lists would read as removals. With
+ * no labels base the merge is a first one, which only adds.
  */
 public final class SyncEngine {
 
@@ -32,14 +39,17 @@ public final class SyncEngine {
 
     static final String FORMAT_FILE = "torrenta-sync.properties";
     static final String SETTINGS_FILE = "settings.properties";
+    static final String LABELS_FILE = "labels.properties";
     static final String BASE_REF = "refs/torrenta/base";
+    static final String LABELS_BASE_REF = "refs/torrenta/labels-base";
     private static final int ATTEMPTS = 3;
     private static final String README = """
             # Torrenta settings
 
             Written by Torrenta's settings sync. Every computer that connects to this repository keeps
-            the settings in `settings.properties` the same. Edit it by hand if you like; the next sync
-            on each computer merges the change, one key at a time.
+            the settings in `settings.properties` the same, and the category names and tags in
+            `labels.properties`. Edit them by hand if you like; the next sync on each computer merges
+            the change, one key at a time.
             """;
 
     private final QuietGit git;
@@ -47,6 +57,7 @@ public final class SyncEngine {
     private final String url;
     private final String branch;
     private final SyncTarget target;
+    private final SyncTarget labels;
     private final String machine;
 
     /** A command git refused; the message is its output. */
@@ -61,11 +72,20 @@ public final class SyncEngine {
      * @param machine this computer's name, for the commit message
      */
     public SyncEngine(QuietGit git, String url, String branch, SyncTarget target, String machine) {
+        this(git, url, branch, target, null, machine);
+    }
+
+    /**
+     * @param labels the category names and tags as {@link SyncLabels#entries}, or null to leave the
+     *     repository's labels file as it is
+     */
+    public SyncEngine(QuietGit git, String url, String branch, SyncTarget target, SyncTarget labels, String machine) {
         this.git = git;
         this.clone = git.dir();
         this.url = url == null ? "" : url.strip();
         this.branch = branch == null || branch.isBlank() ? "main" : branch.strip();
         this.target = target;
+        this.labels = labels;
         this.machine = machine == null || machine.isBlank() ? "this computer" : machine.strip();
     }
 
@@ -147,6 +167,7 @@ public final class SyncEngine {
         String remoteRef = "refs/remotes/origin/" + branch;
         boolean remoteHas = exists(remoteRef);
         Map<String, String> theirs;
+        Map<String, String> theirLabels = Map.of();
         if (remoteHas) {
             must(git.run("checkout", "--quiet", "--force", "-B", branch, remoteRef));
             must(git.run("clean", "-fdq"));
@@ -154,6 +175,7 @@ public final class SyncEngine {
                 return SyncReport.failure(SyncReport.Status.NEWER_FORMAT, "");
             }
             theirs = readSettings(clone.resolve(SETTINGS_FILE));
+            theirLabels = readLabels(clone.resolve(LABELS_FILE));
         } else {
             // An empty repository (or a new branch). Whatever an earlier, unpushed attempt left in
             // the clone is not the remote's: start from nothing.
@@ -170,11 +192,30 @@ public final class SyncEngine {
         }
         Map<String, String> mine = target.read();
         SyncMerge.Result merged = SyncMerge.merge(base, mine, theirs);
-        if (previewOnly) return ok(merged);
+        SyncMerge.Result mergedLabels = null;
+        Map<String, String> myLabels = null;
+        if (labels != null) {
+            Map<String, String> labelsBase = null;
+            if (exists(LABELS_BASE_REF)) {
+                Proc.Result shown = git.run("show", LABELS_BASE_REF + ":" + LABELS_FILE);
+                labelsBase = shown.ok() ? SyncLabels.parse(shown.out()) : Map.of();
+            }
+            myLabels = labels.read();
+            mergedLabels = SyncMerge.merge(labelsBase, myLabels, theirLabels);
+        }
+        if (previewOnly) return ok(merged, mergedLabels);
         if (!merged.merged().equals(mine) && !target.apply(mine, merged.merged())) {
             return SyncReport.failure(SyncReport.Status.LOCAL_BUSY, "");
         }
+        if (mergedLabels != null
+                && !mergedLabels.merged().equals(myLabels)
+                && !labels.apply(myLabels, mergedLabels.merged())) {
+            return SyncReport.failure(SyncReport.Status.LOCAL_BUSY, "");
+        }
         Files.writeString(clone.resolve(SETTINGS_FILE), SyncKeys.render(merged.merged()));
+        if (mergedLabels != null) {
+            Files.writeString(clone.resolve(LABELS_FILE), SyncKeys.render(mergedLabels.merged()));
+        }
         writeIfAbsent(FORMAT_FILE, "formatVersion=" + FORMAT_VERSION + "\n");
         writeIfAbsent(".gitattributes", "* -text\n");
         writeIfAbsent("README.md", README);
@@ -194,18 +235,33 @@ public final class SyncEngine {
                 // The live settings already hold the merge; the base stays, so the next sync sends again.
                 return new SyncReport(
                         SyncReport.Status.PUSH_FAILED,
-                        merged.received(),
+                        both(merged, mergedLabels, SyncMerge.Result::received),
                         List.of(),
-                        merged.conflicts(),
+                        both(merged, mergedLabels, SyncMerge.Result::conflicts),
                         push.transcript());
             }
         }
         must(git.run("update-ref", BASE_REF, "HEAD"));
-        return ok(merged);
+        if (mergedLabels != null) must(git.run("update-ref", LABELS_BASE_REF, "HEAD"));
+        return ok(merged, mergedLabels);
     }
 
-    private static SyncReport ok(SyncMerge.Result merged) {
-        return new SyncReport(SyncReport.Status.OK, merged.received(), merged.sent(), merged.conflicts(), "");
+    private static SyncReport ok(SyncMerge.Result merged, SyncMerge.Result labels) {
+        return new SyncReport(
+                SyncReport.Status.OK,
+                both(merged, labels, SyncMerge.Result::received),
+                both(merged, labels, SyncMerge.Result::sent),
+                both(merged, labels, SyncMerge.Result::conflicts),
+                "");
+    }
+
+    /** The settings' keys, then the labels' (null when they were not synced). */
+    private static List<String> both(
+            SyncMerge.Result settings, SyncMerge.Result labels, Function<SyncMerge.Result, List<String>> part) {
+        if (labels == null) return part.apply(settings);
+        List<String> out = new ArrayList<>(part.apply(settings));
+        out.addAll(part.apply(labels));
+        return List.copyOf(out);
     }
 
     static boolean nonFastForward(Proc.Result push) {
@@ -226,6 +282,7 @@ public final class SyncEngine {
             // What was synced with the old repository says nothing about this one: a first sync.
             must(git.run("remote", "set-url", "origin", url));
             if (exists(BASE_REF)) must(git.run("update-ref", "-d", BASE_REF));
+            if (exists(LABELS_BASE_REF)) must(git.run("update-ref", "-d", LABELS_BASE_REF));
             git.run("config", "--local", "--unset-all", SyncAccount.KEY); // absent is fine
         }
     }
@@ -250,6 +307,10 @@ public final class SyncEngine {
 
     private static Map<String, String> readSettings(Path file) throws IOException {
         return Files.isRegularFile(file) ? SyncKeys.parse(Files.readString(file)) : Map.of();
+    }
+
+    private static Map<String, String> readLabels(Path file) throws IOException {
+        return Files.isRegularFile(file) ? SyncLabels.parse(Files.readString(file)) : Map.of();
     }
 
     /** The format version a repository declares; 0 when it declares none. */

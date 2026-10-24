@@ -47,6 +47,23 @@ class LabelStoreTest {
     }
 
     @Test
+    void everyWriteIsHeardAndANoOpIsNot(@TempDir Path dir) throws IOException {
+        LabelStore store = new LabelStore(dir);
+        store.load();
+        int[] heard = {0};
+        store.setOnChanged(() -> heard[0]++);
+        store.putCategory(new Category("Movies"));
+        store.addTags(List.of("hd"));
+        store.addTags(List.of("HD"));
+        store.removeTag("never there");
+        store.removeCategory("never there");
+        assertEquals(2, heard[0], "only the two writes");
+        store.removeTag("hd");
+        store.removeCategory("movies");
+        assertEquals(4, heard[0]);
+    }
+
+    @Test
     void tagsRoundTripNormalised(@TempDir Path dir) throws IOException {
         LabelStore store = new LabelStore(dir);
         store.load();

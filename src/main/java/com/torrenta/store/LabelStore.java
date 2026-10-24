@@ -42,6 +42,7 @@ public final class LabelStore {
     private final Path dir;
     private final TreeMap<String, Category> categories = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     private final TreeSet<String> tags = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+    private volatile Runnable onChanged = () -> {};
 
     public LabelStore(Path dir) {
         this.dir = dir;
@@ -49,6 +50,11 @@ public final class LabelStore {
 
     public Path dir() {
         return dir;
+    }
+
+    /** Runs {@code listener} after every write, on the writing thread; how a change reaches settings sync. */
+    public void setOnChanged(Runnable listener) {
+        onChanged = listener == null ? () -> {} : listener;
     }
 
     /** Reads both files; missing is empty, unreadable is empty and a log line. */
@@ -113,10 +119,12 @@ public final class LabelStore {
 
     private void writeCategories() throws IOException {
         write(dir.resolve(CATEGORIES_FILE), formatCategories(categories.values()));
+        onChanged.run();
     }
 
     private void writeTags() throws IOException {
         write(dir.resolve(TAGS_FILE), formatTags(tags));
+        onChanged.run();
     }
 
     /** Written beside the file and moved into place, so a crash mid-write never truncates it. */

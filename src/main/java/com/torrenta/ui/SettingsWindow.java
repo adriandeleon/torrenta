@@ -1787,7 +1787,7 @@ final class SettingsWindow {
     }
 
     /** The store's lists into the two controls; keeps the category selection where it can. */
-    private void reloadLabels() {
+    void reloadLabels() {
         if (labelStore == null || categoryTable == null) return;
         com.torrenta.engine.Category selected =
                 categoryTable.getSelectionModel().getSelectedItem();
