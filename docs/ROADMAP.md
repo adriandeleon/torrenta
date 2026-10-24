@@ -2,7 +2,8 @@
 
 A keyboard-first, cross-platform BitTorrent client on JavaFX, as complete as Transmission and
 qBittorrent, with built-in search. This is the plan from the 0.1 scaffold to a 1.0 that can replace
-either of them for daily use. One PR per feature, each line below is one PR unless it says
+either of them for daily use, and after it four milestones (1.1 to 1.4, planned 2026-10-24) of
+things neither of them does well. One PR per feature, each line below is one PR unless it says
 otherwise, and each milestone is a tagged release so that macOS and Windows get exercised early.
 
 ## Principles
@@ -48,6 +49,10 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Register as the OS handler for `.torrent` and `magnet:` (single instance, hand off to the running app) | ✓ | ✓ | 0.8 |
 | Default trackers added to every torrent | ✓ | ✓ | 0.4 |
 | Web seeds (HTTP sources) shown and editable | ✓ | ✓ | 0.4 |
+| Content check before adding: executables in a media torrent, double extensions, shortcut files, bidi names; encrypted archives once their first piece is in | ✗ | ✗ | 1.1 |
+| Swarm preview before adding: seeds, peers, availability of the ticked files, a verdict | ✗ | ✗ | 1.1 |
+| Import torrents from qBittorrent, Deluge and Transmission, without a recheck where the resume data allows | ✗ | ✗ | 1.3 |
+| Reuse a file already on disk in another torrent (same v2 file root): link or copy instead of downloading | ✗ | ✗ | 1.3 |
 
 ### Transfer list
 
@@ -61,6 +66,9 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Context menu and chords for every per-torrent action | ✓ | ✓ | 0.2 |
 | Command palette (Ctrl+Shift+P) over every command | ✗ | ✗ | 0.2 |
 | Status bar: session rates, DHT nodes, free space on the download disk, alt-speed toggle, port state | ✓ | ✓ | 0.4 |
+| Saved filters as sidebar views, with live counts | ✗ | ✗ | 1.1 |
+| Commands with arguments from the filter box, over every match | ✗ | ✗ | 1.1 |
+| Undo: remove, Set Location, category and tags, rename, priorities, queue moves | ✗ | ✗ | 1.1 |
 
 ### Per-torrent actions
 
@@ -79,6 +87,8 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Copy name, info-hash (v1 and v2), magnet link | ◐ | ✓ | 0.2 |
 | Open destination folder, open file | ◐ | ✓ | 0.2 |
 | Export `.torrent` | ✗ | ✓ | 0.4 |
+| Stream a file to a player while it downloads (local HTTP, piece deadlines near the playhead) | ✗ | ✗ | 1.4 |
+| Updatable torrents (BEP 46): follow one, publish one | ✗ | ✗ | 1.4 |
 
 ### Detail pane
 
@@ -103,7 +113,8 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | IPv6 | ✓ | ✓ | 0.4 |
 | Proxy: SOCKS5/HTTP, with auth, for peers and trackers | ✗ | ✓ | 0.4 |
 | IP filter: blocklist URL, eMule `.dat` and PeerGuardian `.p2p`, manual bans | ✓ | ✓ | 0.4 |
-| Bind to a network interface or address | ✓ | ✓ | 0.4 |
+| Bind to a network interface or address (the peers it dials too since 0.2.1, #92) | ✓ | ✓ | 0.4 |
+| Leak check: the bound interface's state, the address the swarm sees, where traffic exits | ✗ | ✗ | 1.1 |
 | Anonymous mode (no client identification) | ✗ | ✓ | 0.4 |
 | Connection limits: global, per torrent, upload slots | ✓ | ✓ | 0.4 |
 
@@ -113,6 +124,7 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 |---|---|---|---|
 | Global download and upload limits | ✓ | ✓ | 0.4 |
 | Alternative limits, toggle, weekly schedule | ✓ | ✓ | 0.4 |
+| Alternative limits on battery or on a metered network | ✗ | ✗ | 1.4 |
 | Queue: max active downloads, uploads, total; slow-torrent threshold does not count | ✓ | ✓ | 0.4 |
 | Global share limits with action: pause, remove, remove with data, super seed | ✓ | ✓ | 0.4 |
 | Rate limit counts protocol overhead (the uTP-only option no longer exists in libtorrent 2) | ✓ | ✓ | 0.4 |
@@ -158,8 +170,9 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Light and dark themes, UI font | ✓ | ✓ | 0.8 |
 | Interface languages | ✓ | ✓ | 0.8 |
 | Control a remote daemon (Transmission RPC as a second `Engine`) | ✓ (remote GUI) | ✗ | ✓ 0.9 |
-| Serve a web UI / RPC of its own | ✓ | ✓ | later |
-| Headless daemon mode | ✓ | ✓ (`-nox`) | later |
+| An RPC of its own: qBittorrent's WebUI API (`/api/v2`), so Sonarr, Radarr, Prowlarr and remote apps connect | ✓ (its own) | ✓ | 1.2 |
+| A web UI: an alternative qBittorrent WebUI (VueTorrent) served from a folder, not one of Torrenta's own | ✓ | ✓ | 1.2 |
+| Headless daemon mode | ✓ | ✓ (`-nox`) | 1.2 |
 
 ## Milestones
 
@@ -226,7 +239,8 @@ Everything in Settings that the engine already knows how to do.
 2. **Connection** — done, except the port test (libtorrent has none; it needs an outside service
    and goes with 0.8's OS integration or stays out): port, random port, UPnP/NAT-PMP, interface
    binding, IPv6, connection limits, proxy. `EngineSettings` maps onto `settings_pack`, applied at
-   start and live; the per-torrent limit is set on each add.
+   start and live; the per-torrent limit is set on each add. The binding covered only the
+   listening sockets until 0.2.1 (#92): `outgoing_interfaces` binds the peers the session dials.
 3. **Protocol** — done: DHT, PEX (a per-torrent flag, set on add and carried to existing
    torrents), LSD, uTP, encryption mode, anonymous mode, default trackers (appended on add and to
    existing torrents).
@@ -371,6 +385,238 @@ Every ✓ row for 0.2 through 0.9 shipped on all three platforms; a week of dail
 without data loss; resume data proven across upgrades; installers signed where the platform
 requires it; the README's "Not done" list empty.
 
+### After 1.0
+
+Asked for by adl on 2026-10-24 and planned the same day; the open questions were decided then
+and are recorded where they apply. The plan's first item, binding the peers the session dials to
+the chosen interface, was a bug and shipped at once (#92, 0.2.1). Every API below was checked
+against libtorrent4j 2.1.0-39: the v2 file roots (`file_storage.root`), mutable DHT items
+(`dhtGetItem`/`dhtPutItem`, `Ed25519`), piece deadlines, `ExternalIpAlert` and `ScrapeReplyAlert`
+are all there, and `jdk.httpserver` is in the JDK, so nothing here adds a native dependency.
+
+### 1.1 — Trust and keyboard
+Small and local, no new attack surface. Undo comes before bulk commands on purpose: a command over
+every match is where a mistake is largest.
+
+1. **Content check before adding** (2 PRs). `engine.ContentCheck.of(preview, wanted)`, pure, over
+   the file list the Add dialog already has (a magnet's too, once fetched): executables (high when
+   most of the bytes are media by `FileKind`, info in a software torrent), a media extension before
+   an executable one (`x.mkv.exe`, space-padded too), bidi controls in a name, shortcut files
+   (`.lnk .url .desktop .webloc .scf`), archives in a media torrent, bait names from a word list in
+   the catalogues. A card above the file tree with "Skip these files"; adds without a dialog
+   (watch folders, RSS rules, Add without asking) follow `add.unsafeContent` = `add | skip |
+   refuse`, `skip` by default, and say what they did in the log. An archive's password is in its
+   data, not in the file list, so the second PR's `engine.ArchiveProbe` (ZIP's bit 0, RAR5's
+   encryption header, RAR4's flags, 7z's AES coder `06F10701`) reads a wanted archive's first
+   piece, fetched first with a deadline, and raises a `Diagnosis` card. The static check is on
+   both engines; the probe needs `LOCAL_FILES`.
+2. **Filter keys**: `seeding>`, `active<`, `seeds<`, `eta>`, `uploaded>` in `FilterQuery`, which
+   the views below want.
+3. **Saved views**: `ui.SavedView(name, query)`, the query kept as the omnibox's text and parsed
+   each time; one key per view (`ui.view.<slug>.name`/`.query`, `ui.views.order`) so sync merges
+   view by view. A Views section above Categories with live counts from the same pass as the
+   others; `SidebarFilter.View`, AND with the omnibox; a query that no longer parses is struck
+   through with its error, never silently empty. `Ctrl+S` in the omnibox, `>save-view <name>`, the
+   palette; `Ctrl+Alt+1…9` for the first nine.
+4. **Undo, the engine's half**: `Engine.detach(id)` → `Detached` (fresh resume data, awaited as
+   `stop()` awaits it, since the periodic blob can be two minutes stale; labels, `.storage`, queue
+   position, the `torrent.<hash>.*` keys) and `Engine.reattach`, through the restore path so
+   run-on-added does not fire. Transmission can only re-add by magnet and verify:
+   `Capability.UNDO_REMOVE`.
+5. **Undo, the window's half**: `ui.UndoStack`, the last 10 actions. The status bar offers
+   "… · Undo" for 10 s; `Ctrl+Z` works for 10 minutes, or until the inverse is no longer possible
+   (decided). A scene filter that stands aside in a text field, as Space and Delete do. Inverses for
+   remove without data (held in memory, so a quit ends it rather than a crash bringing the torrent
+   back), Set Location (a move back once `storage_moved_alert` came; a copy across volumes, and
+   said so), category, tags, rename, file priorities, queue moves, a bulk pause. Remove with data
+   stays final until it can go to the OS trash (`Desktop.moveToTrash` needs headful AWT, which
+   `AwtUse` forbids on Linux; the freedesktop trash spec is a later item).
+6. **Bulk commands from the omnibox** (1–2 PRs): `ui.OmniCommand.parse` gives a command and typed
+   arguments: a category or tag (completed from `LabelStore`), a path, a rate (`500k`, as
+   `FilterQuery` reads sizes), a ratio, `on|off`, a queue move. `Actions.targets`: typed while the
+   omnibox holds chips, a command acts on every match, otherwise on the selection; the palette row
+   names the target first ("Pause: 14 matching torrents"); destructive ones and anything over 20
+   confirm through `RemoveConfirm`; `Actions.torrentsOnly` still applies and the skipped are
+   counted; each is one undo entry. Up recalls the last ten (`ui.omnibox.history`, never synced).
+7. **Swarm preview** (2 PRs): every add gets a hidden upload-mode probe (`MetadataFetch` becomes
+   `SwarmProbe`; a `.torrent` gets one as a magnet does), off by default for a private torrent,
+   where a probe's announce counts. `SwarmPreview` (the scrape counts, the highest per tracker
+   since each sees part of the swarm; connected peers; availability whole and over the ticked
+   files) and `ui.SwarmVerdict` (Healthy, Thin, Incomplete, Dead), in `FreeSpace.sentence`'s style
+   beside the free-space line. **No time estimate** (decided): the probe downloads nothing, so
+   there is no rate to measure, and a guess shown as a number reads as a measurement. Transmission
+   has no hidden torrents: `Capability.SWARM_PREVIEW`.
+8. **Leak check** (2 PRs): `net.InterfaceWatch` reads the bound interface every 5 s on the poll
+   thread (present, up, addresses; a change re-applies the settings), `Connectivity` keeps the
+   swarm's view of this machine from `ExternalIpAlert`. Then an opt-in exit check, since it asks a
+   third party (the URL is the user's, `https://api.ipify.org` offered): one request through
+   `HttpClient.localAddress` set to the bound address, one without. `net.LeakCheck.verdict`
+   (Protected, Exposed, Halted, Unbound, Unknown), pure, as a shield pill beside the port dot with
+   a card of the three addresses; `connection.pauseWhenExposed`. Tracker names still resolve
+   through the system's resolver unless a proxy is set; the card says so. Hidden for a remote
+   engine, whose network is not this machine's.
+
+### 1.2 — Headless and the qBittorrent API
+The largest milestone; see "qBittorrent API design" below. Most of what the API needs lives in
+`MainWindow` today, which a server in the window's process could borrow and a headless one cannot,
+so the order is extract, then serve.
+
+1. **Session core** (2–3 PRs, nothing visible): `com.torrenta.session.Session` takes the engine's
+   lifecycle, the poll and its snapshots, share limits, the speed refresh, watch folders, RSS
+   rules, the IP filter, automation, statistics, the instance hand-off and the input queue out of
+   `MainWindow`, which then listens and calls. A test fails on any JavaFX import under `session`,
+   as `UiStringSweepTest` fails on a literal. Order: poll and share limits; watch folders, RSS and
+   the IP filter; `switchProfile`.
+2. **Headless mode**: `torrenta --headless` runs `Session` without the toolkit; inputs are added
+   without a dialog (`add.unsafeContent` applies), events go to stdout and the session log,
+   SIGTERM goes through `stop()` and its resume-data wait. A `torrenta-nox` launcher in the same
+   image (jpackage `--add-launcher`), a systemd user unit in docs.
+3. **HTTP plumbing**: `com.torrenta.http` on `jdk.httpserver` with virtual threads: routes, form
+   and multipart bodies (the *arr apps post `.torrent` files multipart), cookies, `Range` (for
+   1.4's streaming), HTTPS from a PKCS#12 file.
+4. **API Tier 1, the *arr apps** (Sonarr, Radarr, Lidarr, Readarr, Prowlarr).
+5. **API Tier 2, remote apps and alternative web UIs**, and the static root folder.
+6. **Compatibility**: contract tests from a real qBittorrent 5.0's recorded answers;
+   `QbittorrentContractTest`, `@EnabledIf` `qbittorrent-nox` is on the PATH as
+   `TransmissionDaemonTest` is, sends the same requests to both and compares the shapes; a manual
+   pass with Sonarr and Radarr against a headless Torrenta (grab, import, remove after seeding),
+   then one mobile app, written down in `docs/webapi.md`.
+
+Tier 3 (qBittorrent's `search/*` and `rss/*` over Torrenta's own) comes after 1.2, once Tiers 1
+and 2 are in use (decided): the *arr apps never call it, and search makes outbound requests on a
+remote caller's behalf.
+
+### 1.3 — Storage
+
+1. **Import from qBittorrent**, with the dialog. `com.torrenta.migrate`: one reader per client
+   producing `ImportCandidate` (name, hash, metainfo, resume, save path, category, tags, paused);
+   `ImportPlan.of(candidates, existingIds, fileProbe)`, pure: skip what Torrenta has, flag missing
+   data, decide trust or recheck. qBittorrent is libtorrent: `BT_backup/<hash>.fastresume` is
+   libtorrent's resume format plus `qBt-*` keys (category, tags, name, ratio and seeding limits,
+   stopped, content layout) with `<hash>.torrent` beside it, read as it is with the info dict put
+   back; categories from `categories.json`; the paths per platform, Flatpak's included. Its
+   optional SQLite storage (`torrents.db`) is not read (decided): the dialog says how to switch
+   qBittorrent to fastresume files (Advanced → Resume data storage type) and look again, rather
+   than ship a second native library for an opt-in mode. File → Import from another client…:
+   the sources found on this machine or a chosen folder, a table with a verdict per torrent, a
+   summary in the event log.
+2. **Import from Deluge**, also libtorrent: `state/torrents.fastresume` is one bencoded dict of
+   hash to resume bytes, `state/<hash>.torrent` beside it, labels from `label.conf` (Deluge's two
+   concatenated JSON objects). `torrents.state` is a Python pickle and is not read; the save path
+   is in the resume data.
+3. **Import from Transmission**, which is not: `torrents/<hash>.torrent` (3.x:
+   `<name>.<hash16>.torrent`) and `resume/*.resume`, bencoded (`destination`, `name`, `paused`,
+   `labels`, dates, totals, per-file `priority`/`dnd`, renamed names, and `progress` as
+   `have: all`, a 4.x `pieces` bitfield or 3.x 16 KiB `blocks`, a piece only when all its blocks
+   are there), converted to add parameters; `have: all` becomes seed mode; labels come back through
+   `TransmissionLabels`' `category:` convention.
+   For all three: an engine test per client from fixtures real clients made, which must reach
+   their progress without checking, and one with a truncated file, which must come up short.
+   "Verify in the background afterwards" is an option, off, since `force_recheck` is where
+   libtorrent's picker crash lives. An incomplete torrent is not imported while the other client
+   runs (qBittorrent's `lockfile`, a daemon's RPC port): two writers on one file is corruption.
+   libtorrent only; into a Transmission profile it would be a full verify, which is not the promise.
+4. **Dedup, the index**: `engine.ContentIndex`, v2 Merkle root → (torrent, path on disk, size) for
+   complete files only, built at start from torrents with v2 metadata and kept on finish, rename,
+   move and remove; never persisted, since the metadata is already there. `DedupPlan.of(preview,
+   index, layout, savePath, renames)`, pure, maps each wanted file with a known root to (source,
+   target, method), the target derived from `FileRenames` exactly where libtorrent will look at
+   add: content layout, incomplete folder, `.part`.
+5. **Dedup, the add**: "3 files (4.2 GB) are already on disk in 'Debian 13.1' · link them", ticked
+   by default; a hardlink on the same file system, a reflink where there is one (`cp
+   --reflink=auto`, `clonefile`), else a copy with its size shown first (`link | copy | ask`). The
+   files are in place before `add_torrent`, whose own check verifies them: v2 pieces are per file,
+   and a hybrid's padding keeps its v1 pieces file-aligned. Watch folders and rules dedup without
+   asking; the Files tab marks a linked file. v1-only torrents have no roots: matching by size and
+   whole v1 pieces is a later item. `Capability.DEDUP`.
+
+### 1.4 — Protocol extras
+
+1. **Battery and metered networks** (1–2 PRs): `os.PowerState` and `os.NetworkCost` behind a pure
+   `Conditions(onBattery, metered)`: UPower's `OnBattery` and NetworkManager's `Metered` on the
+   system bus through dbus-java, with their `PropertiesChanged`; `pmset -g batt` on macOS, which
+   has no command for Low Data Mode, so that row is hidden there rather than faked;
+   `GetSystemPowerStatus` through FFM and a PowerShell query of the connection cost on Windows.
+   `Speed.alternativeActive(now)` becomes `Speed.mode(now, schedule, conditions, override)`:
+   alternative when the schedule says so or a condition's rule is on, or paused for the stronger
+   choice; a manual toggle wins until the next change, as qBittorrent's schedule override does.
+   The pill says why ("Alternative speeds: on battery"). Hidden for a remote engine.
+2. **Streaming, the server**: `com.torrenta.stream.StreamServer` on 1.2's plumbing, loopback only,
+   a random port, `/s/<token>/<id>/<fileIndex>/<name>` with a token per file and launch, no
+   listing, `206` and `Content-Range`. `PieceMath.span`, pure, gives the pieces a range needs; a
+   piece the torrent has is read from the file under its recorded name (`onDisk`), a missing one
+   gets a deadline and a wait on `PieceFinishedAlert` first. Reading beside libtorrent's writes is
+   fine on POSIX; Windows' share mode is measured, with `readPiece` as the fallback. An engine test
+   reads a range from a loopback torrent that has to wait for its piece. `Capability.STREAMING`.
+3. **Streaming, the player**: `Readahead.plan(playhead, have, rate, bitrate)`, pure: deadlines
+   tightening towards the playhead over about 30 s of playback, the file's first and last pieces at
+   start (container indexes sit at the end), sequential over the file's range alone, all cleared
+   when the last connection closes. Files tab → Stream in player runs `stream.player` (mpv or VLC
+   found on the PATH, the app bundles, the registry) with the URL as an argument and no shell;
+   Copy stream URL beside it; the Overview's strip marks the window.
+4. **BEP 46, following**: `Inputs` reads `magnet:?xs=urn:btpk:<key>&s=<salt>` as a
+   `MutableSource`, `dhtGetItem` resolves its `ih`, which is added as a magnet with the source in
+   the `.labels` sidecar. A `MutableFollower` asks again every 6 h (a setting); a higher `seq` adds
+   the new torrent into the same save path (1.3's dedup makes an update cost the changed files) and
+   keeps or removes the old one when the new one is complete; `EngineEvent.Kind.UPDATED` for
+   automation. The URI, the item and the follower's decision are pure and tested; the DHT round
+   trip is two loopback sessions bootstrapped to each other, nightly if it proves flaky.
+5. **BEP 46, publishing**: the Create dialog's "Publish as updatable": a key pair
+   (`Ed25519.createKeypair`) in `keys/<name>.key`, owner-only, never synced, with the warning that
+   losing it ends the updates; `dhtPutItem` with the next `seq`, republished hourly while the app
+   runs since items expire from the DHT in about two hours; New version… on a published torrent.
+   `Capability.MUTABLE`.
+
+## qBittorrent API design
+
+Sonarr, Radarr, Lidarr, Readarr and Prowlarr, and most remote apps for phones, already speak
+qBittorrent's WebUI API. Speaking it at `/api/v2` plugs Torrenta into all of them at once, gives
+phone control through apps that exist, and, over a Transmission profile, makes Torrenta a
+qBittorrent front for a Transmission daemon. The handlers are thin over `Session`; the mapping is
+pure and tested:
+
+- `QbitState.of(Torrent, RowState)` → `downloading`, `stalledDL`, `metaDL`, `queuedDL`,
+  `checkingDL`, `pausedDL`/`stoppedDL`, `forcedDL`, `uploading`, `stalledUP`, …, `error`,
+  `missingFiles`, `moving`. The *arr apps decide imports by it, so every case has a test.
+- `QbitTorrent.write(…)` fills `torrents/info`'s fields; `content_path`, which the *arr apps import
+  from, is the file of a single-file torrent and the root folder otherwise.
+- `MainData.diff(previous, current, rid)` → `sync/maindata`'s partial updates, the last few
+  snapshots kept by `rid`, `full_update` for an unknown one.
+
+**Tier 1** (the *arr apps): `auth/login`, `auth/logout`, `app/version`, `app/webapiVersion` (the
+qBittorrent 5.0 level, 2.11), `app/preferences` (the keys they read: `save_path`,
+`queueing_enabled`, `max_ratio_enabled`, `max_ratio`, `max_seeding_time_enabled`, `dht`),
+`app/defaultSavePath`; `torrents/info` (`filter`, `category`, `tag`, `hashes`, `sort`, `limit`),
+`properties`, `files`, `add` (`urls`, multipart `torrents`, `savepath`, `category`, `tags`,
+`paused`/`stopped`, `skip_checking`, `contentLayout`, `sequentialDownload`, `firstLastPiecePrio`,
+`rename`, limits), `delete`, `pause`/`resume` and 5.0's `stop`/`start`, `recheck`, `setCategory`,
+`categories`, `createCategory`, `addTags`, `setShareLimits`, `topPrio`, `setForceStart`;
+`transfer/info`.
+
+**Tier 2** (remote apps, VueTorrent and the like): `sync/maindata`, `sync/torrentPeers`,
+`torrents/filePrio`, `setLocation`, `rename`, `renameFile`/`renameFolder`,
+`addTrackers`/`removeTrackers`, per-torrent limits, the other queue moves, category and tag
+editing, `transfer/speedLimitsMode`/`toggleSpeedLimitsMode` and the global limits,
+`app/setPreferences` for the keys Torrenta has (onto `Settings`, live and saved), `log/main` from
+`EventLog`. `webapi.rootFolder` serves static files, as qBittorrent's alternative WebUI does, so
+unpacking VueTorrent there is a phone interface Torrenta does not have to write.
+
+**Security**, decided before Tier 1 ships, since this is the widest door the app will have: off
+by default and on `127.0.0.1` until an address is chosen, with a warning for one that is neither
+loopback nor HTTPS; authentication always, the localhost bypass off; the password as salted
+PBKDF2-SHA256 in `webapi.*`, machine-local and never synced; five failed logins ban an address for
+an hour; `Origin`/`Referer` checked against `Host`, the `Host` header validated against DNS
+rebinding, cookies `HttpOnly` and `SameSite=Strict`; caps on body size and multipart parts, and
+`.torrent` uploads through `Bencode`'s bounds; `savepath` resolved inside the allowed roots (the
+download folder, the categories' folders, roots added by hand), or anyone with the password could
+write anywhere the user can.
+
+**Port 8080** by default (decided), qBittorrent's, so the *arr apps and the phone apps connect with
+no edits; when it is taken, the Settings page says so and offers a free one. Settings → Remote
+access holds the switch, address, port, user, password, HTTPS file, allowed roots, root folder and
+bans. An endpoint whose capability the engine lacks answers as qBittorrent does for a feature it
+does not have.
+
 ## Search design
 
 qBittorrent's search is a set of Python scraper plugins, one per site, which break when a site
@@ -398,7 +644,8 @@ result pre-filled. Searches are rate-limited per provider and cached for the ses
 
 - Packages: `engine` (API), `engine.libtorrent`, `engine.transmission` (0.9), `store` (resume data,
   settings), `search`, `rss`, `ui` (one window), `ui.detail`, `ui.settings`, `cli`, `i18n`,
-  `update`.
+  `update`; after 1.0 `session` (everything but the window, 1.2), `http` and `webapi` (1.2),
+  `migrate` (1.3), `stream` (1.4).
 - Threads: FX thread for the scene only; one engine poll thread; one alert thread; virtual threads
   for actions, search and RSS; every engine call off the FX thread, enforced by an assertion in
   `LibtorrentEngine`.
@@ -425,8 +672,18 @@ result pre-filled. Searches are rate-limited per provider and cached for the ses
   found. Capture and check on a Wayland desktop before each release.
 - **Search providers** change and go away. Definitions as data, Torznab for the long tail, no
   site-specific code in the app.
+- **The WebUI API is a door into the machine** (1.2): anyone with the password adds torrents and
+  chooses where files go. Off by default, loopback first, the allowed roots, and the security list
+  above settled before the first endpoint ships.
+- **Imported resume data is trusted** (1.3). Another client's word that a piece is there skips the
+  check, so each reader is tested on fixtures made by the real client, a truncated file included,
+  and a torrent still downloading is not taken while that client runs.
+- **Extracting `Session` from `MainWindow`** (1.2) moves every background rule at once. Done in
+  small PRs with nothing visible changing, each verified by capture as well as by the tests.
 
-## Out of scope for 1.0
+## Out of scope
 
-A web UI or RPC server of Torrenta's own, headless mode, a built-in tracker, email notifications,
-plugin loading of arbitrary code.
+For 1.0: a web UI or RPC server of Torrenta's own and headless mode, which come in 1.2 as
+qBittorrent's API (with an alternative WebUI served from a folder, not one Torrenta writes) and
+`--headless`. At all: a built-in tracker, email notifications, plugin loading of arbitrary code,
+reading qBittorrent's SQLite resume storage (1.3 asks for its file storage instead).
