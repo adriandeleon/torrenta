@@ -44,6 +44,7 @@ import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
@@ -100,6 +101,10 @@ final class DetailPane extends VBox {
     private final Button reannounceButton = new Button(tr("detail.action.reannounce"));
     private final Button openButton = new Button(tr("detail.action.openFolder"));
     private final Button moreButton = new Button("···");
+    /** Pause's glyph: two bars while it pauses, the play triangle while it resumes. */
+    private final StackPane pauseGlyph = new StackPane();
+
+    private Boolean pauseShowsResume;
     private RowState headerState;
     private boolean wide;
 
@@ -226,9 +231,9 @@ final class DetailPane extends VBox {
      */
     void setCommands(Function<String, Optional<Command>> lookup) {
         commands = lookup;
-        pauseButton.setGraphic(keyHint("pause-resume"));
-        reannounceButton.setGraphic(keyHint("reannounce"));
-        openButton.setGraphic(keyHint("open-folder"));
+        pauseButton.setGraphic(actionGraphic(pauseButton, pauseGlyph, "pause-resume"));
+        reannounceButton.setGraphic(actionGraphic(reannounceButton, Icons.broadcast(), "reannounce"));
+        openButton.setGraphic(actionGraphic(openButton, Icons.open(), "open-folder"));
     }
 
     /** The ··· button's menu: the Torrent menu's items, as the list's context menu has them. */
@@ -528,9 +533,10 @@ final class DetailPane extends VBox {
         for (Button b : List.of(pauseButton, reannounceButton, openButton, moreButton)) {
             b.getStyleClass().add("detail-action");
             b.setFocusTraversable(false);
-            b.setContentDisplay(ContentDisplay.RIGHT);
-            b.setGraphicTextGap(10);
         }
+        pauseButton.getStyleClass().add("action-pause");
+        reannounceButton.getStyleClass().add("action-reannounce");
+        openButton.getStyleClass().add("action-open");
         moreButton.getStyleClass().add("detail-more");
         moreButton.setTooltip(new javafx.scene.control.Tooltip(tr("detail.action.more")));
         pauseButton.setOnAction(e -> runCommand("pause-resume"));
@@ -554,6 +560,33 @@ final class DetailPane extends VBox {
         title.setText(t.name());
         subtitle.setText(OverviewText.subtitle(t, fileCount, nowSeconds));
         pauseButton.setText(tr(t.paused() ? "detail.action.resume" : "detail.action.pause"));
+        if (!Boolean.valueOf(t.paused()).equals(pauseShowsResume)) {
+            pauseShowsResume = t.paused();
+            pauseGlyph.getChildren().setAll((t.paused() ? Icons.run() : Icons.pause()).at(Icons.MENU_SIZE));
+            pauseButton.pseudoClassStateChanged(RESUME, t.paused());
+        }
+    }
+
+    private static final PseudoClass RESUME = PseudoClass.getPseudoClass("resume");
+
+    /**
+     * A header button's face: its glyph in the action's colour, its name (the button's own text,
+     * so {@code getText} and the accessible name stay true), and the command's chord.
+     */
+    private Node actionGraphic(Button button, Node glyph, String id) {
+        if (glyph instanceof Icons.Glyph g) g.at(Icons.MENU_SIZE);
+        Label name = new Label();
+        name.textProperty().bind(button.textProperty());
+        name.getStyleClass().add("action-name");
+        HBox face = new HBox(7, glyph, name);
+        face.setAlignment(Pos.CENTER_LEFT);
+        Node key = keyHint(id);
+        if (key != null) {
+            HBox.setMargin(key, new Insets(0, 0, 0, 3));
+            face.getChildren().add(key);
+        }
+        button.setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+        return face;
     }
 
     /** A command's chord in the muted key face, or nothing for one with none. */
