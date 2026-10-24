@@ -287,6 +287,9 @@ public final class MainWindow {
     private CheckMenuItem sidebarRightItem;
     private volatile String detailId;
     private volatile boolean detailWanted;
+    /** A {@link #refreshDetailNow} waiting on the poll thread; later requests ride on it. */
+    private final java.util.concurrent.atomic.AtomicBoolean detailRefreshQueued =
+            new java.util.concurrent.atomic.AtomicBoolean();
     /** The global share limit as the poll thread applies it; refreshed with the engine settings. */
     private volatile ShareLimit globalShareLimit = ShareLimit.NONE;
     /** Per-torrent share limits as of the last poll, for the status sentences ("ratio 1.2 of 2"). */
@@ -2468,17 +2471,7 @@ public final class MainWindow {
         // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
         com.torrenta.engine.SessionStats stats = statsWanted ? engine.stats() : null;
         enforceShareLimits(engine, snapshot);
-        // The detail pane costs a status with the pieces bitfield; only for one shown torrent.
-        String id = detailWanted ? detailId : null;
-        TorrentDetail detailSnapshot = null;
-        if (id != null) {
-            try {
-                detailSnapshot = engine.detail(id);
-            } catch (EngineException e) {
-                detailSnapshot = null; // gone between the selection and the poll
-            }
-        }
-        TorrentDetail shown = detailSnapshot;
+        TorrentDetail shown = fetchDetail(engine);
         Connectivity connectivity = engine.connectivity();
         long unproven = portClock.tick(connectivity, NetworkStatus.anyRunning(snapshot), nowSeconds);
         Optional<NetworkStatus.Port> port = NetworkStatus.port(connectivity, unproven);
@@ -2491,19 +2484,55 @@ public final class MainWindow {
             refreshSidebar(snapshot);
             showRates(current, nowSeconds);
             showNetwork(port, dht, space);
-            if (detailWanted) {
-                if (shown != null && shown.general().id().equals(detailId)) {
-                    TorrentRow row = rows.get(detailId);
-                    detail.show(
-                            shown,
-                            row == null ? null : row.torrent(),
-                            row == null ? 0 : row.quietSeconds(),
-                            nowSeconds);
-                    detail.showSpeed(torrentHistories.get(detailId), nowSeconds);
-                } else if (detailId == null) detail.clear();
-            }
+            applyDetail(shown, nowSeconds);
             if (stats != null) statsWindow.update(stats, sessionHistory, nowSeconds);
         });
+    }
+
+    /**
+     * Poll thread. The detail pane costs a status with the pieces bitfield; only for one shown
+     * torrent, and null for none or for one gone between the selection and the poll.
+     */
+    private TorrentDetail fetchDetail(Engine engine) {
+        String id = detailWanted ? detailId : null;
+        if (id == null) return null;
+        try {
+            return engine.detail(id);
+        } catch (EngineException e) {
+            return null;
+        }
+    }
+
+    /** FX thread. A detail snapshot into the pane, unless the selection has moved on since. */
+    private void applyDetail(TorrentDetail shown, long nowSeconds) {
+        if (!detailWanted) return;
+        if (shown != null && shown.general().id().equals(detailId)) {
+            TorrentRow row = rows.get(detailId);
+            detail.show(shown, row == null ? null : row.torrent(), row == null ? 0 : row.quietSeconds(), nowSeconds);
+            detail.showSpeed(torrentHistories.get(detailId), nowSeconds);
+        } else if (detailId == null) detail.clear();
+    }
+
+    /**
+     * FX thread. The pane's torrent at once, not at the next tick: a click on a row (or showing the
+     * pane) otherwise waited up to a whole poll for its first snapshot. Run on the poll thread, so
+     * it never overlaps a poll; requests made while one is queued share it.
+     */
+    private void refreshDetailNow() {
+        ScheduledExecutorService p = poller;
+        if (p == null || !detailWanted || detailId == null || !detailRefreshQueued.compareAndSet(false, true)) return;
+        try {
+            p.execute(() -> {
+                detailRefreshQueued.set(false);
+                Engine engine = this.engine;
+                TorrentDetail shown = engine == null ? null : fetchDetail(engine);
+                if (shown == null) return;
+                long nowSeconds = System.currentTimeMillis() / 1000;
+                Platform.runLater(() -> applyDetail(shown, nowSeconds));
+            });
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            detailRefreshQueued.set(false); // stopping: no more polls of any kind
+        }
     }
 
     /**
@@ -2595,6 +2624,7 @@ public final class MainWindow {
             if (!split.getItems().contains(detail)) split.getItems().add(detail);
             split.setDividerPositions(dividerFromSettings());
             settings.setDetailSide(place.id());
+            refreshDetailNow();
         } else {
             split.getItems().remove(detail);
         }
@@ -3918,6 +3948,7 @@ public final class MainWindow {
                             return recent == null ? new SpeedHistory() : recent.widened();
                         });
                     if (detailId == null && detailWanted) detail.clear();
+                    refreshDetailNow();
                 });
         detail.selectTab(settings.get(Settings.DETAIL_TAB, "overview"));
         detail.setOnFilePriority((index, priority) -> {
