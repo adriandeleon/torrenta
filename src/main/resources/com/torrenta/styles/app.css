@@ -519,6 +519,16 @@
     -fx-text-fill: -color-cell-fg;
 }
 
+/* The chain before a download's name: it came from a link, not a torrent. */
+.torrent-table .row-link .icon-line {
+    -fx-stroke: -color-fg-muted;
+    -fx-stroke-width: 1.4;
+}
+
+.torrent-table .table-row-cell:selected .row-link .icon-line {
+    -fx-stroke: -color-fg-default;
+}
+
 .torrent-table.comfortable .state-lead,
 .torrent-table.comfortable .state-rest {
     -fx-font-size: 12px;

@@ -73,7 +73,9 @@ class UiStringSweepTest {
             "main",
             "1.2.3.4\\n10.0.0.0/8\\n1.2.3.0-1.2.3.255",
             // the default name of the sync repository, in a TextInputDialog
-            "torrenta-settings");
+            "torrenta-settings",
+            // the program run when the field is empty, as its prompt
+            "curl");
 
     private static boolean allowed(String literal) {
         if (!LETTERS.matcher(literal).find()) return true;

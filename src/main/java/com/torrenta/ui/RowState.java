@@ -56,6 +56,8 @@ public enum RowState {
     public static RowState of(Torrent t, long quietSeconds) {
         if (!t.error().isEmpty()) return ERROR;
         if (t.moving()) return MOVING;
+        // A finished download from a link has nothing left to do: there is no seeding.
+        if (t.direct() && complete(t)) return DONE;
         if (t.state() == TorrentState.CHECKING) return CHECKING;
         if (t.paused()) return complete(t) ? DONE : PAUSED;
         if (t.queued()) return QUEUED;

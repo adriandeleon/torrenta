@@ -78,7 +78,9 @@ class SidebarStatusTest {
     void keysRoundTripAndTitlesRead() {
         for (SidebarStatus s : SidebarStatus.values()) {
             assertEquals(Optional.of(s), SidebarStatus.parse(s.key()), s.key());
-            assertEquals(Optional.of(s), SidebarStatus.parse(" " + s.title().toUpperCase() + " "));
+            // The English title is the key, blanks and case aside; "From links" is the one that is not.
+            if (s != SidebarStatus.LINKS)
+                assertEquals(Optional.of(s), SidebarStatus.parse(" " + s.title().toUpperCase() + " "));
         }
         assertEquals("downloading", SidebarStatus.DOWNLOADING.key());
         assertEquals("Tracker error".length() > 0, true);
@@ -94,7 +96,8 @@ class SidebarStatusTest {
                         "Inactive",
                         "Stalled",
                         "Checking",
-                        "Errored"),
+                        "Errored",
+                        "From links"),
                 java.util.Arrays.stream(SidebarStatus.values())
                         .map(SidebarStatus::title)
                         .toList(),

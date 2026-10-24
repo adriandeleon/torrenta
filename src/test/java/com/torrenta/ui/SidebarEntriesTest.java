@@ -73,7 +73,8 @@ class SidebarEntriesTest {
                         "Inactive",
                         "Stalled",
                         "Checking",
-                        "Errored"),
+                        "Errored",
+                        "From links"),
                 titles(entries.status),
                 "fixed from the start");
         List<Section> rebuilt = entries.update(

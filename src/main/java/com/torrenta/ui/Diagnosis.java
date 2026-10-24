@@ -90,6 +90,8 @@ public record Diagnosis(Title title, String body, String file, int fileIndex, Li
      * @param quietSeconds how long it has received nothing; what the last-resort sentence says
      */
     public static Optional<Diagnosis> of(Torrent t, RowState state, TorrentDetail d, long quietSeconds) {
+        // A download from a link has no swarm to reason about: its error is the whole story.
+        if (t.direct()) return state == RowState.ERROR ? Optional.of(error(t)) : Optional.empty();
         return switch (state) {
             case ERROR -> Optional.of(error(t));
             case QUEUED -> RowState.complete(t) ? Optional.empty() : Optional.of(queued(t));

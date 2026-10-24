@@ -354,7 +354,7 @@ final class Sidebar extends VBox {
             case COMPLETED -> "dot-done";
             case STALLED -> "dot-stall";
             case ERRORED -> "dot-error";
-            case PAUSED, INACTIVE, CHECKING -> "dot-idle";
+            case PAUSED, INACTIVE, CHECKING, LINKS -> "dot-idle";
         };
     }
 
@@ -373,6 +373,9 @@ final class Sidebar extends VBox {
         private final Label count = new Label();
         private final Region dot = new Region();
         private final javafx.scene.Node folder = Icons.folderSmall();
+        /** Downloads from links get the chain their rows carry, not a state's dot. */
+        private final javafx.scene.Node link = Icons.linkSmall();
+
         private final javafx.scene.Node chevron = Icons.chevronSmall();
         private final HBox box;
 
@@ -382,6 +385,7 @@ final class Sidebar extends VBox {
             count.getStyleClass().add("sidebar-count");
             dot.getStyleClass().add("sidebar-dot");
             folder.getStyleClass().add("sidebar-folder");
+            link.getStyleClass().add("sidebar-folder");
             chevron.getStyleClass().add("sidebar-chevron");
             box = new HBox(8, title, spacer, count);
             box.setAlignment(Pos.CENTER_LEFT);
@@ -420,6 +424,7 @@ final class Sidebar extends VBox {
             }
             return switch (entry.filter.kind()) {
                 case STATUS -> {
+                    if (entry.filter.status() == SidebarStatus.LINKS) yield link;
                     dot.getStyleClass().removeIf(c -> c.startsWith("dot-"));
                     dot.getStyleClass().add(dotClass(entry.filter.status()));
                     yield dot;

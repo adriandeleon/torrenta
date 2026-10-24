@@ -5,6 +5,32 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Added
+
+- **Links that are not torrents are downloaded by curl.** Paste, type or drop a link to any file
+  (http, https, ftp, ftps, sftp) and it joins the list beside the torrents: progress, rate, pause
+  and resume (which carries on from where it stopped), remove with or without the file, a category,
+  tags, a name of your own, Set Location, a download limit. The file grows under a `.part` name in
+  the download folder and takes the server's name for it when it is done, never over a file that
+  is there. A few run at once (Settings → Adding torrents → Links at once, 3 by default), the
+  rest wait their turn; the list survives a restart. curl comes from the `PATH` unless the same
+  page names another, and it is run with the engine's proxy. A link that turns out to be a
+  `.torrent` is added as a torrent when it arrives. The clipboard offers a link to a file as it
+  does a magnet; a link to a web page is not offered.
+- **Download Link, a dialog for a link that is not a torrent**: the folder (Browse, and the free
+  space there), the file's name (kept over the one the server gives, unless left as the link's
+  own) and Start paused. "Add without asking" skips it; links that arrive together are asked
+  about one after the other.
+- **Downloads from links are easy to tell from torrents**: a chain before the name in the list,
+  a "From links" entry in the sidebar's Status section (and Show: From links in the palette),
+  and `is:link` / `is:torrent` in the filter box. Commands only a torrent understands (Recheck,
+  Reannounce, Sequential, Super Seeding, the Queue, Copy Info-Hash, Copy Magnet Link, Export
+  .torrent) are off for a selection of downloads and skip the downloads in a mixed one.
+- **The download limit holds for downloads from links too.** Settings → Speed's limit, and the
+  alternative one while it is on or scheduled, is shared by the downloads from links among
+  themselves (the torrents keep theirs): each gets an equal part, or its own limit when that is
+  lower, and a change takes within a second.
+
 ### Changed
 
 - **The sidebar's sections fold with a click, and the sidebar resizes.** A click on Status,

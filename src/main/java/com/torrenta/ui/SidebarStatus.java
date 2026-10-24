@@ -26,7 +26,9 @@ public enum SidebarStatus {
     INACTIVE,
     STALLED,
     CHECKING,
-    ERRORED;
+    ERRORED,
+    /** Downloads from links (curl's), not torrents, whatever their state. */
+    LINKS;
 
     /** The entry's text in the sidebar, in the UI language; read at call time, never cached. */
     public String title() {
@@ -50,17 +52,20 @@ public enum SidebarStatus {
         boolean finished = t.state() == TorrentState.SEEDING || t.state() == TorrentState.FINISHED;
         boolean fetching = t.state() == TorrentState.DOWNLOADING || t.state() == TorrentState.FETCHING_METADATA;
         boolean moving = t.downloadRate() > 0 || t.uploadRate() > 0;
+        // A finished download from a link has nothing left to do: it neither seeds nor stalls.
+        boolean seeds = finished && !t.direct();
         return switch (this) {
             case DOWNLOADING -> fetching && !t.paused();
-            case SEEDING -> finished && !t.paused();
+            case SEEDING -> seeds && !t.paused();
             case COMPLETED -> finished;
             case PAUSED -> t.paused();
             case ACTIVE -> moving;
             case INACTIVE -> !moving;
             case STALLED ->
-                (fetching || finished) && !t.paused() && !moving && t.error().isEmpty();
+                (fetching || seeds) && !t.paused() && !moving && t.error().isEmpty();
             case CHECKING -> t.state() == TorrentState.CHECKING;
             case ERRORED -> !t.error().isEmpty();
+            case LINKS -> t.direct();
         };
     }
 }

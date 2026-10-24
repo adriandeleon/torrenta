@@ -135,6 +135,12 @@ final class DetailPane extends VBox {
     private final Label seedingValue = value();
     private final Label announceValue = value();
     private final Label trackerValue = value();
+    /** A download's link, in the place a torrent's info-hash has. */
+    private final Label sourceValue = value();
+    /** The facts' rows only a torrent has, and the one only a download from a link has. */
+    private final List<Node> torrentFacts = new java.util.ArrayList<>();
+
+    private final List<Node> directFacts = new java.util.ArrayList<>();
     private final Label privateValue = value();
 
     // ---- the other tabs
@@ -384,7 +390,8 @@ final class DetailPane extends VBox {
         if (shownId == null) return List.of("empty");
         return List.of(
                 "header=" + stateGlyph.getText() + " " + title.getText() + " | " + subtitle.getText()
-                        + " | actions=[" + pauseButton.getText() + ", " + reannounceButton.getText() + ", "
+                        + " | actions=[" + pauseButton.getText() + ", "
+                        + (reannounceButton.isManaged() ? reannounceButton.getText() + ", " : "")
                         + openButton.getText() + ", " + moreButton.getText() + "] wide=" + wide,
                 "diagnosis="
                         + (shownDiagnosis == null
@@ -431,6 +438,12 @@ final class DetailPane extends VBox {
             downloadedValue.setText(OverviewText.downloaded(torrent));
             uploadedValue.setText(OverviewText.uploaded(torrent));
         }
+        // A download from a link has no swarm, pieces or announce: those rows go, its link shows.
+        boolean direct = torrent != null && torrent.direct();
+        for (Node n : torrentFacts) shown(n, !direct);
+        for (Node n : directFacts) shown(n, direct);
+        shown(reannounceButton, !direct);
+        sourceValue.setText(direct ? g.currentTracker() : "");
         savePathValue.setText(g.savePath());
         hashValue.setText(OverviewText.shortHash(g.id()));
         availabilityValue.setText(
@@ -622,30 +635,41 @@ final class DetailPane extends VBox {
         HBox hash = new HBox(10, hashValue, copy);
         hash.setAlignment(Pos.CENTER_LEFT);
         // The five a glance wants first, as the mockup has them; the General tab's others after a gap.
+        sourceValue.getStyleClass().add("mono");
+        sourceValue.setTextOverrun(OverrunStyle.CENTER_ELLIPSIS);
         int row = 0;
-        fact(row++, tr("detail.overview.peers"), peersValue);
+        torrentFacts.addAll(fact(row++, tr("detail.overview.peers"), peersValue));
         fact(row++, tr("detail.general.downloaded"), downloadedValue);
-        fact(row++, tr("detail.general.uploaded"), uploadedValue);
+        torrentFacts.addAll(fact(row++, tr("detail.general.uploaded"), uploadedValue));
         fact(row++, tr("detail.general.savePath"), savePathValue);
-        fact(row++, tr("detail.general.infoHash"), hash);
+        directFacts.addAll(fact(row++, tr("detail.general.source"), sourceValue));
+        torrentFacts.addAll(fact(row++, tr("detail.general.infoHash"), hash));
         Region gap = new Region();
         gap.setMinHeight(6);
         facts.add(gap, 0, row++);
-        fact(row++, tr("detail.general.pieces"), pieceSizeValue);
-        fact(row++, tr("detail.general.availability"), availabilityValue);
-        fact(row++, tr("detail.general.wasted"), wastedValue);
+        torrentFacts.addAll(fact(row++, tr("detail.general.pieces"), pieceSizeValue));
+        torrentFacts.addAll(fact(row++, tr("detail.general.availability"), availabilityValue));
+        torrentFacts.addAll(fact(row++, tr("detail.general.wasted"), wastedValue));
         fact(row++, tr("detail.general.active"), activeValue);
-        fact(row++, tr("detail.general.seeding"), seedingValue);
-        fact(row++, tr("detail.general.nextAnnounce"), announceValue);
-        fact(row++, tr("detail.general.tracker"), trackerValue);
-        fact(row, tr("detail.general.private"), privateValue);
+        torrentFacts.addAll(fact(row++, tr("detail.general.seeding"), seedingValue));
+        torrentFacts.addAll(fact(row++, tr("detail.general.nextAnnounce"), announceValue));
+        torrentFacts.addAll(fact(row++, tr("detail.general.tracker"), trackerValue));
+        torrentFacts.addAll(fact(row, tr("detail.general.private"), privateValue));
+        for (Node n : directFacts) shown(n, false);
     }
 
-    private void fact(int row, String name, Node value) {
+    /** The row's name and value, for showing and hiding them together. */
+    private List<Node> fact(int row, String name, Node value) {
         Label label = new Label(name);
         label.getStyleClass().add("fact-name");
         facts.add(label, 0, row);
         facts.add(value, 1, row);
+        return List.of(label, value);
+    }
+
+    private static void shown(Node n, boolean on) {
+        n.setVisible(on);
+        n.setManaged(on);
     }
 
     private static Label value() {
