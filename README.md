@@ -14,6 +14,10 @@
 
 A keyboard-first, cross-platform BitTorrent client built on JavaFX.
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="Torrenta's main window: the sidebar, the torrent list with five downloads and seeds, and the detail pane's Overview of the selected torrent with its pieces and speed graph" width="860">
+</p>
+
 Status: **feature-complete against the roadmap (0.2 through 0.9); 0.1.0 is the first release**. A themed window with a menu bar, an icon toolbar, a torrent list, a status bar that keeps its history, an event log, a debug log,
 on a real engine: libtorrent, through [libtorrent4j](https://github.com/aldenml/libtorrent4j).
 Torrents arrive from a file, a magnet link, a URL, a drop or the clipboard through an Add dialog
