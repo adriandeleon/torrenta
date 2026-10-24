@@ -5,6 +5,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Changed
+
+- **The sidebar's sections fold with a click, and the sidebar resizes.** A click on Status,
+  Categories, Tags or Trackers folds or opens it (Enter and Space on a heading still do); a
+  chevron at the right edge says which. Drag the sidebar's edge that faces the list to make it
+  wider or narrower (150 to 480 px); a double-click on the edge goes back to the default. Both
+  are remembered.
+
 ### Fixed
 
 - **`Ctrl+Shift+D` was both Set Location and the details pane**, so only one of them fired. Set

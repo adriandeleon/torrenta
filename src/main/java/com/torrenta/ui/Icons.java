@@ -233,6 +233,11 @@ final class Icons {
         return line("M2 12.5V3.5h4.2l1.5 2h5.8v2M2 12.5l2.2-5h10.3l-2.2 5z", SMALL_SCALE);
     }
 
+    /** A section's fold in the sidebar: points down while open, turned to point right when folded. */
+    static Glyph chevronSmall() {
+        return line("M4.5 6.2 8 9.7l3.5-3.5", SMALL_SCALE);
+    }
+
     static Glyph find() {
         return line("M2.5999999999999996 7.0a4.4 4.4 0 1 0 8.8 0a4.4 4.4 0 1 0 -8.8 0M10.4 10.4L14 14");
     }

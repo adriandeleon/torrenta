@@ -815,10 +815,16 @@
     -fx-border-color: transparent transparent transparent -color-border-default;
 }
 
+/* Inset on the side that faces the list by the resize grip's reach (SidebarWidth.GRIP), so the
+   grip never sits over the tree's scrollbar. */
 .sidebar .sidebar-tree {
     -fx-background-color: transparent;
     -fx-background-insets: 0;
-    -fx-padding: 4 0 4 0;
+    -fx-padding: 4 5 4 0;
+}
+
+.sidebar:right .sidebar-tree {
+    -fx-padding: 4 0 4 5;
 }
 
 .sidebar .tree-cell {
@@ -827,8 +833,9 @@
     -fx-indent: 0;
 }
 
-/* Sections are small capitals in the muted ink, with room above; no disclosure triangle (a
-   click, Enter or Space still folds them). */
+/* Sections are small capitals in the muted ink, with room above; the tree's own disclosure
+   triangle is gone, and a chevron at the right edge, where the counts are, says whether the
+   section is open (a click anywhere on the heading, Enter or Space folds it). */
 .sidebar .tree-cell:section {
     -fx-font-size: 11px;
     -fx-font-weight: bold;
@@ -873,6 +880,15 @@
 .sidebar .sidebar-folder .icon-line {
     -fx-stroke: -color-fg-muted;
     -fx-stroke-width: 1.4;
+}
+
+.sidebar .sidebar-chevron .icon-line {
+    -fx-stroke: -color-fg-muted;
+    -fx-stroke-width: 1.6;
+}
+
+.sidebar .tree-cell:section:hover .sidebar-chevron .icon-line {
+    -fx-stroke: -color-fg-default;
 }
 
 /* The Files tab's folder and sheet before each name, in the sidebar's weight; the selected row's
