@@ -68,6 +68,11 @@ public record Torrent(
         trackers = trackers == null ? java.util.List.of() : java.util.List.copyOf(trackers);
     }
 
+    /** A download from a link (curl's), not a torrent: by its id, which no info-hash looks like. */
+    public boolean direct() {
+        return com.torrenta.engine.direct.DirectDownload.isId(id);
+    }
+
     /** A torrent that is not queued and not moving: what most tests want. */
     public Torrent(
             String id,

@@ -40,8 +40,13 @@ public final class Settings {
     /** Every file allocated in full when the torrent starts. */
     public static final String PREALLOCATE = "download.preallocate";
 
+    /** The curl that downloads links that are not torrents; empty for the one on the PATH. This machine's. */
+    public static final String DIRECT_CURL = "download.curl";
+    /** Downloads from links running at once; the rest wait their turn. */
+    public static final String DIRECT_ACTIVE = "download.linksAtOnce";
+
     public static final String[] DOWNLOAD_KEYS = {
-        DOWNLOAD_DIR, INCOMPLETE_ENABLED, INCOMPLETE_DIR, PART_SUFFIX, PREALLOCATE
+        DOWNLOAD_DIR, INCOMPLETE_ENABLED, INCOMPLETE_DIR, PART_SUFFIX, PREALLOCATE, DIRECT_CURL, DIRECT_ACTIVE
     };
     /** The transfer list's columns: order, widths, visibility. See {@code ui.ColumnLayout}. */
     public static final String TABLE_COLUMNS = "table.columns";
@@ -1042,6 +1047,20 @@ public final class Settings {
 
     public void setPreallocate(boolean on) {
         properties.setProperty(PREALLOCATE, String.valueOf(on));
+    }
+
+    /** How links that are not torrents are downloaded: the curl to run, and how many at once (1–20). */
+    public com.torrenta.engine.direct.DirectDownloads.Options directOptions() {
+        return new com.torrenta.engine.direct.DirectDownloads.Options(
+                properties.getProperty(DIRECT_CURL, ""), readInt(DIRECT_ACTIVE, 3, 1, 20));
+    }
+
+    public void setDirectCurl(String program) {
+        properties.setProperty(DIRECT_CURL, program == null ? "" : program.strip());
+    }
+
+    public void setDirectActive(int n) {
+        properties.setProperty(DIRECT_ACTIVE, String.valueOf(Math.max(1, Math.min(20, n))));
     }
 
     /** Where a torrent saved to {@code destination} starts, by the incomplete-folder settings. */

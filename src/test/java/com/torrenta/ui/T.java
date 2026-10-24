@@ -26,6 +26,7 @@ final class T {
     String error = "";
     boolean moving = false;
     boolean superSeeding = false;
+    List<String> trackers = List.of();
 
     static T downloading() {
         return new T();
@@ -103,6 +104,13 @@ final class T {
         return this;
     }
 
+    /** A download from a link on {@code host}, as the direct downloads build their rows. */
+    T direct(String host) {
+        id = com.torrenta.engine.direct.DirectDownload.idOf("https://" + host + "/" + id);
+        trackers = List.of(host);
+        return this;
+    }
+
     T moving() {
         moving = true;
         return this;
@@ -132,7 +140,7 @@ final class T {
                 "",
                 List.of(),
                 error,
-                List.of(),
+                trackers,
                 false,
                 queued,
                 queuePosition,

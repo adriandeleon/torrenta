@@ -35,6 +35,11 @@ public record StatusLine(RowState state, String lead, String rest) implements Co
     public static StatusLine of(Torrent t, long quietSeconds, ShareLimit limit) {
         RowState state = RowState.of(t, quietSeconds);
         String percent = Format.wholePercent(t.progress());
+        if (t.direct()
+                && state != RowState.ERROR
+                && state != RowState.MOVING
+                && state != RowState.QUEUED
+                && state != RowState.PAUSED) return direct(t, state, quietSeconds);
         return switch (state) {
             case ERROR -> new StatusLine(state, tr("statusLine.error"), SEP + t.error());
             case MOVING -> new StatusLine(state, tr("statusLine.movingFiles"), SEP + percent);
@@ -70,6 +75,24 @@ public record StatusLine(RowState state, String lead, String rest) implements Co
             case DOWNLOADING ->
                 new StatusLine(state, percent, SEP + swarm(t) + (t.sequential() ? SEP + tr("statusLine.inOrder") : ""));
             case SEEDING -> new StatusLine(state, tr("statusLine.seeding"), seedingRest(t, limit));
+        };
+    }
+
+    /**
+     * A download from a link: its server where a torrent has its swarm, the bytes where the size
+     * is not known, and no seeding or ratio after it.
+     */
+    private static StatusLine direct(Torrent t, RowState state, long quietSeconds) {
+        String host = t.trackers().isEmpty() ? "" : t.trackers().getFirst();
+        String got = t.size() > 0 ? Format.wholePercent(t.progress()) : Bytes.human(t.done());
+        return switch (state) {
+            case DONE -> new StatusLine(state, tr("statusLine.done"), SEP + tr("statusLine.directFrom", host));
+            case STALLED ->
+                new StatusLine(
+                        state,
+                        tr("statusLine.stalled", Format.coarse(quietSeconds)),
+                        SEP + got + SEP + tr("statusLine.directQuiet", host));
+            default -> new StatusLine(state, got, SEP + tr("statusLine.directFrom", host));
         };
     }
 

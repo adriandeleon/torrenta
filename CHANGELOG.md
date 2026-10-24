@@ -5,6 +5,19 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Added
+
+- **Links that are not torrents are downloaded by curl.** Paste, type or drop a link to any file
+  (http, https, ftp, ftps, sftp) and it joins the list beside the torrents: progress, rate, pause
+  and resume (which carries on from where it stopped), remove with or without the file, a category,
+  tags, a name of your own, Set Location, a download limit. The file grows under a `.part` name in
+  the download folder and takes the server's name for it when it is done, never over a file that
+  is there. A few run at once (Settings → Adding torrents → Links at once, 3 by default), the
+  rest wait their turn; the list survives a restart. curl comes from the `PATH` unless the same
+  page names another, and it is run with the engine's proxy. A link that turns out to be a
+  `.torrent` is added as a torrent when it arrives. The clipboard offers a link to a file as it
+  does a magnet; a link to a web page is not offered.
+
 ## 0.1.0 — 2026-10-22
 
 ### Added

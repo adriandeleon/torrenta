@@ -527,6 +527,8 @@ final class SettingsWindow {
     private CheckBox addSequential;
     private ChoiceBox<com.torrenta.engine.FileRenames.Layout> addLayout;
     private CheckBox addWithoutAsking;
+    private TextField directCurl;
+    private Spinner<Integer> directActive;
     private Spinner<Integer> port;
     private CheckBox randomPort;
     private TextField listenInterface;
@@ -2959,6 +2961,27 @@ final class SettingsWindow {
                 tr("settings.adding.withoutAsking.desc"),
                 addWithoutAsking,
                 tr("settings.adding.withoutAsking.keywords"));
+
+        // Links that are not torrents: curl downloads them, on this machine, whatever the engine.
+        VBox links = section(page, tr("settings.adding.links"));
+        directCurl = text(Settings.DIRECT_CURL);
+        directCurl.setPromptText("curl");
+        directCurl.setPrefColumnCount(24);
+        row(
+                Category.ADDING,
+                links,
+                tr("settings.adding.curl"),
+                tr("settings.adding.curl.desc"),
+                directCurl,
+                tr("settings.adding.curl.keywords"));
+        directActive = intSpinner(1, 20, Settings.DIRECT_ACTIVE);
+        row(
+                Category.ADDING,
+                links,
+                tr("settings.adding.linksAtOnce"),
+                tr("settings.adding.linksAtOnce.desc"),
+                directActive,
+                tr("settings.adding.linksAtOnce.keywords"));
     }
 
     private void buildConnection(VBox page) {
@@ -3593,6 +3616,8 @@ final class SettingsWindow {
             addSequential.setSelected(settings.addSequential());
             addLayout.setValue(settings.addContentLayout());
             addWithoutAsking.setSelected(settings.addWithoutAsking());
+            directCurl.setText(settings.directOptions().curl());
+            directActive.getValueFactory().setValue(settings.directOptions().active());
             AutomationSettings a = settings.automation();
             onAdded.setText(a.onAdded());
             onFinished.setText(a.onFinished());

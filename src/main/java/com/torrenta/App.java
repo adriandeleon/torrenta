@@ -10,6 +10,8 @@ import javafx.stage.Stage;
 import com.torrenta.cli.CommandLine;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineProfile;
+import com.torrenta.engine.direct.DirectDownloads;
+import com.torrenta.engine.direct.WithDownloads;
 import com.torrenta.engine.libtorrent.LibtorrentEngine;
 import com.torrenta.engine.transmission.TransmissionEngine;
 import com.torrenta.os.AwtUse;
@@ -146,14 +148,20 @@ public final class App extends Application {
 
     /** libtorrent in this process with its stores, or a Transmission daemon reached as the profile says. */
     static Engine createEngine(EngineProfile profile, Settings settings, Path configDir) {
-        if (profile.isLocal()) {
-            return new LibtorrentEngine(
-                    settings::downloadDir,
-                    new TorrentStore(configDir.resolve(TorrentStore.FOLDER)),
-                    settings.engineSettings(),
-                    new StatsStore(configDir.resolve(StatsStore.FILE_NAME)));
-        }
-        return new TransmissionEngine(profile, settings::downloadDir, settings.engineSettings());
+        Engine torrents = profile.isLocal()
+                ? new LibtorrentEngine(
+                        settings::downloadDir,
+                        new TorrentStore(configDir.resolve(TorrentStore.FOLDER)),
+                        settings.engineSettings(),
+                        new StatsStore(configDir.resolve(StatsStore.FILE_NAME)))
+                : new TransmissionEngine(profile, settings::downloadDir, settings.engineSettings());
+        // Links that are not torrents go to curl, on this machine, whichever engine has the torrents.
+        DirectDownloads links = new DirectDownloads(
+                configDir,
+                () -> settings.downloadDir().toString(),
+                settings::directOptions,
+                AppInfo.NAME + "/" + AppInfo.VERSION);
+        return new WithDownloads(torrents, links, settings.engineSettings());
     }
 
     @Override

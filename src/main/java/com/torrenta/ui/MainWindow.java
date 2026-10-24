@@ -2015,6 +2015,12 @@ public final class MainWindow {
         AddDialog.Defaults defaults = addDefaults();
         Thread.ofVirtual().name("engine-inspect").start(() -> {
             try {
+                if (Inputs.isDirectLink(text)) {
+                    // Not a torrent: curl downloads it into the download folder, no dialog.
+                    Torrent added = e.add(text);
+                    Platform.runLater(() -> setStatus(tr("status.directAdded", added.name())));
+                    return;
+                }
                 Inputs.Kind kind = Inputs.classify(text);
                 AddDialog.Via shownVia = via != null
                         ? via
@@ -2402,7 +2408,13 @@ public final class MainWindow {
             setStatus(
                     Inputs.classify(text) == Inputs.Kind.MAGNET
                             ? tr("status.clipboard.magnet", chord(KeyCode.V).getDisplayText())
-                            : tr("status.clipboard.torrent", chord(KeyCode.V).getDisplayText()));
+                            : Inputs.isDirectLink(text)
+                                    ? tr(
+                                            "status.clipboard.link",
+                                            chord(KeyCode.V).getDisplayText())
+                                    : tr(
+                                            "status.clipboard.torrent",
+                                            chord(KeyCode.V).getDisplayText()));
         });
     }
 
