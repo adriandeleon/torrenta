@@ -1313,9 +1313,35 @@
     -fx-background-color: -torrenta-chosen;
 }
 
+.detail-action .action-name {
+    -fx-text-fill: -color-fg-default;
+}
+
 .detail-action .action-key {
     -fx-text-fill: -color-fg-muted;
     -fx-font-size: 12px;
+}
+
+/* Each action's glyph in a colour of its own, hover or not: pause amber (what a stall is), resume
+   green (going again), reannounce the seeding indigo (talking out), open folder the accent. */
+.detail-action.action-pause .icon-line,
+.detail-action.action-pause:hover .icon-line {
+    -fx-stroke: -torrenta-stall;
+}
+
+.detail-action.action-pause:resume .icon-line,
+.detail-action.action-pause:resume:hover .icon-line {
+    -fx-stroke: -torrenta-done;
+}
+
+.detail-action.action-reannounce .icon-line,
+.detail-action.action-reannounce:hover .icon-line {
+    -fx-stroke: -torrenta-up;
+}
+
+.detail-action.action-open .icon-line,
+.detail-action.action-open:hover .icon-line {
+    -fx-stroke: -torrenta-down;
 }
 
 .detail-more {
