@@ -179,6 +179,8 @@ public final class FilterQuery {
     private static Term is(String value) {
         return switch (value.toLowerCase(Locale.ROOT)) {
             case "sequential" -> new Term(Torrent::sequential, tr("filter.sequential"));
+            case "link", "links", "direct" -> new Term(Torrent::direct, tr("filter.link"));
+            case "torrent", "torrents" -> new Term(t -> !t.direct(), tr("filter.torrent"));
             default -> Term.invalid(value.isEmpty() ? tr("filter.isNeedsValue") : tr("filter.noSuchFlag", value));
         };
     }

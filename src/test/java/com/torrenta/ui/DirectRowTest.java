@@ -60,6 +60,51 @@ class DirectRowTest {
     }
 
     @Test
+    void theSidebarHasAnEntryForDownloadsFromLinks() {
+        assertTrue(SidebarStatus.LINKS.matches(T.downloading().direct("x.org").build()));
+        assertTrue(SidebarStatus.LINKS.matches(T.downloading()
+                .state(TorrentState.FINISHED)
+                .progress(1)
+                .direct("x.org")
+                .build()));
+        assertTrue(!SidebarStatus.LINKS.matches(T.seeding().build()), "a torrent is not from a link");
+        assertEquals("links", SidebarStatus.LINKS.key());
+        assertEquals("From links", SidebarStatus.LINKS.title());
+    }
+
+    @Test
+    void torrentOnlyCommandsSkipTheDownloads() {
+        var download = T.downloading().direct("x.org").build();
+        var torrent = T.seeding().id("b").build();
+        assertTrue(!Actions.anyTorrent(List.of(download)), "nothing for recheck to act on");
+        assertTrue(Actions.anyTorrent(List.of(download, torrent)));
+        assertEquals(List.of(torrent), Actions.torrentsOnly(List.of(download, torrent)));
+        assertTrue(!Actions.anyTorrent(List.of()));
+    }
+
+    @Test
+    void theLinkDialogRefusesANameTheDiskWouldChange() {
+        assertTrue(LinkDialog.problem("debian.iso").isEmpty());
+        assertEquals("Give the file a name", LinkDialog.problem("  ").orElseThrow());
+        assertTrue(LinkDialog.problem("a/b.iso").isPresent());
+        assertTrue(LinkDialog.problem("what?.iso").isPresent());
+        assertTrue(LinkDialog.problem(".hidden").isPresent());
+        assertTrue(LinkDialog.problem("CON").isPresent());
+    }
+
+    @Test
+    void theLinksOwnNameLeftAsItWasIsNoChoice() {
+        var kept = LinkDialog.request("https://x.org/a.iso", " /dl ", "a.iso", "a.iso", true);
+        assertEquals(null, kept.fileName(), "the server may still name it");
+        assertEquals(java.nio.file.Path.of("/dl"), kept.savePath());
+        assertTrue(kept.startPaused());
+        assertEquals(
+                "mine.iso",
+                LinkDialog.request("https://x.org/a.iso", "/dl", " mine.iso ", "a.iso", false)
+                        .fileName());
+    }
+
+    @Test
     void pausedQueuedAndErrorReadAsATorrentsDo() {
         assertEquals(
                 "Paused by you · 30%",

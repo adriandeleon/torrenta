@@ -32,6 +32,8 @@ import com.torrenta.engine.TorrentLabels;
  * @param error why it stopped by itself, or empty
  * @param tags sorted, as {@link TorrentLabels} keeps them
  * @param rateLimit bytes per second, 0 for none
+ * @param named {@code file} is the name a person chose when adding it, so the server's name for
+ *     the file does not replace it at the end
  */
 public record DirectDownload(
         String id,
@@ -46,7 +48,8 @@ public record DirectDownload(
         String error,
         String category,
         List<String> tags,
-        long rateLimit) {
+        long rateLimit,
+        boolean named) {
 
     /** The suffix an incomplete file carries, as the engine's own {@code .part} files do. */
     public static final String PART = ".part";
@@ -65,7 +68,7 @@ public record DirectDownload(
 
     /** A new download of {@code url}, not started. */
     public static DirectDownload of(String url, String file, String savePath, long now) {
-        return new DirectDownload(idOf(url), url, file, "", savePath, now, 0, -1, false, "", "", List.of(), 0);
+        return new DirectDownload(idOf(url), url, file, "", savePath, now, 0, -1, false, "", "", List.of(), 0, false);
     }
 
     public static String idOf(String url) {
@@ -97,52 +100,71 @@ public record DirectDownload(
 
     public DirectDownload withFile(String f) {
         return new DirectDownload(
-                id, url, f, ownName, savePath, added, completed, size, paused, error, category, tags, rateLimit);
+                id, url, f, ownName, savePath, added, completed, size, paused, error, category, tags, rateLimit, named);
     }
 
     public DirectDownload withOwnName(String n) {
         return new DirectDownload(
-                id, url, file, n, savePath, added, completed, size, paused, error, category, tags, rateLimit);
+                id, url, file, n, savePath, added, completed, size, paused, error, category, tags, rateLimit, named);
     }
 
     public DirectDownload withSavePath(String p) {
         return new DirectDownload(
-                id, url, file, ownName, p, added, completed, size, paused, error, category, tags, rateLimit);
+                id, url, file, ownName, p, added, completed, size, paused, error, category, tags, rateLimit, named);
     }
 
     public DirectDownload withCompleted(long at, long finalSize) {
         return new DirectDownload(
-                id, url, file, ownName, savePath, added, at, finalSize, paused, "", category, tags, rateLimit);
+                id, url, file, ownName, savePath, added, at, finalSize, paused, "", category, tags, rateLimit, named);
     }
 
     public DirectDownload withSize(long s) {
         return new DirectDownload(
-                id, url, file, ownName, savePath, added, completed, s, paused, error, category, tags, rateLimit);
+                id, url, file, ownName, savePath, added, completed, s, paused, error, category, tags, rateLimit, named);
     }
 
     public DirectDownload withPaused(boolean p) {
         return new DirectDownload(
-                id, url, file, ownName, savePath, added, completed, size, p, p ? "" : error, category, tags, rateLimit);
+                id,
+                url,
+                file,
+                ownName,
+                savePath,
+                added,
+                completed,
+                size,
+                p,
+                p ? "" : error,
+                category,
+                tags,
+                rateLimit,
+                named);
     }
 
     public DirectDownload withError(String e) {
         return new DirectDownload(
-                id, url, file, ownName, savePath, added, completed, size, paused, e, category, tags, rateLimit);
+                id, url, file, ownName, savePath, added, completed, size, paused, e, category, tags, rateLimit, named);
     }
 
     public DirectDownload withCategory(String c) {
         return new DirectDownload(
-                id, url, file, ownName, savePath, added, completed, size, paused, error, c, tags, rateLimit);
+                id, url, file, ownName, savePath, added, completed, size, paused, error, c, tags, rateLimit, named);
     }
 
     public DirectDownload withTags(List<String> t) {
         return new DirectDownload(
-                id, url, file, ownName, savePath, added, completed, size, paused, error, category, t, rateLimit);
+                id, url, file, ownName, savePath, added, completed, size, paused, error, category, t, rateLimit, named);
+    }
+
+    /** The file's name as a person chose it: kept when the download finishes. */
+    public DirectDownload withChosenName(String f) {
+        return new DirectDownload(
+                id, url, f, ownName, savePath, added, completed, size, paused, error, category, tags, rateLimit, true);
     }
 
     public DirectDownload withRateLimit(long limit) {
         return new DirectDownload(
-                id, url, file, ownName, savePath, added, completed, size, paused, error, category, tags, limit);
+                id, url, file, ownName, savePath, added, completed, size, paused, error, category, tags, limit, named);
     }
 
     // ---- the file, pure ---------------------------------------------------------------------------
@@ -177,6 +199,7 @@ public record DirectDownload(
                 g.writeEndArray();
             }
             if (d.rateLimit > 0) g.writeNumberField("rateLimit", d.rateLimit);
+            if (d.named) g.writeBooleanField("named", true);
             g.writeEndObject();
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -198,7 +221,7 @@ public record DirectDownload(
                 }
                 String url = "", file = "", name = "", savePath = "", error = "", category = "";
                 long added = 0, completed = 0, size = -1, rateLimit = 0;
-                boolean paused = false;
+                boolean paused = false, named = false;
                 List<String> tags = new ArrayList<>();
                 while (p.nextToken() == JsonToken.FIELD_NAME) {
                     String field = p.currentName();
@@ -215,6 +238,7 @@ public record DirectDownload(
                         case "size" -> size = p.getValueAsLong(-1);
                         case "rateLimit" -> rateLimit = p.getValueAsLong(0);
                         case "paused" -> paused = p.getValueAsBoolean(false);
+                        case "named" -> named = p.getValueAsBoolean(false);
                         case "tags" -> {
                             if (value == JsonToken.START_ARRAY) {
                                 while (p.nextToken() != JsonToken.END_ARRAY) {
@@ -240,7 +264,8 @@ public record DirectDownload(
                         error,
                         category,
                         TorrentLabels.normalizeTags(tags),
-                        rateLimit));
+                        rateLimit,
+                        named));
             }
         }
         return out;

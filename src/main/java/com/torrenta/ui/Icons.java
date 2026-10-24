@@ -229,6 +229,22 @@ final class Icons {
     }
 
     /** A folder beside a category in the sidebar, and beside a folder in the Files tab. */
+    /**
+     * Two links of a chain: a download from a link rather than a torrent, beside its name in the
+     * list and its entry in the sidebar.
+     */
+    static Glyph link() {
+        return line(
+                "M6.6 9.4l2.8-2.8M7.4 4.6l1.1-1.1a2.6 2.6 0 0 1 3.7 3.7l-1.1 1.1M8.6 11.4l-1.1 1.1a2.6 2.6 0 0 1-3.7-3.7l1.1-1.1");
+    }
+
+    /** {@link #link} at the sidebar's size. */
+    static Glyph linkSmall() {
+        return line(
+                "M6.6 9.4l2.8-2.8M7.4 4.6l1.1-1.1a2.6 2.6 0 0 1 3.7 3.7l-1.1 1.1M8.6 11.4l-1.1 1.1a2.6 2.6 0 0 1-3.7-3.7l1.1-1.1",
+                SMALL_SCALE);
+    }
+
     static Glyph folderSmall() {
         return line("M2 12.5V3.5h4.2l1.5 2h5.8v2M2 12.5l2.2-5h10.3l-2.2 5z", SMALL_SCALE);
     }

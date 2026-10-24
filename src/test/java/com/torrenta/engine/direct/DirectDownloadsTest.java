@@ -193,6 +193,15 @@ class DirectDownloadsTest {
     }
 
     @Test
+    void aNameChosenWhenAddingIsKeptOverTheServers() throws Exception {
+        Torrent added = downloads.add(base + "/named", dir.resolve("mine").toString(), "my report.pdf", false);
+        assertEquals("my report.pdf", added.name());
+        await("the download to finish", () -> saw(EngineEvent.Kind.FINISHED, added.id()));
+        assertArrayEquals(SMALL, Files.readAllBytes(dir.resolve("mine/my report.pdf")));
+        assertFalse(Files.exists(dir.resolve("mine/report 2026.pdf")));
+    }
+
+    @Test
     void aMissingFileIsAnErrorThatSaysSo() throws Exception {
         Torrent added = downloads.add(base + "/missing", null, false);
         await("the error", () -> saw(EngineEvent.Kind.ERROR, added.id()));

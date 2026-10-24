@@ -283,6 +283,17 @@ class FilterQueryTest {
         assertFalse(chip("is:private").valid(), "the snapshot does not carry it");
     }
 
+    @Test
+    void isLinkPicksTheDownloadsFromLinks() {
+        T link = T.of("a.iso").id(com.torrenta.engine.direct.DirectDownload.idOf("https://x.org/a.iso"));
+        assertTrue(matches("is:link", link));
+        assertFalse(matches("is:link", T.of("a")));
+        assertTrue(matches("is:torrent", T.of("a")));
+        assertFalse(matches("is:torrent", link));
+        assertTrue(matches("-is:link", T.of("a")));
+        assertEquals("from a link", chip("is:link").label());
+    }
+
     // ---- comparisons
 
     @Test

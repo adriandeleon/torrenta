@@ -185,7 +185,17 @@ public final class DirectDownloads {
      * Adds a link, to {@code savePath} or the download folder when that is null. A link already in
      * the list is that download, as a torrent added twice is.
      */
-    public synchronized Torrent add(String url, String savePath, boolean paused) throws EngineException {
+    public Torrent add(String url, String savePath, boolean paused) throws EngineException {
+        return add(url, savePath, null, paused);
+    }
+
+    /**
+     * Adds a link as {@link #add(String, String, boolean)} does, under {@code fileName} when one is
+     * given: made safe, numbered past a file already there, and kept when the download finishes
+     * whatever the server calls it. Null or blank takes the link's own name.
+     */
+    public synchronized Torrent add(String url, String savePath, String fileName, boolean paused)
+            throws EngineException {
         String link = url.strip();
         String id = DirectDownload.idOf(link);
         DirectDownload existing = downloads.get(id);
@@ -196,9 +206,11 @@ public final class DirectDownloads {
         } catch (IOException | RuntimeException e) {
             throw new EngineException(tr("engine.error.downloadFolder", dir), e);
         }
-        String file = unusedFile(dir, DirectNames.fromUrl(link), null);
+        boolean chosen = fileName != null && !fileName.isBlank();
+        String file = unusedFile(dir, chosen ? DirectNames.safe(fileName.strip()) : DirectNames.fromUrl(link), null);
         DirectDownload d = DirectDownload.of(link, file, dir, Instant.now().getEpochSecond())
                 .withPaused(paused);
+        if (chosen) d = d.withChosenName(file);
         downloads.put(id, d);
         sizes.put(id, 0L);
         save();
@@ -518,7 +530,8 @@ public final class DirectDownloads {
 
     /** Lock held. The part renamed to its final name; null (and in error) when it cannot be. */
     private DirectDownload finish(DirectDownload d, CurlHeaders headers, Path part) {
-        String wanted = headers.name().map(DirectNames::safe).orElse(d.file());
+        String wanted =
+                d.named() ? d.file() : headers.name().map(DirectNames::safe).orElse(d.file());
         String file = unusedFile(d.savePath(), wanted, d.id());
         Path target = Path.of(d.savePath(), file);
         try {
@@ -693,7 +706,7 @@ public final class DirectDownloads {
     /** Lock held. The download as the list shows it. */
     private Torrent snapshot(DirectDownload d) {
         Run r = running.get(d.id());
-        String shown = d.ownName().isEmpty() && r != null
+        String shown = d.ownName().isEmpty() && !d.named() && r != null
                 ? r.headers.name().map(DirectNames::safe).orElse(d.file())
                 : d.name();
         long have = d.finished() ? d.size() : sizes.getOrDefault(d.id(), 0L);

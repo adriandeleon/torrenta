@@ -46,6 +46,15 @@ public interface Engine extends AutoCloseable {
     /** Adds with the dialog's choices. */
     Torrent add(AddRequest request) throws EngineException;
 
+    /**
+     * Downloads a link that is not a torrent, as a file, on this machine. Only an engine with
+     * downloads from links beside it does ({@code direct.WithDownloads}, which the app always
+     * builds); the default refuses.
+     */
+    default Torrent addLink(LinkRequest request) throws EngineException {
+        throw new EngineException(tr("engine.error.noLinks"));
+    }
+
     /** Reads a {@code .torrent} without adding it, for the dialog. */
     TorrentPreview inspect(byte[] torrent) throws EngineException;
 

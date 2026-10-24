@@ -16,6 +16,7 @@ import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.Inputs;
 import com.torrenta.engine.IpRange;
+import com.torrenta.engine.LinkRequest;
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.SessionStats;
 import com.torrenta.engine.Torrent;
@@ -107,6 +108,12 @@ public final class WithDownloads implements Engine {
     public Torrent add(String input) throws EngineException {
         if (Inputs.isDirectLink(input)) return links.add(input, null, false);
         return torrents.add(input);
+    }
+
+    @Override
+    public Torrent addLink(LinkRequest request) throws EngineException {
+        String folder = request.savePath() == null ? null : request.savePath().toString();
+        return links.add(request.url(), folder, request.fileName(), request.startPaused());
     }
 
     @Override

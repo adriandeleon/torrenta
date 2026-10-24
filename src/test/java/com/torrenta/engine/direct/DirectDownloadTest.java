@@ -37,8 +37,10 @@ class DirectDownloadTest {
         DirectDownload c = DirectDownload.of("https://z.org/c", "c", "/dl", 300)
                 .withPaused(true)
                 .withError("HTTP 404");
-        String text = DirectDownload.format(List.of(a, b, c));
-        assertEquals(List.of(a, b, c), DirectDownload.parse(text));
+        DirectDownload d = DirectDownload.of("https://z.org/d", "x", "/dl", 400).withChosenName("chosen.bin");
+        assertTrue(d.named());
+        String text = DirectDownload.format(List.of(a, b, c, d));
+        assertEquals(List.of(a, b, c, d), DirectDownload.parse(text));
         assertEquals("[]\n", DirectDownload.format(List.of()));
     }
 

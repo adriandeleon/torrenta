@@ -17,6 +17,19 @@ public final class Actions {
      * selections pause, because a person who presses Space on a running torrent expects it to
      * stop, and a paused one in the same selection staying paused costs nothing.
      */
+    /**
+     * The torrents of a selection, its downloads from links left out: what a command only a torrent
+     * understands (recheck, reannounce, the queue, magnets, export…) acts on.
+     */
+    public static List<Torrent> torrentsOnly(List<Torrent> selected) {
+        return selected.stream().filter(t -> !t.direct()).toList();
+    }
+
+    /** Whether such a command has anything to act on: off for a selection of downloads alone. */
+    public static boolean anyTorrent(List<Torrent> selected) {
+        return selected.stream().anyMatch(t -> !t.direct());
+    }
+
     public static boolean shouldResume(List<Torrent> selected) {
         return !selected.isEmpty() && selected.stream().allMatch(Torrent::paused);
     }

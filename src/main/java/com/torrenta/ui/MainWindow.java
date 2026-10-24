@@ -77,6 +77,7 @@ import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.Inputs;
+import com.torrenta.engine.LinkRequest;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
@@ -220,6 +221,12 @@ public final class MainWindow {
     private LocationDialog locationDialog;
     /** A folder the capture hook wants typed into the next Set Location dialog, or null. */
     private String locationForCapture;
+
+    private LinkDialog linkDialog;
+    /** Links that arrived while the Add Link dialog was open, each asked about in turn. */
+    private final java.util.ArrayDeque<String> linksWaiting = new java.util.ArrayDeque<>();
+    /** A name the capture hook types into the Add Link dialog when it opens. */
+    private String linkNameForCapture;
     /** A choice or text prompt of the category commands, while one is up. */
     private javafx.scene.control.Dialog<?> promptDialog;
 
@@ -965,6 +972,7 @@ public final class MainWindow {
         if (limitsDialog != null && limitsDialog.isShowing()) return limitsDialog.scene();
         if (tagsDialog != null && tagsDialog.isShowing()) return tagsDialog.scene();
         if (locationDialog != null && locationDialog.isShowing()) return locationDialog.scene();
+        if (linkDialog != null && linkDialog.isShowing()) return linkDialog.scene();
         if (promptDialog != null && promptDialog.isShowing())
             return promptDialog.getDialogPane().getScene();
         if (aboutDialog != null && aboutDialog.isShowing())
@@ -1026,6 +1034,8 @@ public final class MainWindow {
         if (limitsDialog != null && limitsDialog.isShowing()) limitsDialog.cancel();
         if (tagsDialog != null && tagsDialog.isShowing()) tagsDialog.cancel();
         if (locationDialog != null && locationDialog.isShowing()) locationDialog.cancel();
+        linksWaiting.clear(); // or the next one opens as this one closes
+        if (linkDialog != null && linkDialog.isShowing()) linkDialog.cancel();
         if (promptDialog != null && promptDialog.isShowing()) promptDialog.close();
         if (aboutDialog != null && aboutDialog.isShowing()) aboutDialog.close();
         if (rssPane != null) rssPane.closeDialog();
@@ -1047,6 +1057,10 @@ public final class MainWindow {
         if (locationDialog != null && locationDialog.isShowing()) {
             out.add("dialog=" + locationDialog.title());
             out.add("location-hint=" + locationDialog.hint());
+        }
+        if (linkDialog != null && linkDialog.isShowing()) {
+            out.add("dialog=" + linkDialog.title());
+            out.add("link-dialog=" + linkDialog.describe());
         }
         // After the shot: the window and the tab have had their ticks by then.
         if (statsWindow.isShowing()) {
@@ -1255,6 +1269,13 @@ public final class MainWindow {
         } else if (action.startsWith("dialog-key:")) {
             if (currentDialog != null && currentDialog.isShowing())
                 currentDialog.keyForCapture(KeyCode.valueOf(action.substring("dialog-key:".length())));
+        } else if (action.startsWith("link-name:")) {
+            // The Add Link dialog's name, typed in; `~` for a space, the action list being trimmed.
+            String typed = action.substring("link-name:".length()).replace('~', ' ');
+            if (linkDialog != null && linkDialog.isShowing()) linkDialog.setNameForCapture(typed);
+            else linkNameForCapture = typed;
+        } else if (action.equals("link-download")) {
+            if (linkDialog != null && linkDialog.isShowing()) linkDialog.confirm();
         } else if (action.startsWith("set-location:")) {
             // The Set Location dialog with this folder typed in, so its free-space line can be read;
             // the dialog opens on a later pulse, so the folder waits for it.
@@ -2027,9 +2048,14 @@ public final class MainWindow {
         Thread.ofVirtual().name("engine-inspect").start(() -> {
             try {
                 if (Inputs.isDirectLink(text)) {
-                    // Not a torrent: curl downloads it into the download folder, no dialog.
-                    Torrent added = e.add(text);
-                    Platform.runLater(() -> setStatus(tr("status.directAdded", added.name())));
+                    // Not a torrent: curl downloads it, on this machine. The dialog asks where and
+                    // under what name, unless the setting says to add without asking.
+                    if (withoutAsking) {
+                        Torrent added = e.addLink(LinkRequest.of(text));
+                        Platform.runLater(() -> setStatus(tr("status.directAdded", added.name())));
+                    } else {
+                        Platform.runLater(() -> openLinkDialog(text));
+                    }
                     return;
                 }
                 Inputs.Kind kind = Inputs.classify(text);
@@ -2055,6 +2081,38 @@ public final class MainWindow {
             } catch (EngineException | IOException | RuntimeException ex) {
                 String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
                 Platform.runLater(() -> setStatus(message));
+            }
+        });
+    }
+
+    /**
+     * FX thread. The Add Link dialog for a link that is not a torrent: the folder (this machine's
+     * download folder to start with, whatever the engine), the name, started or paused.
+     */
+    private void openLinkDialog(String url) {
+        if (linkDialog != null && linkDialog.isShowing()) {
+            linksWaiting.add(url);
+            return;
+        }
+        LinkDialog dialog = new LinkDialog(stage, url, settings.downloadDir(), settings.addStartPaused());
+        if (linkNameForCapture != null) {
+            dialog.setNameForCapture(linkNameForCapture);
+            linkNameForCapture = null;
+        }
+        linkDialog = dialog;
+        Optional<LinkRequest> request = dialog.showAndWait();
+        linkDialog = null;
+        table.requestFocus();
+        String next = linksWaiting.poll();
+        if (next != null) Platform.runLater(() -> openLinkDialog(next));
+        Engine e = engine;
+        if (request.isEmpty() || e == null) return;
+        Thread.ofVirtual().name("engine-link").start(() -> {
+            try {
+                Torrent added = e.addLink(request.get());
+                Platform.runLater(() -> setStatus(tr("status.directAdded", added.name())));
+            } catch (EngineException ex) {
+                Platform.runLater(() -> setStatus(ex.getMessage()));
             }
         });
     }
@@ -2704,6 +2762,11 @@ public final class MainWindow {
                 .toList();
     }
 
+    /** The selection's torrents, its downloads from links left out ({@link Actions#torrentsOnly}). */
+    private List<Torrent> torrentsSelected() {
+        return Actions.torrentsOnly(selectedTorrents());
+    }
+
     /** Applies an action to every selected torrent on a worker; the status bar gets the tally. */
     private void onSelection(String verb, TorrentAction action) {
         onTorrents(verb, selectedTorrents(), action);
@@ -2740,7 +2803,7 @@ public final class MainWindow {
      * downloading): on unless every one of them has it already.
      */
     private void toggleSuperSeeding() {
-        List<Torrent> seeds = Actions.superSeedTargets(selectedTorrents());
+        List<Torrent> seeds = Actions.superSeedTargets(torrentsSelected());
         if (seeds.isEmpty()) {
             setStatus(tr("status.superSeed.none"));
             return;
@@ -2753,9 +2816,11 @@ public final class MainWindow {
     }
 
     private void toggleSequential() {
-        boolean on = Actions.shouldEnableSequential(selectedTorrents());
-        onSelection(
+        List<Torrent> targets = torrentsSelected();
+        boolean on = Actions.shouldEnableSequential(targets);
+        onTorrents(
                 on ? tr("actions.verb.sequentialOn") : tr("actions.verb.sequentialOff"),
+                targets,
                 (e, t) -> e.setSequential(t.id(), on));
     }
 
@@ -2825,7 +2890,7 @@ public final class MainWindow {
                     case DOWN -> tr("actions.verb.queueDown");
                     case BOTTOM -> tr("actions.verb.queueBottom");
                 };
-        onTorrents(verb, QueueOrder.plan(selectedTorrents(), move), (e, t) -> e.queueMove(t.id(), move));
+        onTorrents(verb, QueueOrder.plan(torrentsSelected(), move), (e, t) -> e.queueMove(t.id(), move));
     }
 
     /** Torrent → Set Location…: one folder for the whole selection; the engine moves on its own thread. */
@@ -3093,7 +3158,10 @@ public final class MainWindow {
 
     /** {@code key} names the status sentence ({@code status.copied.*}), given the selection's size. */
     private void copyToClipboard(String key, Function<Torrent, String> text) {
-        List<Torrent> selected = selectedTorrents();
+        copyToClipboard(key, selectedTorrents(), text);
+    }
+
+    private void copyToClipboard(String key, List<Torrent> selected, Function<Torrent, String> text) {
         if (selected.isEmpty()) return;
         ClipboardContent content = new ClipboardContent();
         content.putString(String.join("\n", selected.stream().map(text).toList()));
@@ -3102,7 +3170,7 @@ public final class MainWindow {
     }
 
     private void copyMagnetLinks() {
-        List<Torrent> selected = selectedTorrents();
+        List<Torrent> selected = torrentsSelected();
         if (selected.isEmpty() || engine == null) return;
         Engine e = engine;
         Thread.ofVirtual().name("engine-magnet").start(() -> {
@@ -3177,7 +3245,7 @@ public final class MainWindow {
      * engine on a worker and are written beside their final name, then moved into place.
      */
     private void exportTorrents() {
-        List<Torrent> selected = selectedTorrents();
+        List<Torrent> selected = torrentsSelected();
         if (selected.isEmpty() || engine == null) return;
         Map<Torrent, Path> targets = new LinkedHashMap<>();
         if (selected.size() == 1) {
@@ -3243,6 +3311,11 @@ public final class MainWindow {
     private List<Command> buildCommands() {
         BooleanBinding selection = Bindings.isNotEmpty(table.getSelectionModel().getSelectedItems());
         BooleanBinding always = Bindings.createBooleanBinding(() -> true);
+        // What only a torrent understands is off for a selection of downloads from links alone, and
+        // skips the downloads in a mixed one (torrentsSelected).
+        BooleanBinding torrents = Bindings.createBooleanBinding(
+                () -> Actions.anyTorrent(selectedTorrents()),
+                table.getSelectionModel().getSelectedItems());
         // A torrent added with "Add now, pick files when ready" until its files have been chosen;
         // the settings are not observable, so a change of mark bumps pickFilesMarks.
         BooleanBinding filesToChoose = Bindings.createBooleanBinding(
@@ -3292,28 +3365,30 @@ public final class MainWindow {
                         tr("command.recheck"),
                         Chords.of("recheck"),
                         null,
-                        selection,
-                        () -> onSelection(tr("actions.verb.rechecking"), (e, t) -> e.recheck(t.id()))),
+                        torrents,
+                        () -> onTorrents(
+                                tr("actions.verb.rechecking"), torrentsSelected(), (e, t) -> e.recheck(t.id()))),
                 new Command(
                         "reannounce",
                         tr("command.reannounce"),
                         Chords.of("reannounce"),
                         null,
-                        selection,
-                        () -> onSelection(tr("actions.verb.reannounced"), (e, t) -> e.reannounce(t.id()))),
+                        torrents,
+                        () -> onTorrents(
+                                tr("actions.verb.reannounced"), torrentsSelected(), (e, t) -> e.reannounce(t.id()))),
                 new Command(
                         "sequential",
                         tr("command.sequential"),
                         Chords.of("sequential"),
                         null,
-                        gate("sequential", selection),
+                        gate("sequential", torrents),
                         this::toggleSequential),
                 new Command(
                         "super-seed",
                         tr("command.superSeed"),
                         null,
                         null,
-                        gate("super-seed", selection),
+                        gate("super-seed", torrents),
                         this::toggleSuperSeeding),
                 new Command("limits", tr("command.limits"), Chords.of("limits"), null, selection, this::editLimits),
                 // The four chords are also taken on the table itself (onTableChord): its own
@@ -3323,28 +3398,28 @@ public final class MainWindow {
                         tr("command.queueTop"),
                         Chords.of("queue-top"),
                         null,
-                        gate("queue-top", selection),
+                        gate("queue-top", torrents),
                         () -> queueMove(Engine.QueueMove.TOP)),
                 new Command(
                         "queue-up",
                         tr("command.queueUp"),
                         Chords.of("queue-up"),
                         null,
-                        gate("queue-up", selection),
+                        gate("queue-up", torrents),
                         () -> queueMove(Engine.QueueMove.UP)),
                 new Command(
                         "queue-down",
                         tr("command.queueDown"),
                         Chords.of("queue-down"),
                         null,
-                        gate("queue-down", selection),
+                        gate("queue-down", torrents),
                         () -> queueMove(Engine.QueueMove.DOWN)),
                 new Command(
                         "queue-bottom",
                         tr("command.queueBottom"),
                         Chords.of("queue-bottom"),
                         null,
-                        gate("queue-bottom", selection),
+                        gate("queue-bottom", torrents),
                         () -> queueMove(Engine.QueueMove.BOTTOM)),
                 new Command(
                         "set-location",
@@ -3385,14 +3460,14 @@ public final class MainWindow {
                         tr("command.copyHash"),
                         Chords.of("copy-hash"),
                         null,
-                        selection,
-                        () -> copyToClipboard("status.copied.infoHash", Torrent::id)),
+                        torrents,
+                        () -> copyToClipboard("status.copied.infoHash", torrentsSelected(), Torrent::id)),
                 new Command(
                         "copy-magnet",
                         tr("command.copyMagnet"),
                         Chords.of("copy-magnet"),
                         null,
-                        selection,
+                        torrents,
                         this::copyMagnetLinks),
                 // F2 is handled on the table, like Space and Delete: a text field takes it too.
                 new Command("rename", tr("command.rename"), null, "F2", gate("rename", selection), this::renameTorrent),
@@ -3401,7 +3476,7 @@ public final class MainWindow {
                         tr("command.exportTorrent"),
                         Chords.of("export-torrent"),
                         null,
-                        gate("export-torrent", selection),
+                        gate("export-torrent", torrents),
                         this::exportTorrents),
                 new Command(
                         "open-folder",
@@ -4597,7 +4672,7 @@ public final class MainWindow {
      * the snapshot, so the cell redraws exactly when what it shows changes (the stall clock moves a
      * sentence on while the snapshot stays equal). Sorts by name.
      */
-    record RowView(String name, StatusLine line, double progress) {}
+    record RowView(String name, StatusLine line, double progress, boolean direct) {}
 
     private TableColumn<TorrentRow, RowView> nameColumn() {
         TableColumn<TorrentRow, RowView> column = new TableColumn<>(tr("common.name"));
@@ -4607,7 +4682,10 @@ public final class MainWindow {
             TorrentRow row = cell.getValue();
             return row.torrentProperty()
                     .map(t -> new RowView(
-                            t.name(), StatusLine.of(t, row.quietSeconds(), shareLimitFor(t)), t.progress()));
+                            t.name(),
+                            StatusLine.of(t, row.quietSeconds(), shareLimitFor(t)),
+                            t.progress(),
+                            t.direct()));
         });
         column.setComparator(java.util.Comparator.comparing(RowView::name, String.CASE_INSENSITIVE_ORDER));
         column.setCellFactory(c -> new NameCell());
@@ -4625,8 +4703,13 @@ public final class MainWindow {
         private final Label lead = new Label();
         private final Label rest = new Label();
         private final HBox two;
+        /** Before a download's name, in either density: it came from a link, not a torrent. */
+        private final Icons.Glyph link = Icons.link().at(13);
 
         NameCell() {
+            link.getStyleClass().add("row-link");
+            Tooltip.install(link, new Tooltip(tr("row.directTooltip")));
+            name.setGraphicTextGap(6);
             glyph.getStyleClass().addAll("state-glyph", "row-glyph");
             name.getStyleClass().add("row-name");
             bar.getStyleClass().add("row-bar");
@@ -4653,12 +4736,15 @@ public final class MainWindow {
                 setText(null);
                 setGraphic(null);
             } else if (density == Density.COMPACT) {
-                setGraphic(null);
+                name.setGraphic(null);
+                setGraphic(item.direct() ? link : null);
+                setGraphicTextGap(6);
                 setText(item.name());
             } else {
                 setText(null);
                 glyph.setText(item.line().state().glyph());
                 name.setText(item.name());
+                name.setGraphic(item.direct() ? link : null);
                 bar.setProgress(item.progress());
                 lead.setText(item.line().lead());
                 rest.setText(item.line().rest());

@@ -543,7 +543,14 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   refuses the range gets the file started again once, and a `416` to a resume of a complete file
   is finished (`Curl.outcome`, tested). The window tells a download from a torrent by its id
   (`Torrent.direct()`), so `RowState` has it Done where a torrent would be Seeding, `StatusLine`
-  names the server where it names peers, `Diagnosis` offers only the error card. The engine's
+  names the server where it names peers, `Diagnosis` offers only the error card, the Name cell
+  puts `Icons.link()` before it, `SidebarStatus.LINKS` ("From links") and `is:link` pick them, and
+  the torrent-only commands are enabled by `Actions.anyTorrent` and act on `Actions.torrentsOnly`.
+  A link goes through `ui.LinkDialog` (folder, name, paused; `problem`/`request` are the pure
+  rules) unless "Add without asking", then `Engine.addLink(LinkRequest)`; a name typed there is
+  `DirectDownload.named` and survives the server's. Links that arrive while it is open wait in
+  `linksWaiting`. The capture hook takes `link-name:<name>` (`~` for a space) and `link-download`,
+  and prints `link-dialog=`. The engine's
   speed limits do not reach curl; a download's own limit (the Limits dialog) does, as
   `limit-rate`. `DirectDownloadsTest` runs the real curl against a loopback server and is
   `@EnabledIf` curl is on the PATH.

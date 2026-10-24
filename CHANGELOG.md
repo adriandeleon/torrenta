@@ -17,6 +17,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   page names another, and it is run with the engine's proxy. A link that turns out to be a
   `.torrent` is added as a torrent when it arrives. The clipboard offers a link to a file as it
   does a magnet; a link to a web page is not offered.
+- **Download Link, a dialog for a link that is not a torrent**: the folder (Browse, and the free
+  space there), the file's name (kept over the one the server gives, unless left as the link's
+  own) and Start paused. "Add without asking" skips it; links that arrive together are asked
+  about one after the other.
+- **Downloads from links are easy to tell from torrents**: a chain before the name in the list,
+  a "From links" entry in the sidebar's Status section (and Show: From links in the palette),
+  and `is:link` / `is:torrent` in the filter box. Commands only a torrent understands (Recheck,
+  Reannounce, Sequential, Super Seeding, the Queue, Copy Info-Hash, Copy Magnet Link, Export
+  .torrent) are off for a selection of downloads and skip the downloads in a mixed one.
 
 ### Changed
 
