@@ -2759,7 +2759,7 @@ public final class MainWindow {
                     dividerKey(detailPlace),
                     String.format(java.util.Locale.ROOT, "%.3f", split.getDividerPositions()[0]));
         }
-        settings.set(Settings.DETAIL_TAB, detail.activeTab());
+        settings.set(Settings.DETAIL_TAB, detail.rememberedTab());
         settings.saveQuietly();
     }
 
