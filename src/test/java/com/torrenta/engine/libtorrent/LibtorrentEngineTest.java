@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.CreateRequest;
@@ -1244,8 +1245,18 @@ class LibtorrentEngineTest {
      * write files, rather than find them. The seeder has the data under {@code dir/seed/pair}.
      */
     private static LibtorrentEngine seeder(Path dir, byte[] torrent) throws Exception {
+        return seeder(dir, torrent, e -> {});
+    }
+
+    /**
+     * The same, heard from before the add: SEEDING is read off the status, and the add's own
+     * check alerts can still be on their way when it shows, so a listener added afterwards may
+     * hear them later.
+     */
+    private static LibtorrentEngine seeder(Path dir, byte[] torrent, Consumer<EngineEvent> listener) throws Exception {
         LibtorrentEngine seed = new LibtorrentEngine(
                 () -> dir.resolve("seed"), new TorrentStore(dir.resolve("seedstore")), isolated(freePort()));
+        seed.addListener(listener);
         seed.start();
         seed.add(new AddRequest(
                 new AddRequest.TorrentFile(torrent, "pair.torrent"),
@@ -2176,8 +2187,11 @@ class LibtorrentEngineTest {
     void setLocationMovesASeedsFilesAndNeverReplacesOnesAlreadyThere(@TempDir Path dir) throws Exception {
         byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
         List<EngineEvent> events = new CopyOnWriteArrayList<>();
-        try (LibtorrentEngine engine = seeder(dir, torrent)) {
-            engine.addListener(events::add);
+        try (LibtorrentEngine engine = seeder(dir, torrent, events::add)) {
+            // The add's own check, heard first, so a "checked" after the move would be a recheck.
+            await(
+                    "the add's check is in the log",
+                    () -> events.stream().anyMatch(e -> e.message().equals("pair checked")));
             String id = engine.torrents().get(0).id();
             assertEquals(-1, engine.torrents().get(0).queuePosition(), "a seed is outside the download queue");
             Path moved = dir.resolve("moved");
