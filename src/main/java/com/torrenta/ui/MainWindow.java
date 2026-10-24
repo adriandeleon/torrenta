@@ -335,6 +335,8 @@ public final class MainWindow {
     /** Bumped on the FX thread whenever a "pick files when ready" mark is set or cleared. */
     private final javafx.beans.property.IntegerProperty pickFilesMarks =
             new javafx.beans.property.SimpleIntegerProperty();
+    /** Torrents whose content-check mark is being handled, so a tick does not handle one twice. */
+    private final Set<String> screening = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private VBox engineProblem;
     private Label engineProblemText;
@@ -1616,6 +1618,11 @@ public final class MainWindow {
         public void statusChanged() {
             Platform.runLater(settingsWindow::refreshWatchStatus);
         }
+
+        @Override
+        public Torrent add(Engine engine, AddRequest request) throws EngineException {
+            return screenedAdd(engine, request);
+        }
     }
 
     /** What the Settings page needs. */
@@ -2184,12 +2191,127 @@ public final class MainWindow {
             Engine e, AddRequest.Source source, AddDialog.Via via, boolean withoutAsking, AddDialog.Defaults defaults)
             throws EngineException {
         if (withoutAsking) {
-            Torrent added = e.add(AddDialog.withoutAsking(source, defaults));
-            Platform.runLater(() -> setStatus(tr("status.added", added.name())));
+            try {
+                Torrent added = screenedAdd(e, AddDialog.withoutAsking(source, defaults));
+                Platform.runLater(() -> setStatus(tr("status.added", added.name())));
+            } catch (UnsafeContent.Refused refused) {
+                reportFromWorker(EngineEvent.session(EngineEvent.Level.WARNING, refused.line()));
+            }
             return;
         }
         TorrentPreview preview = source instanceof AddRequest.TorrentFile file ? e.inspect(file.bytes()) : null;
         Platform.runLater(() -> openDialog(source, preview, via));
+    }
+
+    /**
+     * Worker. An add without a dialog, through the content check ({@link UnsafeContent},
+     * {@code add.unsafeContent}): a {@code .torrent} is checked before it is added, its flagged
+     * files skipped or the add refused; a magnet has no files yet, so it is added to stop once its
+     * metadata is in and marked for {@link #screenPending}. What was found is logged; a refusal is
+     * thrown, so each path reports it as it reports a failed add. A torrent already in the list
+     * is left as it is: the engine hands it back, and its files are not this add's to change.
+     */
+    private Torrent screenedAdd(Engine e, AddRequest request) throws EngineException {
+        UnsafeContent mode = UnsafeContent.byName(settings.addUnsafeContent());
+        Set<String> before = new java.util.HashSet<>();
+        for (Torrent t : e.torrents()) before.add(t.id());
+        if (request.source() instanceof AddRequest.TorrentFile file) {
+            TorrentPreview preview = e.inspect(file.bytes());
+            if (before.contains(preview.id())) return e.add(request);
+            ContentCheck check = UnsafeContent.check(preview, request);
+            UnsafeContent.Decision decision = UnsafeContent.decide(mode, check, UnsafeContent.wanted(preview, request));
+            if (decision.refused()) throw new UnsafeContent.Refused(preview.name(), decision, check);
+            Torrent added = e.add(
+                    decision == UnsafeContent.Decision.SKIP
+                            ? UnsafeContent.withSkipped(request, check.indices())
+                            : request);
+            String line = UnsafeContent.logLine(decision, added.name(), check, false);
+            if (!line.isEmpty()) reportFromWorker(EngineEvent.warning(added.id(), added.name(), line));
+            return added;
+        }
+        // A magnet: stopped once its files are known, unless a person chose otherwise or the
+        // engine cannot stop on metadata (a daemon); then it is checked while it runs.
+        boolean stop = mode != UnsafeContent.ADD
+                && request.stopCondition() == AddRequest.StopCondition.NONE
+                && capabilities.has(Engine.Capability.STOP_CONDITION);
+        Torrent added = e.add(stop ? request.withStopCondition(AddRequest.StopCondition.METADATA_RECEIVED) : request);
+        if (before.contains(added.id())) return added;
+        String mark = new UnsafeContent.Pending(mode, stop && !request.startPaused()).format();
+        Platform.runLater(() -> {
+            settings.setUnsafeContentPending(added.id(), mark);
+            settings.saveQuietly();
+        });
+        return added;
+    }
+
+    /**
+     * Poll thread. A magnet added without a dialog waits, stopped, for its file list; once it has
+     * one, the content check runs under the setting it was added with: started as it is (a
+     * warning when something was found), started without the flagged files, or removed before
+     * anything was downloaded. The mark goes on the FX thread; {@link #screening} keeps the next
+     * tick from handling a torrent twice meanwhile.
+     */
+    private void screenPending(Engine engine, List<Torrent> snapshot) {
+        Map<String, String> pending = settings.unsafeContentPending();
+        if (pending.isEmpty()) return;
+        Map<String, Torrent> byId = new java.util.HashMap<>();
+        for (Torrent t : snapshot) byId.put(t.id(), t);
+        for (Map.Entry<String, String> entry : pending.entrySet()) {
+            String id = entry.getKey();
+            Torrent t = byId.get(id);
+            if (t == null) {
+                // Marked after this tick's snapshot was taken, or removed since: the next tick knows.
+                if (!screening.add(id)) continue;
+                boolean gone;
+                try {
+                    gone = engine.torrents().stream().noneMatch(x -> x.id().equals(id));
+                } catch (RuntimeException ex) {
+                    gone = false;
+                }
+                if (gone) clearPending(id);
+                else screening.remove(id);
+                continue;
+            }
+            if (t.state() == com.torrenta.engine.TorrentState.FETCHING_METADATA || !screening.add(id)) continue;
+            try {
+                List<TorrentDetail.FileStatus> files = engine.detail(id).files();
+                if (files.isEmpty()) {
+                    screening.remove(id);
+                    continue;
+                }
+                UnsafeContent.Pending p = UnsafeContent.Pending.parse(entry.getValue());
+                ContentCheck check = ContentCheck.of(
+                        UnsafeContent.previewOf(t, files),
+                        i -> files.stream()
+                                .anyMatch(f -> f.index() == i && f.priority() != com.torrenta.engine.Priority.IGNORE));
+                int wanted = (int) files.stream()
+                        .filter(f -> f.priority() != com.torrenta.engine.Priority.IGNORE)
+                        .count();
+                UnsafeContent.Decision decision = UnsafeContent.decide(p.mode(), check, wanted);
+                if (decision.refused()) {
+                    engine.remove(id, false);
+                } else {
+                    if (decision == UnsafeContent.Decision.SKIP)
+                        for (int index : check.indices())
+                            engine.setFilePriority(id, index, com.torrenta.engine.Priority.IGNORE);
+                    if (p.resume()) engine.resume(id);
+                }
+                String line = UnsafeContent.logLine(decision, t.name(), check, true);
+                if (!line.isEmpty()) reportFromWorker(EngineEvent.warning(id, t.name(), line));
+            } catch (EngineException ex) {
+                reportFromWorker(EngineEvent.warning(id, t.name(), ex.getMessage()));
+            }
+            clearPending(id);
+        }
+    }
+
+    /** Any thread. A torrent's content-check mark cleared and saved, and the guard let go after. */
+    private void clearPending(String id) {
+        Platform.runLater(() -> {
+            settings.setUnsafeContentPending(id, null);
+            settings.saveQuietly();
+            screening.remove(id);
+        });
     }
 
     /**
@@ -2610,6 +2732,7 @@ public final class MainWindow {
         // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
         com.torrenta.engine.SessionStats stats = statsWanted ? engine.stats() : null;
         enforceShareLimits(engine, snapshot);
+        screenPending(engine, snapshot);
         TorrentDetail shown = fetchDetail(engine);
         Connectivity connectivity = engine.connectivity();
         long unproven = portClock.tick(connectivity, NetworkStatus.anyRunning(snapshot), nowSeconds);
@@ -4254,7 +4377,7 @@ public final class MainWindow {
         AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
         Optional<Path> categoryFolder = labels.category(rule.category()).flatMap(Category::path);
         try {
-            e.add(RuleAdd.request(rule, source, addDefaults(), categoryFolder));
+            screenedAdd(e, RuleAdd.request(rule, source, addDefaults(), categoryFolder));
         } catch (EngineException ex) {
             throw new IOException(ex.getMessage() == null ? ex.toString() : ex.getMessage(), ex);
         }
@@ -4281,9 +4404,11 @@ public final class MainWindow {
         Thread.ofVirtual().name("rss-download").start(() -> {
             try {
                 AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
-                Torrent added = e.add(AddDialog.withoutAsking(source, defaults));
+                Torrent added = screenedAdd(e, AddDialog.withoutAsking(source, defaults));
                 rss.markDownloaded(article.feedId(), article.identity());
                 Platform.runLater(() -> setStatus(tr("status.added", added.name())));
+            } catch (UnsafeContent.Refused refused) {
+                reportFromWorker(EngineEvent.session(EngineEvent.Level.WARNING, refused.line()));
             } catch (EngineException | IOException | RuntimeException ex) {
                 String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
                 Platform.runLater(() -> setStatus(message));

@@ -152,6 +152,7 @@ final class SettingsWindow {
                 Settings.ADD_SEQUENTIAL,
                 Settings.ADD_CONTENT_LAYOUT,
                 Settings.ADD_WITHOUT_ASKING,
+                Settings.ADD_UNSAFE_CONTENT,
                 Settings.UI_STATE_COLORS,
                 Settings.UI_DENSITY,
                 Settings.UI_SIDEBAR,
@@ -527,6 +528,7 @@ final class SettingsWindow {
     private CheckBox addSequential;
     private ChoiceBox<com.torrenta.engine.FileRenames.Layout> addLayout;
     private CheckBox addWithoutAsking;
+    private ChoiceBox<UnsafeContent> addUnsafeContent;
     private TextField directCurl;
     private Spinner<Integer> directActive;
     private Spinner<Integer> port;
@@ -2970,6 +2972,20 @@ final class SettingsWindow {
                 tr("settings.adding.withoutAsking.desc"),
                 addWithoutAsking,
                 tr("settings.adding.withoutAsking.keywords"));
+        addUnsafeContent = new ChoiceBox<>();
+        addUnsafeContent.getItems().addAll(UnsafeContent.values());
+        addUnsafeContent.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setAddUnsafeContent(now.name());
+            settings.saveQuietly();
+        });
+        row(
+                Category.ADDING,
+                defaults,
+                tr("settings.adding.unsafe"),
+                tr("settings.adding.unsafe.desc"),
+                addUnsafeContent,
+                tr("settings.adding.unsafe.keywords"));
 
         // Links that are not torrents: curl downloads them, on this machine, whatever the engine.
         VBox links = section(page, tr("settings.adding.links"));
@@ -3625,6 +3641,7 @@ final class SettingsWindow {
             addSequential.setSelected(settings.addSequential());
             addLayout.setValue(settings.addContentLayout());
             addWithoutAsking.setSelected(settings.addWithoutAsking());
+            addUnsafeContent.setValue(UnsafeContent.byName(settings.addUnsafeContent()));
             directCurl.setText(settings.directOptions().curl());
             directActive.getValueFactory().setValue(settings.directOptions().active());
             AutomationSettings a = settings.automation();
