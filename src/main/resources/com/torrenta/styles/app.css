@@ -803,6 +803,8 @@
 .about-tagline { -fx-font-size: 13px; -fx-text-fill: -color-fg-muted; }
 .about-copyright { -fx-text-fill: -color-fg-muted; }
 .about-update { -fx-text-fill: -color-accent-fg; -fx-font-weight: bold; }
+.about-uptodate { -fx-text-fill: -color-success-fg; }
+.about-update-muted { -fx-text-fill: -color-fg-muted; }
 .about-env {
     -fx-font-family: monospace;
     -fx-font-size: 11.5px;

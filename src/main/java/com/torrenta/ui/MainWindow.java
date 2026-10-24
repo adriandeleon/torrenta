@@ -276,6 +276,10 @@ public final class MainWindow {
     private boolean altSpeedOn;
 
     private ReleaseInfo availableUpdate;
+    /** A check is running; and the last one's failure this session, null when it answered. */
+    private boolean updateChecking;
+
+    private String updateError;
     private SettingsSync sync;
     private final Label syncBadge = new Label(tr("status.syncProblem"));
     private Alert aboutDialog;
@@ -1789,7 +1793,27 @@ public final class MainWindow {
         if (!UpdateCheck.isDue(settings.lastUpdateCheck(), now, UpdateCheck.DEFAULT_INTERVAL_MS)) return;
         settings.setLastUpdateCheck(now);
         settings.saveQuietly();
-        updates.check(AppInfo.VERSION, outcome -> onUpdateOutcome(outcome, false));
+        startUpdateCheck(outcome -> onUpdateOutcome(outcome, false));
+    }
+
+    /** Runs a check, keeping what the About panel shows in step with it. */
+    private void startUpdateCheck(java.util.function.Consumer<UpdateService.Outcome> then) {
+        updateChecking = true;
+        refreshAboutUpdate();
+        updates.check(AppInfo.VERSION, outcome -> {
+            updateChecking = false;
+            updateError = outcome.error();
+            then.accept(outcome);
+            refreshAboutUpdate();
+        });
+    }
+
+    private AboutDialog.UpdateStatus updateStatus() {
+        return new AboutDialog.UpdateStatus(updateChecking, availableUpdate, updateError, settings.lastUpdateCheck());
+    }
+
+    private void refreshAboutUpdate() {
+        if (aboutDialog != null && aboutDialog.isShowing()) AboutDialog.showUpdate(aboutDialog, updateStatus());
     }
 
     /** The user asked: ignores the interval, the setting and the skipped version, and always reports. */
@@ -1797,7 +1821,7 @@ public final class MainWindow {
         setStatus(tr("status.checkingUpdates"));
         settings.setLastUpdateCheck(System.currentTimeMillis());
         settings.saveQuietly();
-        updates.check(AppInfo.VERSION, outcome -> {
+        startUpdateCheck(outcome -> {
             onUpdateOutcome(outcome, true);
             if (outcome.error() != null) setStatus(tr("status.updateFailed", outcome.error()), EngineEvent.Level.ERROR);
             else if (outcome.available())
@@ -1828,7 +1852,7 @@ public final class MainWindow {
             aboutDialog.getDialogPane().getScene().getWindow().requestFocus();
             return;
         }
-        aboutDialog = AboutDialog.create(stage, settings.file(), opener, availableUpdate);
+        aboutDialog = AboutDialog.create(stage, settings.file(), opener, updateStatus(), this::checkForUpdatesNow);
         aboutDialog.show();
     }
 
@@ -1848,6 +1872,23 @@ public final class MainWindow {
         skipUpdateItem.setVisible(false);
         updateBadge.setVisible(false);
         updateBadge.setManaged(false);
+        refreshAboutUpdate();
+    }
+
+    /** The About panel's bounds and the window's, or empty when it is closed; read by the capture hook. */
+    public String aboutBoundsForCapture() {
+        if (aboutDialog == null || !aboutDialog.isShowing()) return "";
+        javafx.stage.Window panel = aboutDialog.getDialogPane().getScene().getWindow();
+        return String.format(
+                "panel=%.0f,%.0f %.0fx%.0f window=%.0f,%.0f %.0fx%.0f",
+                panel.getX(),
+                panel.getY(),
+                panel.getWidth(),
+                panel.getHeight(),
+                stage.getX(),
+                stage.getY(),
+                stage.getWidth(),
+                stage.getHeight());
     }
 
     /** The newer version found, or empty; read by the capture hook. */
