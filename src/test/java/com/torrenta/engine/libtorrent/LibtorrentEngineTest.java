@@ -547,6 +547,97 @@ class LibtorrentEngineTest {
         assertEquals(java.util.Set.of(MAGNET_ID), store.loadAll().keySet(), "a fetch never reaches the store");
     }
 
+    /**
+     * Binding is meant for a VPN: no peer connection may leave by another interface. The session
+     * is bound to loopback and dials this machine's other address, which the system would answer
+     * from that other address if left to choose; the connection has to arrive from loopback.
+     * Before {@code outgoing_interfaces} was set, only the listening sockets were bound.
+     */
+    @Test
+    void aPeerIsDialledFromTheBoundAddressNotTheRoutesChoice(@TempDir Path dir) throws Exception {
+        String other = otherAddress();
+        org.junit.jupiter.api.Assumptions.assumeTrue(other != null, "needs an IPv4 address besides loopback");
+        try (java.net.ServerSocket peer = new java.net.ServerSocket(0);
+                LibtorrentEngine engine = new LibtorrentEngine(
+                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), boundTo("127.0.0.1"))) {
+            engine.start();
+            String id = engine.add(MAGNET).id();
+            java.net.InetAddress from = dialledFrom(engine, id, peer, other, LOOPBACK_SECONDS);
+            assertEquals(java.net.InetAddress.getLoopbackAddress(), from, "dialled " + other);
+        }
+    }
+
+    /** An interface that is not there (the VPN went down) dials nobody, rather than the default route. */
+    @Test
+    void aBindingToAMissingInterfaceDialsNobody(@TempDir Path dir) throws Exception {
+        String other = otherAddress();
+        org.junit.jupiter.api.Assumptions.assumeTrue(other != null, "needs an IPv4 address besides loopback");
+        try (java.net.ServerSocket peer = new java.net.ServerSocket(0);
+                LibtorrentEngine engine = new LibtorrentEngine(
+                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), boundTo("torrenta0"))) {
+            engine.start();
+            String id = engine.add(MAGNET).id();
+            // A negative cannot be awaited; ten dials, each refused at bind, is the bound.
+            assertEquals(null, dialledFrom(engine, id, peer, other, 10), "dialled " + other);
+        }
+    }
+
+    /**
+     * Dials the listener from the torrent once a second until it accepts, and returns the address
+     * the connection came from, or null if none came within {@code seconds}.
+     */
+    private static java.net.InetAddress dialledFrom(
+            LibtorrentEngine engine, String id, java.net.ServerSocket listener, String address, int seconds)
+            throws Exception {
+        engine.reconnectQuicklyForTest();
+        listener.setSoTimeout(1000);
+        long deadline = System.currentTimeMillis() + seconds * 1000L;
+        while (System.currentTimeMillis() < deadline) {
+            engine.connectPeerForTest(id, address, listener.getLocalPort());
+            try (java.net.Socket s = listener.accept()) {
+                return s.getInetAddress();
+            } catch (java.net.SocketTimeoutException e) {
+                // Not yet: dial again.
+            }
+        }
+        return null;
+    }
+
+    /** An IPv4 address of this machine that is not loopback, or null on a machine with none. */
+    private static String otherAddress() throws java.io.IOException {
+        for (java.net.NetworkInterface i :
+                java.util.Collections.list(java.net.NetworkInterface.getNetworkInterfaces())) {
+            if (!i.isUp() || i.isLoopback()) continue;
+            for (java.net.InetAddress a : java.util.Collections.list(i.getInetAddresses())) {
+                if (a instanceof java.net.Inet4Address && !a.isLinkLocalAddress()) return a.getHostAddress();
+            }
+        }
+        return null;
+    }
+
+    /** {@link #isolated} bound to an address or interface name. */
+    private static com.torrenta.engine.EngineSettings boundTo(String bound) throws java.io.IOException {
+        com.torrenta.engine.EngineSettings d = isolated(freePort());
+        return new com.torrenta.engine.EngineSettings(
+                d.listenPort(),
+                d.randomPort(),
+                bound,
+                d.ipv6(),
+                d.upnp(),
+                d.maxConnections(),
+                d.maxConnectionsPerTorrent(),
+                d.uploadSlots(),
+                d.proxy(),
+                d.proxyHost(),
+                d.proxyPort(),
+                d.proxyUsername(),
+                d.proxyPassword(),
+                d.proxyPeers(),
+                d.protocol(),
+                d.speed(),
+                d.queue());
+    }
+
     private static int freePort() throws java.io.IOException {
         try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
             return socket.getLocalPort();

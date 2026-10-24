@@ -304,6 +304,18 @@ public record EngineSettings(
         return ipv6 ? v4 + ",[::]:" + port : v4;
     }
 
+    /**
+     * libtorrent's {@code outgoing_interfaces}: the bound address or interface name, without a
+     * port or brackets, or empty when unbound. {@code listen_interfaces} binds only the listening
+     * sockets; without this the peers the session dials leave by whatever route the system picks,
+     * which is the VPN leak that binding is there to prevent.
+     */
+    public String outgoingInterfaces() {
+        String bound = listenInterface == null ? "" : listenInterface.trim();
+        if (bound.startsWith("[") && bound.endsWith("]")) return bound.substring(1, bound.length() - 1);
+        return bound;
+    }
+
     /** True when the proxy needs credentials, which libtorrent treats as a distinct type. */
     public boolean proxyAuthenticated() {
         return proxy != ProxyType.NONE && proxyUsername != null && !proxyUsername.isBlank();

@@ -5,6 +5,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Fixed
+
+- **Binding to an interface now binds the connections Torrenta makes, not only the ones it
+  accepts.** With Settings → Connection → Interface set (a VPN's, say), peers Torrenta dialled
+  still left by the system's own route: from the LAN address, and through the default route once
+  the VPN interface had gone. Now every dialled peer leaves from the bound address or interface,
+  and none is dialled when it is missing.
+
 ## 0.2.0 — 2026-10-24
 
 ### Added
