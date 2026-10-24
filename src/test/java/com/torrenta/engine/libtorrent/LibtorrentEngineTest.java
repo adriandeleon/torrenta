@@ -1734,6 +1734,68 @@ class LibtorrentEngineTest {
         }
     }
 
+    /**
+     * The application screens a watch folder's add (the content check): the add goes through
+     * {@code Host.add}, a refusal there adds nothing, is reported like a failed add, and the file
+     * stays where it was for the person to look at.
+     */
+    @Test
+    void aWatchFolderAddGoesThroughTheHostWhichMayRefuseIt(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] pair = twoFileTorrent(downloads, "pair");
+        Path inbox = Files.createDirectories(dir.resolve("inbox"));
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        List<AddRequest> screened = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            com.torrenta.engine.WatchFolders.Host host = new com.torrenta.engine.WatchFolders.Host() {
+                @Override
+                public Path defaultDownloadDir() {
+                    return downloads;
+                }
+
+                @Override
+                public java.util.Optional<com.torrenta.engine.Category> category(String name) {
+                    return java.util.Optional.empty();
+                }
+
+                @Override
+                public AddRequest.Storage storage(Path destination) {
+                    return AddRequest.Storage.DEFAULT;
+                }
+
+                @Override
+                public void report(EngineEvent event) {
+                    events.add(event);
+                }
+
+                @Override
+                public Torrent add(com.torrenta.engine.Engine e, AddRequest request) throws EngineException {
+                    screened.add(request);
+                    throw new EngineException("refused by the host");
+                }
+            };
+            try (com.torrenta.engine.WatchFolders watcher = new com.torrenta.engine.WatchFolders(engine, host)) {
+                watcher.configure(List.of(new com.torrenta.engine.WatchFolder(
+                        inbox.toString(),
+                        com.torrenta.engine.WatchFolder.AfterAdd.RENAME,
+                        com.torrenta.engine.WatchFolder.SaveTo.DEFAULT,
+                        "",
+                        "",
+                        false)));
+                Path dropped = inbox.resolve("pair.torrent");
+                Files.write(dropped, pair);
+                watcher.poll();
+                watcher.poll();
+                assertEquals(1, screened.size(), "the add went through the host");
+                assertTrue(engine.torrents().isEmpty(), "and added nothing");
+                assertTrue(Files.isRegularFile(dropped), "the file stays");
+                assertTrue(
+                        events.stream().anyMatch(e -> e.message().contains("refused by the host")), events.toString());
+            }
+        }
+    }
+
     @Test
     void watchFoldersAddWhatIsDroppedIn(@TempDir Path dir) throws Exception {
         Path downloads = dir.resolve("downloads");

@@ -231,6 +231,12 @@ public final class Settings {
     /** {@code torrent.<info-hash>.pickFiles}: added before its file list, the files still to choose. */
     private static final String PICK_FILES_SUFFIX = ".pickFiles";
 
+    /**
+     * {@code torrent.<info-hash>.unsafeContent}: a magnet added without a dialog, its files to be
+     * checked once they are known; the value is {@code ui.UnsafeContent.Pending}'s.
+     */
+    private static final String UNSAFE_PENDING_SUFFIX = ".unsafeContent";
+
     /** IP filter page. Bans are space-separated ranges or addresses. */
     public static final String IPFILTER_ENABLED = "ipfilter.enabled";
 
@@ -262,6 +268,12 @@ public final class Settings {
 
     /** Inputs are added with the defaults above and the Add dialog does not open. Off by default. */
     public static final String ADD_WITHOUT_ASKING = "add.withoutAsking";
+
+    /**
+     * What an add without a dialog does with files the content check flags: {@code ADD},
+     * {@code SKIP} (the default) or {@code REFUSE}; read through {@code ui.UnsafeContent.byName}.
+     */
+    public static final String ADD_UNSAFE_CONTENT = "add.unsafeContent";
 
     /** Where the Create Torrent dialog last saved a {@code .torrent}; a folder of this machine, never synced. */
     public static final String CREATE_LAST_DIR = "create.lastDir";
@@ -724,6 +736,33 @@ public final class Settings {
     public void setFilesToPick(String torrentId, boolean pending) {
         String key = TORRENT_PREFIX + torrentId + PICK_FILES_SUFFIX;
         if (pending) properties.setProperty(key, "true");
+        else properties.remove(key);
+    }
+
+    public String addUnsafeContent() {
+        return properties.getProperty(ADD_UNSAFE_CONTENT, "SKIP").trim();
+    }
+
+    public void setAddUnsafeContent(String value) {
+        properties.setProperty(ADD_UNSAFE_CONTENT, value);
+    }
+
+    /** Every torrent still waiting for its content check, by id, with the mark's value. */
+    public java.util.Map<String, String> unsafeContentPending() {
+        java.util.Map<String, String> pending = new java.util.HashMap<>();
+        for (String key : properties.stringPropertyNames()) {
+            if (key.startsWith(TORRENT_PREFIX) && key.endsWith(UNSAFE_PENDING_SUFFIX)) {
+                String id = key.substring(TORRENT_PREFIX.length(), key.length() - UNSAFE_PENDING_SUFFIX.length());
+                pending.put(id, properties.getProperty(key));
+            }
+        }
+        return pending;
+    }
+
+    /** Marks a torrent for its content check once its files are known; null clears the mark. */
+    public void setUnsafeContentPending(String torrentId, String value) {
+        String key = TORRENT_PREFIX + torrentId + UNSAFE_PENDING_SUFFIX;
+        if (value != null) properties.setProperty(key, value);
         else properties.remove(key);
     }
 

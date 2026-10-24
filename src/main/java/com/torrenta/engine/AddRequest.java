@@ -63,6 +63,16 @@ public record AddRequest(
                 source, savePath, startPaused, sequential, skipCheck, stopCondition, filePriorities, labels, s);
     }
 
+    public AddRequest withFilePriorities(Map<Integer, Priority> priorities) {
+        return new AddRequest(
+                source, savePath, startPaused, sequential, skipCheck, stopCondition, priorities, labels, storage);
+    }
+
+    public AddRequest withStopCondition(StopCondition condition) {
+        return new AddRequest(
+                source, savePath, startPaused, sequential, skipCheck, condition, filePriorities, labels, storage);
+    }
+
     /**
      * The storage choices, nested so the request did not grow three more positional arguments.
      *
