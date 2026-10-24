@@ -338,6 +338,16 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   the connection tests did not have to grow seven arguments.
 - **A proxy with a username is a different libtorrent type** (`socks5_pw`, `http_pw`); the record
   decides with `proxyAuthenticated()`. `proxy_hostnames` is on, so lookups go through the proxy.
+- **Binding needs `outgoing_interfaces` as well as `listen_interfaces`.** The listen string binds
+  only the listening sockets; with `outgoing_interfaces` empty, every peer the session dials leaves
+  by the system's route, so a session "bound" to a VPN interface dialled from the LAN address,
+  and one bound to an interface that had gone dialled through the default route (measured:
+  `aPeerIsDialledFromTheBoundAddressNotTheRoutesChoice`, `aBindingToAMissingInterfaceDialsNobody`).
+  `EngineSettings.outgoingInterfaces()` is the same binding without port or brackets. Windows
+  refuses a loopback-bound connection to the machine's own LAN address where Linux and macOS
+  route it, so the first test asserts "never from the other address" everywhere and "from
+  loopback" only off Windows. Tracker
+  hostnames still resolve through the system's resolver unless a proxy is set.
 - **Engine events arrive on libtorrent4j's alert thread.** `MainWindow` hops to the FX thread
   before touching the log or the status bar; `EventLog.add` is FX-only. The j.u.l bridge takes
   the hop as a parameter so tests run it inline.

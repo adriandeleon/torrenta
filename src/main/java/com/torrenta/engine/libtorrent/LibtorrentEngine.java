@@ -724,6 +724,11 @@ public final class LibtorrentEngine implements Engine {
                 .connect_peer(new tcp_endpoint(Address.parseIp("127.0.0.1").swig(), port));
     }
 
+    /** Tells the torrent about a peer at any address, for the test of where dials leave from. */
+    void connectPeerForTest(String id, String address, int port) throws EngineException {
+        handle(id).swig().connect_peer(new tcp_endpoint(Address.parseIp(address).swig(), port));
+    }
+
     /**
      * Retries a failed peer connection after a second instead of libtorrent's minute, for the
      * loopback tests: {@code connect_peer} only adds the address to the peer list, and an address
@@ -1814,6 +1819,8 @@ public final class LibtorrentEngine implements Engine {
     private static SettingsPack toPack(EngineSettings s) {
         SettingsPack pack = new SettingsPack();
         pack.listenInterfaces(s.listenInterfaces());
+        // Dialled peers too, not only the listening sockets: empty, they follow the system's route.
+        pack.setString(settings_pack.string_types.outgoing_interfaces.swigValue(), s.outgoingInterfaces());
         pack.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), s.upnp());
         pack.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), s.upnp());
         pack.connectionsLimit(s.maxConnections());
