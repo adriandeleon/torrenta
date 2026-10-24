@@ -7,6 +7,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **The Add dialog says when a torrent's files deserve a look.** A card above the file tree names
+  what it found: a program named like a video or a document (`Film.mkv.exe`, spaces before the
+  last dot included), a name whose real extension is hidden by right-to-left characters, a
+  Windows shortcut, a program or a link to a web page in a film or an album, an archive where the
+  name promises a film and nothing else is there, a file named for a password or a codec. Red for
+  danger, amber for a caution; Skip these files unticks them and keeps the rest. A program in a
+  software torrent is not flagged, and a file you skip stops being reported.
+
 - **Settings sync carries the category names and tags.** A category or tag added on one computer
   appears on the others, and one deleted is deleted everywhere (torrents filed under it there let
   go of it, as a deletion in Settings does). Names only: each computer keeps its own folder for a

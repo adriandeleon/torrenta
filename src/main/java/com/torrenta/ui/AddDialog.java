@@ -138,6 +138,15 @@ final class AddDialog {
     private final VBox placeholder;
     private FileTree.Node root;
 
+    /** What in the wanted files deserves a look (ContentCheck), above the tree; hidden when nothing. */
+    private final VBox contentCard = new VBox(6);
+
+    private final Label contentTitle = new Label();
+    private final VBox contentLines = new VBox(2);
+    private final Label contentAdvice = new Label();
+    private final Button contentSkip = new Button(tr("content.skip"));
+    private ContentCheck content = ContentCheck.NONE;
+
     private final Button cancel = keyed(tr("common.cancel"), tr("dialog.common.key.esc"));
     private final Button add = keyed(tr("common.add"), tr("dialog.common.key.enter"));
     private static final KeyCombination OTHER = new KeyCodeCombination(KeyCode.ENTER, KeyCombination.SHIFT_DOWN);
@@ -306,8 +315,9 @@ final class AddDialog {
         placeholder.setPadding(new Insets(16));
         treeHost.getStyleClass().add("add-files");
         buildTree();
+        buildContentCard();
         VBox.setVgrow(treeHost, Priority.ALWAYS);
-        VBox left = new VBox(6, treeHost, hint);
+        VBox left = new VBox(6, contentCard, treeHost, hint);
         HBox.setHgrow(left, Priority.ALWAYS);
         left.setMinWidth(320);
 
@@ -872,6 +882,71 @@ final class AddDialog {
         allFiles.setIndeterminate(wanted > 0 && wanted < files.size());
         allFiles.setSelected(wanted == files.size());
         updateDisk();
+        updateContentCard();
+    }
+
+    // ---- the content check -----------------------------------------------------------------------
+
+    private void buildContentCard() {
+        contentCard.getStyleClass().addAll("diagnosis-card", "content-card");
+        contentTitle.getStyleClass().add("diagnosis-title");
+        contentAdvice.getStyleClass().add("content-advice");
+        // A wrapping label in a VBox is squeezed to one line and an ellipsis unless its height holds.
+        contentAdvice.setWrapText(true);
+        contentAdvice.setMinHeight(Region.USE_PREF_SIZE);
+        contentSkip.setOnAction(e -> skipFlagged());
+        contentCard.getChildren().addAll(contentTitle, contentLines, contentAdvice, contentSkip);
+        shown(contentCard, false);
+    }
+
+    /** The card follows the ticks: a file skipped no longer warns, and the card goes with the last. */
+    private void updateContentCard() {
+        Map<Integer, FileTree.Node> byIndex = new java.util.HashMap<>();
+        if (root != null) for (FileTree.Node f : FileTree.files(root)) byIndex.put(f.index(), f);
+        content = preview == null
+                ? ContentCheck.NONE
+                : ContentCheck.of(preview, i -> {
+                    FileTree.Node node = byIndex.get(i);
+                    return node != null && node.wantedProperty().get();
+                });
+        shown(contentCard, !content.isEmpty());
+        if (content.isEmpty()) return;
+        contentCard.getStyleClass().remove("diagnosis-error");
+        if (content.severity() == ContentCheck.Severity.DANGER)
+            contentCard.getStyleClass().add("diagnosis-error");
+        contentTitle.setText(content.title());
+        contentLines.getChildren().clear();
+        for (ContentCheck.Line line : content.lines()) {
+            Label label = new Label(line.text());
+            label.getStyleClass().add("content-line");
+            label.setWrapText(true);
+            label.setMinHeight(Region.USE_PREF_SIZE);
+            contentLines.getChildren().add(label);
+        }
+        contentAdvice.setText(content.advice());
+    }
+
+    /** Skip these files: every flagged file unticked, the rest of the torrent kept. */
+    private void skipFlagged() {
+        if (root == null) return;
+        java.util.Set<Integer> flagged = content.indices();
+        for (FileTree.Node f : FileTree.files(root)) {
+            if (flagged.contains(f.index())) f.wantedProperty().set(false);
+        }
+    }
+
+    /** The card as the capture prints it: severity, then each line; "none" without one. */
+    String contentForCapture() {
+        if (content.isEmpty()) return "none";
+        List<String> parts = new ArrayList<>();
+        parts.add(content.severity().name());
+        for (ContentCheck.Line line : content.lines()) parts.add(line.text());
+        return String.join(" | ", parts);
+    }
+
+    /** Presses Skip these files, for the capture. */
+    void skipFlaggedForCapture() {
+        if (contentSkip.isVisible()) contentSkip.fire();
     }
 
     /** Files are bound to their node's wanted flag; folders follow their files, as the item does. */

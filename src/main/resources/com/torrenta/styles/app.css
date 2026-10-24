@@ -1484,6 +1484,16 @@
     -fx-font-size: 12px;
 }
 
+/* The Add dialog's content check (ui.ContentCheck): the diagnosis card's colours, a line per kind. */
+.content-card .content-line {
+    -fx-text-fill: -color-fg-default;
+}
+
+.content-card .content-advice {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 12px;
+}
+
 /* The pieces map: a square per run of pieces (ui.PieceStrip). */
 .piece-cell {
     -fx-background-radius: 1.5;
