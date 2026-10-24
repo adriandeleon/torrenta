@@ -1,0 +1,101 @@
+package com.torrenta.ui;
+
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyCodeCombination;
+import javafx.scene.input.KeyCombination;
+
+/**
+ * Every chord the main window binds, in one table: under the command's id where it is a command's
+ * accelerator or the hint a command shows, under a name of its own for a scene accelerator no
+ * command carries. The commands, the View menu's check items, the scene accelerators and the badges
+ * all read it, so a key cannot be handed out twice without {@code ChordsTest} seeing it: Ctrl+Shift+D
+ * was once both Set Location and the details pane, and only one of them ever fired.
+ */
+final class Chords {
+
+    private static final Map<String, KeyCombination> TABLE = table();
+
+    private Chords() {}
+
+    private static Map<String, KeyCombination> table() {
+        Map<String, KeyCombination> t = new LinkedHashMap<>();
+        // File
+        t.put("create", chord(KeyCode.N));
+        t.put("add-file", chord(KeyCode.O));
+        t.put("add-magnet", chord(KeyCode.M));
+        t.put("add-clipboard", chord(KeyCode.V));
+        t.put("quit", chord(KeyCode.Q));
+        t.put("settings", chord(KeyCode.COMMA));
+        // Torrent
+        t.put("force-resume", shiftChord(KeyCode.U));
+        t.put("recheck", shiftChord(KeyCode.R));
+        t.put("reannounce", shiftChord(KeyCode.A));
+        t.put("sequential", shiftChord(KeyCode.S));
+        t.put("limits", chord(KeyCode.L));
+        t.put("queue-top", shiftChord(KeyCode.HOME));
+        t.put("queue-up", shiftChord(KeyCode.UP));
+        t.put("queue-down", shiftChord(KeyCode.DOWN));
+        t.put("queue-bottom", shiftChord(KeyCode.END));
+        t.put("set-location", shiftChord(KeyCode.D));
+        t.put("set-category", shiftChord(KeyCode.G));
+        t.put("edit-tags", chord(KeyCode.T));
+        t.put("copy-name", chord(KeyCode.C));
+        t.put("copy-hash", shiftChord(KeyCode.H));
+        t.put("copy-magnet", shiftChord(KeyCode.C));
+        t.put("export-torrent", shiftChord(KeyCode.E));
+        t.put("open-folder", shiftChord(KeyCode.O));
+        t.put("alt-speed", shiftChord(KeyCode.J));
+        // View
+        t.put("search", shiftChord(KeyCode.F));
+        t.put("rss", chord(KeyCode.R));
+        for (View v : View.values()) t.put(viewName(v), chord(KeyCode.valueOf("DIGIT" + v.number())));
+        // Control on macOS too, where Cmd+Tab belongs to the system.
+        t.put("view-next", new KeyCodeCombination(KeyCode.TAB, KeyCombination.CONTROL_DOWN));
+        t.put(
+                "view-previous",
+                new KeyCodeCombination(KeyCode.TAB, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN));
+        t.put("filter", chord(KeyCode.K));
+        t.put("filter-find", chord(KeyCode.F));
+        t.put("select-all", chord(KeyCode.A));
+        t.put("event-log", shiftChord(KeyCode.L));
+        t.put("statistics", shiftChord(KeyCode.T));
+        t.put("message-log", shiftChord(KeyCode.M));
+        t.put("toggle-sidebar", shiftChord(KeyCode.B));
+        t.put("focus-sidebar", chord(KeyCode.B));
+        t.put("toggle-detail", chord(KeyCode.I));
+        return Collections.unmodifiableMap(t);
+    }
+
+    /** The chord named, a command's id or one of the table's own names; a typo fails at once. */
+    static KeyCombination of(String name) {
+        KeyCombination c = TABLE.get(name);
+        if (c == null) throw new IllegalArgumentException("No chord is named " + name);
+        return c;
+    }
+
+    /** Shortcut and the view's place on the strip: Ctrl+1 for Transfers. */
+    static KeyCombination view(View v) {
+        return of(viewName(v));
+    }
+
+    /** The whole table, in the menus' order, for the test that no key is in it twice. */
+    static Map<String, KeyCombination> all() {
+        return TABLE;
+    }
+
+    private static String viewName(View v) {
+        return "view-" + v.number();
+    }
+
+    private static KeyCombination chord(KeyCode key) {
+        return new KeyCodeCombination(key, KeyCombination.SHORTCUT_DOWN);
+    }
+
+    private static KeyCombination shiftChord(KeyCode key) {
+        return new KeyCodeCombination(key, KeyCombination.SHORTCUT_DOWN, KeyCombination.SHIFT_DOWN);
+    }
+}

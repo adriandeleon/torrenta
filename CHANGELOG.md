@@ -5,6 +5,13 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Fixed
+
+- **`Ctrl+Shift+D` was both Set Location and the details pane**, so only one of them fired. Set
+  Location keeps it; View → Details Pane (and the palette's Toggle Details Pane) is now `Ctrl+I`.
+  Every chord the window binds is now one table (`ui.Chords`), and a test fails when two actions
+  are given the same key.
+
 ## 0.1.0 — 2026-10-22
 
 ### Added
