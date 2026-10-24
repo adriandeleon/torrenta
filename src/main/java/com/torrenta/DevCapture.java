@@ -121,6 +121,8 @@ final class DevCapture {
         for (String line : window.eventLines()) System.out.println("capture: event=" + line);
         if (!window.availableUpdateVersion().isEmpty())
             System.out.println("capture: update=" + window.availableUpdateVersion());
+        if (!window.aboutBoundsForCapture().isEmpty())
+            System.out.println("capture: about=" + window.aboutBoundsForCapture());
         if (scene != stage.getScene()) System.out.println("capture: scene=dialog");
         for (String line : window.menuLines()) System.out.println("capture: menu=" + line);
         // The backend that came up ("sni", "awt") or the reason none did, and the icon's line.

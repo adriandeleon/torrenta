@@ -5,6 +5,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Added
+
+- **Settings sync carries the category names and tags.** A category or tag added on one computer
+  appears on the others, and one deleted is deleted everywhere (torrents filed under it there let
+  go of it, as a deletion in Settings does). Names only: each computer keeps its own folder for a
+  category, and one that arrives downloads to the default folder until it is given one. The
+  first sync after updating only adds, so nothing that exists on just one computer is lost.
+
 ### Fixed
 
 - **Binding to an interface now binds the connections Torrenta makes, not only the ones it

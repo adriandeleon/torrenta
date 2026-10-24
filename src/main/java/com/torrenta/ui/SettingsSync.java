@@ -1,6 +1,7 @@
 package com.torrenta.ui;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.InetAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,11 +26,14 @@ import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.util.Duration;
 
+import com.torrenta.engine.Category;
+import com.torrenta.store.LabelStore;
 import com.torrenta.store.Settings;
 import com.torrenta.sync.GitHubCli;
 import com.torrenta.sync.QuietGit;
 import com.torrenta.sync.SyncAccount;
 import com.torrenta.sync.SyncEngine;
+import com.torrenta.sync.SyncLabels;
 import com.torrenta.sync.SyncReport;
 import com.torrenta.sync.SyncTarget;
 
@@ -37,8 +41,9 @@ import static com.torrenta.i18n.Messages.tr;
 
 /**
  * Settings sync for the application, as Editora runs it: decides when a {@link SyncEngine} round
- * happens, runs it off the FX thread, writes what it brings into the live settings, and says what
- * happened. Every method is called on the FX thread.
+ * happens, runs it off the FX thread, writes what it brings into the live settings and the label
+ * store (category names and tags, {@link SyncLabels}), and says what happened. Every method is
+ * called on the FX thread.
  *
  * <p>Automatic rounds (after startup, {@value #DIRTY_DELAY_SECONDS} s after a local change, and on
  * the interval timer while the window is focused) never ask for anything: git runs without a
@@ -76,10 +81,17 @@ final class SettingsSync {
         /** The live settings changed under the window: re-apply what they drive. */
         void settingsApplied();
 
+        /**
+         * The label store changed under the window: the removed names are gone from it already,
+         * and the torrents here that carry them are to let go of them as a deletion on this machine would.
+         */
+        void labelsApplied(SyncLabels.Change change);
+
         boolean windowFocused();
     }
 
     private final Settings settings;
+    private final LabelStore labels;
     private final Path configDir;
     private final Host host;
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
@@ -106,8 +118,9 @@ final class SettingsSync {
     private boolean startupDone;
     private volatile String machine = "";
 
-    SettingsSync(Settings settings, Path configDir, Host host) {
+    SettingsSync(Settings settings, LabelStore labels, Path configDir, Host host) {
         this.settings = settings;
+        this.labels = labels;
         this.configDir = configDir;
         this.host = host;
         dirty.setOnFinished(e -> request(false));
@@ -180,7 +193,7 @@ final class SettingsSync {
         if (host.windowFocused()) request(false);
     }
 
-    /** The settings were saved: sync soon, unless the save was a sync's own. */
+    /** The settings or the label lists were saved: sync soon, unless the save was a sync's own. */
     void markDirty() {
         if (!applying && active()) dirty.playFromStart();
     }
@@ -222,7 +235,9 @@ final class SettingsSync {
      */
     void preview(String url, String branch, Consumer<SyncReport> done) {
         worker.execute(() -> {
-            SyncReport report = new SyncEngine(gitFor(url, true), url, branch, new LiveTarget(), machine).preview();
+            SyncReport report = new SyncEngine(
+                            gitFor(url, true), url, branch, new LiveTarget(), new LiveLabels(), machine)
+                    .preview();
             Platform.runLater(() -> done.accept(report));
         });
     }
@@ -258,7 +273,9 @@ final class SettingsSync {
         worker.execute(() -> {
             SyncReport report;
             try {
-                report = new SyncEngine(gitFor(url, interactive), url, branch, new LiveTarget(), machine).run();
+                report = new SyncEngine(
+                                gitFor(url, interactive), url, branch, new LiveTarget(), new LiveLabels(), machine)
+                        .run();
             } catch (RuntimeException e) {
                 report = new SyncReport(SyncReport.Status.FAILED, List.of(), List.of(), List.of(), String.valueOf(e));
             }
@@ -336,6 +353,56 @@ final class SettingsSync {
                 }
                 return true;
             });
+            return Boolean.TRUE.equals(ok);
+        }
+    }
+
+    /**
+     * The label store's names, on the FX thread like the settings. A category that arrives gets no
+     * save path; one respelled keeps the one it has here.
+     */
+    private final class LiveLabels implements SyncTarget {
+        @Override
+        public Map<String, String> read() {
+            Map<String, String> out = onFx(this::current);
+            return out == null ? Map.of() : out;
+        }
+
+        private Map<String, String> current() {
+            return SyncLabels.entries(
+                    labels.categories().stream().map(Category::name).toList(), labels.tags());
+        }
+
+        @Override
+        public boolean apply(Map<String, String> expected, Map<String, String> merged) {
+            AtomicReference<IOException> failed = new AtomicReference<>();
+            Boolean ok = onFx(() -> {
+                Map<String, String> now = current();
+                if (!now.equals(expected)) return false;
+                SyncLabels.Change change = SyncLabels.change(now, merged);
+                applying = true;
+                try {
+                    for (String name : change.putCategories()) {
+                        String path =
+                                labels.category(name).map(Category::savePath).orElse("");
+                        labels.putCategory(new Category(name, path));
+                    }
+                    for (String name : change.removedCategories()) labels.removeCategory(name);
+                    for (String tag : change.putTags()) {
+                        labels.removeTag(tag); // a respelling replaces the one equal ignoring case
+                        labels.addTags(List.of(tag));
+                    }
+                    for (String tag : change.removedTags()) labels.removeTag(tag);
+                } catch (IOException e) {
+                    // Half applied: the base stays, so the next round merges again from what is here.
+                    failed.set(e);
+                } finally {
+                    host.labelsApplied(change);
+                    Platform.runLater(() -> applying = false);
+                }
+                return true;
+            });
+            if (failed.get() != null) throw new UncheckedIOException(failed.get());
             return Boolean.TRUE.equals(ok);
         }
     }

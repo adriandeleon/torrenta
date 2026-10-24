@@ -108,6 +108,7 @@ import com.torrenta.store.ProfileStore;
 import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
+import com.torrenta.sync.SyncLabels;
 import com.torrenta.tray.TorrentaTray;
 import com.torrenta.tray.Trays;
 import com.torrenta.update.ReleaseInfo;
@@ -276,6 +277,10 @@ public final class MainWindow {
     private boolean altSpeedOn;
 
     private ReleaseInfo availableUpdate;
+    /** A check is running; and the last one's failure this session, null when it answered. */
+    private boolean updateChecking;
+
+    private String updateError;
     private SettingsSync sync;
     private final Label syncBadge = new Label(tr("status.syncProblem"));
     private Alert aboutDialog;
@@ -465,7 +470,7 @@ public final class MainWindow {
             Automation a = automation;
             if (a != null) a.testNotification();
         });
-        sync = new SettingsSync(settings, configDir, new SyncHost());
+        sync = new SettingsSync(settings, labels, configDir, new SyncHost());
         settingsWindow.setSync(sync);
         sync.addListener(() -> {
             boolean problem = sync.state().phase() == SettingsSync.Phase.PROBLEM;
@@ -479,6 +484,8 @@ public final class MainWindow {
             // The download folder may have moved in Settings; the welcome's footer names it.
             showDownloadFolder(welcome);
         }));
+        // So is a category or tag added or deleted; the lists travel with the settings.
+        labels.setOnChanged(() -> Platform.runLater(sync::markDirty));
         detail.setOnBanPeer(this::banPeer);
         detail.setOnCopyPeer(address -> {
             ClipboardContent content = new ClipboardContent();
@@ -1691,6 +1698,15 @@ public final class MainWindow {
         }
 
         @Override
+        public void labelsApplied(SyncLabels.Change change) {
+            LabelsHost labelsHost = new LabelsHost();
+            for (String name : change.removedCategories()) labelsHost.categoryDeleted(name);
+            for (String name : change.removedTags()) labelsHost.tagDeleted(name);
+            labelsHost.labelsChanged();
+            settingsWindow.reloadLabels();
+        }
+
+        @Override
         public boolean windowFocused() {
             return stage.isFocused();
         }
@@ -1789,7 +1805,27 @@ public final class MainWindow {
         if (!UpdateCheck.isDue(settings.lastUpdateCheck(), now, UpdateCheck.DEFAULT_INTERVAL_MS)) return;
         settings.setLastUpdateCheck(now);
         settings.saveQuietly();
-        updates.check(AppInfo.VERSION, outcome -> onUpdateOutcome(outcome, false));
+        startUpdateCheck(outcome -> onUpdateOutcome(outcome, false));
+    }
+
+    /** Runs a check, keeping what the About panel shows in step with it. */
+    private void startUpdateCheck(java.util.function.Consumer<UpdateService.Outcome> then) {
+        updateChecking = true;
+        refreshAboutUpdate();
+        updates.check(AppInfo.VERSION, outcome -> {
+            updateChecking = false;
+            updateError = outcome.error();
+            then.accept(outcome);
+            refreshAboutUpdate();
+        });
+    }
+
+    private AboutDialog.UpdateStatus updateStatus() {
+        return new AboutDialog.UpdateStatus(updateChecking, availableUpdate, updateError, settings.lastUpdateCheck());
+    }
+
+    private void refreshAboutUpdate() {
+        if (aboutDialog != null && aboutDialog.isShowing()) AboutDialog.showUpdate(aboutDialog, updateStatus());
     }
 
     /** The user asked: ignores the interval, the setting and the skipped version, and always reports. */
@@ -1797,7 +1833,7 @@ public final class MainWindow {
         setStatus(tr("status.checkingUpdates"));
         settings.setLastUpdateCheck(System.currentTimeMillis());
         settings.saveQuietly();
-        updates.check(AppInfo.VERSION, outcome -> {
+        startUpdateCheck(outcome -> {
             onUpdateOutcome(outcome, true);
             if (outcome.error() != null) setStatus(tr("status.updateFailed", outcome.error()), EngineEvent.Level.ERROR);
             else if (outcome.available())
@@ -1828,7 +1864,7 @@ public final class MainWindow {
             aboutDialog.getDialogPane().getScene().getWindow().requestFocus();
             return;
         }
-        aboutDialog = AboutDialog.create(stage, settings.file(), opener, availableUpdate);
+        aboutDialog = AboutDialog.create(stage, settings.file(), opener, updateStatus(), this::checkForUpdatesNow);
         aboutDialog.show();
     }
 
@@ -1848,6 +1884,23 @@ public final class MainWindow {
         skipUpdateItem.setVisible(false);
         updateBadge.setVisible(false);
         updateBadge.setManaged(false);
+        refreshAboutUpdate();
+    }
+
+    /** The About panel's bounds and the window's, or empty when it is closed; read by the capture hook. */
+    public String aboutBoundsForCapture() {
+        if (aboutDialog == null || !aboutDialog.isShowing()) return "";
+        javafx.stage.Window panel = aboutDialog.getDialogPane().getScene().getWindow();
+        return String.format(
+                "panel=%.0f,%.0f %.0fx%.0f window=%.0f,%.0f %.0fx%.0f",
+                panel.getX(),
+                panel.getY(),
+                panel.getWidth(),
+                panel.getHeight(),
+                stage.getX(),
+                stage.getY(),
+                stage.getWidth(),
+                stage.getHeight());
     }
 
     /** The newer version found, or empty; read by the capture hook. */
@@ -2759,7 +2812,7 @@ public final class MainWindow {
                     dividerKey(detailPlace),
                     String.format(java.util.Locale.ROOT, "%.3f", split.getDividerPositions()[0]));
         }
-        settings.set(Settings.DETAIL_TAB, detail.activeTab());
+        settings.set(Settings.DETAIL_TAB, detail.rememberedTab());
         settings.saveQuietly();
     }
 

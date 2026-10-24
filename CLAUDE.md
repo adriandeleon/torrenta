@@ -48,7 +48,8 @@ selected torrent, `select-first`, `message-log` / `message-log:<query>` (the sta
   (the PNG is of it; `stats=` and `stats-graph=` lines after the shot), `detail:speed` for the Speed
   tab (a `speed-tab=` line), `window:<w>x<h>+<x>+<y>` / `window:maximize` to move the main window
   (a `window=` line after every shot has its bounds, what is saved and whether the list's
-  horizontal scrollbar shows; a `statusbar-fit=` line has each status-bar entry as width/needed),
+  horizontal scrollbar shows; an `about=` line has the About panel's bounds beside the window's while
+  it is open; a `statusbar-fit=` line has each status-bar entry as width/needed),
   or `settings` / `settings:<query>` /
   `settings-page:<category>` to open the Settings window (the PNG is then of it) and print the
   visible rows and a `settings-search=` line (query, page), `settings-key:<KeyCode>` for a key in it,
@@ -68,7 +69,7 @@ to try one on purpose).
 | Events | `EngineEvent` (level, torrent, message), raised by the engine from libtorrent alerts and by its own start/stop/remove; `Engine.addListener` | `com.torrenta.engine` |
 | Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Engine.fetchMetadata` (a magnet's file list while the dialog is open), `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL), `FileRenames.Layout` (the content layout, `add.contentLayout`); `ui.AddDialog` (rules as statics), `FileTree` (wanted + priority ladder), `FreeSpace` (disk bar and sentence) | `com.torrenta.engine`, `com.torrenta.net`, `ui` |
 | Create | `CreateRequest` (path, `Format` v1/v2/hybrid, piece size or 0, private, tracker tiers, web seeds, comment, `source` tag, align, seed), `CreatedTorrent` (bytes, engine id, both hashes, counts, magnet, the seeding torrent or the add's problem), `PieceSize` (the automatic rule: ~1,500 pieces, 16 KiB … 16 MiB; `count` packed or aligned), `Engine.create(request, CreateProgress)` blocking on the caller's worker, cancellable at the next piece; `libtorrent.PieceHasher` (v1 pieces and v2 piece layers in Java, bit for bit libtorrent's); `ui.CreateDialog` (modeless, sizes the source live, Save as…, atomic write), `CreateText` (tier parser, summary, outcome) | `com.torrenta.engine`, `.libtorrent`, `ui` |
-| Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags, the name a person gave; JSON for the `<hash>.labels` sidecar), `Engine.rename`, `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `ui.FilterQuery` (the filter box's `key:value` language → predicate + chips), `Sidebar` (a tree: All, Categories, Tags; Status and Tracker sections later), `TagsDialog` | `com.torrenta.engine`, `store`, `ui` |
+| Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags, the name a person gave; JSON for the `<hash>.labels` sidecar), `Engine.rename`, `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`; the names sync through `sync.SyncLabels`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `ui.FilterQuery` (the filter box's `key:value` language → predicate + chips), `Sidebar` (a tree: All, Categories, Tags; Status and Tracker sections later), `TagsDialog` | `com.torrenta.engine`, `store`, `ui` |
 | Detail | `TorrentDetail` (general, files with their piece range, peers, trackers, pieces, per-piece availability, web seeds) from `Engine.detail(id)`; `ui.Diagnosis` (why it is not moving + remedies), `OverviewText`, `PieceStrip`, `Sparkline`; `setFilePriority`, `renamePath` (`FileRenames.plan`/`problem`), `addTrackers`, `removeTracker`, `webSeeds`/`addWebSeeds`/`removeWebSeed` (`WebSeeds`: an http(s) URL with a host, `fresh` against what the torrent has; `Capability.WEB_SEEDS` to edit); `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
 | Engine settings | `EngineSettings` (engine-neutral record; `listenInterfaces()` is the tested string), `Settings.engineSettings()` clamps the `connection.*` and `proxy.*` keys, `LibtorrentEngine.toPack` maps onto `settings_pack`; applied at start (`SessionParams`) and live (`applySettings`) | `com.torrenta.engine`, `store`, `.libtorrent` |
 | IP filter | `IpRange` (literals only, never resolves), `Blocklist` (pure parser for .p2p/.dat/CIDR/plain), `net.BlocklistFetch` (gzip by magic), `ui.IpFilterController` (cache, schedule, bans → `Engine.setIpFilter`), `peer_blocked` alerts counted | `com.torrenta.engine`, `net`, `ui` |
@@ -309,6 +310,15 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   proxy password). Automatic rounds run git with no prompt of any kind (`QuietGit`); a `gh` account
   that can read an https repository is pinned in the clone's config (`SyncAccount`, adl has two).
   `Settings.setOnSaved` is how a change reaches the service; its own saves set `applying` first.
+  Category names and tags travel too, in `labels.properties` beside the settings (`SyncLabels`:
+  `category.<lower case>=<name>`, so two spellings are one key, never two deletions), merged the same
+  way against a base of their own, `refs/torrenta/labels-base`: a machine whose last sync was by a
+  build without labels has a base holding a labels file it never applied, and its own lists would
+  read as removals against it; no labels base is a first merge, which only adds. Names only: a
+  category that arrives has no save path, one already here keeps its own, and a name removed
+  elsewhere is let go of here as a deletion in Settings would (`Host.labelsApplied`, the torrents
+  carrying it cleared). `LabelStore.setOnChanged` is the store's `setOnSaved`. An older build keeps
+  the file (its checkout has it, and it writes only `settings.properties`), so the format stays 1.
 - **Speed limits are re-evaluated every minute** (`Engine.refreshLimits(now)`, from the window's
   poller) and after any settings change; the pair in force is `Speed.alternativeActive(now)`,
   a pure rule with the overnight case tested. Limits are KiB/s in settings and bytes/s in the

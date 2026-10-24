@@ -71,6 +71,9 @@ final class DetailPane extends VBox {
 
     static final List<String> TABS = List.of("overview", "files", "peers", "trackers", "log", "speed");
 
+    /** The tabs a download from a link has nothing for: it has no swarm and no trackers. */
+    static final java.util.Set<String> TORRENT_ONLY = java.util.Set.of("peers", "trackers");
+
     /** Wider than this, the Overview and the header use two columns. */
     static final double WIDE = 760;
 
@@ -165,6 +168,15 @@ final class DetailPane extends VBox {
     private boolean[] lastPieces = new boolean[0];
     private String shownId;
 
+    /**
+     * The tab the person chose, kept while a download from a link shows the Overview in place of
+     * its Peers or Trackers, so the next torrent opens on it again.
+     */
+    private String wantedTab = "overview";
+
+    /** Set while {@link #show} moves off a disabled tab, so the move is not taken as a choice. */
+    private boolean steering;
+
     private Function<String, Optional<Command>> commands = id -> Optional.empty();
     private BiConsumer<Integer, com.torrenta.engine.Priority> onFilePriority = (i, p) -> {};
     private Consumer<FileRows.Row> onOpenFile = r -> {};
@@ -214,6 +226,7 @@ final class DetailPane extends VBox {
                         tab(tr("detail.tab.log"), Icons.history(), null, buildLog()),
                         tab(tr("detail.tab.speed"), Icons.gauge(), null, speed));
         tabs.getSelectionModel().selectedIndexProperty().addListener(o -> {
+            if (!steering) wantedTab = activeTab();
             if (speedShowing()) speed.show(speedHistory, speedNow);
         });
         VBox.setVgrow(tabs, Priority.ALWAYS);
@@ -371,6 +384,16 @@ final class DetailPane extends VBox {
         return TABS.get(tabs.getSelectionModel().getSelectedIndex());
     }
 
+    /** The tab to remember: the person's choice, not the Overview a link download stood in with. */
+    String rememberedTab() {
+        return wantedTab;
+    }
+
+    /** The tab to show for {@code wanted}: the Overview where a download from a link has nothing. */
+    static String tabFor(String wanted, boolean direct) {
+        return direct && TORRENT_ONLY.contains(wanted) ? "overview" : wanted;
+    }
+
     /**
      * Selects a tab by name. General and Pieces were folded into the Overview; a remembered one
      * of those opens it.
@@ -387,7 +410,8 @@ final class DetailPane extends VBox {
                 ? 0
                 : fileRows.rootItem().getChildren().size();
         return activeTab() + " files=" + fileCount + " peers=" + peerItems.size() + " trackers=" + trackerItems.size()
-                + " pieces=" + count(lastPieces) + "/" + lastPieces.length + " webseeds=" + webSeedItems;
+                + " pieces=" + count(lastPieces) + "/" + lastPieces.length + " webseeds=" + webSeedItems
+                + " peersTrackers=" + (peersTab.isDisable() ? "off" : "on");
     }
 
     /** The Overview as words, for the capture hook: header, card, map, graph, facts. */
@@ -444,7 +468,15 @@ final class DetailPane extends VBox {
             uploadedValue.setText(OverviewText.uploaded(torrent));
         }
         // A download from a link has no swarm, pieces or announce: those rows go, its link shows.
-        boolean direct = torrent != null && torrent.direct();
+        boolean direct = com.torrenta.engine.direct.DirectDownload.isId(g.id());
+        peersTab.setDisable(direct);
+        trackersTab.setDisable(direct);
+        String tab = tabFor(wantedTab, direct);
+        if (!tab.equals(activeTab())) {
+            steering = true;
+            selectTab(tab);
+            steering = false;
+        }
         for (Node n : torrentFacts) shown(n, !direct);
         for (Node n : directFacts) shown(n, direct);
         shown(reannounceButton, !direct);
