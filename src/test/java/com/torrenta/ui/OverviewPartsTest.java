@@ -229,4 +229,14 @@ class OverviewPartsTest {
         assertEquals("abcd ef", OverviewText.shortHash("abcdef"));
         assertEquals("—", OverviewText.shortHash(""));
     }
+
+    @Test
+    void aDownloadFromALinkShowsTheOverviewInPlaceOfPeersAndTrackers() {
+        assertEquals("overview", DetailPane.tabFor("peers", true));
+        assertEquals("overview", DetailPane.tabFor("trackers", true));
+        assertEquals("files", DetailPane.tabFor("files", true));
+        assertEquals("log", DetailPane.tabFor("log", true));
+        assertEquals("peers", DetailPane.tabFor("peers", false));
+        assertEquals("trackers", DetailPane.tabFor("trackers", false));
+    }
 }
