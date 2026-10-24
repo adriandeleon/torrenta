@@ -550,20 +550,32 @@ class LibtorrentEngineTest {
     /**
      * Binding is meant for a VPN: no peer connection may leave by another interface. The session
      * is bound to loopback and dials this machine's other address, which the system would answer
-     * from that other address if left to choose; the connection has to arrive from loopback.
-     * Before {@code outgoing_interfaces} was set, only the listening sockets were bound.
+     * from that other address if left to choose. Linux and macOS route a loopback-bound socket to
+     * a local address, so the connection has to arrive from loopback; Windows refuses that
+     * connection outright, so there it must not arrive at all. Either way never from the other
+     * address, which is where it came from before {@code outgoing_interfaces} was set, on all
+     * three. A dial to loopback first proves the bound session dials at all, so a refusal is the
+     * binding's and not a test that dials nobody. Each dial has its own listener: libtorrent
+     * redials a peer that hung up, and those must not be taken for the second dial.
      */
     @Test
     void aPeerIsDialledFromTheBoundAddressNotTheRoutesChoice(@TempDir Path dir) throws Exception {
         String other = otherAddress();
         org.junit.jupiter.api.Assumptions.assumeTrue(other != null, "needs an IPv4 address besides loopback");
-        try (java.net.ServerSocket peer = new java.net.ServerSocket(0);
+        java.net.InetAddress loopback = java.net.InetAddress.getLoopbackAddress();
+        try (java.net.ServerSocket control = new java.net.ServerSocket(0);
+                java.net.ServerSocket peer = new java.net.ServerSocket(0);
                 LibtorrentEngine engine = new LibtorrentEngine(
                         () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), boundTo("127.0.0.1"))) {
             engine.start();
             String id = engine.add(MAGNET).id();
-            java.net.InetAddress from = dialledFrom(engine, id, peer, other, LOOPBACK_SECONDS);
-            assertEquals(java.net.InetAddress.getLoopbackAddress(), from, "dialled " + other);
+            assertEquals(loopback, dialledFrom(engine, id, control, "127.0.0.1", LOOPBACK_SECONDS), "the bound dial");
+            java.net.InetAddress from = dialledFrom(engine, id, peer, other, 10);
+            assertNotEquals(
+                    java.net.InetAddress.getByName(other), from, "dialled " + other + " from the route's choice");
+            if (!System.getProperty("os.name").startsWith("Windows")) {
+                assertEquals(loopback, from, "dialled " + other);
+            }
         }
     }
 
