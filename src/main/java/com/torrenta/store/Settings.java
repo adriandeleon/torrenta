@@ -102,6 +102,8 @@ public final class Settings {
     public static final String UI_SIDEBAR_PREFIX = "ui.sidebar.";
     /** The sections the sidebar has folded, comma-separated axis names. */
     public static final String UI_SIDEBAR_COLLAPSED = "ui.sidebar.collapsed";
+    /** The sidebar's width in px, as its edge was last dragged; this machine's, like its choices. */
+    public static final String UI_SIDEBAR_WIDTH = "ui.sidebar.width";
     /** The sections a choice or a fold can name. */
     public static final java.util.List<String> SIDEBAR_AXES = java.util.List.of("status", "category", "tag", "tracker");
     /** Rows coloured by state (glyph, sentence, progress bar); off leaves the glyphs uncoloured. */
@@ -655,6 +657,15 @@ public final class Settings {
         java.util.List<String> kept = new java.util.ArrayList<>();
         for (String axis : SIDEBAR_AXES) if (axes.contains(axis)) kept.add(axis);
         properties.setProperty(UI_SIDEBAR_COLLAPSED, String.join(",", kept));
+    }
+
+    /** The sidebar's width as saved, or {@code fallback} when unset or unreadable; the UI clamps it. */
+    public double sidebarWidth(double fallback) {
+        return readDouble(UI_SIDEBAR_WIDTH, fallback, 0, 10_000);
+    }
+
+    public void setSidebarWidth(double width) {
+        properties.setProperty(UI_SIDEBAR_WIDTH, String.format(java.util.Locale.ROOT, "%.0f", width));
     }
 
     private static String checkAxis(String axis) {

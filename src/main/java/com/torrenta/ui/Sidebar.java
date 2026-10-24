@@ -7,9 +7,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.DoubleConsumer;
 
 import javafx.css.PseudoClass;
 import javafx.geometry.Pos;
+import javafx.scene.Cursor;
 import javafx.scene.control.Label;
 import javafx.scene.control.TreeCell;
 import javafx.scene.control.TreeItem;
@@ -17,6 +19,7 @@ import javafx.scene.control.TreeView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -32,7 +35,8 @@ import com.torrenta.ui.SidebarFilter.Axis;
  * with how many torrents it holds. Each section keeps a choice of its own and the list shows what
  * passes all of them ({@link SidebarSelection}); the name filter narrows it further.
  *
- * <p>A tree, so that sections collapse (remembered) and Up and Down walk every section. The
+ * <p>A tree, so that sections collapse (remembered; a click on the heading or its chevron, Enter
+ * or Space on it) and Up and Down walk every section. The
  * tree's own selection is only the cursor: a click, Enter or Space makes the entry under it the
  * section's choice (Enter then returns to the list, Escape returns without choosing), and the
  * choices are the entries drawn as chosen, one per section at most. Arrows do not choose, since
@@ -40,6 +44,9 @@ import com.torrenta.ui.SidebarFilter.Axis;
  * Entries and counts come from {@link SidebarEntries}, reconciled in place. Not focus-traversable:
  * the table is hidden until the first torrent, and a traversable pane here would take the first
  * keystroke of a fresh launch; a command focuses it.
+ *
+ * <p>The edge that faces the list drags to resize ({@link SidebarWidth}, remembered); a
+ * double-click on it goes back to the default.
  */
 final class Sidebar extends VBox {
 
@@ -53,18 +60,29 @@ final class Sidebar extends VBox {
     private final Consumer<Entry> onChoose;
     private final Consumer<Set<Axis>> onCollapse;
     private final Runnable onLeave;
+    private final DoubleConsumer onResize;
     private SidebarSelection selection = SidebarSelection.ALL;
     private boolean rebuilding;
+    /** On the right of the list, so the grip is the left edge. */
+    private boolean right;
+    /** The drag in progress: where it began on the screen and the width then; NaN when none. */
+    private double dragX = Double.NaN;
+
+    private double dragWidth;
+    /** The press was on the grip, so its click is the grip's too and never the tree's. */
+    private boolean gripPressed;
 
     /**
      * @param onChoose told of every entry chosen by hand, on the FX thread
      * @param onCollapse told of the collapsed sections whenever one opens or closes
      * @param onLeave Enter or Escape: the person is done here
+     * @param onResize told of the width a drag of the edge ended at, or a double-click reset it to
      */
-    Sidebar(Consumer<Entry> onChoose, Consumer<Set<Axis>> onCollapse, Runnable onLeave) {
+    Sidebar(Consumer<Entry> onChoose, Consumer<Set<Axis>> onCollapse, Runnable onLeave, DoubleConsumer onResize) {
         this.onChoose = onChoose;
         this.onCollapse = onCollapse;
         this.onLeave = onLeave;
+        this.onResize = onResize;
         all = new TreeItem<>(entries.all);
         TreeItem<Entry> root = new TreeItem<>(null);
         root.getChildren().add(all);
@@ -93,8 +111,108 @@ final class Sidebar extends VBox {
         VBox.setVgrow(tree, Priority.ALWAYS);
         getChildren().add(tree);
         getStyleClass().add("sidebar");
-        setPrefWidth(200);
-        setMinWidth(150);
+        setPrefWidth(SidebarWidth.DEFAULT);
+        setMinWidth(SidebarWidth.MIN);
+        // Filters, so the grip is the sidebar's before any cell or the scrollbar sees the mouse.
+        addEventFilter(MouseEvent.MOUSE_MOVED, e -> setCursor(onGrip(e) ? Cursor.H_RESIZE : null));
+        addEventFilter(MouseEvent.MOUSE_EXITED, e -> {
+            if (Double.isNaN(dragX)) setCursor(null);
+        });
+        addEventFilter(MouseEvent.MOUSE_PRESSED, this::onGripPressed);
+        addEventFilter(MouseEvent.MOUSE_DRAGGED, e -> {
+            if (Double.isNaN(dragX)) return;
+            setSidebarWidth(SidebarWidth.dragged(dragWidth, e.getScreenX() - dragX, right, frameWidth()));
+            e.consume();
+        });
+        addEventFilter(MouseEvent.MOUSE_RELEASED, e -> {
+            if (Double.isNaN(dragX)) return;
+            dragX = Double.NaN;
+            if (!onGrip(e)) setCursor(null);
+            onResize.accept(getPrefWidth());
+            e.consume();
+        });
+        addEventFilter(MouseEvent.MOUSE_CLICKED, e -> {
+            if (gripPressed) e.consume();
+        });
+    }
+
+    private void onGripPressed(MouseEvent e) {
+        gripPressed = e.getButton() == MouseButton.PRIMARY && onGrip(e);
+        if (!gripPressed) return;
+        e.consume();
+        if (e.getClickCount() == 2) {
+            setSidebarWidth(SidebarWidth.DEFAULT);
+            onResize.accept(getPrefWidth());
+            return;
+        }
+        dragX = e.getScreenX();
+        dragWidth = getWidth();
+    }
+
+    private boolean onGrip(MouseEvent e) {
+        return SidebarWidth.onGrip(e.getX(), getWidth(), right);
+    }
+
+    /** The sidebar and the list together: the room a width is clamped to. */
+    private double frameWidth() {
+        return getParent() instanceof Region parent ? parent.getWidth() : 0;
+    }
+
+    /** The width to draw, within {@link SidebarWidth}'s bounds; at start, from the settings. */
+    void setSidebarWidth(double width) {
+        setPrefWidth(SidebarWidth.clamp(width, frameWidth()));
+    }
+
+    /** Which side of the list it sits on: the grip is the edge that faces the list. */
+    void setRight(boolean right) {
+        this.right = right;
+    }
+
+    /** The capture hook's mouse: a drag of the grip by {@code dx} px, through the real handlers. */
+    void dragForCapture(double dx) {
+        double x = right ? 1 : getWidth() - 1;
+        fireEvent(mouse(this, MouseEvent.MOUSE_PRESSED, x, 0));
+        fireEvent(mouse(this, MouseEvent.MOUSE_DRAGGED, x, dx));
+        fireEvent(mouse(this, MouseEvent.MOUSE_RELEASED, x, dx));
+    }
+
+    /** The capture hook's mouse: a click on a section's heading, by its axis name. */
+    void clickHeadingForCapture(String axis) {
+        TreeItem<Entry> item = sections.get(Axis.valueOf(axis.toUpperCase(java.util.Locale.ROOT)));
+        for (javafx.scene.Node n : tree.lookupAll(".tree-cell")) {
+            if (n instanceof Cell cell && cell.getTreeItem() == item) {
+                cell.fireEvent(mouse(cell, MouseEvent.MOUSE_PRESSED, 20, 0));
+                cell.fireEvent(mouse(cell, MouseEvent.MOUSE_RELEASED, 20, 0));
+                cell.fireEvent(mouse(cell, MouseEvent.MOUSE_CLICKED, 20, 0));
+                return;
+            }
+        }
+    }
+
+    /** A primary-button event at {@code x} px across {@code node} (then {@code dx} further), as the scene would make it. */
+    private static MouseEvent mouse(
+            javafx.scene.Node node, javafx.event.EventType<MouseEvent> type, double x, double dx) {
+        javafx.geometry.Point2D scene = node.localToScene(x, 8).add(dx, 0);
+        javafx.geometry.Point2D screen = node.localToScreen(x, 8).add(dx, 0);
+        return new MouseEvent(
+                type,
+                scene.getX(),
+                scene.getY(),
+                screen.getX(),
+                screen.getY(),
+                MouseButton.PRIMARY,
+                1,
+                false,
+                false,
+                false,
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                null);
     }
 
     private void onKey(KeyEvent e) {
@@ -247,13 +365,15 @@ final class Sidebar extends VBox {
     /**
      * A mark, the title, then the count at the right edge in the muted ink. The mark is a dot in
      * the state's colour for a status, a small folder for a category, nothing otherwise; a section
-     * is small capitals with no count.
+     * is small capitals with a chevron where the count would be, and a press anywhere on it folds
+     * or opens it (the tree's own double-click toggle is held back, so each press is one fold).
      */
     private final class Cell extends TreeCell<Entry> {
         private final Label title = new Label();
         private final Label count = new Label();
         private final Region dot = new Region();
         private final javafx.scene.Node folder = Icons.folderSmall();
+        private final javafx.scene.Node chevron = Icons.chevronSmall();
         private final HBox box;
 
         Cell() {
@@ -262,8 +382,22 @@ final class Sidebar extends VBox {
             count.getStyleClass().add("sidebar-count");
             dot.getStyleClass().add("sidebar-dot");
             folder.getStyleClass().add("sidebar-folder");
+            chevron.getStyleClass().add("sidebar-chevron");
             box = new HBox(8, title, spacer, count);
             box.setAlignment(Pos.CENTER_LEFT);
+            addEventFilter(MouseEvent.MOUSE_PRESSED, e -> {
+                TreeItem<Entry> item = getTreeItem();
+                if (e.getButton() != MouseButton.PRIMARY || item == null || item.getValue() == null) return;
+                if (!item.getValue().isHeading()) return;
+                item.setExpanded(!item.isExpanded());
+                if (e.getClickCount() > 1) e.consume();
+            });
+        }
+
+        /** The count, or a section's chevron, at the right edge. */
+        private void tail(javafx.scene.Node node) {
+            if (box.getChildren().getLast() != node)
+                box.getChildren().set(box.getChildren().size() - 1, node);
         }
 
         private void mark(javafx.scene.Node node) {
@@ -299,6 +433,7 @@ final class Sidebar extends VBox {
         protected void updateItem(Entry entry, boolean empty) {
             super.updateItem(entry, empty);
             count.textProperty().unbind();
+            chevron.rotateProperty().unbind();
             if (empty || entry == null) {
                 setGraphic(null);
                 pseudoClassStateChanged(SECTION, false);
@@ -310,8 +445,16 @@ final class Sidebar extends VBox {
             pseudoClassStateChanged(SECTION, section);
             mark(markFor(entry));
             pseudoClassStateChanged(CHOSEN, entry.chosenIn(selection));
-            count.setVisible(!section);
-            if (!section) count.textProperty().bind(entry.count.asString());
+            if (section) {
+                tail(chevron);
+                chevron.rotateProperty()
+                        .bind(javafx.beans.binding.Bindings.when(getTreeItem().expandedProperty())
+                                .then(0.0)
+                                .otherwise(-90.0));
+            } else {
+                tail(count);
+                count.textProperty().bind(entry.count.asString());
+            }
             setGraphic(box);
         }
     }

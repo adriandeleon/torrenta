@@ -1086,6 +1086,8 @@ public final class MainWindow {
      * person takes, where the hook itself exits through Platform.exit), {@code select-all}, {@code palette},
      * {@code palette:<query>}, {@code sidebar:<filter>} (as {@link SidebarFilter#parse} reads it),
      * {@code sidebar-keys:<KEY+KEY+…>} (focus the sidebar and press them),
+     * {@code sidebar-click:<section>} (a click on a heading folds it), {@code sidebar-drag:<px>}
+     * (the edge facing the list dragged that far; a {@code sidebar-width=} line),
      * {@code dialog-category:<name>} on an open Add dialog, or a command id. Prints what a
      * screenshot cannot show.
      */
@@ -1266,6 +1268,12 @@ public final class MainWindow {
                 currentDialog.selectCategoryForCapture(action.substring("dialog-category:".length()));
         } else if (action.startsWith("sidebar:")) {
             chooseFilter(SidebarFilter.parse(action.substring("sidebar:".length())));
+        } else if (action.startsWith("sidebar-click:")) {
+            // A click on a section's heading (status, category, tag, tracker): the mouse's fold.
+            sidebar.clickHeadingForCapture(action.substring("sidebar-click:".length()));
+        } else if (action.startsWith("sidebar-drag:")) {
+            // A drag of the edge that faces the list by this many px (negative is leftwards).
+            sidebar.dragForCapture(Double.parseDouble(action.substring("sidebar-drag:".length())));
         } else if (action.startsWith("sidebar-keys:")) {
             // Focus the sidebar and press these keys in turn (DOWN+DOWN+SPACE; the comma is the hook's own separator):
             // the keyboard path.
@@ -1422,7 +1430,11 @@ public final class MainWindow {
         if (tagsDialog != null && tagsDialog.isShowing()) System.out.println("capture: dialog=" + tagsDialog.title());
         if (promptDialog != null && promptDialog.isShowing())
             System.out.println("capture: dialog=" + promptDialog.getTitle());
-        if (sidebar.isVisible()) System.out.println("capture: sidebar=" + sidebar.summary());
+        if (sidebar.isVisible()) {
+            System.out.println("capture: sidebar=" + sidebar.summary());
+            System.out.println("capture: sidebar-width=" + Math.round(sidebar.getPrefWidth()) + " saved="
+                    + settings.get(Settings.UI_SIDEBAR_WIDTH, ""));
+        }
         System.out.println("capture: filter=" + sidebarSelection.describe() + " shown=" + filtered.size());
         System.out.println("capture: omnibox=" + omnibox.chips() + " text=\"" + filter.getText() + "\" mode="
                 + omnibox.mode() + " query=\"" + omnibox.query() + "\"");
@@ -3038,6 +3050,7 @@ public final class MainWindow {
         if (right) transfersFrame.setRight(sidebar);
         else transfersFrame.setLeft(sidebar);
         sidebar.pseudoClassStateChanged(BESIDE, right);
+        sidebar.setRight(right);
         if (sidebarRightItem != null) sidebarRightItem.setSelected(right);
     }
 
@@ -3971,7 +3984,11 @@ public final class MainWindow {
         // The sidebar runs the full height beside the filter bar, the list and the detail pane, on
         // the side the settings name; hidden and unmanaged together, so View → Sidebar gives the
         // width back to the list.
-        sidebar = new Sidebar(this::onSidebarChoice, this::onSidebarCollapse, () -> table.requestFocus());
+        sidebar = new Sidebar(this::onSidebarChoice, this::onSidebarCollapse, () -> table.requestFocus(), width -> {
+            settings.setSidebarWidth(width);
+            settings.saveQuietly();
+        });
+        sidebar.setSidebarWidth(settings.sidebarWidth(SidebarWidth.DEFAULT));
         sidebar.managedProperty().bind(sidebar.visibleProperty());
         sidebar.setVisible(settings.sidebar());
         sidebar.setCollapsed(settings.sidebarCollapsed().stream()
