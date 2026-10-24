@@ -53,7 +53,6 @@ import javafx.scene.input.ClipboardContent;
 import javafx.scene.input.DragEvent;
 import javafx.scene.input.Dragboard;
 import javafx.scene.input.KeyCode;
-import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.TransferMode;
@@ -410,7 +409,7 @@ public final class MainWindow {
         commands = buildCommands();
         installWelcome();
         // The strip is built with the centre, before the chords it shows exist.
-        viewStrip.showChords(v -> viewChord(v).getDisplayText());
+        viewStrip.showChords(v -> Chords.view(v).getDisplayText());
         paletteChord =
                 PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT).chord();
         // The toolbar first: the View menu's check item binds to its visibility.
@@ -488,18 +487,18 @@ public final class MainWindow {
                         .getResource("/com/torrenta/styles/app.css")
                         .toExternalForm());
         Fonts.installUiFont(scene);
-        scene.getAccelerators().put(chord(KeyCode.F), this::focusFilter);
-        scene.getAccelerators().put(chord(KeyCode.K), this::focusFilter);
+        scene.getAccelerators().put(Chords.of("filter-find"), this::focusFilter);
+        scene.getAccelerators().put(Chords.of("filter"), this::focusFilter);
         scene.getAccelerators().put(paletteChord, () -> palette.show(CapabilityRules.commands(commands, capabilities)));
-        scene.getAccelerators().put(shiftChord(KeyCode.L), logWindow::show);
-        scene.getAccelerators().put(shiftChord(KeyCode.T), statsWindow::show);
-        scene.getAccelerators().put(shiftChord(KeyCode.M), messagePopup::toggle);
-        scene.getAccelerators().put(chord(KeyCode.V), this::addFromClipboard);
+        scene.getAccelerators().put(Chords.of("event-log"), logWindow::show);
+        scene.getAccelerators().put(Chords.of("statistics"), statsWindow::show);
+        scene.getAccelerators().put(Chords.of("message-log"), messagePopup::toggle);
+        scene.getAccelerators().put(Chords.of("add-clipboard"), this::addFromClipboard);
         // Set Category is a submenu, and a submenu carries no accelerator: the chord is the scene's.
-        scene.getAccelerators().put(shiftChord(KeyCode.G), this::chooseCategoryByChord);
+        scene.getAccelerators().put(Chords.of("set-category"), this::chooseCategoryByChord);
         // Ctrl+1, 2, 3: each view by its place on the strip, beside the views' own chords
         // (Esc, Ctrl+Shift+F, Ctrl+R), which the menus keep showing.
-        for (View v : View.values()) scene.getAccelerators().put(viewChord(v), () -> show(v));
+        for (View v : View.values()) scene.getAccelerators().put(Chords.view(v), () -> show(v));
         // Ctrl+Tab and Ctrl+Shift+Tab cycle the views. A filter, ahead of focus traversal, which
         // would otherwise take Ctrl+Tab out of the table; Control on every platform, since Cmd+Tab
         // is macOS's own application switcher and never reaches the window.
@@ -1086,6 +1085,8 @@ public final class MainWindow {
      * person takes, where the hook itself exits through Platform.exit), {@code select-all}, {@code palette},
      * {@code palette:<query>}, {@code sidebar:<filter>} (as {@link SidebarFilter#parse} reads it),
      * {@code sidebar-keys:<KEY+KEY+…>} (focus the sidebar and press them),
+     * {@code sidebar-click:<section>} (a click on a heading folds it), {@code sidebar-drag:<px>}
+     * (the edge facing the list dragged that far; a {@code sidebar-width=} line),
      * {@code dialog-category:<name>} on an open Add dialog, or a command id. Prints what a
      * screenshot cannot show.
      */
@@ -1266,6 +1267,12 @@ public final class MainWindow {
                 currentDialog.selectCategoryForCapture(action.substring("dialog-category:".length()));
         } else if (action.startsWith("sidebar:")) {
             chooseFilter(SidebarFilter.parse(action.substring("sidebar:".length())));
+        } else if (action.startsWith("sidebar-click:")) {
+            // A click on a section's heading (status, category, tag, tracker): the mouse's fold.
+            sidebar.clickHeadingForCapture(action.substring("sidebar-click:".length()));
+        } else if (action.startsWith("sidebar-drag:")) {
+            // A drag of the edge that faces the list by this many px (negative is leftwards).
+            sidebar.dragForCapture(Double.parseDouble(action.substring("sidebar-drag:".length())));
         } else if (action.startsWith("sidebar-keys:")) {
             // Focus the sidebar and press these keys in turn (DOWN+DOWN+SPACE; the comma is the hook's own separator):
             // the keyboard path.
@@ -1422,7 +1429,11 @@ public final class MainWindow {
         if (tagsDialog != null && tagsDialog.isShowing()) System.out.println("capture: dialog=" + tagsDialog.title());
         if (promptDialog != null && promptDialog.isShowing())
             System.out.println("capture: dialog=" + promptDialog.getTitle());
-        if (sidebar.isVisible()) System.out.println("capture: sidebar=" + sidebar.summary());
+        if (sidebar.isVisible()) {
+            System.out.println("capture: sidebar=" + sidebar.summary());
+            System.out.println("capture: sidebar-width=" + Math.round(sidebar.getPrefWidth()) + " saved="
+                    + settings.get(Settings.UI_SIDEBAR_WIDTH, ""));
+        }
         System.out.println("capture: filter=" + sidebarSelection.describe() + " shown=" + filtered.size());
         System.out.println("capture: omnibox=" + omnibox.chips() + " text=\"" + filter.getText() + "\" mode="
                 + omnibox.mode() + " query=\"" + omnibox.query() + "\"");
@@ -2407,14 +2418,16 @@ public final class MainWindow {
             lastClipboardOffer = text;
             setStatus(
                     Inputs.classify(text) == Inputs.Kind.MAGNET
-                            ? tr("status.clipboard.magnet", chord(KeyCode.V).getDisplayText())
+                            ? tr(
+                                    "status.clipboard.magnet",
+                                    Chords.of("add-clipboard").getDisplayText())
                             : Inputs.isDirectLink(text)
                                     ? tr(
                                             "status.clipboard.link",
-                                            chord(KeyCode.V).getDisplayText())
+                                            Chords.of("add-clipboard").getDisplayText())
                                     : tr(
                                             "status.clipboard.torrent",
-                                            chord(KeyCode.V).getDisplayText()));
+                                            Chords.of("add-clipboard").getDisplayText()));
         });
     }
 
@@ -3050,6 +3063,7 @@ public final class MainWindow {
         if (right) transfersFrame.setRight(sidebar);
         else transfersFrame.setLeft(sidebar);
         sidebar.pseudoClassStateChanged(BESIDE, right);
+        sidebar.setRight(right);
         if (sidebarRightItem != null) sidebarRightItem.setSelected(right);
     }
 
@@ -3226,26 +3240,6 @@ public final class MainWindow {
     /** The Queue submenu's commands, top to bottom. */
     private static final List<String> QUEUE_COMMANDS = List.of("queue-top", "queue-up", "queue-down", "queue-bottom");
 
-    private static KeyCombination chord(KeyCode key) {
-        return new KeyCodeCombination(key, KeyCombination.SHORTCUT_DOWN);
-    }
-
-    private static KeyCombination shiftChord(KeyCode key) {
-        return new KeyCodeCombination(key, KeyCombination.SHORTCUT_DOWN, KeyCombination.SHIFT_DOWN);
-    }
-
-    /** Shortcut and the view's place on the strip: Ctrl+1 for Transfers. */
-    private static KeyCombination viewChord(View v) {
-        return chord(KeyCode.valueOf("DIGIT" + v.number()));
-    }
-
-    /** Ctrl+Tab, or Ctrl+Shift+Tab: Control on macOS too, where Cmd+Tab belongs to the system. */
-    private static KeyCombination cycleChord(boolean backwards) {
-        return backwards
-                ? new KeyCodeCombination(KeyCode.TAB, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN)
-                : new KeyCodeCombination(KeyCode.TAB, KeyCombination.CONTROL_DOWN);
-    }
-
     private List<Command> buildCommands() {
         BooleanBinding selection = Bindings.isNotEmpty(table.getSelectionModel().getSelectedItems());
         BooleanBinding always = Bindings.createBooleanBinding(() -> true);
@@ -3263,18 +3257,25 @@ public final class MainWindow {
                 new Command(
                         "create",
                         tr("command.create"),
-                        chord(KeyCode.N),
+                        Chords.of("create"),
                         null,
                         gate("create", always),
                         this::createTorrent),
-                new Command("add-file", tr("command.addFile"), chord(KeyCode.O), null, always, this::addTorrentFile),
-                new Command("add-magnet", tr("command.addMagnet"), chord(KeyCode.M), null, always, this::addMagnetLink),
+                new Command(
+                        "add-file", tr("command.addFile"), Chords.of("add-file"), null, always, this::addTorrentFile),
+                new Command(
+                        "add-magnet",
+                        tr("command.addMagnet"),
+                        Chords.of("add-magnet"),
+                        null,
+                        always,
+                        this::addMagnetLink),
                 // The chord is a scene accelerator, not a menu one: Ctrl+V in a text field must paste.
                 new Command(
                         "add-clipboard",
                         tr("command.addClipboard"),
                         null,
-                        chord(KeyCode.V).getDisplayText(),
+                        Chords.of("add-clipboard").getDisplayText(),
                         always,
                         this::addFromClipboard),
                 new Command(
@@ -3282,28 +3283,28 @@ public final class MainWindow {
                 new Command(
                         "force-resume",
                         tr("command.forceResume"),
-                        shiftChord(KeyCode.U),
+                        Chords.of("force-resume"),
                         null,
                         selection,
                         () -> onSelection(tr("actions.verb.forced"), (e, t) -> e.forceResume(t.id()))),
                 new Command(
                         "recheck",
                         tr("command.recheck"),
-                        shiftChord(KeyCode.R),
+                        Chords.of("recheck"),
                         null,
                         selection,
                         () -> onSelection(tr("actions.verb.rechecking"), (e, t) -> e.recheck(t.id()))),
                 new Command(
                         "reannounce",
                         tr("command.reannounce"),
-                        shiftChord(KeyCode.A),
+                        Chords.of("reannounce"),
                         null,
                         selection,
                         () -> onSelection(tr("actions.verb.reannounced"), (e, t) -> e.reannounce(t.id()))),
                 new Command(
                         "sequential",
                         tr("command.sequential"),
-                        shiftChord(KeyCode.S),
+                        Chords.of("sequential"),
                         null,
                         gate("sequential", selection),
                         this::toggleSequential),
@@ -3314,41 +3315,41 @@ public final class MainWindow {
                         null,
                         gate("super-seed", selection),
                         this::toggleSuperSeeding),
-                new Command("limits", tr("command.limits"), chord(KeyCode.L), null, selection, this::editLimits),
+                new Command("limits", tr("command.limits"), Chords.of("limits"), null, selection, this::editLimits),
                 // The four chords are also taken on the table itself (onTableChord): its own
                 // Ctrl+Shift+arrow bindings would consume them before the accelerators saw them.
                 new Command(
                         "queue-top",
                         tr("command.queueTop"),
-                        shiftChord(KeyCode.HOME),
+                        Chords.of("queue-top"),
                         null,
                         gate("queue-top", selection),
                         () -> queueMove(Engine.QueueMove.TOP)),
                 new Command(
                         "queue-up",
                         tr("command.queueUp"),
-                        shiftChord(KeyCode.UP),
+                        Chords.of("queue-up"),
                         null,
                         gate("queue-up", selection),
                         () -> queueMove(Engine.QueueMove.UP)),
                 new Command(
                         "queue-down",
                         tr("command.queueDown"),
-                        shiftChord(KeyCode.DOWN),
+                        Chords.of("queue-down"),
                         null,
                         gate("queue-down", selection),
                         () -> queueMove(Engine.QueueMove.DOWN)),
                 new Command(
                         "queue-bottom",
                         tr("command.queueBottom"),
-                        shiftChord(KeyCode.END),
+                        Chords.of("queue-bottom"),
                         null,
                         gate("queue-bottom", selection),
                         () -> queueMove(Engine.QueueMove.BOTTOM)),
                 new Command(
                         "set-location",
                         tr("command.setLocation"),
-                        shiftChord(KeyCode.D),
+                        Chords.of("set-location"),
                         null,
                         gate("set-location", selection),
                         this::setLocation),
@@ -3362,11 +3363,12 @@ public final class MainWindow {
                 new Command(
                         "set-category",
                         tr("command.setCategory"),
-                        shiftChord(KeyCode.G),
+                        Chords.of("set-category"),
                         null,
                         selection,
                         this::chooseCategory),
-                new Command("edit-tags", tr("command.editTags"), chord(KeyCode.T), null, selection, this::editTags),
+                new Command(
+                        "edit-tags", tr("command.editTags"), Chords.of("edit-tags"), null, selection, this::editTags),
                 new Command("manage-categories", tr("command.manageCategories"), null, null, always, () -> {
                     settingsWindow.show(stage);
                     settingsWindow.selectPageForCapture("LABELS");
@@ -3374,21 +3376,21 @@ public final class MainWindow {
                 new Command(
                         "copy-name",
                         tr("command.copyName"),
-                        chord(KeyCode.C),
+                        Chords.of("copy-name"),
                         null,
                         selection,
                         () -> copyToClipboard("status.copied.name", Torrent::name)),
                 new Command(
                         "copy-hash",
                         tr("command.copyHash"),
-                        shiftChord(KeyCode.H),
+                        Chords.of("copy-hash"),
                         null,
                         selection,
                         () -> copyToClipboard("status.copied.infoHash", Torrent::id)),
                 new Command(
                         "copy-magnet",
                         tr("command.copyMagnet"),
-                        shiftChord(KeyCode.C),
+                        Chords.of("copy-magnet"),
                         null,
                         selection,
                         this::copyMagnetLinks),
@@ -3397,14 +3399,14 @@ public final class MainWindow {
                 new Command(
                         "export-torrent",
                         tr("command.exportTorrent"),
-                        shiftChord(KeyCode.E),
+                        Chords.of("export-torrent"),
                         null,
                         gate("export-torrent", selection),
                         this::exportTorrents),
                 new Command(
                         "open-folder",
                         tr("command.openFolder"),
-                        shiftChord(KeyCode.O),
+                        Chords.of("open-folder"),
                         null,
                         gate("open-folder", selection),
                         this::openFolder),
@@ -3419,25 +3421,25 @@ public final class MainWindow {
                 new Command(
                         "alt-speed",
                         tr("command.altSpeed"),
-                        shiftChord(KeyCode.J),
+                        Chords.of("alt-speed"),
                         null,
                         always,
                         this::toggleAlternativeSpeed),
-                new Command("quit", tr("menu.file.quit"), chord(KeyCode.Q), null, always, this::quit),
+                new Command("quit", tr("menu.file.quit"), Chords.of("quit"), null, always, this::quit),
                 new Command("check-updates", tr("command.checkUpdates"), null, null, always, this::checkForUpdatesNow),
                 new Command("about", tr("command.about", AppInfo.NAME), null, null, always, this::showAbout),
                 new Command(
                         "settings",
                         tr("command.settings"),
-                        chord(KeyCode.COMMA),
+                        Chords.of("settings"),
                         null,
                         always,
                         () -> settingsWindow.show(stage)),
                 new Command("switch-profile", tr("command.switchProfile"), null, null, always, this::chooseProfile),
                 new Command(
                         "retry-engine", tr("command.retryEngine"), null, null, engineDown, () -> startEngine(profile)),
-                new Command("search", tr("command.search"), shiftChord(KeyCode.F), null, always, this::showSearch),
-                new Command("rss", tr("command.rss"), chord(KeyCode.R), null, always, this::showRss),
+                new Command("search", tr("command.search"), Chords.of("search"), null, always, this::showSearch),
+                new Command("rss", tr("command.rss"), Chords.of("rss"), null, always, this::showRss),
                 new Command("rss-run-rules", tr("command.rssRunRules"), null, null, always, rss::runRulesNow),
                 new Command(
                         "transfers",
@@ -3452,21 +3454,21 @@ public final class MainWindow {
                         "view-next",
                         tr("command.viewNext"),
                         null,
-                        cycleChord(false).getDisplayText(),
+                        Chords.of("view-next").getDisplayText(),
                         always,
                         () -> show(ViewSwitch.next(view))),
                 new Command(
                         "view-previous",
                         tr("command.viewPrevious"),
                         null,
-                        cycleChord(true).getDisplayText(),
+                        Chords.of("view-previous").getDisplayText(),
                         always,
                         () -> show(ViewSwitch.previous(view))),
                 new Command(
                         "filter",
                         tr("command.filter"),
                         null,
-                        chord(KeyCode.K).getDisplayText(),
+                        Chords.of("filter").getDisplayText(),
                         always,
                         this::focusFilter),
                 new Command(
@@ -3480,28 +3482,28 @@ public final class MainWindow {
                         "select-all",
                         tr("command.selectAll"),
                         null,
-                        chord(KeyCode.A).getDisplayText(),
+                        Chords.of("select-all").getDisplayText(),
                         always,
                         () -> table.getSelectionModel().selectAll()),
                 new Command(
                         "event-log",
                         tr("command.eventLog"),
                         null,
-                        shiftChord(KeyCode.L).getDisplayText(),
+                        Chords.of("event-log").getDisplayText(),
                         always,
                         () -> logWindow.show()),
                 new Command(
                         "statistics",
                         tr("command.statistics"),
                         null,
-                        shiftChord(KeyCode.T).getDisplayText(),
+                        Chords.of("statistics").getDisplayText(),
                         always,
                         () -> statsWindow.show()),
                 new Command(
                         "message-log",
                         tr("command.messageLog"),
                         null,
-                        shiftChord(KeyCode.M).getDisplayText(),
+                        Chords.of("message-log").getDisplayText(),
                         always,
                         () -> messagePopup.toggle()),
                 new Command("debug-log", tr("command.debugLog"), null, null, always, this::showDebugLog),
@@ -3515,14 +3517,14 @@ public final class MainWindow {
                 new Command(
                         "toggle-sidebar",
                         tr("command.toggleSidebar"),
-                        shiftChord(KeyCode.B),
+                        Chords.of("toggle-sidebar"),
                         null,
                         always,
                         () -> setSidebarVisible(!sidebar.isVisible())),
                 new Command(
                         "focus-sidebar",
                         tr("command.focusSidebar"),
-                        chord(KeyCode.B),
+                        Chords.of("focus-sidebar"),
                         null,
                         always,
                         this::focusSidebar),
@@ -3530,7 +3532,7 @@ public final class MainWindow {
                 new Command(
                         "toggle-detail",
                         tr("command.toggleDetail"),
-                        shiftChord(KeyCode.D),
+                        Chords.of("toggle-detail"),
                         null,
                         always,
                         this::toggleDetail),
@@ -3730,14 +3732,14 @@ public final class MainWindow {
         toolbarItem.selectedProperty().bindBidirectional(toolbar.visibleProperty());
         CheckMenuItem sidebarItem = new CheckMenuItem(tr("menu.view.sidebar"));
         sidebarItem.setGraphic(menuIcon(Icons.sidebar()));
-        sidebarItem.setAccelerator(shiftChord(KeyCode.B));
+        sidebarItem.setAccelerator(Chords.of("toggle-sidebar"));
         sidebarItem.selectedProperty().bindBidirectional(sidebar.visibleProperty());
         sidebarRightItem = new CheckMenuItem(tr("menu.view.sidebarRight"));
         sidebarRightItem.setSelected(SidebarPlace.of(true, settings.sidebarSide()) == SidebarPlace.RIGHT);
         sidebarRightItem.setOnAction(e -> switchSidebarSide());
         detailItem = new CheckMenuItem(tr("menu.view.detail"));
         detailItem.setGraphic(menuIcon(Icons.detailPane()));
-        detailItem.setAccelerator(shiftChord(KeyCode.D));
+        detailItem.setAccelerator(Chords.of("toggle-detail"));
         detailItem.setSelected(detailPlace.shown());
         detailItem.setOnAction(e -> toggleDetail());
         // Checked while the alternative limits are in force, by hand or by the schedule; the
@@ -3983,7 +3985,11 @@ public final class MainWindow {
         // The sidebar runs the full height beside the filter bar, the list and the detail pane, on
         // the side the settings name; hidden and unmanaged together, so View → Sidebar gives the
         // width back to the list.
-        sidebar = new Sidebar(this::onSidebarChoice, this::onSidebarCollapse, () -> table.requestFocus());
+        sidebar = new Sidebar(this::onSidebarChoice, this::onSidebarCollapse, () -> table.requestFocus(), width -> {
+            settings.setSidebarWidth(width);
+            settings.saveQuietly();
+        });
+        sidebar.setSidebarWidth(settings.sidebarWidth(SidebarWidth.DEFAULT));
         sidebar.managedProperty().bind(sidebar.visibleProperty());
         sidebar.setVisible(settings.sidebar());
         sidebar.setCollapsed(settings.sidebarCollapsed().stream()
@@ -4303,7 +4309,7 @@ public final class MainWindow {
         HBox.setHgrow(filter, Priority.ALWAYS);
         // The box the redesign draws: a lens, the field with no chrome of its own, and the chord as
         // a key badge, read from the same chord the command and the menu use.
-        Label badge = new Label(chord(KeyCode.K).getDisplayText());
+        Label badge = new Label(Chords.of("filter").getDisplayText());
         badge.getStyleClass().add("key-badge");
         HBox box = new HBox(Icons.find(), chipRow, filter, badge);
         box.getStyleClass().add("filter-box");

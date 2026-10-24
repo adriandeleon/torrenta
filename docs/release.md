@@ -82,6 +82,12 @@ neither path has run for real. Before adding it:
   attributes. JGit re-adds them as LF; git would not. A pull request with those in it will not be
   accepted, so either they are gone after the sync or the pull request is opened by hand with the
   manifests alone. The LICENSE that JReleaser also copied in is turned off (`skipLicenseFile`).
+- **The install text.** [`.github/release-notes.md`](../.github/release-notes.md) names neither
+  package manager while they publish nothing (0.1.0 went out saying `brew install` and
+  `winget install`, and its notes were edited afterwards). Once the first cask and winget package
+  exist, put the commands back in front of the downloads:
+  `brew install --cask adriandeleon/tap/torrenta` for macOS and `winget install AdrianDeLeon.Torrenta`
+  for Windows.
 
 ## Checking the configuration locally
 
