@@ -956,10 +956,11 @@ final class SettingsWindow {
     private static double sidebarWidth() {
         double widest = 0;
         for (Category category : Category.values()) {
-            javafx.scene.text.Text text = new javafx.scene.text.Text("    " + category.title());
+            javafx.scene.text.Text text = new javafx.scene.text.Text(category.title());
             widest = Math.max(widest, text.getLayoutBounds().getWidth());
         }
-        return Math.max(190, Math.ceil(widest) + 36);
+        // The cell's 20 + 10 padding, the glyph and its gap, and room for the list's own border.
+        return Math.max(190, Math.ceil(widest) + 30 + Icons.MENU_SIZE + 8 + 14);
     }
 
     private final class SidebarCell extends ListCell<Object> {
@@ -969,18 +970,26 @@ final class SettingsWindow {
             getStyleClass().removeAll("settings-group-header", "settings-sidebar-item", "settings-dimmed");
             if (empty || item == null) {
                 setText(null);
+                setGraphic(null);
                 setDisable(false);
                 setMouseTransparent(false);
                 return;
             }
             if (item instanceof Group group) {
                 setText(group.title().toUpperCase(Locale.ROOT));
+                setGraphic(null);
                 getStyleClass().add("settings-group-header");
                 setMouseTransparent(true);
                 setDisable(false);
             } else {
                 Category category = (Category) item;
-                setText("    " + category.title());
+                setText(category.title());
+                // A square box per glyph, so the titles line up whatever each glyph's own width.
+                StackPane glyph =
+                        new StackPane(Icons.forSettingsPage(category.id).at(Icons.MENU_SIZE));
+                glyph.setMinSize(Icons.MENU_SIZE, Icons.MENU_SIZE);
+                glyph.setMaxSize(Icons.MENU_SIZE, Icons.MENU_SIZE);
+                setGraphic(glyph);
                 getStyleClass().add("settings-sidebar-item");
                 setMouseTransparent(false);
                 boolean dimmed = hiddenCategories.contains(category);
