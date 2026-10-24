@@ -32,6 +32,22 @@
     -fx-background-radius: 6;
 }
 
+/* A page: indented under its group, its glyph before the title in the muted ink, the title's
+   accent while it is the page showing. */
+.settings-sidebar .list-cell.settings-sidebar-item {
+    -fx-padding: 5 10 5 20;
+    -fx-graphic-text-gap: 8;
+}
+
+.settings-sidebar .settings-sidebar-item .icon-line {
+    -fx-stroke: -color-fg-muted;
+    -fx-stroke-width: 1.4;
+}
+
+.settings-sidebar .list-cell:filled:selected .icon-line {
+    -fx-stroke: -color-accent-fg;
+}
+
 /* A category with no search hits: still listed, so its absence is not mistaken for it not existing. */
 .settings-dimmed {
     -fx-opacity: 0.4;

@@ -135,4 +135,18 @@ class IconsTest {
         assertNull(Icons.forCommand("show-all"));
         assertNull(Icons.forCommand("toggle-density"));
     }
+
+    /** Every Settings page has a glyph of its own, so no two rows of the sidebar look alike. */
+    @Test
+    void everySettingsPageHasItsOwnGlyph() {
+        java.util.Set<String> paths = new java.util.HashSet<>();
+        for (SettingsWindow.Category page : SettingsWindow.Category.values()) {
+            Icons.Glyph glyph = Icons.forSettingsPage(page.id);
+            assertNotNull(glyph, page.name());
+            assertTrue(glyph != Icons.forSettingsPage(page.id), page + ": each call is a fresh node");
+            String content = ((SVGPath) glyph.getChildren().get(0)).getContent();
+            assertTrue(paths.add(content), page + " shares its glyph with another page");
+        }
+        assertNull(Icons.forSettingsPage("nothing"));
+    }
 }

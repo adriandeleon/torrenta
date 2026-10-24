@@ -165,6 +165,32 @@ final class Icons {
         };
     }
 
+    /**
+     * The glyph beside a Settings page in the window's sidebar, by the page's id
+     * ({@code SettingsWindow.Category.id}); null for an id that is not a page. Where a page holds
+     * what a command does, it shows that command's glyph (Search, RSS, Speed, Queue, Categories and
+     * tags), so the menus and the sidebar agree.
+     */
+    static Glyph forSettingsPage(String id) {
+        return switch (id) {
+            case "general" -> sliders();
+            case "adding" -> download();
+            case "watchFolders" -> eye();
+            case "automation" -> terminal();
+            case "search" -> search();
+            case "rss" -> rss();
+            case "sync" -> sync();
+            case "labels" -> tag();
+            case "engine" -> server();
+            case "connection" -> globe();
+            case "protocol" -> network();
+            case "ipFilter" -> shield();
+            case "speed" -> gauge();
+            case "queue" -> queue();
+            default -> null;
+        };
+    }
+
     // ---- glyphs; the paths are Editora's, by the same name --------------------------------------
 
     /** A page with a plus, Editora's new-file glyph, for "New Torrent". */
@@ -510,5 +536,52 @@ final class Icons {
     /** An arrow left against a bar: the previous view. */
     static Glyph viewPrevious() {
         return line("M13.5 8h-9M7.5 5l-3 3 3 3M2.5 3.5v9");
+    }
+
+    // ---- the Settings window's pages -------------------------------------------------------------
+
+    /** Three sliders at different settings: General. */
+    static Glyph sliders() {
+        return line("M2.5 4h5.3M10.7 4h2.8M7.8 4a1.45 1.45 0 1 0 2.9 0a1.45 1.45 0 1 0-2.9 0"
+                + "M2.5 8h1.3M6.7 8h6.8M3.8 8a1.45 1.45 0 1 0 2.9 0a1.45 1.45 0 1 0-2.9 0"
+                + "M2.5 12h7.3M12.7 12h.8M9.8 12a1.45 1.45 0 1 0 2.9 0a1.45 1.45 0 1 0-2.9 0");
+    }
+
+    /** An open eye: Watch folders. */
+    static Glyph eye() {
+        return line("M1.5 8c1.7-3 4-4.5 6.5-4.5s4.8 1.5 6.5 4.5c-1.7 3-4 4.5-6.5 4.5S3.2 11 1.5 8z"
+                + "M6.3 8a1.7 1.7 0 1 0 3.4 0a1.7 1.7 0 1 0-3.4 0");
+    }
+
+    /** A terminal with its prompt: Automation, which runs a command. */
+    static Glyph terminal() {
+        return line("M2 3.5h12v9H2zM4.5 6.5l2 1.5-2 1.5M8 10h3.5");
+    }
+
+    /** Two arrows chasing round a circle: Sync. */
+    static Glyph sync() {
+        return line("M3 7a5 5 0 0 1 9-2.2M12 2.5v2.3H9.7M13 9a5 5 0 0 1-9 2.2M4 13.5v-2.3h2.3");
+    }
+
+    /** Two stacked units with their lights: an engine, local or remote. */
+    static Glyph server() {
+        return line("M2.5 2.5h11V7h-11zM2.5 9h11v4.5h-11zM5 4.75h.1M5 11.25h.1M8 4.75h3M8 11.25h3");
+    }
+
+    /** A globe with its equator and a meridian: Connection. */
+    static Glyph globe() {
+        return line("M2.5 8a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0-11 0M2.5 8h11"
+                + "M8 2.5c-1.8 1.6-2.5 3.5-2.5 5.5s.7 3.9 2.5 5.5c1.8-1.6 2.5-3.5 2.5-5.5S9.8 4.1 8 2.5z");
+    }
+
+    /** Three nodes joined: Protocol (DHT, PEX, local discovery). */
+    static Glyph network() {
+        return line("M6.5 3.5a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0M2 12a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0"
+                + "M11 12a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0M7.3 4.8L4.2 10.7M8.7 4.8l3.1 5.9M5 12h6");
+    }
+
+    /** A shield with a tick: IP filter. */
+    static Glyph shield() {
+        return line("M8 2l5 2v4c0 3-2.2 5-5 6-2.8-1-5-3-5-6V4zM5.8 8l1.6 1.6 2.9-3");
     }
 }
