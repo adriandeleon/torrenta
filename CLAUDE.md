@@ -48,7 +48,8 @@ selected torrent, `select-first`, `message-log` / `message-log:<query>` (the sta
   (the PNG is of it; `stats=` and `stats-graph=` lines after the shot), `detail:speed` for the Speed
   tab (a `speed-tab=` line), `window:<w>x<h>+<x>+<y>` / `window:maximize` to move the main window
   (a `window=` line after every shot has its bounds, what is saved and whether the list's
-  horizontal scrollbar shows; a `statusbar-fit=` line has each status-bar entry as width/needed),
+  horizontal scrollbar shows; an `about=` line has the About panel's bounds beside the window's while
+  it is open; a `statusbar-fit=` line has each status-bar entry as width/needed),
   or `settings` / `settings:<query>` /
   `settings-page:<category>` to open the Settings window (the PNG is then of it) and print the
   visible rows and a `settings-search=` line (query, page), `settings-key:<KeyCode>` for a key in it,
