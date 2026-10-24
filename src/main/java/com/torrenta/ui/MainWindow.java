@@ -108,6 +108,7 @@ import com.torrenta.store.ProfileStore;
 import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
+import com.torrenta.sync.SyncLabels;
 import com.torrenta.tray.TorrentaTray;
 import com.torrenta.tray.Trays;
 import com.torrenta.update.ReleaseInfo;
@@ -465,7 +466,7 @@ public final class MainWindow {
             Automation a = automation;
             if (a != null) a.testNotification();
         });
-        sync = new SettingsSync(settings, configDir, new SyncHost());
+        sync = new SettingsSync(settings, labels, configDir, new SyncHost());
         settingsWindow.setSync(sync);
         sync.addListener(() -> {
             boolean problem = sync.state().phase() == SettingsSync.Phase.PROBLEM;
@@ -479,6 +480,8 @@ public final class MainWindow {
             // The download folder may have moved in Settings; the welcome's footer names it.
             showDownloadFolder(welcome);
         }));
+        // So is a category or tag added or deleted; the lists travel with the settings.
+        labels.setOnChanged(() -> Platform.runLater(sync::markDirty));
         detail.setOnBanPeer(this::banPeer);
         detail.setOnCopyPeer(address -> {
             ClipboardContent content = new ClipboardContent();
@@ -1688,6 +1691,15 @@ public final class MainWindow {
             applyAppearance();
             refreshIpFilter(false);
             if (settingsWindow.isShowing()) settingsWindow.reloadFromSettings();
+        }
+
+        @Override
+        public void labelsApplied(SyncLabels.Change change) {
+            LabelsHost labelsHost = new LabelsHost();
+            for (String name : change.removedCategories()) labelsHost.categoryDeleted(name);
+            for (String name : change.removedTags()) labelsHost.tagDeleted(name);
+            labelsHost.labelsChanged();
+            settingsWindow.reloadLabels();
         }
 
         @Override

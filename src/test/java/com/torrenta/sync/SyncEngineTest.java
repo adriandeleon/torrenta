@@ -97,6 +97,66 @@ class SyncEngineTest {
         assertEquals(Map.of("connection.port", "7000", "add.sequential", "true"), b.live);
     }
 
+    private static SyncEngine engine(Path dir, String name, String url, SyncTarget target, SyncTarget labels) {
+        return new SyncEngine(
+                new QuietGit(dir.resolve(name).resolve("sync").resolve("repo"), false),
+                url,
+                "main",
+                target,
+                labels,
+                name);
+    }
+
+    private static Map<String, String> labels(List<String> categories, List<String> tags) {
+        return SyncLabels.entries(categories, tags);
+    }
+
+    @Test
+    void categoryNamesAndTagsTravelBesideTheSettings(@TempDir Path dir) throws Exception {
+        String url = bare(dir);
+        MapTarget a = new MapTarget(Map.of("ui.theme", "x"));
+        MapTarget al = new MapTarget(labels(List.of("Movies"), List.of("hd")));
+        MapTarget b = new MapTarget(Map.of());
+        MapTarget bl = new MapTarget(labels(List.of("TV"), List.of()));
+        assertTrue(engine(dir, "a", url, a, al).run().ok());
+        SyncReport second = engine(dir, "b", url, b, bl).run();
+        assertTrue(second.ok(), second.summary());
+        assertEquals(List.of("ui.theme", "category.movies", "tag.hd"), second.received());
+        assertEquals(labels(List.of("Movies", "TV"), List.of("hd")), bl.live, "a first sync only adds");
+        assertEquals(Map.of("ui.theme", "x"), b.live);
+        assertTrue(engine(dir, "a", url, a, al).run().ok());
+        assertEquals(labels(List.of("Movies", "TV"), List.of("hd")), al.live);
+
+        bl.live.remove("tag.hd");
+        bl.live.put("category.movies", "MOVIES");
+        assertTrue(engine(dir, "b", url, b, bl).run().ok());
+        SyncReport back = engine(dir, "a", url, a, al).run();
+        assertEquals(List.of("category.movies", "tag.hd"), back.received());
+        assertEquals(labels(List.of("MOVIES", "TV"), List.of()), al.live, "removed and respelled on A");
+    }
+
+    @Test
+    void aMachineThatSyncedWithoutLabelsDeletesNoneWhenItStarts(@TempDir Path dir) throws Exception {
+        String url = bare(dir);
+        MapTarget a = new MapTarget(Map.of());
+        MapTarget al = new MapTarget(labels(List.of("Movies"), List.of()));
+        assertTrue(engine(dir, "a", url, a, al).run().ok());
+        // B runs a build without labels: its base is a commit that holds A's labels file.
+        MapTarget b = new MapTarget(Map.of("ui.theme", "y"));
+        assertTrue(engine(dir, "b", url, b).run().ok());
+        assertTrue(engine(dir, "a", url, a, al).run().ok());
+        assertEquals(Map.of("ui.theme", "y"), a.live);
+        assertEquals(labels(List.of("Movies"), List.of()), al.live, "the old build kept the labels file");
+
+        // B upgrades. Its own list never held Movies, and that is not a deletion.
+        MapTarget bl = new MapTarget(labels(List.of("TV"), List.of()));
+        SyncReport upgraded = engine(dir, "b", url, b, bl).run();
+        assertTrue(upgraded.ok(), upgraded.summary());
+        assertEquals(labels(List.of("Movies", "TV"), List.of()), bl.live);
+        assertTrue(engine(dir, "a", url, a, al).run().ok());
+        assertEquals(labels(List.of("Movies", "TV"), List.of()), al.live);
+    }
+
     @Test
     void previewWritesNothingAndLocalBusyKeepsTheBase(@TempDir Path dir) throws Exception {
         String url = bare(dir);
