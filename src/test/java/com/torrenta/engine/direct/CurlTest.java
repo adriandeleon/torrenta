@@ -33,7 +33,11 @@ class CurlTest {
     void theConfigHasTheTransferAndQuotesWhatItMust() {
         String config = Curl.config(request(false, 0, Curl.Proxy.NONE));
         assertTrue(config.contains("url = \"https://x.org/a?token=s3cr\\\"t\"\n"), config);
-        assertTrue(config.contains("output = \"" + Path.of("/dl/a.iso.part") + "\"\n"));
+        // Quoted as curl reads it: on Windows the path's backslashes are escaped.
+        assertTrue(
+                config.contains(
+                        "output = " + Curl.quote(Path.of("/dl/a.iso.part").toString()) + "\n"),
+                config);
         assertTrue(config.contains("\nlocation\n"));
         assertTrue(config.contains("\nfail\n"));
         assertTrue(config.contains("proto = \"=http,https,ftp,ftps,sftp\""));
