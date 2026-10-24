@@ -228,6 +228,21 @@ class DirectDownloadsTest {
     }
 
     @Test
+    void theGlobalLimitHoldsTheLinksBackAndLiftingItTakesAtOnce() throws Exception {
+        downloads.setGlobalLimit(16 * 1024);
+        Torrent added = downloads.add(base + "/files/small.bin", null, false);
+        await("a start", () -> row(added.id()).orElseThrow().done() > 0);
+        Thread.sleep(1500);
+        long held = row(added.id()).orElseThrow().done();
+        assertTrue(held < SMALL.length / 2, "16 KiB/s for a couple of seconds, not 200 kB: " + held);
+
+        downloads.setGlobalLimit(0);
+        await("the download to finish", () -> saw(EngineEvent.Kind.FINISHED, added.id()));
+        assertArrayEquals(SMALL, Files.readAllBytes(dir.resolve("dl/small.bin")));
+        assertTrue(ranges.get() >= 1, "restarted for the new limit, carrying on where it was");
+    }
+
+    @Test
     void theListComesBackAfterARestart() throws Exception {
         Torrent added = downloads.add(base + "/files/small.bin", null, true);
         downloads.setCategory(added.id(), "ISOs");

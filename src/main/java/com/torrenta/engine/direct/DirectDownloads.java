@@ -80,6 +80,8 @@ public final class DirectDownloads {
     private final Supplier<Options> options;
     private final String userAgent;
     private volatile Curl.Proxy proxy = Curl.Proxy.NONE;
+    /** The download limit in force, shared by the downloads from links; bytes per second, 0 for none. */
+    private long globalLimit;
 
     private final Map<String, DirectDownload> downloads = new LinkedHashMap<>();
     private final Map<String, Run> running = new HashMap<>();
@@ -102,6 +104,9 @@ public final class DirectDownloads {
     private static final class Run {
         final Process process;
         final boolean restarted;
+        /** The rate limit curl was started with, bytes per second, 0 for none. */
+        final long limit;
+
         final long startedAt = System.nanoTime();
         boolean stopping;
         long lastSize;
@@ -109,9 +114,10 @@ public final class DirectDownloads {
         double rate;
         CurlHeaders headers = CurlHeaders.NONE;
 
-        Run(Process process, boolean restarted, long size) {
+        Run(Process process, boolean restarted, long size, long limit) {
             this.process = process;
             this.restarted = restarted;
+            this.limit = limit;
             this.lastSize = size;
         }
     }
@@ -172,6 +178,57 @@ public final class DirectDownloads {
     /** Hears a download that turned out to be a {@code .torrent}, on the ticking thread. */
     public void onTorrentFile(Consumer<DirectDownload> handler) {
         this.onTorrentFile = handler == null ? d -> {} : handler;
+    }
+
+    /**
+     * The download limit in force (the normal pair's or the alternative one's), bytes per second,
+     * 0 for none: the downloads from links share it, as the torrents share it among themselves.
+     * Running downloads take a new share at the next tick.
+     */
+    public synchronized void setGlobalLimit(long bytesPerSecond) {
+        globalLimit = Math.max(0, bytesPerSecond);
+    }
+
+    /** The smallest share curl is given: a limit so low it reads as stalled helps nobody. */
+    static final long MIN_SHARE = 4096;
+
+    /**
+     * One download's limit: an equal part of the global one among the downloads meant to run,
+     * capped by its own limit. Pure; 0 is none.
+     */
+    static long share(long own, long global, int running) {
+        long each = global <= 0 ? 0 : Math.max(MIN_SHARE, global / Math.max(1, running));
+        if (own <= 0) return each;
+        if (each <= 0) return own;
+        return Math.min(own, each);
+    }
+
+    /**
+     * Whether a running curl's limit is far enough from its share to restart it for the new one.
+     * Pure. curl takes its limit once, at start, and a restart reconnects, so a change under a
+     * tenth is let be; to or from none always counts.
+     */
+    static boolean reshare(long started, long wanted) {
+        if (started == wanted) return false;
+        if (started == 0 || wanted == 0) return true;
+        return Math.abs(started - wanted) * 10 > Math.max(started, wanted);
+    }
+
+    /**
+     * Lock held. How many downloads the share is cut for: those that want to run, as many as the
+     * queue lets run (or more, when some were forced), never only the ones running at this
+     * instant, so a restart one at a time does not change the others' share each time.
+     */
+    private int meantToRun() {
+        int wanting = 0;
+        for (DirectDownload d : downloads.values()) {
+            if (!d.finished() && !d.paused() && d.error().isEmpty()) wanting++;
+        }
+        return Math.max(running.size(), Math.min(wanting, options.get().active()));
+    }
+
+    private long shareOf(DirectDownload d) {
+        return share(d.rateLimit(), globalLimit, meantToRun());
     }
 
     /** Applies from the next run of each download: the ones running keep the proxy they had. */
@@ -399,6 +456,7 @@ public final class DirectDownloads {
     // ---- the ticking thread -------------------------------------------------------------------------
 
     private void tick() {
+        Map<String, Run> resharing = new HashMap<>();
         try {
             synchronized (this) {
                 long now = System.nanoTime();
@@ -422,12 +480,21 @@ public final class DirectDownloads {
                 for (DirectDownload d : downloads.values()) {
                     if (!d.finished() && !running.containsKey(d.id())) sizes.put(d.id(), sizeOf(partOf(d)));
                 }
+                // A share that moved (the limit changed, the alternative pair came in, a download
+                // started or ended): those curls start again with it, carrying on where they were.
+                for (Map.Entry<String, Run> e : List.copyOf(running.entrySet())) {
+                    DirectDownload d = downloads.get(e.getKey());
+                    if (d != null && reshare(e.getValue().limit, shareOf(d))) {
+                        resharing.put(d.id(), stopRun(d.id()));
+                    }
+                }
                 if (dirty) save();
                 schedule();
             }
         } catch (RuntimeException e) {
             LOG.log(Level.WARNING, "Direct downloads tick failed", e);
         }
+        resharing.forEach(this::endAndRelease);
     }
 
     /** Lock held. Starts the downloads that may start: forced ones, then by age up to the limit. */
@@ -465,7 +532,8 @@ public final class DirectDownloads {
             Files.createDirectories(part.getParent());
             Files.deleteIfExists(headers);
             long have = sizeOf(part);
-            Curl.Request request = new Curl.Request(d.url(), part, headers, have > 0, d.rateLimit(), proxy, userAgent);
+            long limit = shareOf(d);
+            Curl.Request request = new Curl.Request(d.url(), part, headers, have > 0, limit, proxy, userAgent);
             ProcessBuilder pb = new ProcessBuilder(Curl.command(o.curl()))
                     .redirectOutput(ProcessBuilder.Redirect.DISCARD)
                     .redirectError(errors.toFile());
@@ -473,7 +541,7 @@ public final class DirectDownloads {
             try (OutputStream in = process.getOutputStream()) {
                 in.write(Curl.config(request).getBytes(StandardCharsets.UTF_8));
             }
-            Run run = new Run(process, restarted, have);
+            Run run = new Run(process, restarted, have, limit);
             running.put(d.id(), run);
             ScheduledExecutorService t = thread;
             process.onExit().thenRun(() -> {

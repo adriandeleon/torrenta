@@ -42,10 +42,13 @@ public final class WithDownloads implements Engine {
 
     private final Engine torrents;
     private final DirectDownloads links;
+    /** The settings last applied: the speed page's limits are the links' too. */
+    private volatile EngineSettings settings;
 
     public WithDownloads(Engine torrents, DirectDownloads links, EngineSettings settings) {
         this.torrents = torrents;
         this.links = links;
+        this.settings = settings;
         links.setProxy(proxyOf(settings));
     }
 
@@ -74,6 +77,7 @@ public final class WithDownloads implements Engine {
     public void start() throws EngineException {
         torrents.start();
         links.onTorrentFile(this::handOver);
+        shareLimit(LocalDateTime.now());
         links.start();
     }
 
@@ -332,13 +336,25 @@ public final class WithDownloads implements Engine {
 
     @Override
     public void applySettings(EngineSettings settings) throws EngineException {
+        this.settings = settings;
         links.setProxy(proxyOf(settings));
+        shareLimit(LocalDateTime.now());
         torrents.applySettings(settings);
     }
 
+    /**
+     * The torrents' limits as the engine has them, and the same download limit for the links,
+     * shared among them: the normal pair's, or the alternative one's while it is in force.
+     */
     @Override
     public boolean refreshLimits(LocalDateTime now) throws EngineException {
+        shareLimit(now);
         return torrents.refreshLimits(now);
+    }
+
+    private void shareLimit(LocalDateTime now) {
+        EngineSettings s = settings;
+        links.setGlobalLimit(s == null ? 0 : s.speed().effectiveDownloadBytes(now));
     }
 
     @Override

@@ -26,6 +26,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   and `is:link` / `is:torrent` in the filter box. Commands only a torrent understands (Recheck,
   Reannounce, Sequential, Super Seeding, the Queue, Copy Info-Hash, Copy Magnet Link, Export
   .torrent) are off for a selection of downloads and skip the downloads in a mixed one.
+- **The download limit holds for downloads from links too.** Settings → Speed's limit, and the
+  alternative one while it is on or scheduled, is shared by the downloads from links among
+  themselves (the torrents keep theirs): each gets an equal part, or its own limit when that is
+  lower, and a change takes within a second.
 
 ### Changed
 

@@ -550,9 +550,14 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   rules) unless "Add without asking", then `Engine.addLink(LinkRequest)`; a name typed there is
   `DirectDownload.named` and survives the server's. Links that arrive while it is open wait in
   `linksWaiting`. The capture hook takes `link-name:<name>` (`~` for a space) and `link-download`,
-  and prints `link-dialog=`. The engine's
-  speed limits do not reach curl; a download's own limit (the Limits dialog) does, as
-  `limit-rate`. `DirectDownloadsTest` runs the real curl against a loopback server and is
+  and prints `link-dialog=`. The download
+  limit in force (`Speed.effectiveDownloadBytes`, the alternative pair included, from
+  `WithDownloads.refreshLimits`/`applySettings`) is shared by the downloads from links among
+  themselves, apart from the torrents': each curl gets `DirectDownloads.share` of it (an equal part
+  among `meantToRun`, the queue's target rather than the runs of this instant, capped by its own
+  limit from the Limits dialog) as `limit-rate`, and since curl takes it only at start the tick
+  restarts a run whose share moved by more than a tenth (`reshare`), carrying on with
+  `continue-at`. Upload limits mean nothing to curl. `DirectDownloadsTest` runs the real curl against a loopback server and is
   `@EnabledIf` curl is on the PATH.
 - **The config folder is locked by the first instance, and the port file is not the arbiter.**
   `SingleInstance.claim` runs in `App.main` before the toolkit: `tryLock` on `instance.lock`
