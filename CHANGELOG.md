@@ -5,6 +5,8 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+## 0.2.0 — 2026-10-24
+
 ### Added
 
 - **Links that are not torrents are downloaded by curl.** Paste, type or drop a link to any file
@@ -38,6 +40,11 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   chevron at the right edge says which. Drag the sidebar's edge that faces the list to make it
   wider or narrower (150 to 480 px); a double-click on the edge goes back to the default. Both
   are remembered.
+- **Settings pages have glyphs.** Each page in the Settings window's sidebar leads with a glyph;
+  a page that holds what a command does shows that command's own (Search, RSS, Speed, Queue,
+  Categories and tags), so the menus and the sidebar agree.
+- **The detail header's buttons have coloured glyphs.** Pause in amber (Resume, in green, while
+  the torrent is paused), Reannounce in indigo, Open folder in the accent, in both themes.
 
 ### Fixed
 
@@ -45,6 +52,9 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   Location keeps it; View → Details Pane (and the palette's Toggle Details Pane) is now `Ctrl+I`.
   Every chord the window binds is now one table (`ui.Chords`), and a test fails when two actions
   are given the same key.
+- **The detail pane showed the previous torrent for up to a second after a click.** It waited
+  for the next once-a-second poll; a selection change now fetches the detail at once (about
+  20 ms instead of up to a whole tick).
 
 ## 0.1.0 — 2026-10-22
 
