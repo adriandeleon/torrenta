@@ -50,6 +50,7 @@ import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.util.StringConverter;
 
+import com.torrenta.content.ContentCheck;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
 import com.torrenta.engine.DownloadPlan;
@@ -57,6 +58,7 @@ import com.torrenta.engine.FileRenames;
 import com.torrenta.engine.SwarmPreview;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
+import com.torrenta.session.AddDefaults;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -137,7 +139,7 @@ final class AddDialog {
     private final TextField tags = new TextField();
     private final CheckBox withoutAsking = new CheckBox(tr("dialog.add.withoutAsking"));
     private final List<Category> categories;
-    private final Defaults defaults;
+    private final AddDefaults defaults;
     /** Enter adds paused and Shift+Enter starts, rather than the other way round. */
     private final boolean startPausedDefault;
 
@@ -184,73 +186,6 @@ final class AddDialog {
     private Choice result;
 
     /**
-     * What the settings say a new torrent starts as.
-     *
-     * @param savePath the download folder
-     * @param startPaused the Start paused box's starting position
-     * @param sequential the Sequential box's
-     * @param incompleteEnabled whether downloads start in the incomplete folder
-     * @param incompleteDir that folder
-     * @param partSuffix whether incomplete files carry {@code .part}
-     * @param preallocate whether files are allocated in full at the start
-     * @param layout how the files sit under the save path
-     */
-    record Defaults(
-            Path savePath,
-            boolean startPaused,
-            boolean sequential,
-            boolean incompleteEnabled,
-            Path incompleteDir,
-            boolean partSuffix,
-            boolean preallocate,
-            FileRenames.Layout layout) {
-
-        Defaults {
-            if (layout == null) layout = FileRenames.Layout.ORIGINAL;
-        }
-
-        /** In the torrent's own layout. */
-        Defaults(
-                Path savePath,
-                boolean startPaused,
-                boolean sequential,
-                boolean incompleteEnabled,
-                Path incompleteDir,
-                boolean partSuffix,
-                boolean preallocate) {
-            this(savePath, startPaused, sequential, incompleteEnabled, incompleteDir, partSuffix, preallocate, null);
-        }
-
-        static Defaults from(com.torrenta.store.Settings settings) {
-            return new Defaults(
-                    settings.downloadDir(),
-                    settings.addStartPaused(),
-                    settings.addSequential(),
-                    settings.incompleteEnabled(),
-                    settings.incompleteDir(),
-                    settings.partSuffix(),
-                    settings.preallocate(),
-                    settings.addContentLayout());
-        }
-
-        /** The same defaults with another folder: a remote engine's own, when the files are not here. */
-        Defaults withSavePath(Path path) {
-            return new Defaults(
-                    path, startPaused, sequential, incompleteEnabled, incompleteDir, partSuffix, preallocate);
-        }
-
-        /** Where a torrent saved to {@code destination} starts and ends. */
-        DownloadPlan plan(Path destination) {
-            return DownloadPlan.of(destination, incompleteEnabled, incompleteDir);
-        }
-
-        AddRequest.Storage storage(Path destination) {
-            return AddRequest.Storage.of(plan(destination), partSuffix, preallocate)
-                    .withLayout(layout);
-        }
-    }
-
-    /**
      * @param preview the torrent's contents, or null for a magnet
      * @param via where it came from, for the header
      * @param defaults the folder, Start paused (which makes Enter add paused and Shift+Enter
@@ -262,7 +197,7 @@ final class AddDialog {
             AddRequest.Source source,
             TorrentPreview preview,
             Via via,
-            Defaults defaults,
+            AddDefaults defaults,
             List<Category> categories) {
         this(owner, source, preview, via, defaults, categories, false);
     }
@@ -279,7 +214,7 @@ final class AddDialog {
                 new AddRequest.Magnet(""),
                 null,
                 Via.FILE,
-                new Defaults(Path.of(""), false, false, false, Path.of(""), false, false),
+                new AddDefaults(Path.of(""), false, false, false, Path.of(""), false, false),
                 List.of(),
                 true);
         dialog.initial = Map.copyOf(priorities);
@@ -292,7 +227,7 @@ final class AddDialog {
             AddRequest.Source source,
             TorrentPreview preview,
             Via via,
-            Defaults defaults,
+            AddDefaults defaults,
             List<Category> categories,
             boolean existing) {
         this.source = source;
@@ -1163,20 +1098,6 @@ final class AddDialog {
      */
     static String keyLabel(String displayText) {
         return displayText.replace("↵", tr("dialog.common.key.enter")).replace("⏎", tr("dialog.common.key.enter"));
-    }
-
-    /** The request an input is added with when the dialog does not open: the settings' defaults. */
-    static AddRequest withoutAsking(AddRequest.Source source, Defaults defaults) {
-        return new AddRequest(
-                source,
-                defaults.savePath(),
-                defaults.startPaused(),
-                defaults.sequential(),
-                false,
-                AddRequest.StopCondition.NONE,
-                Map.of(),
-                TorrentLabels.NONE,
-                defaults.storage(defaults.savePath()));
     }
 
     /**

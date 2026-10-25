@@ -1,11 +1,10 @@
-package com.torrenta.ui;
+package com.torrenta.content;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 class FileKindTest {
 
@@ -49,10 +48,5 @@ class FileKindTest {
         assertEquals("", FileKind.extension("Makefile"));
         assertEquals("", FileKind.extension(".bashrc"));
         assertEquals("", FileKind.extension("dot."));
-    }
-
-    @Test
-    void everyKindHasAGlyph() {
-        for (FileKind kind : FileKind.values()) assertNotNull(kind.glyph(), kind.name());
     }
 }

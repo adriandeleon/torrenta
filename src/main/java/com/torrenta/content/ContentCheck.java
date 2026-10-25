@@ -1,4 +1,4 @@
-package com.torrenta.ui;
+package com.torrenta.content;
 
 import java.util.ArrayList;
 import java.util.Arrays;

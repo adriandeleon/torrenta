@@ -50,6 +50,7 @@ import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 import javafx.util.StringConverter;
 
+import com.torrenta.content.FileKind;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
@@ -1176,7 +1177,7 @@ final class DetailPane extends VBox {
             }
             setText(item);
             setGraphic(glyphs.computeIfAbsent(FileKind.of(row.name(), !row.isFile()), kind -> {
-                Icons.Glyph glyph = kind.glyph();
+                Icons.Glyph glyph = Icons.forKind(kind);
                 glyph.getStyleClass().add("file-glyph");
                 if (kind == FileKind.FOLDER) glyph.getStyleClass().add("file-glyph-folder");
                 return glyph;
