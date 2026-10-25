@@ -347,6 +347,11 @@ public final class WithDownloads implements Engine {
     }
 
     @Override
+    public void rebind() throws EngineException {
+        torrents.rebind();
+    }
+
+    @Override
     public void applySettings(EngineSettings settings) throws EngineException {
         this.settings = settings;
         links.setProxy(proxyOf(settings));

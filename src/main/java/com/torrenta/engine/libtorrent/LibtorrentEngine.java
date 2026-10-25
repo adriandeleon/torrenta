@@ -76,6 +76,7 @@ import org.libtorrent4j.Vectors;
 import org.libtorrent4j.alerts.AddTorrentAlert;
 import org.libtorrent4j.alerts.Alert;
 import org.libtorrent4j.alerts.AlertType;
+import org.libtorrent4j.alerts.ExternalIpAlert;
 import org.libtorrent4j.alerts.FileCompletedAlert;
 import org.libtorrent4j.alerts.FileErrorAlert;
 import org.libtorrent4j.alerts.FileRenameFailedAlert;
@@ -2113,6 +2114,18 @@ public final class LibtorrentEngine implements Engine {
         emit(EngineEvent.session(EngineEvent.Level.INFO, tr("engine.event.settingsApplied", settings)));
     }
 
+    /**
+     * The bound interface changed under the session: the settings again, and the listen sockets
+     * reopened, since an unchanged {@code listen_interfaces} string is not looked at twice.
+     */
+    @Override
+    public synchronized void rebind() throws EngineException {
+        SessionManager s = session;
+        if (s == null || !s.isRunning()) return;
+        s.applySettings(toPack(engineSettings));
+        s.swig().reopen_network_sockets();
+    }
+
     /** The session's connection limit as libtorrent has it; for the test. */
     int connectionsLimitForTest() throws EngineException {
         return running().settings().connectionsLimit();
@@ -2716,6 +2729,7 @@ public final class LibtorrentEngine implements Engine {
             AlertType.PORTMAP_ERROR.swig(),
             AlertType.INCOMING_CONNECTION.swig(),
             AlertType.DHT_BOOTSTRAP.swig(),
+            AlertType.EXTERNAL_IP.swig(),
             AlertType.PEER_BLOCKED.swig(),
             AlertType.PEER_CONNECT.swig(),
             AlertType.STORAGE_MOVED.swig(),
@@ -2918,6 +2932,9 @@ public final class LibtorrentEngine implements Engine {
                         connectivity.updateAndGet(c -> c.connectedFrom(from));
                     }
                     case DHT_BOOTSTRAP -> connectivity.updateAndGet(Connectivity::bootstrapped);
+                    case EXTERNAL_IP ->
+                        onExternalAddress(
+                                ((ExternalIpAlert) alert).externalAddress().toString());
                     // Counted, not logged: a busy blocklist refuses peers by the hundred.
                     case PEER_BLOCKED -> blockedPeers.incrementAndGet();
                     case PEER_CONNECT -> {
@@ -3018,6 +3035,17 @@ public final class LibtorrentEngine implements Engine {
                 Set<String> errors = trackerErrors.get(id);
                 if (errors != null) errors.remove(alert.trackerUrl());
             }
+        }
+
+        /**
+         * libtorrent's vote on this machine's address as peers, trackers and the DHT report it: kept
+         * for the status bar, and said in the log when it moves, since an address that is suddenly
+         * the home connection's rather than the VPN's is the leak a person wants to hear of.
+         */
+        private void onExternalAddress(String address) {
+            String was = connectivity.getAndUpdate(c -> c.seenAs(address)).externalAddress();
+            if (!address.equals(was))
+                emit(EngineEvent.session(EngineEvent.Level.INFO, tr("engine.event.seenAs", address)));
         }
 
         /** A fetch's outgoing connections are remembered for the torrent it becomes; nothing else. */

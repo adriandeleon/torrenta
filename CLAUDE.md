@@ -73,6 +73,7 @@ to try one on purpose).
 | Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags, the name a person gave; JSON for the `<hash>.labels` sidecar), `Engine.rename`, `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`; the names sync through `sync.SyncLabels`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `ui.FilterQuery` (the filter box's `key:value` language → predicate + chips), `Sidebar` (a tree: All, Views, Status, Categories, Tags, Trackers), `TagsDialog`; saved views: `store.SavedView` (name + the omnibox's query, one key per field `ui.view.<slug>.name/.query` and `ui.views.order` so sync merges view by view), `SidebarFilter.view(slug)` on the VIEW axis matches everything itself and `MainWindow.rowFilter` ANDs the view's query in (`viewQuery`), `SidebarEntries.View` counts each by its query and carries a broken one's reason (struck through, `:broken`); Save Filter as View is Shortcut+S, the first nine are Shortcut+Alt+1…9 through a scene filter that stands aside in a text field (Ctrl+Alt is AltGr), the row's menu renames, re-points or deletes | `com.torrenta.engine`, `store`, `ui` |
 | Detail | `TorrentDetail` (general, files with their piece range, peers, trackers, pieces, per-piece availability, web seeds) from `Engine.detail(id)`; `ui.Diagnosis` (why it is not moving + remedies; first after an error, a wanted archive that asks for a password, Skip or Remove), `OverviewText`, `PieceStrip`, `Sparkline`; `engine.ArchiveProbe` (pure: ZIP, RAR 4/5, 7z encryption from the first 64 KiB, a 7z's last too; `Reading` gathers them from pieces) and `TorrentDetail.encryptedArchives`; `setFilePriority`, `renamePath` (`FileRenames.plan`/`problem`), `addTrackers`, `removeTracker`, `webSeeds`/`addWebSeeds`/`removeWebSeed` (`WebSeeds`: an http(s) URL with a host, `fresh` against what the torrent has; `Capability.WEB_SEEDS` to edit); `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
 | Engine settings | `EngineSettings` (engine-neutral record; `listenInterfaces()` is the tested string), `Settings.engineSettings()` clamps the `connection.*` and `proxy.*` keys, `LibtorrentEngine.toPack` maps onto `settings_pack`; applied at start (`SessionParams`) and live (`applySettings`) | `com.torrenta.engine`, `store`, `.libtorrent` |
+| Binding | `net.InterfaceWatch` (the bound interface: there, up, its addresses; read every 5 s in the poll), `Engine.rebind`, `Connectivity.externalAddress` (`external_ip_alert`), `ui.NetworkStatus.port(…, bound)`; the leak check: `net.LeakCheck.verdict` (pure: Protected, Exposed, Halted, Unbound, Unknown), `net.ExitCheck` (opt-in, two GETs to the person's address-echo URL, one from the bound address), `ui.LeakView` (pill, sentence, the three addresses), `LeakCard` (the shield pill's card), `ExposurePause` (`connection.pauseWhenExposed`) | `com.torrenta.net`, `engine`, `ui` |
 | IP filter | `IpRange` (literals only, never resolves), `Blocklist` (pure parser for .p2p/.dat/CIDR/plain), `net.BlocklistFetch` (gzip by magic), `ui.IpFilterController` (cache, schedule, bans → `Engine.setIpFilter`), `peer_blocked` alerts counted | `com.torrenta.engine`, `net`, `ui` |
 | Watch folders | `WatchFolder` (entry + pure rules: destination, request, names, `.magnet` lines, magnet id, `Growth`), `WatchFolders` (the service: `configure`, `start`, `stop`, `poll`), `store.WatchFolderStore` (`watch-folders.json`), `ui.WatchFolderDialog`, Settings → Watch folders | `com.torrenta.engine`, `store`, `ui` |
 | Automation | `automation.EventCommand` (pure: `tokens` splits like a shell, `substitute` fills qBittorrent's `%N %L %G %F %R %D %C %Z %T %I %J %K %%` per token, `subject` from a `Torrent` + `TorrentDetail`), `Automation` (the service: `plan` is the rule, `handle(event)` runs on a virtual thread, `Subprocess` with a 10-min ceiling, outcomes back as events), `Notifier` + `Notifiers.forPlatform` (`notify-send` / `osascript` / `toast.ps1` through PowerShell, text as arguments), `AutomationSettings` from `Settings.automation()`; `EngineEvent.Kind` says which events count | `com.torrenta.automation` |
@@ -349,6 +350,37 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   route it, so the first test asserts "never from the other address" everywhere and "from
   loopback" only off Windows. Tracker
   hostnames still resolve through the system's resolver unless a proxy is set.
+- **A binding that reaches no one is said, and the same binding coming back binds again.**
+  `net.InterfaceWatch` (pure: `of(bound, nics)` finds an address by comparing parsed literals,
+  never resolving, and a name exactly then ignoring case; `change` is the log line; `system()`
+  reads `NetworkInterface`, IPv6 compacted, zone ids dropped) runs every five seconds in the
+  window's poll (`watchInterface`, where the engine has `LISTEN_DETAILS`, so never for a daemon).
+  A binding down or missing turns the port entry red with the interface's name ("tun0 missing ·
+  reaching no one"), said without a port: libtorrent opens nothing on an interface that is not
+  there and sends no listen alert either way, so the port stays 0. The same binding going up or
+  down or changing its addresses calls `Engine.rebind()`: the settings again and
+  `reopen_network_sockets`, since an unchanged `listen_interfaces` is not looked at twice.
+  `Connectivity.externalAddress` is libtorrent's `external_ip_alert` (its vote of what peers,
+  trackers and the DHT report), said in the log when it moves and in the port's tooltip as "Peers
+  see this machine as …"; libtorrent changes its mind only after many votes or about fifteen
+  minutes, so a short capture never shows it. The capture's `statusbar=` line ends in `portTip=`.
+- **"Exposed" needs proof, and a full-tunnel VPN is never a leak.** `LeakCheck.verdict` calls it
+  Exposed only when the swarm sees the default route's address and the bound path, checked, leaves
+  by another; with the bound exit unknown, a full tunnel (both exits the VPN's) would look the same,
+  so it is Unknown, never a guess. The exit check (`connection.exitCheck`, off: it tells a third
+  party this machine's addresses) asks `connection.exitCheckUrl` (empty means `ExitCheck.DEFAULT_URL`,
+  https://api.ipify.org) twice on a virtual thread from the poll (`checkLeaks`): once with
+  `HttpClient.Builder.localAddress` set to the binding (an address as written, else the
+  interface's first non-link-local IPv4, else its first address), once without, no proxy, no
+  redirects; only a 200 whose body is a bare address literal counts. Asked every ten minutes, and
+  at once when the binding or the swarm's view moved or Check now was pressed. The verdict is
+  decided every poll from the last answers; `pauseWhenExposed` pauses what runs (never a person's
+  pause, never a link's curl) and resumes exactly those on Protected, Unbound or the switch off,
+  holding through Halted and Unknown. `ExitCheckTest` proves the bound request's source address
+  against a loopback echo server from 127.0.0.2 (Linux only: macOS has 127.0.0.1 alone). The
+  capture action `leak-card` opens the card, `leak-check` presses Check now, and `statusbar=` ends
+  in `leak=` and `leakCard=`; a stand-in exit server is a few lines of Python's `http.server`
+  answering `client_address[0]`.
 - **Engine events arrive on libtorrent4j's alert thread.** `MainWindow` hops to the FX thread
   before touching the log or the status bar; `EventLog.add` is FX-only. The j.u.l bridge takes
   the hop as a parameter so tests run it inline.

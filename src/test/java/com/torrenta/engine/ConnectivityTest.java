@@ -99,4 +99,15 @@ class ConnectivityTest {
         assertTrue(c.listened(7000, true).dhtBootstrapped(), "a port change is not a DHT restart");
         assertSame(c, c.connectedFrom("10.0.0.1"));
     }
+
+    /** The swarm's view of this machine is the network's, not the socket's: a new port keeps it. */
+    @Test
+    void theAddressTheSwarmSeesOutlivesANewPort() {
+        Connectivity seen = Connectivity.NONE.listened(6881, true).seenAs("198.51.100.7");
+        assertEquals("198.51.100.7", seen.externalAddress());
+        assertEquals(
+                "198.51.100.7",
+                seen.listened(6882, true).mapped(true).bootstrapped().externalAddress());
+        assertEquals("", Connectivity.NONE.externalAddress(), "nobody has said yet");
+    }
 }

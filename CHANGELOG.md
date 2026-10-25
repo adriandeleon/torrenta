@@ -7,6 +7,22 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **A leak check you can see.** With a binding set, a shield beside the port says Protected,
+  Exposed, Halted (the interface is down, so nothing goes out) or Unchecked; a click shows the
+  three addresses it decided from. Settings → Connection → "Check where traffic leaves" (off: it
+  tells the server you choose this machine's addresses) asks an address-echo server, by default
+  https://api.ipify.org, every ten minutes where traffic through the binding leaves and where the
+  default route leaves. Exposed means peers see the default route's address while the binding
+  leaves elsewhere; a VPN that carries everything is never called a leak. "Pause torrents when
+  exposed" pauses what runs while exposed and resumes exactly those once protected again.
+
+- **A VPN that drops is said at once.** With Settings → Connection bound to an interface or an
+  address, Torrenta looks at it every five seconds: when it goes down or disappears, the port in
+  the status bar turns red ("tun0 missing · reaching no one") and the log says so; nothing goes
+  out another way in the meantime. When it comes back, or its address changes, Torrenta binds to
+  it again by itself. The port's tooltip names the interface and its addresses, and the address
+  peers see this machine as, once libtorrent has settled on one.
+
 - **Commands for many torrents at once, typed.** In the omnibox, `>` and a command with what it
   takes: `>set-category Films`, `>add-tag keep`, `>remove-tag old`, `>set-location /srv/media`,
   `>limit-down 500k` (or `none`), `>limit-up 1m`, `>sequential on`, `>queue top`, `>pause`,

@@ -15,6 +15,8 @@ import java.util.Locale;
  * @param incoming a peer outside this network connected in since the port was last opened
  * @param dhtEnabled the DHT is switched on in the settings
  * @param dhtBootstrapped the DHT has finished its bootstrap since the session started
+ * @param externalAddress this machine's address as the swarm sees it, by libtorrent's vote of what
+ *     peers, trackers and the DHT said; empty until one has said
  */
 public record Connectivity(
         int port,
@@ -23,7 +25,12 @@ public record Connectivity(
         Mapping mapping,
         boolean incoming,
         boolean dhtEnabled,
-        boolean dhtBootstrapped) {
+        boolean dhtBootstrapped,
+        String externalAddress) {
+
+    public Connectivity {
+        externalAddress = externalAddress == null ? "" : externalAddress;
+    }
 
     /** The router's answer to the port mapping, the best of UPnP's and NAT-PMP's. */
     public enum Mapping {
@@ -33,7 +40,7 @@ public record Connectivity(
     }
 
     /** Before the engine has started. */
-    public static final Connectivity NONE = new Connectivity(0, false, false, Mapping.NONE, false, false, false);
+    public static final Connectivity NONE = new Connectivity(0, false, false, Mapping.NONE, false, false, false, "");
 
     /**
      * The facts after a listen alert. A different port opens a new question: no peer has reached
@@ -48,27 +55,40 @@ public record Connectivity(
                 same ? mapping : Mapping.NONE,
                 same && incoming,
                 dhtEnabled,
-                dhtBootstrapped);
+                dhtBootstrapped,
+                externalAddress);
     }
 
     /** One transport mapped the port, or failed to; a success from either stands. */
     public Connectivity mapped(boolean succeeded) {
         Mapping next = succeeded || mapping == Mapping.MAPPED ? Mapping.MAPPED : Mapping.FAILED;
-        return new Connectivity(port, listening, listenFailed, next, incoming, dhtEnabled, dhtBootstrapped);
+        return new Connectivity(
+                port, listening, listenFailed, next, incoming, dhtEnabled, dhtBootstrapped, externalAddress);
     }
 
     /** A peer connected in from {@code address}; one on this network proves nothing about the router. */
     public Connectivity connectedFrom(String address) {
         if (incoming || isLocal(address)) return this;
-        return new Connectivity(port, listening, listenFailed, mapping, true, dhtEnabled, dhtBootstrapped);
+        return new Connectivity(
+                port, listening, listenFailed, mapping, true, dhtEnabled, dhtBootstrapped, externalAddress);
     }
 
     public Connectivity dht(boolean enabled) {
-        return new Connectivity(port, listening, listenFailed, mapping, incoming, enabled, dhtBootstrapped);
+        return new Connectivity(
+                port, listening, listenFailed, mapping, incoming, enabled, dhtBootstrapped, externalAddress);
+    }
+
+    /**
+     * libtorrent settled on this machine's external address: the one peers and trackers see,
+     * which is the VPN's when traffic goes out through it. Survives a new port: the address is
+     * the network's, not the listen socket's.
+     */
+    public Connectivity seenAs(String address) {
+        return new Connectivity(port, listening, listenFailed, mapping, incoming, dhtEnabled, dhtBootstrapped, address);
     }
 
     public Connectivity bootstrapped() {
-        return new Connectivity(port, listening, listenFailed, mapping, incoming, dhtEnabled, true);
+        return new Connectivity(port, listening, listenFailed, mapping, incoming, dhtEnabled, true, externalAddress);
     }
 
     /**

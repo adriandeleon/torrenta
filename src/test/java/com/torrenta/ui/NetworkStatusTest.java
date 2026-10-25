@@ -6,6 +6,7 @@ import java.util.Optional;
 import com.torrenta.engine.Connectivity;
 import com.torrenta.engine.SessionStats;
 import com.torrenta.engine.TorrentState;
+import com.torrenta.net.InterfaceWatch;
 import com.torrenta.ui.NetworkStatus.Dot;
 import org.junit.jupiter.api.Test;
 
@@ -17,6 +18,47 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class NetworkStatusTest {
 
     private static final Connectivity UP = Connectivity.NONE.dht(true).listened(51413, true);
+
+    /**
+     * A bound interface that is down or gone is the whole story: nothing is reached through it
+     * and nothing leaks around it, so the dot is red with the interface's name, whatever the port.
+     */
+    @Test
+    void aBindingThatReachesNoOneIsSaidBeforeThePort() {
+        Connectivity open = UP.connectedFrom("203.0.113.9");
+        NetworkStatus.Port down = NetworkStatus.port(
+                        open,
+                        0,
+                        InterfaceWatch.of("tun0", List.of(new InterfaceWatch.Nic("tun0", false, List.of("10.8.0.2")))))
+                .orElseThrow();
+        assertEquals("tun0 down · reaching no one", down.text());
+        assertEquals(Dot.DOWN, down.dot());
+        assertTrue(down.tooltip().startsWith("Torrenta is bound to tun0, which is down"), down.tooltip());
+        NetworkStatus.Port gone =
+                NetworkStatus.port(open, 0, InterfaceWatch.of("wg0", List.of())).orElseThrow();
+        assertEquals("wg0 missing · reaching no one", gone.text());
+        assertEquals(Dot.DOWN, gone.dot());
+        assertEquals(
+                gone,
+                NetworkStatus.port(Connectivity.NONE, 0, InterfaceWatch.of("wg0", List.of()))
+                        .orElseThrow(),
+                "libtorrent listens on nothing it cannot find, and says nothing: no port is needed");
+    }
+
+    @Test
+    void theTooltipNamesAWorkingBindingAndHowTheSwarmSeesThisMachine() {
+        InterfaceWatch.State tun =
+                InterfaceWatch.of("tun0", List.of(new InterfaceWatch.Nic("tun0", true, List.of("10.8.0.2"))));
+        NetworkStatus.Port port =
+                NetworkStatus.port(UP.seenAs("198.51.100.7"), 0, tun).orElseThrow();
+        assertEquals(Dot.CHECKING, port.dot(), "a working binding leaves the port's own story");
+        assertTrue(
+                port.tooltip().endsWith("\nBound to tun0: 10.8.0.2\nPeers see this machine as 198.51.100.7"),
+                port.tooltip());
+        assertFalse(
+                NetworkStatus.port(UP, 0).orElseThrow().tooltip().contains("Peers see"),
+                "nothing said before anyone has said it");
+    }
 
     @Test
     void nothingIsSaidBeforeThePortIsKnown() {

@@ -534,6 +534,9 @@ final class SettingsWindow {
     private Spinner<Integer> port;
     private CheckBox randomPort;
     private TextField listenInterface;
+    private CheckBox exitCheck;
+    private TextField exitCheckUrl;
+    private CheckBox pauseWhenExposed;
     private CheckBox ipv6;
     private CheckBox upnp;
     private Spinner<Integer> maxConnections;
@@ -3056,6 +3059,37 @@ final class SettingsWindow {
                 listenInterface,
                 tr("settings.connection.interface.keywords"),
                 Engine.Capability.LISTEN_DETAILS);
+        exitCheck = bool(Settings.CONN_EXIT_CHECK);
+        row(
+                Category.CONNECTION,
+                listening,
+                tr("settings.connection.exitCheck"),
+                tr("settings.connection.exitCheck.desc"),
+                exitCheck,
+                tr("settings.connection.exitCheck.keywords"),
+                Engine.Capability.LISTEN_DETAILS);
+        exitCheckUrl = text(Settings.CONN_EXIT_CHECK_URL);
+        exitCheckUrl.setPrefColumnCount(18);
+        exitCheckUrl.setPromptText(com.torrenta.net.ExitCheck.DEFAULT_URL);
+        exitCheckUrl.disableProperty().bind(exitCheck.selectedProperty().not());
+        row(
+                Category.CONNECTION,
+                listening,
+                tr("settings.connection.exitCheckUrl"),
+                tr("settings.connection.exitCheckUrl.desc"),
+                exitCheckUrl,
+                tr("settings.connection.exitCheckUrl.keywords"),
+                Engine.Capability.LISTEN_DETAILS);
+        pauseWhenExposed = bool(Settings.CONN_PAUSE_WHEN_EXPOSED);
+        pauseWhenExposed.disableProperty().bind(exitCheck.selectedProperty().not());
+        row(
+                Category.CONNECTION,
+                listening,
+                tr("settings.connection.pauseWhenExposed"),
+                tr("settings.connection.pauseWhenExposed.desc"),
+                pauseWhenExposed,
+                tr("settings.connection.pauseWhenExposed.keywords"),
+                Engine.Capability.LISTEN_DETAILS);
 
         VBox limits = section(page, tr("settings.connection.limits"));
         maxConnections = intSpinner(2, 10_000, Settings.CONN_MAX_CONNECTIONS);
@@ -3658,6 +3692,9 @@ final class SettingsWindow {
             upnp.setSelected(e.upnp());
             ipv6.setSelected(e.ipv6());
             listenInterface.setText(e.listenInterface());
+            exitCheck.setSelected(settings.exitCheck());
+            exitCheckUrl.setText(settings.get(Settings.CONN_EXIT_CHECK_URL, ""));
+            pauseWhenExposed.setSelected(settings.pauseWhenExposed());
             maxConnections.getValueFactory().setValue(e.maxConnections());
             maxPerTorrent.getValueFactory().setValue(e.maxConnectionsPerTorrent());
             uploadSlots.getValueFactory().setValue(e.uploadSlots());
