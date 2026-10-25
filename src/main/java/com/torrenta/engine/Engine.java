@@ -126,6 +126,41 @@ public interface Engine extends AutoCloseable {
     void moveStorage(String id, String destination, boolean moveFiles) throws EngineException;
 
     /**
+     * Removes the torrent (not its files) and hands back what puts it back as it was: its resume
+     * data written fresh for the occasion, its labels, its storage record, its place in the
+     * queue. Only with {@link Capability#UNDO_REMOVE}.
+     */
+    default Detached detach(String id) throws EngineException {
+        throw new EngineException(tr("engine.error.noUndo"));
+    }
+
+    /**
+     * Puts a detached torrent back, without a recheck, as a restored one: nothing that runs on an
+     * add runs on it. Refused when a torrent of that id is in the list again.
+     */
+    default void reattach(Detached torrent) throws EngineException {
+        throw new EngineException(tr("engine.error.noUndo"));
+    }
+
+    /**
+     * A torrent taken out by {@link #detach}. The bytes are the engine's own: its resume data and
+     * its sidecars, opaque here as they are in the store.
+     *
+     * @param id the torrent's id
+     * @param name its name, for what the undo says
+     * @param resume its resume data, fresh
+     * @param labels its labels sidecar, or empty
+     * @param storage its storage record, or empty
+     * @param queuePosition its place in the queue, or -1
+     */
+    record Detached(String id, String name, byte[] resume, byte[] labels, byte[] storage, int queuePosition) {
+        public Detached {
+            labels = labels == null ? new byte[0] : labels;
+            storage = storage == null ? new byte[0] : storage;
+        }
+    }
+
+    /**
      * Super seeding: a seed offers each peer only pieces nobody else has yet, so a first seed's
      * upload goes as far as it can. Meaningful for a complete torrent; kept in its resume data.
      * Needs {@link Capability#SUPER_SEEDING}.
@@ -361,7 +396,12 @@ public interface Engine extends AutoCloseable {
         /** The content layout on add: in a folder of its own, or without the torrent's root folder. */
         CONTENT_LAYOUT,
         /** Adding and removing a torrent's web seeds; any engine lists them. */
-        WEB_SEEDS;
+        WEB_SEEDS,
+        /**
+         * A removal that can be taken back: {@link #detach} keeps what brings the torrent back as
+         * it was, and {@link #reattach} brings it back without a recheck.
+         */
+        UNDO_REMOVE;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

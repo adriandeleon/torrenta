@@ -421,6 +421,60 @@ class LibtorrentEngineTest {
         }
     }
 
+    /**
+     * Undo's engine half: a detached torrent comes back as it was, labels and queue place and
+     * all, as a restored one (nothing that runs on an add runs), and without a recheck. The proof
+     * of the last is a byte changed in a downloaded file while it was out, its size kept: from its
+     * resume data the torrent stays complete, where a recheck would fail that piece.
+     */
+    @Test
+    void aDetachedTorrentComesBackAsItWasWithoutARecheck(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "pair");
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine engine = engine(dir, store)) {
+            engine.addListener(events::add);
+            engine.start();
+            Torrent t = engine.add(downloadsTorrent(dir, torrent));
+            await(
+                    "seeding from the files already there",
+                    () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+            engine.setCategory(t.id(), "Linux");
+            engine.setTags(t.id(), List.of("keep"));
+
+            com.torrenta.engine.Engine.Detached detached = engine.detach(t.id());
+            assertTrue(engine.torrents().isEmpty(), "out of the list");
+            assertFalse(store.contains(t.id()), "and out of the store, as a removal is");
+            assertEquals("pair", detached.name());
+            assertTrue(Files.isRegularFile(downloads.resolve("pair").resolve("a.bin")), "the files stay");
+
+            Path a = downloads.resolve("pair").resolve("a.bin");
+            byte[] bytes = Files.readAllBytes(a);
+            bytes[0] ^= 0x5a;
+            Files.write(a, bytes);
+
+            events.clear();
+            engine.reattach(detached);
+            await("back in the list", () -> engine.torrents().size() == 1);
+            Torrent back = engine.torrents().get(0);
+            assertEquals(t.id(), back.id());
+            assertEquals("Linux", back.category());
+            assertEquals(List.of("keep"), back.tags());
+            // Past any checking: a recheck would have ended in DOWNLOADING, short the changed piece.
+            await("seeding again", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+            assertTrue(engine.torrents().get(0).progress() >= 1.0, "no recheck found the changed byte");
+            await(
+                    "said as restored",
+                    () -> events.stream().anyMatch(e -> e.message().equals("Restored pair")));
+            assertTrue(
+                    events.stream().noneMatch(e -> e.kind() == EngineEvent.Kind.ADDED),
+                    "run-on-added does not run for a torrent put back: " + events);
+            await("in the store again", () -> store.contains(t.id()));
+            assertThrows(EngineException.class, () -> engine.reattach(detached), "it is back already");
+        }
+    }
+
     @Test
     void inspectShowsTheFilesWithoutAdding(@TempDir Path dir) throws Exception {
         Path downloads = dir.resolve("downloads");

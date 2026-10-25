@@ -55,7 +55,15 @@ final class RemoveConfirm {
     }
 
     /** FX thread. The question itself, for a removal worded its own way; true on {@code button}. */
+    /** The capture hook's answer to the next question, which is then not shown; null for a person's. */
+    static Boolean answerForCapture;
+
     static boolean ask(Window owner, String header, String text, String button) {
+        if (answerForCapture != null) {
+            boolean answer = answerForCapture;
+            answerForCapture = null;
+            return answer;
+        }
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, text);
         confirm.setTitle(header);
         confirm.setHeaderText(header);
