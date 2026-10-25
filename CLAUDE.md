@@ -416,6 +416,15 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   only: the blob leaves the store at once, so a quit ends the undo rather than a crash bringing the
   torrent back. Rename is not undoable: the window cannot tell a given name from the torrent's own.
   Shortcut+Z is a scene filter that stands aside in a text field, which has an undo of its own.
+- **A command typed with its argument is a palette row of its own** (`ui.OmniCommand`: `>set-category
+  Films`, `>add-tag keep`, `>limit-down 500k`, `>queue top`, `>pause` …). `parse` is empty unless
+  the first word is a verb, so the palette's own search is untouched; otherwise it is `Ready` or a
+  `Problem` whose row says what does not read. `CommandPalette.setResolver` puts that row first.
+  The targets are `Actions.targets`: every match while the omnibox holds chips, else the selection,
+  counted when the row is built and acted on as counted. A removal always asks, anything over
+  `ASK_ABOVE` (20) asks; category, tags, location and limits go through `onTorrentsUndoable`, so
+  one Enter is one undo entry. The capture drives it as `omnibox:>add-tag~keep,focus-key:ENTER`;
+  the `sidebar=` line printed right after is a poll older than the change.
 - **A remote engine is a second `Engine`, and the window hides what it lacks.** `Engine.capabilities()`
   is valid after `start()` (a daemon's depends on its RPC version); `MainWindow.applyCapabilities`
   runs in `engineReady` and sets one `BooleanProperty` per capability that the gated commands'

@@ -3,6 +3,8 @@ package com.torrenta.ui;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Function;
 
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -46,6 +48,15 @@ final class CommandPalette {
     private final VBox card = new VBox(6);
     private final Region backdrop = new Region();
     private List<Command> commands = List.of();
+    /**
+     * What a query reads as when it is a command with an argument ({@code set-category Films}):
+     * the window's, from {@link OmniCommand}; the row it gives leads the list.
+     */
+    private Function<String, Optional<Command>> resolver = q -> Optional.empty();
+
+    void setResolver(Function<String, Optional<Command>> resolver) {
+        this.resolver = resolver;
+    }
     /** The query of the current filter pass, read by the cells to embolden the matched characters. */
     private String currentQuery = "";
 
@@ -147,7 +158,9 @@ final class CommandPalette {
 
     private void refilter(String text) {
         currentQuery = text == null ? "" : text;
-        results.getItems().setAll(rank(text, commands));
+        List<Command> rows = new ArrayList<>(rank(text, commands));
+        resolver.apply(currentQuery).ifPresent(typed -> rows.addFirst(typed));
+        results.getItems().setAll(rows);
         if (!results.getItems().isEmpty()) results.getSelectionModel().selectFirst();
         Insets in = results.getInsets();
         results.setPrefHeight(listHeight(in == null ? 0 : in.getTop() + in.getBottom()));
