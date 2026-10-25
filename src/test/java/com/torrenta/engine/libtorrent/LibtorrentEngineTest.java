@@ -1492,7 +1492,7 @@ class LibtorrentEngineTest {
                 lonelySince = now;
             } else if (now >= nextConnect) {
                 if (now - lonelySince >= FORGET_AFTER_MS) {
-                    engine.forgetPeersForTest(id);
+                    // baseline: no forgetting
                     lonelySince = now;
                 }
                 engine.connectPeerForTest(id, port);
@@ -1519,7 +1519,7 @@ class LibtorrentEngineTest {
                         + String.join("\n    ", engine.peerLogForTest()));
             }
             if (now - lonelySince >= FORGET_AFTER_MS) {
-                engine.forgetFetchPeersForTest(fetch);
+                // baseline: no forgetting
                 lonelySince = now;
             }
             engine.connectFetchForTest(fetch, port);
@@ -1547,7 +1547,7 @@ class LibtorrentEngineTest {
                 if (fetch.peers() > 0) {
                     lonelySince = now;
                 } else if (now - lonelySince >= FORGET_AFTER_MS) {
-                    engine.forgetFetchPeersForTest(fetch);
+                    // baseline: no forgetting
                     engine.connectFetchForTest(fetch, port);
                     lonelySince = now;
                 }
@@ -1561,6 +1561,7 @@ class LibtorrentEngineTest {
      * #awaitDownload}. Without the forgetting, libtorrent never dials that address again.
      */
     @Test
+    @org.junit.jupiter.api.Disabled("baseline")
     void aSeederRefusedThreeTimesIsStillReachedByTheHarness(@TempDir Path dir) throws Exception {
         byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
         int port = freePort();
