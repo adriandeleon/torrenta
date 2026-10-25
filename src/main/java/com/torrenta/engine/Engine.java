@@ -270,6 +270,12 @@ public interface Engine extends AutoCloseable {
     void applySettings(EngineSettings settings) throws EngineException;
 
     /**
+     * The interface the settings bind to came up, went down or changed its addresses: the engine
+     * binds again to what is there now. Nothing for an engine whose network is not this machine's.
+     */
+    default void rebind() throws EngineException {}
+
+    /**
      * Re-evaluates the speed limits for this moment: the alternative pair if its schedule says so
      * or it is on by hand, the normal pair otherwise. Called every minute by the window and after
      * any change. Returns whether the alternative pair is in force.

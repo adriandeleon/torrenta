@@ -151,6 +151,16 @@ public final class Settings {
 
     public static final String CONN_RANDOM_PORT = "connection.randomPort";
     public static final String CONN_INTERFACE = "connection.interface";
+
+    /** Opt-in: ask an address-echo server where traffic through the binding and around it leaves. */
+    public static final String CONN_EXIT_CHECK = "connection.exitCheck";
+
+    /** The address-echo server's URL; {@code net.ExitCheck.DEFAULT_URL} when unset. */
+    public static final String CONN_EXIT_CHECK_URL = "connection.exitCheckUrl";
+
+    /** Pause the running torrents while the leak check says Exposed; resume them when protected. */
+    public static final String CONN_PAUSE_WHEN_EXPOSED = "connection.pauseWhenExposed";
+
     public static final String CONN_IPV6 = "connection.ipv6";
     public static final String CONN_UPNP = "connection.upnp";
     public static final String CONN_MAX_CONNECTIONS = "connection.maxConnections";
@@ -258,7 +268,7 @@ public final class Settings {
     public static final String[] CONNECTION_KEYS = {
         CONN_PORT, CONN_RANDOM_PORT, CONN_INTERFACE, CONN_IPV6, CONN_UPNP, CONN_MAX_CONNECTIONS,
         CONN_MAX_PER_TORRENT, CONN_UPLOAD_SLOTS, PROXY_TYPE, PROXY_HOST, PROXY_PORT, PROXY_USERNAME,
-        PROXY_PASSWORD, PROXY_PEERS
+        PROXY_PASSWORD, PROXY_PEERS, CONN_EXIT_CHECK, CONN_EXIT_CHECK_URL, CONN_PAUSE_WHEN_EXPOSED
     };
 
     /** The Add dialog's starting positions for its checkboxes. */
@@ -761,6 +771,19 @@ public final class Settings {
         String key = TORRENT_PREFIX + torrentId + PICK_FILES_SUFFIX;
         if (pending) properties.setProperty(key, "true");
         else properties.remove(key);
+    }
+
+    public boolean exitCheck() {
+        return readBoolean(CONN_EXIT_CHECK, false);
+    }
+
+    /** The URL as set; empty means the offered one ({@code net.ExitCheck.DEFAULT_URL}). */
+    public String exitCheckUrl() {
+        return properties.getProperty(CONN_EXIT_CHECK_URL, "").trim();
+    }
+
+    public boolean pauseWhenExposed() {
+        return readBoolean(CONN_PAUSE_WHEN_EXPOSED, false);
     }
 
     public String addUnsafeContent() {

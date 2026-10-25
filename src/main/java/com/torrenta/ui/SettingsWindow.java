@@ -536,6 +536,9 @@ final class SettingsWindow {
     private Spinner<Integer> port;
     private CheckBox randomPort;
     private TextField listenInterface;
+    private CheckBox exitCheck;
+    private TextField exitCheckUrl;
+    private CheckBox pauseWhenExposed;
     private CheckBox ipv6;
     private CheckBox upnp;
     private Spinner<Integer> maxConnections;
@@ -2288,7 +2291,7 @@ final class SettingsWindow {
         url.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().url()));
         TableColumn<TorznabEndpoint, String> key = new TableColumn<>(tr("settings.search.column.apiKey"));
-        key.setPrefWidth(80);
+        key.setPrefWidth(100); // "needed here" on a server whose key is on another machine
         key.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().maskedKey()));
         TableColumn<TorznabEndpoint, String> enabled = new TableColumn<>(tr("common.enabled"));
@@ -2551,6 +2554,12 @@ final class SettingsWindow {
         reloadSearch();
         if (select != null) searchTable.getSelectionModel().select(select);
         onSearchProvidersChanged.run();
+    }
+
+    /** FX thread: the Search page's two tables again, after a sync changed what they show. */
+    void reloadSearchPage() {
+        reloadSearch();
+        reloadDefinitions();
     }
 
     /** The store's list into the table; keeps the selection where it can. */
@@ -3071,6 +3080,37 @@ final class SettingsWindow {
                 tr("settings.connection.interface.desc"),
                 listenInterface,
                 tr("settings.connection.interface.keywords"),
+                Engine.Capability.LISTEN_DETAILS);
+        exitCheck = bool(Settings.CONN_EXIT_CHECK);
+        row(
+                Category.CONNECTION,
+                listening,
+                tr("settings.connection.exitCheck"),
+                tr("settings.connection.exitCheck.desc"),
+                exitCheck,
+                tr("settings.connection.exitCheck.keywords"),
+                Engine.Capability.LISTEN_DETAILS);
+        exitCheckUrl = text(Settings.CONN_EXIT_CHECK_URL);
+        exitCheckUrl.setPrefColumnCount(18);
+        exitCheckUrl.setPromptText(com.torrenta.net.ExitCheck.DEFAULT_URL);
+        exitCheckUrl.disableProperty().bind(exitCheck.selectedProperty().not());
+        row(
+                Category.CONNECTION,
+                listening,
+                tr("settings.connection.exitCheckUrl"),
+                tr("settings.connection.exitCheckUrl.desc"),
+                exitCheckUrl,
+                tr("settings.connection.exitCheckUrl.keywords"),
+                Engine.Capability.LISTEN_DETAILS);
+        pauseWhenExposed = bool(Settings.CONN_PAUSE_WHEN_EXPOSED);
+        pauseWhenExposed.disableProperty().bind(exitCheck.selectedProperty().not());
+        row(
+                Category.CONNECTION,
+                listening,
+                tr("settings.connection.pauseWhenExposed"),
+                tr("settings.connection.pauseWhenExposed.desc"),
+                pauseWhenExposed,
+                tr("settings.connection.pauseWhenExposed.keywords"),
                 Engine.Capability.LISTEN_DETAILS);
 
         VBox limits = section(page, tr("settings.connection.limits"));
@@ -3675,6 +3715,9 @@ final class SettingsWindow {
             upnp.setSelected(e.upnp());
             ipv6.setSelected(e.ipv6());
             listenInterface.setText(e.listenInterface());
+            exitCheck.setSelected(settings.exitCheck());
+            exitCheckUrl.setText(settings.get(Settings.CONN_EXIT_CHECK_URL, ""));
+            pauseWhenExposed.setSelected(settings.pauseWhenExposed());
             maxConnections.getValueFactory().setValue(e.maxConnections());
             maxPerTorrent.getValueFactory().setValue(e.maxConnectionsPerTorrent());
             uploadSlots.getValueFactory().setValue(e.uploadSlots());

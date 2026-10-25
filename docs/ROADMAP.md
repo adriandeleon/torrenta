@@ -461,6 +461,12 @@ every match is where a mistake is largest.
    a card of the three addresses; `connection.pauseWhenExposed`. Tracker names still resolve
    through the system's resolver unless a proxy is set; the card says so. Hidden for a remote
    engine, whose network is not this machine's.
+   The first PR is in: `net.InterfaceWatch` in the poll (a binding down or missing is the port's
+   red entry and a log line, the same binding changing calls `Engine.rebind()`), and
+   `Connectivity.externalAddress` from `external_ip_alert`, in the port's tooltip and the log.
+   The second PR finished it: the opt-in exit check (`net.ExitCheck`), `net.LeakCheck.verdict`,
+   the shield pill and its card (`ui.LeakView`, `LeakCard`), and `connection.pauseWhenExposed`
+   (`ui.ExposurePause`).
 
 ### 1.2 — Headless and the qBittorrent API
 The largest milestone; see "qBittorrent API design" below. Most of what the API needs lives in

@@ -10,16 +10,21 @@ import static com.torrenta.i18n.Messages.tr;
  * One Torznab server as the Settings page lists it: Prowlarr's {@code http://host:9696/1/api},
  * Jackett's {@code http://host:9117/api/v2.0/indexers/all/results/torznab/api}, with its API key.
  *
- * <p>Kept in {@code search-providers.json} by the store. The key is a secret, so the file is this
- * machine's and never syncs. Pure; the validation the dialog applies is {@link #problem}.
+ * <p>Kept in {@code search-providers.json} by the store. Settings sync carries the entry without
+ * its key, which is a secret: a machine that receives one whose server takes a key has it
+ * {@link #keyNeeded} until the key is typed in there. Pure; the validation the dialog applies is
+ * {@link #problem}.
  *
  * @param name what the results and the failure lines call it; empty falls back to the URL's host
  * @param url the API endpoint, {@code http} or {@code https}
  * @param apiKey the key, or empty for a server that asks none (Jackett with no key set)
  * @param enabled asked when searching; a disabled one is kept but left alone
  * @param categories how many categories the last Test found, or {@code -1} when never tested
+ * @param keyNeeded the server takes a key that another machine has and this one was not given yet;
+ *     never true beside a key
  */
-public record TorznabEndpoint(String name, String url, String apiKey, boolean enabled, int categories) {
+public record TorznabEndpoint(
+        String name, String url, String apiKey, boolean enabled, int categories, boolean keyNeeded) {
 
     public TorznabEndpoint {
         url = url == null ? "" : url.trim();
@@ -27,6 +32,12 @@ public record TorznabEndpoint(String name, String url, String apiKey, boolean en
         name = name == null ? "" : name.trim();
         if (name.isEmpty()) name = hostOf(url);
         if (categories < 0) categories = -1;
+        if (!apiKey.isEmpty()) keyNeeded = false;
+    }
+
+    /** An entry whose key, if any, is here. */
+    public TorznabEndpoint(String name, String url, String apiKey, boolean enabled, int categories) {
+        this(name, url, apiKey, enabled, categories, false);
     }
 
     /** A new, enabled, untested entry. */
@@ -36,11 +47,17 @@ public record TorznabEndpoint(String name, String url, String apiKey, boolean en
 
     /** The same entry with the count the Test found. */
     public TorznabEndpoint tested(String foundName, int foundCategories) {
-        return new TorznabEndpoint(name.isEmpty() ? foundName : name, url, apiKey, enabled, foundCategories);
+        return new TorznabEndpoint(name.isEmpty() ? foundName : name, url, apiKey, enabled, foundCategories, keyNeeded);
     }
 
-    /** The key shown without giving it away: {@code ••••} or "none". */
+    /** Whether the server takes a key: one is here, or another machine has it. What sync carries. */
+    public boolean takesKey() {
+        return keyNeeded || !apiKey.isEmpty();
+    }
+
+    /** The key shown without giving it away: {@code ••••}, "none", or that it is still to be typed in here. */
     public String maskedKey() {
+        if (keyNeeded) return tr("search.endpoint.keyNeeded");
         return apiKey.isEmpty() ? tr("search.endpoint.noKey") : "••••••••";
     }
 

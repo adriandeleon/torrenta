@@ -209,10 +209,11 @@ filed under which is `torrents/<info-hash>.labels` beside its resume data, writt
 changes and deleted with the torrent. Watch folders are `watch-folders.json` (folder, what to do
 with the file, save path, category, start paused), this machine's and never synced; a file that is
 not a torrent is renamed `.invalid` and left alone. Search providers are `search-providers.json`
-(name, URL, API key, enabled, the category count the last Test found), this machine's too and
-never synced, since the key is a secret. Definition-file providers are `search-providers/<id>.json`,
-one per site, read only (the shipped examples are copied in once and never written over); which are
-switched off is `search.disabled` in the settings file and syncs. The RSS reader keeps its feeds in
+(name, URL, API key, enabled, the category count the last Test found); settings sync carries the
+servers but never the key, which is a secret, nor the count. Definition-file providers are
+`search-providers/<id>.json`, one per site, read only (the shipped examples are copied in once and
+never written over); a file that differs from the shipped one syncs, and which are switched off is
+`search.disabled` in the settings file and syncs too. The RSS reader keeps its feeds in
 `rss/feeds.json` (id, URL, name, its own interval if any) and each feed's articles, read or not,
 with the last answer's `ETag`, `Last-Modified`, time and error, in `rss/articles/<id>.json`, at most
 500 per feed, the oldest dropped, and its auto-download rules, with what each remembers (the last
@@ -243,6 +244,10 @@ this machine's value and says so. It syncs after startup, half a minute after a 
 few minutes while the window is in front, without ever asking for a password: git signs in the way
 it does for you, and with two `gh` accounts the one that can read the repository is used. Folders,
 the network interface, the clocks of the last checks and the proxy password stay on each machine.
+Category names and tags travel, and so do the search providers: the Torznab servers without their
+API keys, which never leave the machine they were typed on (a server that arrives says "needed
+here" in Settings → Search until you type its key once on that computer), and the definition files
+you added or changed.
 
 After startup, at most once a day, Torrenta asks GitHub whether there is a newer release and says
 so in the status bar and the Help menu; nothing about you or the machine is sent beyond the request

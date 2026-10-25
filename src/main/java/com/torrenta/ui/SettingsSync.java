@@ -27,7 +27,10 @@ import javafx.application.Platform;
 import javafx.util.Duration;
 
 import com.torrenta.engine.Category;
+import com.torrenta.search.TorznabEndpoint;
+import com.torrenta.store.DefinitionStore;
 import com.torrenta.store.LabelStore;
+import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
 import com.torrenta.sync.GitHubCli;
 import com.torrenta.sync.QuietGit;
@@ -35,14 +38,16 @@ import com.torrenta.sync.SyncAccount;
 import com.torrenta.sync.SyncEngine;
 import com.torrenta.sync.SyncLabels;
 import com.torrenta.sync.SyncReport;
+import com.torrenta.sync.SyncSearch;
 import com.torrenta.sync.SyncTarget;
 
 import static com.torrenta.i18n.Messages.tr;
 
 /**
  * Settings sync for the application, as Editora runs it: decides when a {@link SyncEngine} round
- * happens, runs it off the FX thread, writes what it brings into the live settings and the label
- * store (category names and tags, {@link SyncLabels}), and says what happened. Every method is
+ * happens, runs it off the FX thread, writes what it brings into the live settings, the label
+ * store (category names and tags, {@link SyncLabels}) and the search providers ({@link SyncSearch}:
+ * Torznab servers without their keys, definition files), and says what happened. Every method is
  * called on the FX thread.
  *
  * <p>Automatic rounds (after startup, {@value #DIRTY_DELAY_SECONDS} s after a local change, and on
@@ -87,11 +92,16 @@ final class SettingsSync {
          */
         void labelsApplied(SyncLabels.Change change);
 
+        /** The search providers or the definition files changed under the window. */
+        void searchApplied();
+
         boolean windowFocused();
     }
 
     private final Settings settings;
     private final LabelStore labels;
+    private final SearchProviderStore searchStore;
+    private final DefinitionStore definitions;
     private final Path configDir;
     private final Host host;
     private final ExecutorService worker = Executors.newSingleThreadExecutor(r -> {
@@ -109,6 +119,8 @@ final class SettingsSync {
     private boolean again;
     /** True while a round's result is being written: those saves are not "the user changed something". */
     private boolean applying;
+    /** Torznab servers the round brought that wait for their key here; said with the round's line. */
+    private int keysNeeded;
     /** The failure already reported, so an automatic round that fails the same way every interval says it once. */
     private SyncReport.Status reportedFailure;
 
@@ -118,9 +130,17 @@ final class SettingsSync {
     private boolean startupDone;
     private volatile String machine = "";
 
-    SettingsSync(Settings settings, LabelStore labels, Path configDir, Host host) {
+    SettingsSync(
+            Settings settings,
+            LabelStore labels,
+            SearchProviderStore searchStore,
+            DefinitionStore definitions,
+            Path configDir,
+            Host host) {
         this.settings = settings;
         this.labels = labels;
+        this.searchStore = searchStore;
+        this.definitions = definitions;
         this.configDir = configDir;
         this.host = host;
         dirty.setOnFinished(e -> request(false));
@@ -236,7 +256,13 @@ final class SettingsSync {
     void preview(String url, String branch, Consumer<SyncReport> done) {
         worker.execute(() -> {
             SyncReport report = new SyncEngine(
-                            gitFor(url, true), url, branch, new LiveTarget(), new LiveLabels(), machine)
+                            gitFor(url, true),
+                            url,
+                            branch,
+                            new LiveTarget(),
+                            new LiveLabels(),
+                            new LiveSearch(),
+                            machine)
                     .preview();
             Platform.runLater(() -> done.accept(report));
         });
@@ -274,7 +300,13 @@ final class SettingsSync {
             SyncReport report;
             try {
                 report = new SyncEngine(
-                                gitFor(url, interactive), url, branch, new LiveTarget(), new LiveLabels(), machine)
+                                gitFor(url, interactive),
+                                url,
+                                branch,
+                                new LiveTarget(),
+                                new LiveLabels(),
+                                new LiveSearch(),
+                                machine)
                         .run();
             } catch (RuntimeException e) {
                 report = new SyncReport(SyncReport.Status.FAILED, List.of(), List.of(), List.of(), String.valueOf(e));
@@ -288,15 +320,22 @@ final class SettingsSync {
         running = false;
         remoteFailed =
                 report.status() == SyncReport.Status.FETCH_FAILED || report.status() == SyncReport.Status.PUSH_FAILED;
+        String line = null;
         if (report.ok()) {
             settings.setSyncLastEpochMs(System.currentTimeMillis());
             saveOwn();
             reportedFailure = null;
-            if (report.changedAnything() || interactive) host.reportStatus(report.summary());
+            if (report.changedAnything() || interactive) line = report.summary();
         } else if (interactive || reportedFailure != report.status()) {
             reportedFailure = report.status();
-            host.reportStatus(report.summary());
+            line = report.summary();
         }
+        if (keysNeeded > 0) {
+            String keys = tr("sync.report.keysNeeded", keysNeeded);
+            line = line == null ? keys : tr("sync.report.andKeys", line, keys);
+            keysNeeded = 0;
+        }
+        if (line != null) host.reportStatus(line);
         setState(new State(report.ok() ? Phase.IDLE : Phase.PROBLEM, report, LocalDateTime.now(), account));
         boolean more = again || report.status() == SyncReport.Status.LOCAL_BUSY;
         again = false;
@@ -398,6 +437,51 @@ final class SettingsSync {
                     failed.set(e);
                 } finally {
                     host.labelsApplied(change);
+                    Platform.runLater(() -> applying = false);
+                }
+                return true;
+            });
+            if (failed.get() != null) throw new UncheckedIOException(failed.get());
+            return Boolean.TRUE.equals(ok);
+        }
+    }
+
+    /**
+     * The Torznab servers and the definition files, on the FX thread where the Search page edits
+     * them. Counts the servers that arrive waiting for a key, for the round's status line.
+     */
+    private final class LiveSearch implements SyncTarget {
+        @Override
+        public Map<String, String> read() {
+            Map<String, String> out = onFx(this::current);
+            return out == null ? Map.of() : out;
+        }
+
+        private Map<String, String> current() {
+            return SyncSearch.entries(searchStore.entries(), definitions.texts(), DefinitionStore.shippedTexts());
+        }
+
+        @Override
+        public boolean apply(Map<String, String> expected, Map<String, String> merged) {
+            AtomicReference<IOException> failed = new AtomicReference<>();
+            Boolean ok = onFx(() -> {
+                Map<String, String> now = current();
+                if (!now.equals(expected)) return false;
+                applying = true;
+                try {
+                    List<TorznabEndpoint> before = searchStore.entries();
+                    List<TorznabEndpoint> after = SyncSearch.endpoints(before, merged);
+                    if (!after.equals(before)) searchStore.set(after);
+                    keysNeeded += SyncSearch.newlyWaiting(before, after);
+                    SyncSearch.DefinitionChange change = SyncSearch.definitionChange(now, merged);
+                    for (var put : change.put().entrySet()) definitions.put(put.getKey(), put.getValue());
+                    for (String id : change.removed()) definitions.remove(id);
+                    if (!change.isEmpty()) definitions.load();
+                } catch (IOException e) {
+                    // Half applied: the base stays, so the next round merges again from what is here.
+                    failed.set(e);
+                } finally {
+                    host.searchApplied();
                     Platform.runLater(() -> applying = false);
                 }
                 return true;
