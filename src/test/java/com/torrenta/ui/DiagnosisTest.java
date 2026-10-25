@@ -2,6 +2,7 @@ package com.torrenta.ui;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.Torrent;
@@ -68,6 +69,47 @@ class DiagnosisTest {
             Torrent torrent = t.build();
             assertTrue(Diagnosis.of(torrent, RowState.of(torrent, 0), d, 0).isEmpty());
         }
+    }
+
+    /** The commentary (file 2) found asking for a password; downloading or stalled alike. */
+    private static TorrentDetail locked(Priority commentary) {
+        TorrentDetail d =
+                detail(files(commentary), List.of(peer("dI", 0)), List.of(), have(7, 8, 9), availability(8, 9));
+        return new TorrentDetail(
+                d.general(), d.files(), d.peers(), d.trackers(), d.pieces(), d.availability(), d.webSeeds(), Set.of(2));
+    }
+
+    @Test
+    void anArchiveThatAsksForAPasswordIsSaidWhetherOrNotTheTorrentMoves() {
+        for (Torrent t : List.of(
+                T.downloading().down(100).build(),
+                T.downloading().progress(0.9).peers(1, 0).build())) {
+            Diagnosis d = Diagnosis.of(t, RowState.of(t, STALLED), locked(Priority.NORMAL), STALLED)
+                    .orElseThrow();
+            assertEquals(Diagnosis.Title.ENCRYPTED, d.title());
+            assertEquals("commentary.mkv", d.file());
+            assertEquals(2, d.fileIndex());
+            assertEquals(List.of(Diagnosis.Remedy.SKIP_FILE, Diagnosis.Remedy.REMOVE), d.remedies());
+            assertTrue(d.text().startsWith("commentary.mkv asks for a password before it opens."), d.text());
+        }
+    }
+
+    @Test
+    void aSkippedLockedArchiveIsNoLongerSaidAndAnErrorComesFirst() {
+        Torrent stalled = T.downloading().progress(0.9).peers(1, 0).build();
+        Diagnosis skipped = Diagnosis.of(stalled, RowState.of(stalled, STALLED), locked(Priority.IGNORE), STALLED)
+                .orElseThrow();
+        assertEquals(Diagnosis.Title.STALLED, skipped.title(), "back to why it is stalled");
+        Torrent moving = T.downloading().down(100).build();
+        assertTrue(Diagnosis.of(moving, RowState.of(moving, 0), locked(Priority.IGNORE), 0)
+                .isEmpty());
+        Torrent failed = T.downloading().error("disk full").build();
+        assertEquals(
+                Diagnosis.Title.ERROR,
+                Diagnosis.of(failed, RowState.of(failed, 0), locked(Priority.NORMAL), 0)
+                        .orElseThrow()
+                        .title());
+        assertEquals(Diagnosis.Remedy.REMOVE.command(), java.util.Optional.of("remove"));
     }
 
     @Test

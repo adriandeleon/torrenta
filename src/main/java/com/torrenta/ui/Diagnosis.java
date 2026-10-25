@@ -40,7 +40,9 @@ public record Diagnosis(Title title, String body, String file, int fileIndex, Li
     public enum Title {
         STALLED("diagnosis.title.stalled"),
         ERROR("diagnosis.title.error"),
-        QUEUED("diagnosis.title.queued");
+        QUEUED("diagnosis.title.queued"),
+        /** An archive it wants asks for a password (engine.ArchiveProbe): red, like an error. */
+        ENCRYPTED("diagnosis.title.encrypted");
 
         private final String key;
 
@@ -60,7 +62,8 @@ public record Diagnosis(Title title, String body, String file, int fileIndex, Li
         REANNOUNCE("diagnosis.remedy.reannounce", "reannounce"),
         FORCE_RESUME("diagnosis.remedy.forceResume", "force-resume"),
         RETRY("diagnosis.remedy.retry", "force-resume"),
-        OPEN_FOLDER("diagnosis.remedy.openFolder", "open-folder");
+        OPEN_FOLDER("diagnosis.remedy.openFolder", "open-folder"),
+        REMOVE("diagnosis.remedy.remove", "remove");
 
         private final String key;
         private final String command;
@@ -92,12 +95,32 @@ public record Diagnosis(Title title, String body, String file, int fileIndex, Li
     public static Optional<Diagnosis> of(Torrent t, RowState state, TorrentDetail d, long quietSeconds) {
         // A download from a link has no swarm to reason about: its error is the whole story.
         if (t.direct()) return state == RowState.ERROR ? Optional.of(error(t)) : Optional.empty();
+        // A locked archive matters whether or not the torrent moves: before the stall rules, after
+        // an error (which stops everything). Skipping the archive is what makes it go away.
+        if (state != RowState.ERROR && d != null) {
+            Optional<Diagnosis> locked = encrypted(d);
+            if (locked.isPresent()) return locked;
+        }
         return switch (state) {
             case ERROR -> Optional.of(error(t));
             case QUEUED -> RowState.complete(t) ? Optional.empty() : Optional.of(queued(t));
             case STALLED -> Optional.of(stalled(d, quietSeconds));
             default -> Optional.empty();
         };
+    }
+
+    /** The first wanted archive the engine found asking for a password, as a red card. */
+    private static Optional<Diagnosis> encrypted(TorrentDetail d) {
+        if (d.encryptedArchives().isEmpty()) return Optional.empty();
+        return d.files().stream()
+                .filter(f -> d.encryptedArchives().contains(f.index()) && f.priority() != Priority.IGNORE)
+                .findFirst()
+                .map(f -> new Diagnosis(
+                        Title.ENCRYPTED,
+                        tr("diagnosis.encrypted", MARK),
+                        f.path().substring(f.path().lastIndexOf('/') + 1),
+                        f.index(),
+                        List.of(Remedy.SKIP_FILE, Remedy.REMOVE)));
     }
 
     private static Diagnosis error(Torrent t) {

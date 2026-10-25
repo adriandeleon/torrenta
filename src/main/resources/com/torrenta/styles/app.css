@@ -1407,7 +1407,8 @@
     -fx-background-radius: 10, 9;
 }
 
-.diagnosis-card.diagnosis-error {
+.diagnosis-card.diagnosis-error,
+.diagnosis-card.diagnosis-encrypted {
     -fx-background-color: -color-danger-muted, -color-danger-subtle;
 }
 
@@ -1421,7 +1422,8 @@
     -fx-text-fill: -color-warning-fg;
 }
 
-.diagnosis-error .diagnosis-title {
+.diagnosis-error .diagnosis-title,
+.diagnosis-encrypted .diagnosis-title {
     -fx-text-fill: -color-danger-fg;
 }
 
@@ -1458,11 +1460,14 @@
 }
 
 .diagnosis-error .remedy.primary,
-.diagnosis-error .remedy:hover {
+.diagnosis-error .remedy:hover,
+.diagnosis-encrypted .remedy.primary,
+.diagnosis-encrypted .remedy:hover {
     -fx-background-color: -torrenta-error-chip;
 }
 
-.diagnosis-error .remedy.primary .remedy-label {
+.diagnosis-error .remedy.primary .remedy-label,
+.diagnosis-encrypted .remedy.primary .remedy-label {
     -fx-text-fill: -torrenta-error;
 }
 

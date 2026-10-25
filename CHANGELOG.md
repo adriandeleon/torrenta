@@ -20,6 +20,11 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   says which, and what was found. A magnet has no file list yet, so it stops once its metadata is
   in, is checked, and then starts, starts without the flagged files, or is removed before
   anything was downloaded; a restart in between keeps it waiting.
+- **An archive that asks for a password is found within seconds of starting.** A torrent's
+  first `.rar`, `.zip` or `.7z` gets its first piece before anything else, and if the archive
+  is encrypted (its files, or its names too) the Overview shows a red card saying so, with Skip
+  that file and Remove the torrent; the event log says it once. A torrent that hides its content
+  behind a password usually sells the password.
 
 - **Settings sync carries the category names and tags.** A category or tag added on one computer
   appears on the others, and one deleted is deleted everywhere (torrents filed under it there let
