@@ -10,8 +10,9 @@ The files live in `search-providers/` inside the config folder (`~/.torrenta` un
 loads is a provider chip in the Search tab; Settings → Search lists the files with their type and
 whether they loaded (a file that did not says why, and the Event Log says so once), switches each
 on or off (`search.disabled` in the settings file, a space-separated list of ids, which syncs),
-reloads the folder and opens it. The folder is also re-read when the Search tab opens, so a file
-dropped in is a chip at once.
+reloads the folder, opens it, and exports every file in it, loaded or not, to one zip
+(`search-providers/<id>.json` inside, so unpacking it in the config folder puts them back). The
+folder is also re-read when the Search tab opens, so a file dropped in is a chip at once.
 
 Three examples ship and are copied into the folder on the first run. One you have edited is never
 written over: the shipped text goes beside it as `<id>.json.example` instead (and is removed again
