@@ -273,7 +273,7 @@ public final class FilterQuery {
     }
 
     /** A byte count with k/m/g/t in binary units, as {@link Bytes} prints them; null if it does not read. */
-    private static Long bytes(String operand) {
+    static Long bytes(String operand) {
         Matcher m = SIZE.matcher(operand.toLowerCase(Locale.ROOT));
         if (!m.matches()) return null;
         int shift =

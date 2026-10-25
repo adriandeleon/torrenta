@@ -41,6 +41,15 @@ class ActionsTest {
     }
 
     @Test
+    void aTypedCommandActsOnEveryMatchWhileTheBoxFiltersAndOnTheSelectionOtherwise() {
+        List<Torrent> selection = List.of(t(true, false));
+        List<Torrent> matches = List.of(t(false, false), t(false, true), t(true, true));
+        assertEquals(matches, Actions.targets(selection, matches, true));
+        assertEquals(selection, Actions.targets(selection, matches, false));
+        assertEquals(List.of(), Actions.targets(List.of(), matches, false), "no filter, no selection: nothing");
+    }
+
+    @Test
     void spaceResumesOnlyWhenEverythingSelectedIsPaused() {
         assertFalse(Actions.shouldResume(List.of()));
         assertTrue(Actions.shouldResume(List.of(t(true, false), t(true, false))));

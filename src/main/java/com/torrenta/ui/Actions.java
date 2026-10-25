@@ -25,6 +25,16 @@ public final class Actions {
         return selected.stream().filter(t -> !t.direct()).toList();
     }
 
+    /**
+     * What a command typed in the omnibox acts on: every match while the box holds a filter (so
+     * {@code state:paused >resume} resumes what the list shows), the selection otherwise.
+     *
+     * @param filtering the box holds chips: a filter is in force
+     */
+    public static List<Torrent> targets(List<Torrent> selection, List<Torrent> matches, boolean filtering) {
+        return filtering ? List.copyOf(matches) : List.copyOf(selection);
+    }
+
     /** Whether such a command has anything to act on: off for a selection of downloads alone. */
     public static boolean anyTorrent(List<Torrent> selected) {
         return selected.stream().anyMatch(t -> !t.direct());
