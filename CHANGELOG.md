@@ -7,6 +7,13 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **The Add dialog says how the swarm looks before you add a magnet.** Once its file list is in,
+  a Swarm line under the free space reads Healthy (three seeds and up), Thin (a seed or two, or no
+  seed but every piece among the peers), Incomplete (no seed, and pieces of the chosen files that
+  no peer has), or Dead (no one at all), with the counts, and follows the files you tick. It looks
+  without downloading anything, from the trackers' counts and the peers it meets, and gives no
+  time estimate, since there is nothing to measure one from. A private torrent is never looked at.
+
 - **Undo.** Remove (keeping the files), Set Location, a category and tags can be taken back: the
   status bar offers Undo for ten seconds after each, and Ctrl+Z (Torrent → Undo) takes back the
   last ten for ten minutes. A removed torrent comes back exactly as it was, with its category,

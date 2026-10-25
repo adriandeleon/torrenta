@@ -70,8 +70,9 @@ public interface Engine extends AutoCloseable {
     /**
      * Starts fetching a magnet's metadata without adding it, so the Add dialog can show the files
      * while it is open. The magnet joins the swarm writing nothing, is in no snapshot and no
-     * store, and leaves once the metadata is in or the fetch is cancelled. Fails if the magnet is
-     * already in the session.
+     * store, and stays to look at the swarm ({@link MetadataFetch#swarm}) until it is added or
+     * cancelled; a private torrent leaves once its metadata is in. Fails if the magnet is already
+     * in the session.
      */
     MetadataFetch fetchMetadata(String magnet) throws EngineException;
 
@@ -327,6 +328,18 @@ public interface Engine extends AutoCloseable {
          * engine thread; fails if the fetch is cancelled or the engine stops.
          */
         java.util.concurrent.CompletableFuture<byte[]> torrent();
+
+        /**
+         * What the fetch has seen of the swarm so far, with the pieces counted over the files at
+         * {@code wanted} (indices): once the file list is in, it stays in the swarm downloading
+         * nothing, to look, until it is added or cancelled. Empty where the engine cannot look,
+         * once the fetch is over, and for a private torrent, whose fetch leaves at its metadata
+         * (a probe's announce would count against the person on a private tracker). Not on the FX
+         * thread.
+         */
+        default java.util.Optional<SwarmPreview> swarm(java.util.Set<Integer> wanted) {
+            return java.util.Optional.empty();
+        }
 
         /** Leaves the swarm. Idempotent; must come before the same magnet is added for real. */
         void cancel();

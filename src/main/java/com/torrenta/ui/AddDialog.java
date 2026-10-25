@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import javafx.beans.Observable;
 import javafx.beans.binding.Bindings;
@@ -53,6 +54,7 @@ import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
 import com.torrenta.engine.DownloadPlan;
 import com.torrenta.engine.FileRenames;
+import com.torrenta.engine.SwarmPreview;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 
@@ -114,6 +116,14 @@ final class AddDialog {
     private final DiskBar diskBar = new DiskBar();
     /** One label per line: the disk sentence, then where the files start if not here. */
     private final VBox diskText = new VBox(1);
+
+    /** The swarm as a magnet's fetch sees it once the files are in ({@link SwarmVerdict}); hidden before. */
+    private final VBox swarmBox = new VBox(4);
+
+    private final Region swarmDot = new Region();
+    private final Label swarmText = new Label();
+    /** The ticked files' indices, for the poll thread to count pieces over. */
+    private volatile Set<Integer> wantedFiles = Set.of();
 
     private final CheckBox sequential = new CheckBox(tr("dialog.add.sequential"));
     private final CheckBox firstLast = new CheckBox(tr("dialog.add.firstLast"));
@@ -363,6 +373,20 @@ final class AddDialog {
         filing.add(layoutLabel, 0, 2, 2, 1);
         filing.add(layout, 0, 3, 2, 1);
 
+        swarmDot.getStyleClass().add("swarm-dot");
+        swarmText.getStyleClass().add("swarm-text");
+        // A wrapping label in a box is squeezed to one line and an ellipsis unless its height holds.
+        swarmText.setWrapText(true);
+        swarmText.setMinHeight(Region.USE_PREF_SIZE);
+        HBox swarmLine = new HBox(6, swarmDot, swarmText);
+        // The dot stays by the first line when the sentence wraps.
+        swarmLine.setAlignment(Pos.TOP_LEFT);
+        HBox.setMargin(swarmDot, new Insets(5, 0, 0, 0));
+        swarmBox.getChildren().addAll(muted(tr("dialog.add.swarm")), swarmLine);
+        // Its own top margin rather than spaced()'s wrapper, which would keep the gap while hidden.
+        swarmBox.setPadding(new Insets(12, 0, 0, 0));
+        shown(swarmBox, false);
+
         // First-and-last is piece priorities, which need the metadata: not for "Add now".
         firstLast.disableProperty().bind(hasFiles.not());
         VBox options = new VBox(6, sequential, firstLast, skipCheck);
@@ -373,6 +397,7 @@ final class AddDialog {
                 pathRow,
                 spaced(diskBar, 8),
                 diskText,
+                swarmBox,
                 spaced(filing, 12),
                 spaced(muted(tr("dialog.common.tags")), 12),
                 tags,
@@ -534,6 +559,28 @@ final class AddDialog {
             treeHost.getChildren().setAll(placeholder);
     }
 
+    /** The ticked files' indices; any thread. */
+    Set<Integer> wantedFiles() {
+        return wantedFiles;
+    }
+
+    /**
+     * Once a second while the files are in and the fetch stays to look: the swarm's verdict under
+     * the disk sentence. Empty (the fetch has left, a private torrent, an engine that cannot look)
+     * hides the line rather than guess.
+     */
+    void showSwarm(Optional<SwarmPreview> preview) {
+        if (preview.isEmpty() || !hasFiles.get()) {
+            shown(swarmBox, false);
+            return;
+        }
+        SwarmVerdict verdict = SwarmVerdict.of(preview.get(), System.currentTimeMillis());
+        swarmText.setText(verdict.sentence());
+        swarmDot.getStyleClass().removeIf(c -> c.startsWith("swarm-") && !c.equals("swarm-dot"));
+        swarmDot.getStyleClass().add(verdict.styleClass());
+        shown(swarmBox, true);
+    }
+
     /**
      * There is no fetch to wait for: the engine lists the files once the torrent is added. Said in
      * the tree's place, not as a failure; Add adds the magnet blind.
@@ -632,8 +679,11 @@ final class AddDialog {
         String files = hasFiles.get()
                 ? FileTree.files(root).size() + " files, " + Bytes.human(FileTree.wantedSize(root)) + " wanted"
                 : "placeholder: " + fetching.getText();
+        String swarm = swarmBox.isVisible()
+                ? " | swarm=" + swarmDot.getStyleClass().getLast() + " " + swarmText.getText()
+                : "";
         return kicker.getText() + " | " + title.getText() + " | " + summary.getText() + " | " + hint() + " | " + files
-                + " | buttons=" + buttons;
+                + swarm + " | buttons=" + buttons;
     }
 
     /** Picks a category as a person would, for the capture hook. */
@@ -881,6 +931,10 @@ final class AddDialog {
         long wanted = files.stream().filter(f -> f.wantedProperty().get()).count();
         allFiles.setIndeterminate(wanted > 0 && wanted < files.size());
         allFiles.setSelected(wanted == files.size());
+        wantedFiles = files.stream()
+                .filter(f -> f.wantedProperty().get())
+                .map(FileTree.Node::index)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
         updateDisk();
         updateContentCard();
     }
@@ -1092,11 +1146,15 @@ final class AddDialog {
 
     /** "Fetching file list · 3 peers · 12s"; a minute and more reads "1m 05s". */
     static String fetchingLine(int peers, long seconds) {
+        return tr("dialog.add.fetching", tr("dialog.add.peers", Math.max(0, peers)), elapsed(seconds));
+    }
+
+    /** "12s" under a minute, "1m 05s" from there. */
+    static String elapsed(long seconds) {
         long s = Math.max(0, seconds);
-        String elapsed = s < 60
+        return s < 60
                 ? tr("dialog.add.elapsed.seconds", Long.toString(s))
                 : tr("dialog.add.elapsed.minutes", Long.toString(s / 60), String.format(Locale.ROOT, "%02d", s % 60));
-        return tr("dialog.add.fetching", tr("dialog.add.peers", Math.max(0, peers)), elapsed);
     }
 
     /**

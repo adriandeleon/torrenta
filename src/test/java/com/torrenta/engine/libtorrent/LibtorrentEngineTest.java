@@ -549,10 +549,24 @@ class LibtorrentEngineTest {
             assertTrue(
                     preview.trackers().contains("udp://tracker.example.org:6969/announce"),
                     "the link's trackers are in the .torrent: " + preview.trackers());
-            assertEquals(0, fetch.peers(), "over once the metadata is in");
-            await("the fetch has left the session", () -> engine.torrents().isEmpty());
+
+            // It stays to look at the swarm, hidden, downloading nothing: the seeder that handed
+            // over the metadata is a seed to it, so every piece of the ticked file is held.
+            int first = preview.files().get(0).index();
+            com.torrenta.engine.SwarmPreview look = awaitSwarm(fetch, Set.of(first), p -> p.seeds() >= 1);
+            assertTrue(look.hasPieces(), "the file list is in: " + look);
+            assertTrue(look.metadataAt() >= look.started(), look.toString());
+            assertTrue(look.wanted() > 0 && look.wanted() < look.pieces(), "one file of two: " + look);
+            assertEquals(look.wanted(), look.wantedSeen(), "a seed holds them all: " + look);
+            assertTrue(engine.torrents().isEmpty(), "still not a torrent in the list");
+            assertFalse(
+                    Files.exists(dir.resolve("downloads").resolve("pair")),
+                    "nothing in the download folder while it looks: " + onDisk(dir.resolve("downloads")));
             assertTrue(events.stream().noneMatch(e -> e.torrentId() != null), "a fetch raises no events: " + events);
             assertTrue(new TorrentStore(dir.resolve("store")).loadAll().isEmpty(), "and writes nothing");
+            fetch.cancel();
+            assertEquals(0, fetch.peers(), "over once cancelled");
+            assertTrue(fetch.swarm(Set.of(first)).isEmpty(), "and looks no more");
 
             Torrent added = engine.add(
                     AddRequest.defaults(new AddRequest.TorrentFile(fetched, magnet), dir.resolve("downloads")));
@@ -1673,6 +1687,22 @@ class LibtorrentEngineTest {
                 }
             }
         }
+    }
+
+    /** What a fetch sees of the swarm, once it shows what {@code until} asks: polled as the dialog polls it. */
+    private static com.torrenta.engine.SwarmPreview awaitSwarm(
+            Engine.MetadataFetch fetch,
+            Set<Integer> wanted,
+            java.util.function.Predicate<com.torrenta.engine.SwarmPreview> until)
+            throws Exception {
+        long deadline = System.currentTimeMillis() + LOOPBACK_SECONDS * 1000;
+        com.torrenta.engine.SwarmPreview last = null;
+        while (System.currentTimeMillis() < deadline) {
+            last = fetch.swarm(wanted).orElse(null);
+            if (last != null && until.test(last)) return last;
+            Thread.sleep(250);
+        }
+        throw new AssertionError("timed out looking at the swarm; last seen " + last);
     }
 
     /**

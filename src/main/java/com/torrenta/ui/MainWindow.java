@@ -79,6 +79,7 @@ import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.Inputs;
 import com.torrenta.engine.LinkRequest;
 import com.torrenta.engine.ShareLimit;
+import com.torrenta.engine.SwarmPreview;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentLabels;
@@ -2760,8 +2761,14 @@ public final class MainWindow {
         FetchWatch watch = fetchWatch;
         Engine.MetadataFetch fetch = watch == null ? null : watch.slot().get();
         if (fetch != null) {
-            int peers = fetch.peers();
-            Platform.runLater(() -> watch.dialog().showFetching(peers));
+            if (!fetch.torrent().isDone()) {
+                int peers = fetch.peers();
+                Platform.runLater(() -> watch.dialog().showFetching(peers));
+            } else {
+                // The files are in and the fetch stays to look at the swarm, over the ticked files.
+                Optional<SwarmPreview> swarm = fetch.swarm(watch.dialog().wantedFiles());
+                Platform.runLater(() -> watch.dialog().showSwarm(swarm));
+            }
         }
         List<Torrent> snapshot = engine.torrents();
         Engine.Rates current = engine.rates();
