@@ -119,7 +119,7 @@ public final class InterfaceWatch {
     }
 
     /** An address written as one, parsed without any lookup; empty for anything else. */
-    static Optional<InetAddress> literal(String text) {
+    public static Optional<InetAddress> literal(String text) {
         String t = text.trim();
         if (t.startsWith("[") && t.endsWith("]")) t = t.substring(1, t.length() - 1);
         int zone = t.indexOf('%');

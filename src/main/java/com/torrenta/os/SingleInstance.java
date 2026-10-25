@@ -130,6 +130,23 @@ public final class SingleInstance implements AutoCloseable {
 
     private record Locked(FileChannel channel, FileLock lock) {}
 
+    /**
+     * Whether a Torrenta holds {@code configDir} now, for a command that writes its files and
+     * leaves ({@code --set-remote-password}): the lock is taken and let go at once.
+     */
+    public static boolean inUse(Path configDir) {
+        try {
+            Files.createDirectories(configDir);
+            Optional<Locked> locked = tryLock(configDir.resolve(LOCK_FILE));
+            if (locked.isEmpty()) return true;
+            locked.get().lock().release();
+            locked.get().channel().close();
+            return false;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     /** Empty when another process (or this one, in a test) holds the lock. */
     private static Optional<Locked> tryLock(Path file) throws IOException {
         FileChannel channel = FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.WRITE);

@@ -31,6 +31,37 @@ profile (`engine.profile` picks a Transmission daemon). Edit the settings with t
 same config folder, or by hand while Torrenta is stopped: `settings.properties` is a plain
 properties file, and hand edits are kept.
 
+## Remote access: Sonarr, Radarr and the phone apps
+
+A server is where the *arr apps live, and they speak qBittorrent's WebUI API, which Torrenta
+speaks at `/api/v2` (Settings → Remote access in the window). With no window to type a password
+into, set it from the command line while Torrenta is stopped: asked twice at a terminal, or read
+as one line from stdin. Only its salted PBKDF2 hash is kept.
+
+```bash
+torrenta-nox --config-dir /srv/torrenta --set-remote-password
+```
+
+Then switch it on in `settings.properties` (all `webapi.*` keys are this machine's and never sync):
+
+```properties
+webapi.enabled=true
+# 127.0.0.1 until you choose: this machine alone. 0.0.0.0 is every network it is on.
+webapi.address=127.0.0.1
+webapi.port=8080
+webapi.username=admin
+# Names besides addresses and localhost that requests may name, for DNS-rebinding protection.
+webapi.domains=nas.lan
+# HTTPS from a PKCS#12 file; without one, use it on 127.0.0.1 or behind a TLS proxy.
+webapi.httpsFile=/srv/torrenta/cert.p12
+webapi.httpsPassword=…
+```
+
+The start says `Remote access is on at http://127.0.0.1:8080/`, or why not (a port in use, no
+password). In Sonarr or Radarr, add a qBittorrent download client with that host, port, user and
+password. There is no localhost bypass: every client signs in. Five failed sign-ins ban an
+address for an hour.
+
 ## One Torrenta per config folder
 
 As with the window, the first Torrenta on a config folder holds it. A second one, headless or not,

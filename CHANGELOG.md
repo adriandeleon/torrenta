@@ -7,6 +7,17 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Remote access, the door for Sonarr, Radarr and the phone apps.** Settings → Remote access
+  speaks qBittorrent's WebUI API at `/api/v2`, off until switched on and on `127.0.0.1:8080` until
+  an address is chosen. Sign-in always (no localhost bypass); the password kept only as a salted
+  PBKDF2 hash, on this machine, never synced; five wrong tries ban an address for an hour; the
+  `Host` header checked against DNS rebinding and a browser's `Origin` against the server itself;
+  the session cookie `HttpOnly` and `SameSite=Strict`; HTTPS from a PKCS#12 file, and a warning for
+  an address other machines reach over plain HTTP. A port in use is said, with a free one offered.
+  This first part answers sign-in and the `app/*` endpoints (version, preferences, the default save
+  path); the torrents come next. Headless runs it too, and `--set-remote-password` sets the
+  password without a window.
+
 - **Torrenta without a window.** `torrenta --headless`, or the `torrenta-nox` launcher beside the
   app's own, runs everything the window does but the window: torrents, watch folders, RSS rules,
   the IP filter, share limits, the speed schedule, run-on-event commands. What arrives (the command

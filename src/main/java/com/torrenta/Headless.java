@@ -19,6 +19,8 @@ import com.torrenta.store.LabelStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
 import com.torrenta.ui.DebugLog;
+import com.torrenta.webapi.SessionBackend;
+import com.torrenta.webapi.WebApiService;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -56,10 +58,13 @@ final class Headless {
                 settings, configDir, labels, watchStore, rssStore, Runnable::run, new Host(settings, out, failed));
         session.setEngineFactory(profile -> Startup.createEngine(profile, settings, configDir));
         session.setInputHandler(text -> Thread.ofVirtual().name("headless-add").start(() -> add(session, text, out)));
+        // Remote access, as Settings → Remote access left it: a server is where the *arr apps live.
+        WebApiService webApi = new WebApiService(new SessionBackend(session, settings), System::currentTimeMillis);
         Runtime.getRuntime()
                 .addShutdownHook(new Thread(
                         () -> {
                             out.say(EngineEvent.Level.INFO, tr("headless.stopping"));
+                            webApi.close();
                             session.stopEngine();
                             session.close();
                             if (instance != null) instance.close();
@@ -68,6 +73,11 @@ final class Headless {
 
         out.say(EngineEvent.Level.INFO, tr("headless.starting", AppInfo.NAME, AppInfo.VERSION, configDir));
         session.open();
+        WebApiService.Status remote = webApi.configure(settings.webApi());
+        if (remote.state() != WebApiService.State.OFF)
+            out.say(
+                    remote.state() == WebApiService.State.FAILED ? EngineEvent.Level.WARNING : EngineEvent.Level.INFO,
+                    remote.text());
         cli.inputs().forEach(session::input);
         // Another Torrenta on this config folder (a browser's magnet link, a second command) hands
         // its inputs here, as it would to a window.

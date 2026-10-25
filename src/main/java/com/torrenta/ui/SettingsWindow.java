@@ -69,6 +69,9 @@ import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
 import com.torrenta.sync.SyncEngine;
+import com.torrenta.webapi.Passwords;
+import com.torrenta.webapi.WebApiConfig;
+import com.torrenta.webapi.WebApiService;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -108,6 +111,7 @@ final class SettingsWindow {
         SEARCH(Group.APPLICATION, "search"),
         RSS(Group.APPLICATION, "rss"),
         SYNC(Group.APPLICATION, "sync"),
+        REMOTE(Group.APPLICATION, "remote"),
         LABELS(Group.APPLICATION, "labels"),
         ENGINE_PROFILES(Group.ENGINE, "engine"),
         CONNECTION(Group.ENGINE, "connection"),
@@ -754,6 +758,244 @@ final class SettingsWindow {
         reload();
     }
 
+    private java.util.function.Supplier<WebApiService.Status> remoteStatusNow = WebApiService.Status::off;
+    private java.util.function.Consumer<java.util.function.Consumer<WebApiService.Status>> remoteApply = then -> {};
+    private CheckBox remoteEnabled;
+    private TextField remoteAddress;
+    private Spinner<Integer> remotePort;
+    private TextField remoteDomains;
+    private TextField remoteUsername;
+    private PasswordField remotePassword;
+    private Label remotePasswordState;
+    private TextField remoteHttpsFile;
+    private PasswordField remoteHttpsPassword;
+    private Label remoteStatus;
+    private Label remoteWarning;
+    private Button remoteUseFree;
+    /** Typing an address or a port applies once the typing pauses, not at every key. */
+    private final javafx.animation.PauseTransition remotePause =
+            new javafx.animation.PauseTransition(javafx.util.Duration.millis(600));
+
+    /**
+     * The server the Remote access page drives: its status now, and a way to bring it in line with
+     * the settings just saved that answers on the FX thread.
+     */
+    void setRemoteAccess(
+            java.util.function.Supplier<WebApiService.Status> status,
+            java.util.function.Consumer<java.util.function.Consumer<WebApiService.Status>> apply) {
+        this.remoteStatusNow = status;
+        this.remoteApply = apply;
+        remotePause.setOnFinished(e -> applyRemote());
+        showRemoteStatus(status.get());
+    }
+
+    private void buildRemote(VBox page) {
+        VBox server = section(page, tr("settings.remote.server"));
+        remoteEnabled = new CheckBox();
+        remoteEnabled.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setWebApiEnabled(now);
+            settings.saveQuietly();
+            applyRemote();
+        });
+        row(
+                Category.REMOTE,
+                server,
+                tr("settings.remote.enabled"),
+                tr("settings.remote.enabled.desc"),
+                remoteEnabled,
+                tr("settings.remote.enabled.keywords"));
+        remoteAddress = new TextField();
+        remoteAddress.setPrefColumnCount(12);
+        remoteAddress.setPromptText(WebApiConfig.DEFAULT_ADDRESS);
+        remoteAddress.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setWebApiAddress(now);
+            settings.saveQuietly();
+            remotePause.playFromStart();
+        });
+        row(
+                Category.REMOTE,
+                server,
+                tr("settings.remote.address"),
+                tr("settings.remote.address.desc"),
+                remoteAddress,
+                tr("settings.remote.address.keywords"));
+        remotePort = new Spinner<>(1, 65535, WebApiConfig.DEFAULT_PORT, 1);
+        remotePort.setEditable(true);
+        Spinners.commitOnBlur(remotePort);
+        remotePort.setPrefWidth(100);
+        remotePort.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setWebApiPort(now);
+            settings.saveQuietly();
+            remotePause.playFromStart();
+        });
+        row(
+                Category.REMOTE,
+                server,
+                tr("settings.remote.port"),
+                tr("settings.remote.port.desc"),
+                remotePort,
+                tr("settings.remote.port.keywords"));
+        remoteDomains = new TextField();
+        remoteDomains.setPrefColumnCount(14);
+        remoteDomains.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setWebApiDomains(now);
+            settings.saveQuietly();
+            remotePause.playFromStart();
+        });
+        row(
+                Category.REMOTE,
+                server,
+                tr("settings.remote.domains"),
+                tr("settings.remote.domains.desc"),
+                remoteDomains,
+                tr("settings.remote.domains.keywords"));
+
+        VBox signIn = section(page, tr("settings.remote.signIn"));
+        remoteUsername = new TextField();
+        remoteUsername.setPrefColumnCount(12);
+        remoteUsername.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setWebApiUsername(now);
+            settings.saveQuietly();
+            remotePause.playFromStart();
+        });
+        row(
+                Category.REMOTE,
+                signIn,
+                tr("settings.remote.username"),
+                tr("settings.remote.username.desc"),
+                remoteUsername,
+                tr("settings.remote.username.keywords"));
+        remotePassword = new PasswordField();
+        remotePassword.setPrefColumnCount(12);
+        remotePassword.setPromptText(tr("settings.remote.password.prompt"));
+        Button setPassword = new Button(tr("settings.remote.password.set"));
+        setPassword.disableProperty().bind(remotePassword.textProperty().isEmpty());
+        setPassword.setOnAction(e -> setRemotePassword());
+        remotePassword.setOnAction(e -> {
+            if (!remotePassword.getText().isEmpty()) setRemotePassword();
+        });
+        remotePasswordState = new Label();
+        remotePasswordState.getStyleClass().add("settings-row-description");
+        VBox passwordBox = new VBox(4, new HBox(6, remotePassword, setPassword), remotePasswordState);
+        row(
+                Category.REMOTE,
+                signIn,
+                tr("settings.remote.password"),
+                tr("settings.remote.password.desc"),
+                passwordBox,
+                tr("settings.remote.password.keywords"));
+
+        VBox https = section(page, tr("settings.remote.https"));
+        remoteHttpsFile = new TextField();
+        remoteHttpsFile.setPrefColumnCount(14);
+        remoteHttpsFile.setPromptText(tr("settings.remote.httpsFile.prompt"));
+        remoteHttpsFile.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setWebApiHttps(now, remoteHttpsPassword.getText());
+            settings.saveQuietly();
+            remotePause.playFromStart();
+        });
+        Button browse = new Button(tr("common.browse"));
+        browse.setOnAction(e -> {
+            javafx.stage.FileChooser chooser = new javafx.stage.FileChooser();
+            chooser.setTitle(tr("settings.remote.httpsFile.chooser"));
+            chooser.getExtensionFilters()
+                    .add(new javafx.stage.FileChooser.ExtensionFilter(
+                            tr("settings.remote.httpsFile.filter"), "*.p12", "*.pfx"));
+            java.io.File chosen = chooser.showOpenDialog(stage);
+            if (chosen != null) remoteHttpsFile.setText(chosen.getAbsolutePath());
+        });
+        row(
+                Category.REMOTE,
+                https,
+                tr("settings.remote.httpsFile"),
+                tr("settings.remote.httpsFile.desc"),
+                new HBox(6, remoteHttpsFile, browse),
+                tr("settings.remote.httpsFile.keywords"));
+        remoteHttpsPassword = new PasswordField();
+        remoteHttpsPassword.setPrefColumnCount(12);
+        remoteHttpsPassword.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setWebApiHttps(remoteHttpsFile.getText(), now);
+            settings.saveQuietly();
+            remotePause.playFromStart();
+        });
+        row(
+                Category.REMOTE,
+                https,
+                tr("settings.remote.httpsPassword"),
+                tr("settings.remote.httpsPassword.desc"),
+                remoteHttpsPassword,
+                tr("settings.remote.httpsPassword.keywords"));
+
+        VBox status = section(page, tr("settings.remote.status"));
+        remoteStatus = new Label(tr("webapi.status.off"));
+        remoteStatus.setWrapText(true);
+        remoteStatus.getStyleClass().add("settings-row-description");
+        remoteWarning = new Label(tr("settings.remote.exposed"));
+        remoteWarning.setWrapText(true);
+        remoteWarning.getStyleClass().addAll("settings-row-description", "settings-warning");
+        remoteUseFree = new Button();
+        remoteUseFree.setOnAction(e -> {
+            Object port = remoteUseFree.getUserData();
+            if (port instanceof Integer p) remotePort.getValueFactory().setValue(p);
+        });
+        VBox statusBox = new VBox(8, remoteStatus, remoteWarning, remoteUseFree);
+        status.getChildren().add(statusBox);
+        rows.add(new Row(Category.REMOTE, statusBox, tr("settings.remote.status.keywords"), status));
+        showRemoteStatus(remoteStatusNow.get());
+    }
+
+    /** The password typed is hashed off the FX thread (PBKDF2 is slow on purpose), then kept as the hash. */
+    private void setRemotePassword() {
+        char[] typed = remotePassword.getText().toCharArray();
+        remotePassword.clear();
+        remotePasswordState.setText(tr("settings.remote.password.hashing"));
+        Thread.ofVirtual().name("webapi-hash").start(() -> {
+            String hash = Passwords.hash(typed, new java.security.SecureRandom());
+            java.util.Arrays.fill(typed, '\0');
+            javafx.application.Platform.runLater(() -> {
+                settings.setWebApiPasswordHash(hash);
+                settings.saveQuietly();
+                refreshRemotePasswordState();
+                applyRemote();
+            });
+        });
+    }
+
+    private void refreshRemotePasswordState() {
+        if (remotePasswordState == null) return;
+        remotePasswordState.setText(
+                Passwords.isSet(settings.webApi().passwordHash())
+                        ? tr("settings.remote.password.isSet")
+                        : tr("settings.remote.password.notSet"));
+    }
+
+    private void applyRemote() {
+        remotePause.stop();
+        remoteApply.accept(this::showRemoteStatus);
+    }
+
+    /** FX thread: the Status section, and the warning for an address others reach over plain HTTP. */
+    void showRemoteStatus(WebApiService.Status status) {
+        if (remoteStatus == null) return;
+        remoteStatus.setText(status.text());
+        WebApiConfig config = settings.webApi();
+        boolean exposed = config.enabled() && config.exposed();
+        remoteWarning.setVisible(exposed);
+        remoteWarning.setManaged(exposed);
+        boolean offer = status.freePort() > 0;
+        remoteUseFree.setUserData(offer ? status.freePort() : null);
+        remoteUseFree.setText(offer ? tr("settings.remote.useFree", String.valueOf(status.freePort())) : "");
+        remoteUseFree.setVisible(offer);
+        remoteUseFree.setManaged(offer);
+    }
+
     /** FX thread: the Status section, from the service's state. */
     private void refreshSyncStatus() {
         if (syncStatus == null || sync == null) return;
@@ -1208,6 +1450,7 @@ final class SettingsWindow {
             case PROTOCOL -> buildProtocol(page);
             case IP_FILTER -> buildIpFilter(page);
             case SYNC -> buildSync(page);
+            case REMOTE -> buildRemote(page);
             case LABELS -> buildLabels(page);
             case SPEED -> buildSpeed(page);
             case QUEUE -> buildQueue(page);
@@ -3997,6 +4240,16 @@ final class SettingsWindow {
             osHandler.setSelected(settings.osHandler());
             osBadge.setSelected(settings.osBadge());
             syncEnabled.setSelected(settings.syncEnabled());
+            WebApiConfig remote = settings.webApi();
+            remoteEnabled.setSelected(remote.enabled());
+            remoteAddress.setText(remote.address());
+            remotePort.getValueFactory().setValue(remote.port());
+            remoteDomains.setText(String.join(" ", remote.domains()));
+            remoteUsername.setText(remote.username());
+            remoteHttpsFile.setText(
+                    remote.httpsFile() == null ? "" : remote.httpsFile().toString());
+            remoteHttpsPassword.setText(remote.httpsPassword());
+            refreshRemotePasswordState();
             syncUrl.setText(settings.syncUrl());
             syncBranch.setText(settings.syncBranch().equals("main") ? "" : settings.syncBranch());
             syncInterval.getValueFactory().setValue(settings.syncIntervalMinutes());

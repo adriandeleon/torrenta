@@ -4,18 +4,26 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The command line: {@code --help}, {@code --version}, {@code --config-dir}, {@code --headless}, and
+ * The command line: {@code --help}, {@code --version}, {@code --config-dir}, {@code --headless},
+ * {@code --set-remote-password} (a headless server has no Settings window to set it in), and
  * anything else is a torrent to add — a {@code .torrent} path or a {@code magnet:} link.
  *
  * <p>Pure parsing with no side effects, so it is fully testable and can run before the toolkit.
  */
 public record CommandLine(
-        boolean help, boolean version, boolean headless, String configDir, List<String> inputs, String error) {
+        boolean help,
+        boolean version,
+        boolean headless,
+        boolean setRemotePassword,
+        String configDir,
+        List<String> inputs,
+        String error) {
 
     public static CommandLine parse(String... args) {
         boolean help = false;
         boolean version = false;
         boolean headless = false;
+        boolean setRemotePassword = false;
         String configDir = null;
         List<String> inputs = new ArrayList<>();
         for (int i = 0; i < args.length; i++) {
@@ -24,6 +32,7 @@ public record CommandLine(
                 case "-h", "--help" -> help = true;
                 case "-v", "-V", "--version" -> version = true;
                 case "--headless" -> headless = true;
+                case "--set-remote-password" -> setRemotePassword = true;
                 case "--config-dir" -> {
                     if (i + 1 >= args.length) return error("--config-dir needs a directory");
                     configDir = args[++i];
@@ -40,11 +49,11 @@ public record CommandLine(
                 }
             }
         }
-        return new CommandLine(help, version, headless, configDir, List.copyOf(inputs), null);
+        return new CommandLine(help, version, headless, setRemotePassword, configDir, List.copyOf(inputs), null);
     }
 
     private static CommandLine error(String message) {
-        return new CommandLine(false, false, false, null, List.of(), message);
+        return new CommandLine(false, false, false, false, null, List.of(), message);
     }
 
     /** True when the application should come up; false when an option answered and stopped. */
@@ -84,6 +93,9 @@ public record CommandLine(
                       --config-dir DIR   Keep settings and resume data in DIR (default ~/.torrenta)
                       --headless         Run without a window: add what arrives without asking, log
                                          to stdout, stop on SIGTERM
+                      --set-remote-password
+                                         Read a password for Remote access from the terminal (or
+                                         a line of stdin), keep its hash in the settings and exit
                 """.formatted(launchName).stripTrailing();
     }
 }
