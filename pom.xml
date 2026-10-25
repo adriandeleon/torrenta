@@ -307,8 +307,9 @@
                     <options>
                         <!-- The engine's automatic module calls System.load; without this the JDK
                              warns on every launch and says it will refuse in a future release.
-                             ALL-UNNAMED covers the jars this plugin puts on the classpath. -->
-                        <option>--enable-native-access=javafx.graphics,libtorrent4j,ALL-UNNAMED</option>
+                             ALL-UNNAMED covers the jars this plugin puts on the classpath.
+                             com.torrenta reads a piece libtorrent hands over by address (FFM). -->
+                        <option>--enable-native-access=com.torrenta,javafx.graphics,libtorrent4j,ALL-UNNAMED</option>
                         <option>-Dprism.order=${prism.pipeline}</option>
                     </options>
                     <launcher>torrenta</launcher>
@@ -557,7 +558,7 @@
                                         <appContentPath>${project.build.directory}/native/torrenta-native</appContentPath>
                                     </appContentPaths>
                                     <javaOptions>
-                                        <javaOption>--enable-native-access=javafx.graphics,libtorrent4j</javaOption>
+                                        <javaOption>--enable-native-access=com.torrenta,javafx.graphics,libtorrent4j</javaOption>
                                         <javaOption>-Dprism.order=${prism.pipeline}</javaOption>
                                         <javaOption>-Dlibtorrent4j.jni.path=$APPDIR/../torrenta-native/libtorrent4j.${native.ext}</javaOption>
                                         <!-- A ceiling, not a tuning claim: without it the JVM takes a

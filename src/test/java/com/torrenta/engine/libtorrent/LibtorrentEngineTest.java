@@ -357,6 +357,70 @@ class LibtorrentEngineTest {
                 .bencode();
     }
 
+    /**
+     * A wanted archive's first piece is asked for with a deadline and read back from libtorrent
+     * (a {@code read_piece_alert}, copied out of native memory): the one zip of two that asks
+     * for a password is found, said once, and kept for the detail; the plain one never is.
+     */
+    @Test
+    void anEncryptedArchiveIsFoundFromItsFirstPiece(@TempDir Path dir) throws Exception {
+        Path root = dir.resolve("seed").resolve("pack");
+        Files.createDirectories(root);
+        // The film first and large, so the archives sit pieces in, not at the torrent's start.
+        Files.write(root.resolve("film.mkv"), new byte[200 * 1024]);
+        Files.write(root.resolve("locked.zip"), archiveFixture("zip-encrypted.zip"));
+        Files.write(root.resolve("open.zip"), archiveFixture("zip-plain.zip"));
+        NativeLibrary.ensureAvailable();
+        byte[] torrent =
+                new TorrentBuilder().path(root.toFile()).generate().entry().bencode();
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine seed = seeder(dir, torrent);
+                LibtorrentEngine engine = downloader(dir)) {
+            engine.addListener(events::add);
+            engine.start();
+            int locked = engine.inspect(torrent).files().stream()
+                    .filter(f -> f.path().endsWith("locked.zip"))
+                    .findFirst()
+                    .orElseThrow()
+                    .index();
+            Torrent t = engine.add(downloadsTorrent(dir, torrent));
+            awaitDownload(
+                    "the locked archive found",
+                    engine,
+                    t.id(),
+                    seed,
+                    () -> !engine.detail(t.id()).encryptedArchives().isEmpty());
+            awaitDownload(
+                    "the rest",
+                    engine,
+                    t.id(),
+                    seed,
+                    () -> engine.torrents().get(0).progress() >= 1.0);
+            assertEquals(Set.of(locked), engine.detail(t.id()).encryptedArchives(), "the plain zip is not");
+            // The seeder added it complete, its files already there: new to it, so read as well.
+            await(
+                    "the seeder found it too",
+                    () -> seed.detail(t.id()).encryptedArchives().equals(Set.of(locked)));
+            assertEquals(
+                    1,
+                    events.stream()
+                            .filter(e -> e.message().contains("locked.zip")
+                                    && e.message().contains("password"))
+                            .count(),
+                    events.toString());
+            engine.remove(t.id(), false);
+            await("gone", () -> engine.torrents().isEmpty());
+        }
+    }
+
+    private static byte[] archiveFixture(String name) throws java.io.IOException {
+        try (java.io.InputStream in =
+                LibtorrentEngineTest.class.getResourceAsStream("/com/torrenta/engine/archives/" + name)) {
+            if (in == null) throw new java.io.IOException("no fixture " + name);
+            return in.readAllBytes();
+        }
+    }
+
     @Test
     void inspectShowsTheFilesWithoutAdding(@TempDir Path dir) throws Exception {
         Path downloads = dir.resolve("downloads");

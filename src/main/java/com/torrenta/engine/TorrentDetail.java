@@ -13,6 +13,8 @@ import java.util.List;
  * @param availability how many connected peers have each piece, by index; empty when libtorrent
  *     keeps no count (a seed, a paused torrent, one without metadata)
  * @param webSeeds the web seeds (BEP 19 HTTP sources), as {@link Engine#webSeeds} lists them
+ * @param encryptedArchives the indices of the archives whose first bytes say they ask for a
+ *     password ({@link ArchiveProbe}); empty until read, and always for an engine that cannot
  */
 public record TorrentDetail(
         General general,
@@ -21,11 +23,24 @@ public record TorrentDetail(
         List<Tracker> trackers,
         boolean[] pieces,
         int[] availability,
-        List<String> webSeeds) {
+        List<String> webSeeds,
+        java.util.Set<Integer> encryptedArchives) {
 
     public TorrentDetail {
         availability = availability == null ? new int[0] : availability;
         webSeeds = webSeeds == null ? List.of() : List.copyOf(webSeeds);
+        encryptedArchives = encryptedArchives == null ? java.util.Set.of() : java.util.Set.copyOf(encryptedArchives);
+    }
+
+    public TorrentDetail(
+            General general,
+            List<FileStatus> files,
+            List<Peer> peers,
+            List<Tracker> trackers,
+            boolean[] pieces,
+            int[] availability,
+            List<String> webSeeds) {
+        this(general, files, peers, trackers, pieces, availability, webSeeds, java.util.Set.of());
     }
 
     /** A detail with no web seeds. */

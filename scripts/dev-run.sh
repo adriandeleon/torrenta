@@ -74,7 +74,7 @@ done
 exec java \
     --module-path "$MODULE_PATH:target/classes" \
     --add-modules com.torrenta,ALL-MODULE-PATH \
-    --enable-native-access=javafx.graphics,libtorrent4j \
+    --enable-native-access=com.torrenta,javafx.graphics,libtorrent4j \
     "-Dprism.order=$PRISM" \
     "${JVM_ARGS[@]}" \
     -m com.torrenta/com.torrenta.App \

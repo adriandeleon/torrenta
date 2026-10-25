@@ -792,7 +792,8 @@ final class DetailPane extends VBox {
         card.setManaged(d != null);
         if (java.util.Objects.equals(d, shownDiagnosis)) return;
         shownDiagnosis = d;
-        card.getStyleClass().removeAll("diagnosis-stalled", "diagnosis-error", "diagnosis-queued");
+        card.getStyleClass()
+                .removeAll("diagnosis-stalled", "diagnosis-error", "diagnosis-queued", "diagnosis-encrypted");
         if (d == null) return;
         card.getStyleClass().add("diagnosis-" + d.title().name().toLowerCase(java.util.Locale.ROOT));
         pressPending(d);
