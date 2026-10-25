@@ -503,6 +503,12 @@ public final class MainWindow {
             Clipboard.getSystemClipboard().setContent(content);
             setStatus(tr("status.copied.address", address));
         });
+        detail.setOnCopyCommand(command -> {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(command);
+            Clipboard.getSystemClipboard().setContent(content);
+            setStatus(tr("status.copied.command"));
+        });
         log.installLogBridge(Platform::runLater);
         reportDefinitionProblems();
         host.getChildren().add(root);
