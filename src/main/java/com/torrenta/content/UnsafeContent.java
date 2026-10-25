@@ -1,4 +1,4 @@
-package com.torrenta.ui;
+package com.torrenta.content;
 
 import java.util.HashMap;
 import java.util.List;

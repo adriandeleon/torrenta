@@ -1,4 +1,4 @@
-package com.torrenta.ui;
+package com.torrenta.content;
 
 import java.util.Locale;
 import java.util.Map;
@@ -8,7 +8,7 @@ import java.util.Set;
  * What a row of the Files tab holds, read off its name's extension: the rule for which glyph it
  * shows. Pure; {@link #glyph} is the one place a kind meets {@link Icons}.
  */
-enum FileKind {
+public enum FileKind {
     FOLDER,
     VIDEO,
     AUDIO,
@@ -64,7 +64,7 @@ enum FileKind {
                             "snap"));
 
     /** The kind of a folder, or of a file by its name's last extension (case aside); OTHER without one. */
-    static FileKind of(String name, boolean folder) {
+    public static FileKind of(String name, boolean folder) {
         if (folder) return FOLDER;
         String extension = extension(name);
         if (extension.isEmpty()) return OTHER;
@@ -77,29 +77,9 @@ enum FileKind {
     }
 
     /** The part after the last dot, lower case; empty for none, a dot file or a trailing dot. */
-    static String extension(String name) {
+    public static String extension(String name) {
         int dot = name.lastIndexOf('.');
         if (dot <= 0 || dot == name.length() - 1) return "";
         return name.substring(dot + 1).toLowerCase(Locale.ROOT);
-    }
-
-    /** This kind's glyph, fresh, at the menus' size. */
-    Icons.Glyph glyph() {
-        Icons.Glyph g =
-                switch (this) {
-                    case FOLDER -> Icons.folder();
-                    case VIDEO -> Icons.fileVideo();
-                    case AUDIO -> Icons.fileAudio();
-                    case IMAGE -> Icons.fileImage();
-                    case BOOK -> Icons.book();
-                    case DOCUMENT -> Icons.files();
-                    case SUBTITLE -> Icons.subtitles();
-                    case ARCHIVE -> Icons.fileArchive();
-                    case DISC -> Icons.disc();
-                    case DATA -> Icons.database();
-                    case PROGRAM -> Icons.box();
-                    case OTHER -> Icons.file();
-                };
-        return g.at(Icons.MENU_SIZE);
     }
 }

@@ -7,6 +7,8 @@ import javafx.scene.control.Control;
 import javafx.scene.control.Tooltip;
 import javafx.scene.shape.SVGPath;
 
+import com.torrenta.content.FileKind;
+
 /**
  * Toolbar icons, the glyphs Editora draws, returned wrapped in a {@link Group} and scaled down. The
  * Group's layout bounds reflect the scaled size, so buttons sized to their graphic shrink with it.
@@ -608,5 +610,25 @@ final class Icons {
     /** A shield with a tick: IP filter. */
     static Glyph shield() {
         return line("M8 2l5 2v4c0 3-2.2 5-5 6-2.8-1-5-3-5-6V4zM5.8 8l1.6 1.6 2.9-3");
+    }
+
+    /** A file kind's glyph ({@link FileKind}), fresh, at the menus' size. */
+    static Glyph forKind(FileKind kind) {
+        Glyph g =
+                switch (kind) {
+                    case FOLDER -> folder();
+                    case VIDEO -> fileVideo();
+                    case AUDIO -> fileAudio();
+                    case IMAGE -> fileImage();
+                    case BOOK -> book();
+                    case DOCUMENT -> files();
+                    case SUBTITLE -> subtitles();
+                    case ARCHIVE -> fileArchive();
+                    case DISC -> disc();
+                    case DATA -> database();
+                    case PROGRAM -> box();
+                    case OTHER -> file();
+                };
+        return g.at(MENU_SIZE);
     }
 }

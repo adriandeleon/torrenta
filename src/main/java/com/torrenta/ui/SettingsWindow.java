@@ -48,6 +48,7 @@ import javafx.util.StringConverter;
 
 import com.torrenta.AppInfo;
 import com.torrenta.automation.AutomationSettings;
+import com.torrenta.content.UnsafeContent;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineProfile;
