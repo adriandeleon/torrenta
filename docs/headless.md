@@ -52,6 +52,8 @@ webapi.port=8080
 webapi.username=admin
 # Names besides addresses and localhost that requests may name, for DNS-rebinding protection.
 webapi.domains=nas.lan
+# A web UI written for qBittorrent's API (VueTorrent's release unpacked, say), served at /.
+webapi.rootFolder=/srv/torrenta/vuetorrent
 # Where the apps may put files besides the download folder and the categories' folders, one per
 # line on the Remote access page, written \n between them here; a save path anywhere else is refused.
 webapi.roots=/srv/media/tv\n/srv/media/films

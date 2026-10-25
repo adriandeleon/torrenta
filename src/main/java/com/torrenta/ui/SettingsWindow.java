@@ -765,6 +765,7 @@ final class SettingsWindow {
     private Spinner<Integer> remotePort;
     private TextField remoteDomains;
     private TextArea remoteRoots;
+    private TextField remoteRootFolder;
     private TextField remoteUsername;
     private PasswordField remotePassword;
     private Label remotePasswordState;
@@ -870,6 +871,28 @@ final class SettingsWindow {
                 tr("settings.remote.roots.desc"),
                 remoteRoots,
                 tr("settings.remote.roots.keywords"));
+        remoteRootFolder = new TextField();
+        remoteRootFolder.setPrefColumnCount(16);
+        remoteRootFolder.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            // Read at each request: nothing to restart.
+            settings.setWebApiRootFolder(now);
+            settings.saveQuietly();
+        });
+        Button browseRoot = new Button(tr("common.browse"));
+        browseRoot.setOnAction(e -> {
+            javafx.stage.DirectoryChooser chooser = new javafx.stage.DirectoryChooser();
+            chooser.setTitle(tr("settings.remote.rootFolder.chooser"));
+            java.io.File chosen = chooser.showDialog(stage);
+            if (chosen != null) remoteRootFolder.setText(chosen.getAbsolutePath());
+        });
+        row(
+                Category.REMOTE,
+                server,
+                tr("settings.remote.rootFolder"),
+                tr("settings.remote.rootFolder.desc"),
+                new HBox(6, remoteRootFolder, browseRoot),
+                tr("settings.remote.rootFolder.keywords"));
 
         VBox signIn = section(page, tr("settings.remote.signIn"));
         remoteUsername = new TextField();
@@ -4262,6 +4285,8 @@ final class SettingsWindow {
             remoteAddress.setText(remote.address());
             remotePort.getValueFactory().setValue(remote.port());
             remoteDomains.setText(String.join(" ", remote.domains()));
+            remoteRootFolder.setText(
+                    settings.webApiRootFolder().map(Path::toString).orElse(""));
             remoteRoots.setText(String.join(
                     "\n", settings.webApiRoots().stream().map(Path::toString).toList()));
             remoteUsername.setText(remote.username());

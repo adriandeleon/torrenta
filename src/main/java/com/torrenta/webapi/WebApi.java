@@ -112,12 +112,16 @@ public final class WebApi {
 
         /** A {@code .torrent} from a URL, bounded in time and size. */
         byte[] fetch(URI url) throws IOException;
+
+        /** {@code webapi.rootFolder}: a web UI to serve at {@code /}; empty for none. */
+        Optional<Path> rootFolder();
     }
 
     /**
-     * The session's traffic as {@code transfer/info} writes it: rates and limits in bytes per
-     * second (0 for no limit), this session's totals in bytes, and qBittorrent's word for the
-     * connection ({@code connected}, {@code firewalled}, {@code disconnected}).
+     * The session's traffic as {@code transfer/info} and {@code sync/maindata}'s {@code
+     * server_state} write it: rates and limits in bytes per second (0 for no limit), this session's
+     * and all time's totals in bytes, qBittorrent's word for the connection ({@code connected},
+     * {@code firewalled}, {@code disconnected}), the free space where downloads go (-1 unknown).
      */
     public record Transfer(
             long downloadRate,
@@ -127,7 +131,41 @@ public final class WebApi {
             long downloadLimit,
             long uploadLimit,
             long dhtNodes,
-            String connection) {}
+            String connection,
+            long allTimeDownload,
+            long allTimeUpload,
+            long peers,
+            long freeSpace,
+            boolean alternative,
+            boolean queueing) {
+
+        /** Without the totals and states only {@code server_state} reads. */
+        public Transfer(
+                long downloadRate,
+                long uploadRate,
+                long downloadedSession,
+                long uploadedSession,
+                long downloadLimit,
+                long uploadLimit,
+                long dhtNodes,
+                String connection) {
+            this(
+                    downloadRate,
+                    uploadRate,
+                    downloadedSession,
+                    uploadedSession,
+                    downloadLimit,
+                    uploadLimit,
+                    dhtNodes,
+                    connection,
+                    0,
+                    0,
+                    0,
+                    -1,
+                    false,
+                    false);
+        }
+    }
 
     /** qBittorrent's own version, the one the *arr apps check against; 5.0 is the level spoken. */
     public static final String VERSION = "v5.0.0";
@@ -184,6 +222,8 @@ public final class WebApi {
         read(router, "torrents/categories", reads::categories);
         read(router, "torrents/tags", reads::tags);
         read(router, "transfer/info", reads::transfer);
+        read(router, "sync/maindata", reads::maindata);
+        read(router, "sync/torrentPeers", reads::torrentPeers);
         router.route("POST", PREFIX + "torrents/add", writes::add);
         router.route("POST", PREFIX + "torrents/delete", writes::delete);
         for (String path : List.of("torrents/pause", "torrents/stop"))
@@ -197,6 +237,12 @@ public final class WebApi {
         router.route("POST", PREFIX + "torrents/setShareLimits", writes::setShareLimits);
         router.route("POST", PREFIX + "torrents/topPrio", writes::topPrio);
         router.route("POST", PREFIX + "torrents/setForceStart", writes::setForceStart);
+        StaticFiles files = new StaticFiles(
+                backend::rootFolder, r -> sessions.valid(r.cookies().get(COOKIE), clock.getAsLong()));
+        router.prefix("GET", "/", files::serve);
+        // An endpoint Torrenta does not speak is qBittorrent's 404, whatever the method, never a file.
+        router.prefix("GET", "/api/", r -> Response.text(404, "Not Found"));
+        router.prefix("POST", "/api/", r -> Response.text(404, "Not Found"));
         return router;
     }
 
@@ -221,6 +267,8 @@ public final class WebApi {
 
     private Optional<Response> checkSession(Request request) {
         if (request.path().equals(PREFIX + "auth/login")) return Optional.empty();
+        // The root folder's files decide for themselves: its login page is for those without a session.
+        if (!request.path().startsWith(PREFIX)) return Optional.empty();
         if (sessions.valid(request.cookies().get(COOKIE), clock.getAsLong())) return Optional.empty();
         return Optional.of(Response.text(403, "Forbidden"));
     }

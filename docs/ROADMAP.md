@@ -509,7 +509,16 @@ so the order is extract, then serve.
    `Bencode.check` and a 10 MiB cap, the screened `Session.add`; the actions), `SavePaths` (the
    allowed roots on real paths, links followed), `webapi.roots`. Item 4 is done: Sonarr and Radarr
    against a headless Torrenta is item 6's manual pass.
-5. **API Tier 2, remote apps and alternative web UIs**, and the static root folder.
+5. **API Tier 2, remote apps and alternative web UIs**, and the static root folder, in three PRs:
+   what a web UI needs to run at all (`sync/maindata` with `MainData.diff`, `sync/torrentPeers`,
+   `webapi.rootFolder` served as qBittorrent serves an alternative WebUI: `public/` to anyone,
+   `private/` to a session); the torrent edits (`filePrio`, `setLocation`, `rename`,
+   `renameFile`/`renameFolder`, the trackers, per-torrent limits, the other queue moves, category
+   and tag editing); the session's (`transfer/speedLimitsMode`, the global limits,
+   `app/setPreferences`, `log/main`). The first is in: `MainData` (the diff, pure; one snapshot
+   per session, as qBittorrent keeps, not a history), `sync/maindata` with `server_state`,
+   `sync/torrentPeers`, `StaticFiles` (`webapi.rootFolder`), unknown API paths 404 for every
+   method.
 6. **Compatibility**: contract tests from a real qBittorrent 5.0's recorded answers;
    `QbittorrentContractTest`, `@EnabledIf` `qbittorrent-nox` is on the PATH as
    `TransmissionDaemonTest` is, sends the same requests to both and compares the shapes; a manual

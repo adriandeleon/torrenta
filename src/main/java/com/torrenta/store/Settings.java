@@ -111,6 +111,8 @@ public final class Settings {
      * line: {@code savepath} outside all of them is refused.
      */
     public static final String WEBAPI_ROOTS = "webapi.roots";
+    /** A web UI written for qBittorrent's API (VueTorrent, say), served at {@code /}; empty for none. */
+    public static final String WEBAPI_ROOT_FOLDER = "webapi.rootFolder";
     /** Whether the icon toolbar under the menu bar shows; View → Toolbar flips it. */
     public static final String UI_TOOLBAR = "ui.toolbar";
     /** Whether the sidebar of filters shows beside the list; View → Sidebar flips it. */
@@ -490,6 +492,20 @@ public final class Settings {
             }
         }
         return out;
+    }
+
+    public java.util.Optional<Path> webApiRootFolder() {
+        String value = properties.getProperty(WEBAPI_ROOT_FOLDER, "").trim();
+        if (value.isEmpty()) return java.util.Optional.empty();
+        try {
+            return java.util.Optional.of(Path.of(value));
+        } catch (java.nio.file.InvalidPathException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    public void setWebApiRootFolder(String folder) {
+        properties.setProperty(WEBAPI_ROOT_FOLDER, folder == null ? "" : folder.trim());
     }
 
     public void setWebApiRoots(String lines) {

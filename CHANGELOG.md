@@ -7,6 +7,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **A phone interface through a web UI written for qBittorrent.** Settings → Remote access → Web
+  interface folder serves a folder at the server's address the way qBittorrent serves an
+  alternative WebUI: unpack VueTorrent there and a phone's browser runs Torrenta. Its public half
+  is open to anyone (the login page), its private half only after signing in; nothing outside the
+  folder, hidden in it, or behind a link out of it is served. The API gains what such interfaces
+  poll: `sync/maindata` (the whole picture once, then only the fields that changed) and
+  `sync/torrentPeers`.
+
 - **Remote access, the door for Sonarr, Radarr and the phone apps.** Settings → Remote access
   speaks qBittorrent's WebUI API at `/api/v2`, off until switched on and on `127.0.0.1:8080` until
   an address is chosen. Sign-in always (no localhost bypass); the password kept only as a salted
