@@ -62,7 +62,7 @@ class SessionTest {
             paused.set(true);
         });
         RecordingHost host = new RecordingHost();
-        Session session = new Session(settings, host);
+        Session session = session(dir, settings, host);
         AtomicInteger polls = new AtomicInteger();
         session.addListener(p -> polls.incrementAndGet());
         session.start(engine);
@@ -83,7 +83,7 @@ class SessionTest {
     void theSpeedScheduleIsLookedAtOnStartAndNothingIsPolledOnceStopped(@TempDir Path dir) throws Exception {
         Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
         RecordingHost host = new RecordingHost();
-        Session session = new Session(settings, host);
+        Session session = session(dir, settings, host);
         AtomicInteger polls = new AtomicInteger();
         List<String> threads = new CopyOnWriteArrayList<>();
         session.addListener(p -> {
@@ -109,7 +109,51 @@ class SessionTest {
         session.stop(); // idempotent
     }
 
+    /** The IP filters set on any proxy engine, in order. */
+    private static final List<List<?>> IP_FILTERS = new CopyOnWriteArrayList<>();
+
+    private static Session session(Path dir, Settings settings, Session.Host host) {
+        return new Session(
+                settings,
+                dir,
+                new com.torrenta.store.LabelStore(dir),
+                new com.torrenta.store.WatchFolderStore(dir),
+                new com.torrenta.rss.RssStore(dir),
+                Runnable::run,
+                host);
+    }
+
+    /**
+     * Starting takes the engine's IP filter (from disk, here a ban, before any download runs) and
+     * the watch folders with the poll; stopping gives both back.
+     */
+    @Test
+    void startAppliesTheIpFilterAndWatchesStopLetsBothGo(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        settings.set(Settings.IPFILTER_ENABLED, "true");
+        settings.setIpFilterBans(List.of("203.0.113.9"));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        IP_FILTERS.clear();
+        session.start(engine(List::of, id -> {}));
+        try {
+            await(() -> !IP_FILTERS.isEmpty() && host.watchStatus.get() > 0);
+            assertEquals(1, IP_FILTERS.get(0).size(), "the ban, as one range: " + IP_FILTERS);
+            assertTrue(session.watcher() != null, "watching while an engine is up");
+        } finally {
+            session.close();
+        }
+        assertEquals(null, session.watcher(), "and not after");
+    }
+
     private static final class RecordingHost implements Session.Host {
+        final AtomicInteger watchStatus = new AtomicInteger();
+
+        @Override
+        public void watchStatusChanged() {
+            watchStatus.incrementAndGet();
+        }
+
         final List<EngineEvent> seedingDone = new CopyOnWriteArrayList<>();
         final List<Boolean> limits = new CopyOnWriteArrayList<>();
 
@@ -143,6 +187,10 @@ class SessionTest {
                     case "rates" -> Engine.Rates.ZERO;
                     case "capabilities" -> Engine.Capabilities.ALL;
                     case "refreshLimits" -> false;
+                    case "setIpFilter" -> {
+                        IP_FILTERS.add(List.copyOf((List<?>) args[0]));
+                        yield null;
+                    }
                     case "pause" -> {
                         pauser.pause((String) args[0]);
                         yield null;

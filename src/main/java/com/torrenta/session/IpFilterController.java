@@ -1,4 +1,4 @@
-package com.torrenta.ui;
+package com.torrenta.session;
 
 import java.io.IOException;
 import java.net.URI;
@@ -28,12 +28,12 @@ import static com.torrenta.i18n.Messages.tr;
  * {@code report} callback. Nothing is fatal: a list that cannot be fetched or read leaves the
  * previous filter in place and says so.
  */
-final class IpFilterController {
+public final class IpFilterController {
 
     static final String CACHE_FILE = "blocklist.txt";
 
     /** What the last apply did, for the page's status line. */
-    record Status(int ranges, int skipped, long loadedAt, String note) {}
+    public record Status(int ranges, int skipped, long loadedAt, String note) {}
 
     private final Settings settings;
     private final Path cache;
@@ -49,7 +49,7 @@ final class IpFilterController {
         this.engine = engine;
     }
 
-    Status status() {
+    public Status status() {
         return status;
     }
 
