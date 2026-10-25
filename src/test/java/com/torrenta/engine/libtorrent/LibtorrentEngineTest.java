@@ -344,6 +344,10 @@ class LibtorrentEngineTest {
 
     /** A two-file torrent whose data is already in {@code downloads/<name>/}. */
     private static byte[] twoFileTorrent(Path downloads, String name) throws Exception {
+        return twoFileTorrent(downloads, name, false);
+    }
+
+    private static byte[] twoFileTorrent(Path downloads, String name, boolean isPrivate) throws Exception {
         Path root = downloads.resolve(name);
         Files.createDirectories(root.resolve("sub"));
         Files.write(root.resolve("a.bin"), new byte[100 * 1024]);
@@ -352,6 +356,7 @@ class LibtorrentEngineTest {
         return new TorrentBuilder()
                 .path(root.toFile())
                 .addTracker("udp://tracker.example.org:6969/announce")
+                .setPrivate(isPrivate)
                 .generate()
                 .entry()
                 .bencode();
@@ -508,8 +513,11 @@ class LibtorrentEngineTest {
         try (LibtorrentEngine engine = new LibtorrentEngine(
                 () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(freePort()))) {
             engine.start();
-            com.torrenta.engine.Engine.MetadataFetch fetch = engine.fetchMetadata(MAGNET);
-            assertThrows(EngineException.class, () -> engine.fetchMetadata(MAGNET), "one fetch per magnet");
+            com.torrenta.engine.Engine.SwarmProbe fetch = engine.probe(new AddRequest.Magnet(MAGNET), false);
+            assertThrows(
+                    EngineException.class,
+                    () -> engine.probe(new AddRequest.Magnet(MAGNET), false),
+                    "one fetch per magnet");
             fetch.cancel();
             assertTrue(engine.torrents().isEmpty());
         }
@@ -534,7 +542,7 @@ class LibtorrentEngineTest {
             engine.reconnectQuicklyForTest();
             List<EngineEvent> events = new CopyOnWriteArrayList<>();
             engine.addListener(events::add);
-            com.torrenta.engine.Engine.MetadataFetch fetch = engine.fetchMetadata(magnet);
+            com.torrenta.engine.Engine.SwarmProbe fetch = engine.probe(new AddRequest.Magnet(magnet), false);
             assertTrue(engine.torrents().isEmpty(), "a fetch is not a torrent in the list");
             // "One fetch per magnet" is aSecondFetchOfAMagnetStillBeingFetchedIsRefused's: from a
             // seeder on loopback this fetch can be over before a second call (CI saw it).
@@ -575,6 +583,79 @@ class LibtorrentEngineTest {
         }
     }
 
+    /**
+     * A {@code .torrent} has its file list, so its probe looks at the swarm from the start, hidden
+     * and writing nothing, and the add takes over the peers it met: the torrent downloads from the
+     * seeder it was never told about.
+     */
+    @Test
+    void aTorrentFilesProbeLooksAtOnceAndHandsItsPeersToTheAdd(@TempDir Path dir) throws Exception {
+        Path seeds = dir.resolve("seeds");
+        byte[] torrent = twoFileTorrent(seeds, "pair");
+        try (LibtorrentEngine seeder = new LibtorrentEngine(
+                        () -> seeds, new TorrentStore(dir.resolve("seed-store")), isolated(ANY_PORT));
+                LibtorrentEngine engine = new LibtorrentEngine(
+                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(ANY_PORT))) {
+            seeder.start();
+            seeder.add(AddRequest.defaults(new AddRequest.TorrentFile(torrent, "pair"), seeds));
+            await("seeding", () -> seeder.torrents().get(0).state() == TorrentState.SEEDING);
+            engine.start();
+            engine.recordPeersForTest();
+            engine.reconnectQuicklyForTest();
+            AddRequest.TorrentFile file = new AddRequest.TorrentFile(torrent, "pair.torrent");
+            Engine.SwarmProbe probe = engine.probe(file, false);
+            assertArrayEquals(torrent, probe.torrent().getNow(null), "the file list is the .torrent's own, at once");
+
+            int first = engine.inspect(torrent).files().get(0).index();
+            com.torrenta.engine.SwarmPreview look = awaitSwarmDialling(
+                    engine, probe, awaitListening("the seeder", seeder), Set.of(first), p -> p.seeds() >= 1);
+            assertTrue(look.hasPieces() && look.wanted() > 0, look.toString());
+            assertEquals(look.wanted(), look.wantedSeen(), "a seed holds them all: " + look);
+            assertTrue(engine.torrents().isEmpty(), "a probe is not a torrent in the list");
+            assertTrue(new TorrentStore(dir.resolve("store")).loadAll().isEmpty(), "and writes nothing");
+
+            engine.add(AddRequest.defaults(file, dir.resolve("downloads")), probe);
+            await(
+                    "downloaded from the peer the probe met",
+                    () -> engine.torrents().get(0).progress() >= 1.0);
+            assertTrue(probe.swarm(Set.of(first)).isEmpty(), "the add ended the probe");
+        }
+    }
+
+    /**
+     * A private tracker counts every announce: a private {@code .torrent}'s probe never joins the
+     * swarm unless the person let it, and then looks as any other does. (A magnet cannot show
+     * this: libtorrent never hands a private torrent's metadata to one.)
+     */
+    @Test
+    void aPrivateTorrentIsLookedAtOnlyWhenLetIn(@TempDir Path dir) throws Exception {
+        Path seeds = dir.resolve("seeds");
+        byte[] torrent = twoFileTorrent(seeds, "pair", true);
+        try (LibtorrentEngine seeder = new LibtorrentEngine(
+                        () -> seeds, new TorrentStore(dir.resolve("seed-store")), isolated(ANY_PORT));
+                LibtorrentEngine engine = new LibtorrentEngine(
+                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(ANY_PORT))) {
+            seeder.start();
+            seeder.add(AddRequest.defaults(new AddRequest.TorrentFile(torrent, "pair"), seeds));
+            await("seeding", () -> seeder.torrents().get(0).state() == TorrentState.SEEDING);
+            engine.start();
+            engine.recordPeersForTest();
+            engine.reconnectQuicklyForTest();
+            AddRequest.TorrentFile file = new AddRequest.TorrentFile(torrent, "pair.torrent");
+
+            Engine.SwarmProbe kept = engine.probe(file, false);
+            assertArrayEquals(torrent, kept.torrent().getNow(null), "the file list is still there");
+            assertTrue(kept.swarm(Set.of()).isEmpty(), "but the swarm is not looked at");
+            assertEquals(0, kept.peers());
+
+            Engine.SwarmProbe let = engine.probe(file, true);
+            com.torrenta.engine.SwarmPreview look = awaitSwarmDialling(
+                    engine, let, awaitListening("the seeder", seeder), Set.of(), p -> p.seeds() >= 1);
+            assertTrue(look.hasPieces(), look.toString());
+            let.cancel();
+        }
+    }
+
     @Test
     void addingAfterTheFileListArrivedStartsWithThePeersTheFetchFound(@TempDir Path dir) throws Exception {
         Path seeds = dir.resolve("seeds");
@@ -597,7 +678,7 @@ class LibtorrentEngineTest {
             engine.start();
             engine.recordPeersForTest();
             engine.reconnectQuicklyForTest();
-            Engine.MetadataFetch fetch = engine.fetchMetadata(magnet);
+            Engine.SwarmProbe fetch = engine.probe(new AddRequest.Magnet(magnet), false);
             engine.connectFetchForTest(fetch, awaitListening("the seeder", seeder));
             byte[] fetched = awaitFetch(engine, fetch, seeder.listenPortForTest());
 
@@ -633,7 +714,7 @@ class LibtorrentEngineTest {
             engine.start();
             engine.recordPeersForTest();
             engine.reconnectQuicklyForTest();
-            Engine.MetadataFetch fetch = engine.fetchMetadata(MAGNET);
+            Engine.SwarmProbe fetch = engine.probe(new AddRequest.Magnet(MAGNET), false);
             awaitFetchPeer(engine, fetch, awaitListening("the other peer", other));
 
             AddRequest now = new AddRequest(
@@ -657,8 +738,8 @@ class LibtorrentEngineTest {
     void aFetchOfAnotherTorrentIsEndedAndLendsNothing(@TempDir Path dir) throws Exception {
         try (LibtorrentEngine engine = engine(dir)) {
             engine.start();
-            Engine.MetadataFetch fetch =
-                    engine.fetchMetadata("magnet:?xt=urn:btih:89abcdef0123456789abcdef0123456789abcdef");
+            Engine.SwarmProbe fetch = engine.probe(
+                    new AddRequest.Magnet("magnet:?xt=urn:btih:89abcdef0123456789abcdef0123456789abcdef"), false);
             Torrent added =
                     engine.add(AddRequest.defaults(new AddRequest.Magnet(MAGNET), dir.resolve("downloads")), fetch);
             assertEquals(MAGNET_ID, added.id());
@@ -674,7 +755,7 @@ class LibtorrentEngineTest {
         TorrentStore store = new TorrentStore(dir.resolve("store"));
         try (LibtorrentEngine engine = engine(dir, store)) {
             engine.start();
-            com.torrenta.engine.Engine.MetadataFetch fetch = engine.fetchMetadata(MAGNET);
+            com.torrenta.engine.Engine.SwarmProbe fetch = engine.probe(new AddRequest.Magnet(MAGNET), false);
             assertTrue(engine.torrents().isEmpty());
             fetch.cancel();
             fetch.cancel();
@@ -685,12 +766,15 @@ class LibtorrentEngineTest {
             assertEquals(MAGNET_ID, added.id());
             assertEquals(1, engine.torrents().size());
             await("the real add writes its blob", () -> store.contains(MAGNET_ID));
-            assertThrows(EngineException.class, () -> engine.fetchMetadata(MAGNET), "already in the list");
+            assertThrows(
+                    EngineException.class,
+                    () -> engine.probe(new AddRequest.Magnet(MAGNET), false),
+                    "already in the list");
         }
         try (LibtorrentEngine engine = engine(dir, store)) {
             engine.start();
-            com.torrenta.engine.Engine.MetadataFetch fetch =
-                    engine.fetchMetadata("magnet:?xt=urn:btih:89abcdef0123456789abcdef0123456789abcdef");
+            com.torrenta.engine.Engine.SwarmProbe fetch = engine.probe(
+                    new AddRequest.Magnet("magnet:?xt=urn:btih:89abcdef0123456789abcdef0123456789abcdef"), false);
             engine.stop();
             assertTrue(fetch.torrent().isCompletedExceptionally(), "stopping ends a fetch");
         }
@@ -1643,7 +1727,7 @@ class LibtorrentEngineTest {
     private static final long FORGET_AFTER_MS = 5000;
 
     /** A fetch connected to the peer on {@code port}: dialled once a second, forgetting as {@link #awaitFetch} does. */
-    private static void awaitFetchPeer(LibtorrentEngine engine, Engine.MetadataFetch fetch, int port) throws Exception {
+    private static void awaitFetchPeer(LibtorrentEngine engine, Engine.SwarmProbe fetch, int port) throws Exception {
         long deadline = System.currentTimeMillis() + LOOPBACK_SECONDS * 1000;
         long lonelySince = System.currentTimeMillis();
         while (fetch.peers() == 0) {
@@ -1666,7 +1750,7 @@ class LibtorrentEngineTest {
      * redial: the fetch is a hidden torrent with the same peer list, and gives up on the seeder the
      * same way after three failures.
      */
-    private static byte[] awaitFetch(LibtorrentEngine engine, Engine.MetadataFetch fetch, int port) throws Exception {
+    private static byte[] awaitFetch(LibtorrentEngine engine, Engine.SwarmProbe fetch, int port) throws Exception {
         long deadline = System.currentTimeMillis() + LOOPBACK_SECONDS * 1000;
         long lonelySince = System.currentTimeMillis();
         while (true) {
@@ -1689,9 +1773,42 @@ class LibtorrentEngineTest {
         }
     }
 
+    /**
+     * {@link #awaitSwarm} for a probe that knows of no peer: the seeder on {@code port} is dialled
+     * once a second while none is connected, forgetting as {@link #awaitFetch} does.
+     */
+    private static com.torrenta.engine.SwarmPreview awaitSwarmDialling(
+            LibtorrentEngine engine,
+            Engine.SwarmProbe probe,
+            int port,
+            Set<Integer> wanted,
+            java.util.function.Predicate<com.torrenta.engine.SwarmPreview> until)
+            throws Exception {
+        long deadline = System.currentTimeMillis() + LOOPBACK_SECONDS * 1000;
+        long lonelySince = System.currentTimeMillis();
+        com.torrenta.engine.SwarmPreview last = null;
+        while (System.currentTimeMillis() < deadline) {
+            last = probe.swarm(wanted).orElse(null);
+            if (last != null && until.test(last)) return last;
+            long now = System.currentTimeMillis();
+            if (probe.peers() > 0) {
+                lonelySince = now;
+            } else {
+                if (now - lonelySince >= FORGET_AFTER_MS) {
+                    engine.forgetFetchPeersForTest(probe);
+                    lonelySince = now;
+                }
+                engine.connectFetchForTest(probe, port);
+            }
+            Thread.sleep(1000);
+        }
+        throw new AssertionError("timed out looking at the swarm; last seen " + last + "\n  peers:\n    "
+                + String.join("\n    ", engine.peerLogForTest()));
+    }
+
     /** What a fetch sees of the swarm, once it shows what {@code until} asks: polled as the dialog polls it. */
     private static com.torrenta.engine.SwarmPreview awaitSwarm(
-            Engine.MetadataFetch fetch,
+            Engine.SwarmProbe fetch,
             Set<Integer> wanted,
             java.util.function.Predicate<com.torrenta.engine.SwarmPreview> until)
             throws Exception {

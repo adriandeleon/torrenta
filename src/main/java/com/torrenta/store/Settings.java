@@ -276,6 +276,12 @@ public final class Settings {
      */
     public static final String ADD_UNSAFE_CONTENT = "add.unsafeContent";
 
+    /**
+     * The Add dialog looks at a private torrent's swarm too. Off by default: a private tracker
+     * counts every announce, and the probe announces before the person has added the torrent.
+     */
+    public static final String ADD_PROBE_PRIVATE = "add.probePrivate";
+
     /** Where the Create Torrent dialog last saved a {@code .torrent}; a folder of this machine, never synced. */
     public static final String CREATE_LAST_DIR = "create.lastDir";
 
@@ -763,6 +769,14 @@ public final class Settings {
 
     public void setAddUnsafeContent(String value) {
         properties.setProperty(ADD_UNSAFE_CONTENT, value);
+    }
+
+    public boolean addProbePrivate() {
+        return readBoolean(ADD_PROBE_PRIVATE, false);
+    }
+
+    public void setAddProbePrivate(boolean on) {
+        properties.setProperty(ADD_PROBE_PRIVATE, String.valueOf(on));
     }
 
     /** Every torrent still waiting for its content check, by id, with the mark's value. */

@@ -68,21 +68,25 @@ public interface Engine extends AutoCloseable {
     CreatedTorrent create(CreateRequest request, CreateProgress progress) throws EngineException;
 
     /**
-     * Starts fetching a magnet's metadata without adding it, so the Add dialog can show the files
-     * while it is open. The magnet joins the swarm writing nothing, is in no snapshot and no
-     * store, and stays to look at the swarm ({@link MetadataFetch#swarm}) until it is added or
-     * cancelled; a private torrent leaves once its metadata is in. Fails if the magnet is already
-     * in the session.
+     * Joins the swarm of a torrent not added yet, writing nothing, so the Add dialog can show what
+     * is there while it is open: a magnet's metadata first ({@link SwarmProbe#torrent}), then for
+     * either kind the swarm itself ({@link SwarmProbe#swarm}), until it is added or cancelled. The
+     * probe is in no snapshot and no store. A private torrent is looked at only with {@code
+     * privateToo}, since a private tracker counts every announce and the person has not added it
+     * yet: a magnet's probe leaves once its metadata shows it private, and a private {@code
+     * .torrent}'s never joins. Fails if the torrent is already in the session, or (with {@link
+     * Capability#METADATA_FETCH} or {@link Capability#SWARM_PREVIEW} missing) where the engine
+     * cannot.
      */
-    MetadataFetch fetchMetadata(String magnet) throws EngineException;
+    SwarmProbe probe(AddRequest.Source source, boolean privateToo) throws EngineException;
 
     /**
-     * Adds what a fetch was fetching, taking over the peers it found: the fetch is ended first
+     * Adds what a probe was looking at, taking over the peers it found: the probe is ended first
      * (the session holds one torrent per info-hash), and the peers it had dialled are handed to
      * the new torrent, which connects to them as it starts rather than looking for the swarm
-     * again. A fetch of another torrent is only ended.
+     * again. A probe of another torrent is only ended.
      */
-    default Torrent add(AddRequest request, MetadataFetch from) throws EngineException {
+    default Torrent add(AddRequest request, SwarmProbe from) throws EngineException {
         from.cancel();
         return add(request);
     }
@@ -316,32 +320,32 @@ public interface Engine extends AutoCloseable {
         CreateProgress NONE = (done, total) -> true;
     }
 
-    /** A magnet's metadata on its way, from {@link #fetchMetadata}. */
-    interface MetadataFetch {
+    /** A torrent's swarm being looked at before it is added, from {@link #probe}. */
+    interface SwarmProbe {
 
-        /** Peers connected to fetch it now; 0 once the fetch is over. Not on the FX thread. */
+        /** Peers connected to it now; 0 once the probe is over. Not on the FX thread. */
         int peers();
 
         /**
-         * The whole {@code .torrent}, the magnet's trackers included, once the metadata is in:
-         * what {@link #inspect} reads and {@link AddRequest.TorrentFile} adds. Completes on an
-         * engine thread; fails if the fetch is cancelled or the engine stops.
+         * The whole {@code .torrent}, a magnet's trackers included, once the metadata is in:
+         * what {@link #inspect} reads and {@link AddRequest.TorrentFile} adds; a {@code .torrent}'s
+         * own bytes at once. Completes on an engine thread; fails if a magnet's probe is cancelled
+         * or the engine stops first.
          */
         java.util.concurrent.CompletableFuture<byte[]> torrent();
 
         /**
-         * What the fetch has seen of the swarm so far, with the pieces counted over the files at
+         * What the probe has seen of the swarm so far, with the pieces counted over the files at
          * {@code wanted} (indices): once the file list is in, it stays in the swarm downloading
          * nothing, to look, until it is added or cancelled. Empty where the engine cannot look,
-         * once the fetch is over, and for a private torrent, whose fetch leaves at its metadata
-         * (a probe's announce would count against the person on a private tracker). Not on the FX
-         * thread.
+         * once the probe is over, and for a private torrent not let in ({@link #probe}). Not on
+         * the FX thread.
          */
         default java.util.Optional<SwarmPreview> swarm(java.util.Set<Integer> wanted) {
             return java.util.Optional.empty();
         }
 
-        /** Leaves the swarm. Idempotent; must come before the same magnet is added for real. */
+        /** Leaves the swarm. Idempotent; must come before the same torrent is added for real. */
         void cancel();
     }
 
@@ -414,7 +418,13 @@ public interface Engine extends AutoCloseable {
          * A removal that can be taken back: {@link #detach} keeps what brings the torrent back as
          * it was, and {@link #reattach} brings it back without a recheck.
          */
-        UNDO_REMOVE;
+        UNDO_REMOVE,
+        /**
+         * A look at a torrent's swarm before it is added ({@link SwarmProbe#swarm}): the Add
+         * dialog's Swarm line, for a {@code .torrent} as for a magnet. A daemon has no hidden
+         * torrents to look with.
+         */
+        SWARM_PREVIEW;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

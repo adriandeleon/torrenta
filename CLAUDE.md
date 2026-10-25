@@ -68,7 +68,7 @@ to try one on purpose).
 |---|---|---|
 | Entry | `--help`/`--version`, toolkit start, theme | `com.torrenta.App`, `com.torrenta.cli` |
 | Events | `EngineEvent` (level, torrent, message), raised by the engine from libtorrent alerts and by its own start/stop/remove; `Engine.addListener` | `com.torrenta.engine` |
-| Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Engine.fetchMetadata` (a magnet's file list while the dialog is open), `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL), `FileRenames.Layout` (the content layout, `add.contentLayout`); `ui.AddDialog` (rules as statics), `FileTree` (wanted + priority ladder), `FreeSpace` (disk bar and sentence), `SwarmVerdict` (the Swarm line, from the fetch's `SwarmPreview`), `ContentCheck` (pure: what in the wanted files deserves a look — a disguised program, bidi in a name, a shortcut, a program or link in a media torrent, an archive where the name promises media, a bait name from `content.baitWords` — the card above the tree with Skip these files), `UnsafeContent` (`add.unsafeContent`, Skip by default: what an add without a dialog does with what the check found — watch folders through `WatchFolders.Host.add`, RSS rules, an article's Download, Add without asking all go through `MainWindow.screenedAdd`; a `.torrent` is checked before the add, a magnet is added to stop on metadata and marked `torrent.<hash>.unsafeContent`, and `screenPending` in the poll checks it once its files are known: resumed, trimmed, or removed) | `com.torrenta.engine`, `com.torrenta.net`, `ui` |
+| Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Engine.probe` (a `SwarmProbe`: a magnet's file list, then for either kind a look at the swarm, while the dialog is open), `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL), `FileRenames.Layout` (the content layout, `add.contentLayout`); `ui.AddDialog` (rules as statics), `FileTree` (wanted + priority ladder), `FreeSpace` (disk bar and sentence), `SwarmVerdict` (the Swarm line, from the fetch's `SwarmPreview`), `ContentCheck` (pure: what in the wanted files deserves a look — a disguised program, bidi in a name, a shortcut, a program or link in a media torrent, an archive where the name promises media, a bait name from `content.baitWords` — the card above the tree with Skip these files), `UnsafeContent` (`add.unsafeContent`, Skip by default: what an add without a dialog does with what the check found — watch folders through `WatchFolders.Host.add`, RSS rules, an article's Download, Add without asking all go through `MainWindow.screenedAdd`; a `.torrent` is checked before the add, a magnet is added to stop on metadata and marked `torrent.<hash>.unsafeContent`, and `screenPending` in the poll checks it once its files are known: resumed, trimmed, or removed) | `com.torrenta.engine`, `com.torrenta.net`, `ui` |
 | Create | `CreateRequest` (path, `Format` v1/v2/hybrid, piece size or 0, private, tracker tiers, web seeds, comment, `source` tag, align, seed), `CreatedTorrent` (bytes, engine id, both hashes, counts, magnet, the seeding torrent or the add's problem), `PieceSize` (the automatic rule: ~1,500 pieces, 16 KiB … 16 MiB; `count` packed or aligned), `Engine.create(request, CreateProgress)` blocking on the caller's worker, cancellable at the next piece; `libtorrent.PieceHasher` (v1 pieces and v2 piece layers in Java, bit for bit libtorrent's); `ui.CreateDialog` (modeless, sizes the source live, Save as…, atomic write), `CreateText` (tier parser, summary, outcome) | `com.torrenta.engine`, `.libtorrent`, `ui` |
 | Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags, the name a person gave; JSON for the `<hash>.labels` sidecar), `Engine.rename`, `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`; the names sync through `sync.SyncLabels`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `ui.FilterQuery` (the filter box's `key:value` language → predicate + chips), `Sidebar` (a tree: All, Views, Status, Categories, Tags, Trackers), `TagsDialog`; saved views: `store.SavedView` (name + the omnibox's query, one key per field `ui.view.<slug>.name/.query` and `ui.views.order` so sync merges view by view), `SidebarFilter.view(slug)` on the VIEW axis matches everything itself and `MainWindow.rowFilter` ANDs the view's query in (`viewQuery`), `SidebarEntries.View` counts each by its query and carries a broken one's reason (struck through, `:broken`); Save Filter as View is Shortcut+S, the first nine are Shortcut+Alt+1…9 through a scene filter that stands aside in a text field (Ctrl+Alt is AltGr), the row's menu renames, re-points or deletes | `com.torrenta.engine`, `store`, `ui` |
 | Detail | `TorrentDetail` (general, files with their piece range, peers, trackers, pieces, per-piece availability, web seeds) from `Engine.detail(id)`; `ui.Diagnosis` (why it is not moving + remedies; first after an error, a wanted archive that asks for a password, Skip or Remove), `OverviewText`, `PieceStrip`, `Sparkline`; `engine.ArchiveProbe` (pure: ZIP, RAR 4/5, 7z encryption from the first 64 KiB, a 7z's last too; `Reading` gathers them from pieces) and `TorrentDetail.encryptedArchives`; `setFilePriority`, `renamePath` (`FileRenames.plan`/`problem`), `addTrackers`, `removeTracker`, `webSeeds`/`addWebSeeds`/`removeWebSeed` (`WebSeeds`: an http(s) URL with a host, `fresh` against what the torrent has; `Capability.WEB_SEEDS` to edit); `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
@@ -357,8 +357,10 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   the caller's thread the moment it changes (never through the resume-data alert), read back in
   `restore()`, deleted by `TorrentStore.delete`. The engine holds them in a map by id for the
   snapshots. The sidebar is not focus-traversable for the same reason as the filter box.
-- **The Add dialog's magnet fetch is a real torrent, hidden.** `fetchMetadata` adds the magnet in
-  upload mode, out of the queue, and keeps it in `fetches`: `handles()` skips it (so no snapshot,
+- **The Add dialog's swarm probe is a real torrent, hidden.** `Engine.probe(source, privateToo)`
+  (an `Engine.SwarmProbe`; inside the engine still a `Fetch`, kept in `fetches`) adds a magnet,
+  or a `.torrent` whose file list is in from the start (`listed`), in upload mode, out of the
+  queue: `handles()` skips it (so no snapshot,
   flush or settings walk sees it), its alerts are dropped (`ofAFetch`: all but its metadata, its
   add and its peers, so its check never runs the suffix and move handlers), and its add alert is
   swallowed by id (`fetchAddAlerts`) so no blob is written even if it was cancelled before the
@@ -367,10 +369,13 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   writes the `.torrent` (`write_torrent_file` with the link's trackers,
   `allow_missing_piece_layer` for v2) and completes `torrent()`, but stays in the swarm to look,
   downloading nothing, until it is added or cancelled (`ended` is its own flag: the future being
-  done no longer means the fetch is over); a private torrent leaves at once. `swarm(wanted)` is
-  `SwarmPreview`: seeds as the most anyone knows (`num_complete`, which libtorrent keeps as the
-  highest of the trackers' scrapes; `list_seeds`, which keeps a seed that dropped the upload-only
-  fetch; the seeds met), and with none the pieces peers were seen to hold, a `BitSet` gathered
+  done no longer means the fetch is over). A private torrent is looked at only with `privateToo`
+  (`add.probePrivate`, off: a private tracker counts the probe's announce): a magnet's leaves at
+  its metadata, a `.torrent`'s never joins and hands back its own bytes. `Capability.SWARM_PREVIEW`
+  gates the `.torrent` probe and the Settings row. `swarm(wanted)` is `SwarmPreview`: seeds as the
+  most anyone knows (`num_complete`, which libtorrent keeps as the highest of the trackers'
+  scrapes; `list_seeds`; the seeds met, by address), and with none the pieces peers were seen to
+  hold, a `BitSet` gathered
   over the fetch's life from each peer's bitfield; `ui.SwarmVerdict` (pure, first rule wins) is
   the Add dialog's Swarm line, polled with the ticked files' indices. The real add goes through
   `Engine.add(request, fetch)`, which ends the fetch first (libtorrent hands back the existing
@@ -379,12 +384,19 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   connect, not read at the end: once the metadata is in, the fetch is upload-only and a seed
   drops it at once. A loopback test of this has to look at progress, not at peers: the new
   torrent downloads the test payload in a moment and the two seeds part. A v1 magnet of a hybrid torrent gets a new best hash (the v2 one) when its metadata
-  arrives, so the fetch is matched by either hash (`fetchOf`), never by `id()`. libtorrent never
-  serves a private torrent's metadata to a magnet, so the private rule cannot be driven over
-  loopback. A capture of the Swarm line needs a seed: a second `dev-run.sh` on its own config
+  arrives, so the fetch is matched by either hash (`fetchOf`), never by `id()`. **A seed and an
+  upload-only probe drop each other at the handshake** ("upload to upload connection"), before
+  libtorrent's peer list marks the seed: a magnet's probe meets its seeds before the metadata, a
+  `.torrent`'s never does, and saw no one until that disconnect was counted as a seed met
+  (`onPeerDisconnected`, matched on libtorrent's own message, `UPLOAD_TO_UPLOAD`, since
+  libtorrent4j exposes no error enum or category). libtorrent never serves a private torrent's
+  metadata to a magnet, so the private rule is tested with a `.torrent`
+  (`aPrivateTorrentIsLookedAtOnlyWhenLetIn`). A capture of the Swarm line needs a seed: a second `dev-run.sh` on its own config
   folder (fixed `connection.port`, DHT and LSD off, `add.withoutAsking=true`, the data already in
   its `download.dir`) given the `.torrent`, and the captured one given the magnet with
-  `x.pe=127.0.0.1:<port>`; the `add-dialog=` line then ends in `swarm=`.
+  `x.pe=127.0.0.1:<port>`; the `add-dialog=` line then ends in `swarm=`. A `.torrent` has no
+  `x.pe`, and LSD between two instances found nothing in 40 s: give it a stand-in HTTP tracker
+  that answers every announce with the seed's compact address (and `complete` for the scrape).
 - **"Add now, pick files when ready"** adds with stop-after-metadata and marks
   `torrent.<hash>.pickFiles` in the settings; `MainWindow.chooseFiles(id)` opens the dialog's
   tree for a torrent in the list and clears the mark. Torrent → Choose Files… (`choose-files`) is

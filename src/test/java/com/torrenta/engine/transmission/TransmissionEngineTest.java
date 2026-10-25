@@ -149,7 +149,8 @@ class TransmissionEngineTest {
             assertTrue(caps.lacks(missing), missing + " is not Transmission's");
         }
         assertThrows(EngineException.class, () -> e.create(null, null));
-        assertThrows(EngineException.class, () -> e.fetchMetadata("magnet:?xt=urn:btih:" + MAGNET_ID));
+        assertThrows(
+                EngineException.class, () -> e.probe(new AddRequest.Magnet("magnet:?xt=urn:btih:" + MAGNET_ID), false));
         assertThrows(EngineException.class, () -> e.setIpFilter(List.of()));
         assertThrows(EngineException.class, () -> e.setSuperSeeding(MAGNET_ID, true));
         assertThrows(EngineException.class, () -> e.exportTorrent(MAGNET_ID));

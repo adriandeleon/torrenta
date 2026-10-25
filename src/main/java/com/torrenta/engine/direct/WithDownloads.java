@@ -126,7 +126,7 @@ public final class WithDownloads implements Engine {
     }
 
     @Override
-    public Torrent add(AddRequest request, MetadataFetch from) throws EngineException {
+    public Torrent add(AddRequest request, SwarmProbe from) throws EngineException {
         return torrents.add(request, from);
     }
 
@@ -141,8 +141,8 @@ public final class WithDownloads implements Engine {
     }
 
     @Override
-    public MetadataFetch fetchMetadata(String magnet) throws EngineException {
-        return torrents.fetchMetadata(magnet);
+    public SwarmProbe probe(AddRequest.Source source, boolean privateToo) throws EngineException {
+        return torrents.probe(source, privateToo);
     }
 
     @Override
