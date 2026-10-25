@@ -120,7 +120,7 @@ class WebApiTest {
                 "2.11",
                 text(router.dispatch(request("POST", "/api/v2/app/webapiVersion", null, Map.of("cookie", sid(ok))))));
         assertEquals(
-                "/srv/downloads",
+                FakeBackend.abs("/srv/downloads").toString(),
                 text(router.dispatch(request("GET", "/api/v2/app/defaultSavePath", null, Map.of("cookie", sid(ok))))));
     }
 
@@ -220,7 +220,8 @@ class WebApiTest {
         assertEquals(200, r.status());
         assertEquals("application/json", header(r, "Content-Type").orElseThrow());
         String json = text(r);
-        assertTrue(json.contains("\"save_path\":\"/srv/downloads\""), json);
+        String saved = FakeBackend.abs("/srv/downloads").toString().replace("\\", "\\\\");
+        assertTrue(json.contains("\"save_path\":\"" + saved + "\""), json);
         assertTrue(json.contains("\"queueing_enabled\":true"), json);
         assertTrue(json.contains("\"max_ratio_enabled\":true"), json);
         assertTrue(json.contains("\"max_ratio\":2.0"), json);

@@ -5,7 +5,6 @@ import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.List;
@@ -122,7 +121,7 @@ class WritesTest {
         assertEquals("Ok.", text(r));
         AddRequest added = backend.adds.getFirst();
         assertEquals(new AddRequest.Magnet(MAGNET), added.source());
-        assertEquals(Path.of("/srv/downloads"), added.savePath());
+        assertEquals(FakeBackend.abs("/srv/downloads"), added.savePath());
         assertFalse(added.startPaused());
     }
 
@@ -146,7 +145,7 @@ class WritesTest {
         assertEquals("Ok.", text(r));
         AddRequest a = backend.adds.getFirst();
         assertTrue(a.source() instanceof AddRequest.TorrentFile);
-        assertEquals(Path.of("/srv/tv/Show"), a.savePath());
+        assertEquals(FakeBackend.abs("/srv/tv/Show"), a.savePath());
         assertEquals("tv", a.labels().category());
         assertEquals(List.of("keep", "sonarr"), a.labels().tags());
         assertEquals("Show S01", a.labels().name());
@@ -162,9 +161,9 @@ class WritesTest {
     @Test
     void aCategoryWithAFolderIsWhereItsTorrentsGoAndANewOneIsCreated() throws Exception {
         post("torrents/add", "category=tv&urls=" + java.net.URLEncoder.encode(MAGNET, StandardCharsets.UTF_8));
-        assertEquals(Path.of("/srv/tv"), backend.adds.getFirst().savePath());
+        assertEquals(FakeBackend.abs("/srv/tv"), backend.adds.getFirst().savePath());
         post("torrents/add", "category=films&urls=" + java.net.URLEncoder.encode(MAGNET, StandardCharsets.UTF_8));
-        assertEquals(Path.of("/srv/downloads"), backend.adds.get(1).savePath());
+        assertEquals(FakeBackend.abs("/srv/downloads"), backend.adds.get(1).savePath());
         assertTrue(backend.categories.stream().anyMatch(c -> c.name().equals("films")), "created, as qBittorrent does");
     }
 
@@ -175,7 +174,7 @@ class WritesTest {
                 "torrents/add",
                 "savepath=/etc/cron.d&urls=" + java.net.URLEncoder.encode(MAGNET, StandardCharsets.UTF_8));
         assertEquals(400, r.status());
-        assertTrue(text(r).contains("/etc/cron.d"), text(r));
+        assertTrue(text(r).contains("cron.d"), text(r));
         assertTrue(backend.adds.isEmpty());
         assertEquals(
                 400,
@@ -254,7 +253,10 @@ class WritesTest {
                 200,
                 post("torrents/createCategory", "category=films&savePath=/srv/downloads/films")
                         .status());
-        assertEquals(new Category("films", "/srv/downloads/films"), backend.categories.getLast());
+        assertEquals(
+                new Category("films", FakeBackend.abs("/srv/downloads/films").toString()),
+                backend.categories.getLast(),
+                "kept as the absolute path it resolved to");
         assertEquals(409, post("torrents/createCategory", "category=Films").status(), "it exists");
         Response outside = post("torrents/createCategory", "category=sneaky&savePath=/etc");
         assertEquals(400, outside.status(), "a category's folder becomes a root: it must be inside one");

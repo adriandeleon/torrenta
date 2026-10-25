@@ -29,7 +29,15 @@ import com.torrenta.session.AddDefaults;
 final class FakeBackend implements WebApi.Backend {
 
     EngineSettings settings = EngineSettings.defaults();
-    Path savePath = Path.of("/srv/downloads");
+    /**
+     * An absolute path on every platform: {@code /srv} is relative to the current drive on
+     * Windows, and the API answers with the absolute path it resolved.
+     */
+    static Path abs(String posix) {
+        return Path.of(posix).toAbsolutePath();
+    }
+
+    Path savePath = abs("/srv/downloads");
     final List<Torrent> torrents = new ArrayList<>();
     final Map<String, TorrentDetail> details = new HashMap<>();
     final Map<String, ShareLimit> own = new HashMap<>();
@@ -43,7 +51,7 @@ final class FakeBackend implements WebApi.Backend {
     /** What reached the screened add. */
     final List<AddRequest> adds = new java.util.concurrent.CopyOnWriteArrayList<>();
 
-    final List<Path> roots = new ArrayList<>(List.of(Path.of("/srv/downloads")));
+    final List<Path> roots = new ArrayList<>(List.of(abs("/srv/downloads")));
     final Map<String, byte[]> served = new HashMap<>();
     ShareLimit global = ShareLimit.NONE;
     boolean engineUp = true;
