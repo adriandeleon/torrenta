@@ -43,7 +43,7 @@ selected torrent, `select-first`, `message-log` / `message-log:<query>` (the sta
   rows, which arrive with the first detail poll; on the Files tab a `file=` line per row shown
   names its `FileKind`, the glyph's rule by extension), `welcome-clipboard:<text>` (the welcome's
   clipboard card as it would read with that text, the real clipboard untouched; a `welcome=` line
-  is printed), `search` / `search:<query>` / `search-keys:<KEY+KEY>`
+  is printed), `search` / `search:<query>` / `search-keys:<KEY+KEY>` / `search-clear` (Clear Search Results, once the search has ended)
   for the Search tab (the keys go where the focus is, once the search has ended; a stand-in server is
   `java scripts/torznab-stub.java 9696 <search.xml> [caps.xml]`), `stats` for the Statistics window
   (the PNG is of it; `stats=` and `stats-graph=` lines after the shot), `detail:speed` for the Speed
@@ -659,6 +659,8 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   difference when none is given outright. The capture hook's `settings-search-add[:<url>]`,
   `settings-search-dialog-test:<url>` (Test pressed in the dialog) and `settings-search-test`
   (the page's Test on the first row) drive the page; a stub serving the caps fixture is enough.
+  `settings-definitions-export:<zip>` is the definitions' Export to zip past its chooser
+  (`DefinitionStore.exportZip`), with a `definitions-status=` line after the shot.
 
 - **The RSS rules run on the fetch thread, under their own lock, after the merge and before the
   feed's listeners hear.** `RssService.finish` hands the articles new by identity to `runRules`

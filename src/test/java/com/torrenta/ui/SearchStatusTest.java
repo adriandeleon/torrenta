@@ -6,6 +6,8 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SearchStatusTest {
 
@@ -53,5 +55,13 @@ class SearchStatusTest {
                 "Every provider is switched off; turn one on to search", SearchStatus.cannotSearch(true, false, true));
         assertEquals("Type what to search for and press Enter", SearchStatus.cannotSearch(true, true, false));
         assertEquals("", SearchStatus.cannotSearch(true, true, true));
+    }
+
+    @Test
+    void clearIsLiveOnceThereIsSomethingToClear() {
+        assertFalse(SearchStatus.canClear("", false), "a fresh tab");
+        assertFalse(SearchStatus.canClear("   ", false), "blanks are no query");
+        assertTrue(SearchStatus.canClear("ubuntu", false), "a query typed, not run");
+        assertTrue(SearchStatus.canClear("", true), "a search ran and its query was erased");
     }
 }

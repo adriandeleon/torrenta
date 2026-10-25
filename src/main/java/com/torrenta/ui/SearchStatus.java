@@ -54,4 +54,12 @@ final class SearchStatus {
         if (!queryGiven) return tr("search.status.typeQuery");
         return "";
     }
+
+    /**
+     * Whether Clear has anything to clear: a search ran (its rows, or its "nothing found", are
+     * showing, or it is still running) or a query is typed.
+     */
+    static boolean canClear(String query, boolean searched) {
+        return searched || !query.isBlank();
+    }
 }

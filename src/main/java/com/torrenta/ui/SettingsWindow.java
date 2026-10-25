@@ -2397,7 +2397,10 @@ final class SettingsWindow {
         reload.setOnAction(e -> reloadDefinitionsPressed());
         Button open = new Button(tr("settings.search.openFolder"));
         open.setOnAction(e -> openDefinitionFolder.run());
-        HBox buttons = new HBox(6, toggle, reload, open);
+        Button export = new Button(tr("settings.search.export"));
+        export.disableProperty().bind(Bindings.isEmpty(definitionTable.getItems()));
+        export.setOnAction(e -> exportDefinitionsPressed());
+        HBox buttons = new HBox(6, toggle, reload, open, export);
         buttons.setAlignment(Pos.CENTER_LEFT);
         Label hint = new Label(tr("settings.search.definitions.hint"));
         hint.setWrapText(true);
@@ -2435,6 +2438,34 @@ final class SettingsWindow {
         reloadDefinitions();
         definitionTable.getSelectionModel().select(selected);
         onSearchProvidersChanged.run();
+    }
+
+    /** Asks where, then writes every definition file into one zip. */
+    private void exportDefinitionsPressed() {
+        if (definitionStore == null) return;
+        javafx.stage.FileChooser chooser = new javafx.stage.FileChooser();
+        chooser.setTitle(tr("settings.search.export.title"));
+        chooser.getExtensionFilters()
+                .add(new javafx.stage.FileChooser.ExtensionFilter(tr("settings.search.export.filter"), "*.zip"));
+        chooser.setInitialFileName(DefinitionStore.exportName(java.time.LocalDate.now()));
+        File chosen = chooser.showSaveDialog(stage);
+        if (chosen != null) exportDefinitions(DefinitionStore.withZipSuffix(chosen.toPath()));
+    }
+
+    /** Writes the zip and says so on the page's status line; the capture's way past the chooser. */
+    void exportDefinitions(Path target) {
+        if (definitionStore == null || definitionStatusLabel == null) return;
+        try {
+            int count = definitionStore.exportZip(target);
+            definitionStatusLabel.setText(tr("settings.search.export.done", count, target));
+        } catch (IOException e) {
+            definitionStatusLabel.setText(tr("settings.search.export.failed", target, e.getMessage()));
+        }
+    }
+
+    /** The definitions' status line, for a capture. */
+    String definitionStatusForCapture() {
+        return definitionStatusLabel == null ? "" : definitionStatusLabel.getText();
     }
 
     private void reloadDefinitionsPressed() {

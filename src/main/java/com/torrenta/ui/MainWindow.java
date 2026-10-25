@@ -1251,6 +1251,10 @@ public final class MainWindow {
         } else if (action.equals("settings-definitions-reload")) {
             settingsWindow.show(stage);
             settingsWindow.reloadDefinitionsForCapture();
+        } else if (action.startsWith("settings-definitions-export:")) {
+            // The Search page's Export to zip, past its native chooser.
+            settingsWindow.show(stage);
+            settingsWindow.exportDefinitions(Path.of(action.substring("settings-definitions-export:".length())));
         } else if (action.startsWith("view:")) {
             ViewSwitch.parse(action.substring("view:".length()))
                     .ifPresentOrElse(this::show, () -> System.err.println("capture: no view " + action));
@@ -1301,6 +1305,9 @@ public final class MainWindow {
             showSearch();
             searchPane.setQuery(action.substring("search:".length()));
             searchPane.runSearch();
+        } else if (action.equals("search-clear")) {
+            // After the running search, if any, so the shot is of a tab that had rows.
+            searchPane.afterSearchForCapture(() -> command("search-clear").run().run());
         } else if (action.startsWith("search-keys:")) {
             // Keys pressed in the results table (DOWN+ENTER): the keyboard path to the Add dialog.
             showSearch();
@@ -1567,6 +1574,9 @@ public final class MainWindow {
             System.out.println("capture: search=" + settingsWindow.searchStatus());
         if (settingsWindow.isShowing())
             for (String row : settingsWindow.definitionsForCapture()) System.out.println("capture: definition=" + row);
+        if (settingsWindow.isShowing()
+                && !settingsWindow.definitionStatusForCapture().isEmpty())
+            System.out.println("capture: definitions-status=" + settingsWindow.definitionStatusForCapture());
         if (session.watcher() != null) System.out.println("capture: watch=" + watchStatusText());
         System.out.println("capture: view=" + view.id() + " focus=" + focusForCapture());
         System.out.println("capture: view-strip=" + viewStrip.describe());
@@ -4099,6 +4109,13 @@ public final class MainWindow {
                 new Command(
                         "retry-engine", tr("command.retryEngine"), null, null, engineDown, () -> startEngine(profile)),
                 new Command("search", tr("command.search"), Chords.of("search"), null, always, this::showSearch),
+                new Command(
+                        "search-clear",
+                        tr("command.searchClear"),
+                        null,
+                        null,
+                        searchPane.clearableProperty(),
+                        this::clearSearch),
                 new Command("rss", tr("command.rss"), Chords.of("rss"), null, always, this::showRss),
                 new Command("rss-run-rules", tr("command.rssRunRules"), null, null, always, rss::runRulesNow),
                 new Command(
@@ -4888,6 +4905,12 @@ public final class MainWindow {
 
     /** Ctrl+Shift+F: the Search view in place of the transfers, the query field focused. */
     private void showSearch() {
+        show(View.SEARCH);
+    }
+
+    /** Clear Search Results, from the palette: the tab emptied and shown, the query focused. */
+    private void clearSearch() {
+        searchPane.clear();
         show(View.SEARCH);
     }
 

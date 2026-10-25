@@ -9,9 +9,14 @@ import java.util.Set;
 import java.util.function.Function;
 
 import javafx.application.Platform;
+import javafx.beans.binding.Bindings;
+import javafx.beans.binding.BooleanBinding;
+import javafx.beans.property.BooleanProperty;
+import javafx.beans.property.SimpleBooleanProperty;
 import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.control.Button;
 import javafx.scene.control.ContextMenu;
 import javafx.scene.control.Hyperlink;
 import javafx.scene.control.Label;
@@ -49,7 +54,9 @@ import static com.torrenta.i18n.Messages.tr;
  * provider chips (every enabled provider, on unless switched off), a status line with one clause
  * per provider, and the results table. Enter in the query runs the search on a worker, each
  * provider's answer landing in the table as it arrives; a new search cancels the running one.
- * Enter or a double-click on a result hands it to the host, which opens the Add dialog.
+ * Enter or a double-click on a result hands it to the host, which opens the Add dialog. Clear
+ * (the button beside the query, the results' menu, the palette) empties the results, the status
+ * line and the query, and drops a search still running.
  *
  * <p>Driveable without the mouse: Tab walks the query, the chips and the table; Space toggles a
  * chip; Escape in the query or on a chip leaves the tab, Escape in the table returns to the
@@ -99,7 +106,11 @@ final class SearchPane extends VBox {
 
     private Thread running;
     private int generation;
-    private boolean searched;
+    /** A search ran since the tab was last fresh; the line then keeps its words. */
+    private final BooleanProperty searched = new SimpleBooleanProperty();
+    /** Live when Clear has something to clear ({@link SearchStatus#canClear}). */
+    private final BooleanBinding clearable = Bindings.createBooleanBinding(
+            () -> SearchStatus.canClear(query.getText(), searched.get()), query.textProperty(), searched);
     /** Run when the running search ends; the capture's keys wait for the rows. */
     private Runnable whenDone;
 
@@ -121,7 +132,17 @@ final class SearchPane extends VBox {
             }
         });
         HBox.setHgrow(query, Priority.ALWAYS);
-        HBox queryRow = new HBox(8, query);
+        // Off the Tab walk, like the window's chrome: the palette's command is the keyboard's way.
+        Button clear = new Button(tr("search.clear"));
+        clear.getStyleClass().addAll("flat", "search-clear");
+        clear.setFocusTraversable(false);
+        Icons.name(clear, tr("search.clear.tooltip"));
+        clear.disableProperty().bind(clearable.not());
+        clear.setOnAction(e -> {
+            clear();
+            focusQuery();
+        });
+        HBox queryRow = new HBox(8, query, clear);
         queryRow.setAlignment(Pos.CENTER_LEFT);
 
         for (SearchCategory c : SearchCategory.values()) {
@@ -224,7 +245,7 @@ final class SearchPane extends VBox {
         noProviders.setManaged(none);
         providerChips.getParent().setVisible(!none);
         providerChips.getParent().setManaged(!none);
-        if (!searched)
+        if (!searched.get())
             showProblem(SearchStatus.cannotSearch(
                     !none, !SearchChips.chosen(enabled, providersOff).isEmpty(), false));
     }
@@ -323,8 +344,13 @@ final class SearchPane extends VBox {
                 owner.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false));
             }
         };
-        if (searching()) whenDone = press;
-        else press.run();
+        afterSearchForCapture(press);
+    }
+
+    /** Runs {@code then} once the running search (if any) has ended, for the capture. */
+    void afterSearchForCapture(Runnable then) {
+        if (searching()) whenDone = then;
+        else then.run();
     }
 
     /** Runs the query as typed: Enter, or the capture. */
@@ -339,7 +365,7 @@ final class SearchPane extends VBox {
         }
         cancelRunning();
         int gen = ++generation;
-        searched = true;
+        searched.set(true);
         List<SearchProvider> providers = List.copyOf(chosen);
         List<String> names = providers.stream().map(SearchProvider::name).toList();
         SearchCategory cat = category();
@@ -386,6 +412,27 @@ final class SearchPane extends VBox {
                 if (then != null) then.run();
             });
         });
+    }
+
+    /** Whether Clear has anything to clear; the palette's command is live by it. */
+    BooleanBinding clearableProperty() {
+        return clearable;
+    }
+
+    /**
+     * Back to the tab as it was before any search: a running one dropped, no rows, no query, and
+     * the line saying what a search needs. The focus is the caller's to place.
+     */
+    void clear() {
+        cancelRunning();
+        whenDone = null;
+        rows.clear();
+        query.clear();
+        searched.set(false);
+        table.setPlaceholder(new Label(tr("search.placeholder.none")));
+        List<SearchProvider> enabled = host.enabledProviders();
+        showProblem(SearchStatus.cannotSearch(
+                !enabled.isEmpty(), !SearchChips.chosen(enabled, providersOff).isEmpty(), false));
     }
 
     /** A running search is dropped: its thread interrupted, its late answers ignored. */
@@ -474,16 +521,23 @@ final class SearchPane extends VBox {
         copy.setGraphic(Icons.copy().at(Icons.MENU_SIZE));
         MenuItem detail = new MenuItem(tr("search.menu.openDetail"));
         detail.setGraphic(Icons.external().at(Icons.MENU_SIZE));
+        MenuItem clear = new MenuItem(tr("command.searchClear"));
+        clear.setGraphic(Icons.trash().at(Icons.MENU_SIZE));
+        clear.setOnAction(e -> {
+            clear();
+            focusQuery();
+        });
         add.setOnAction(e -> selected(t).ifPresent(host::add));
         copy.setOnAction(e -> selected(t).ifPresent(r -> host.copy(r.link().value())));
         detail.setOnAction(e -> selected(t).ifPresent(r -> host.openDetail(r.detailUrl())));
-        ContextMenu menu = new ContextMenu(add, copy, new SeparatorMenuItem(), detail);
+        ContextMenu menu = new ContextMenu(add, copy, new SeparatorMenuItem(), detail, new SeparatorMenuItem(), clear);
         menu.setOnShowing(e -> {
             var r = selected(t);
             add.setDisable(r.isEmpty());
             copy.setDisable(r.isEmpty());
             copy.setText(r.map(SearchAdd::copyLabel).orElse(tr("search.menu.copyLink")));
             detail.setDisable(r.map(x -> x.detailUrl().isEmpty()).orElse(true));
+            clear.setDisable(!clearable.get());
         });
         return menu;
     }
