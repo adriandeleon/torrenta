@@ -3937,7 +3937,7 @@ public final class MainWindow {
                         "search-clear",
                         tr("command.searchClear"),
                         null,
-                        null,
+                        tr("dialog.common.key.esc"),
                         searchPane.clearableProperty(),
                         this::clearSearch),
                 new Command("rss", tr("command.rss"), Chords.of("rss"), null, always, this::showRss),
