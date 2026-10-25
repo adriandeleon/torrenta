@@ -491,7 +491,8 @@ so the order is extract, then serve.
    image (jpackage `--add-launcher`), a systemd user unit in docs.
 3. **HTTP plumbing**: `com.torrenta.http` on `jdk.httpserver` with virtual threads: routes, form
    and multipart bodies (the *arr apps post `.torrent` files multipart), cookies, `Range` (for
-   1.4's streaming), HTTPS from a PKCS#12 file.
+   1.4's streaming), HTTPS from a PKCS#12 file. Done, with body and part caps and filters for the
+   security checks to come.
 4. **API Tier 1, the *arr apps** (Sonarr, Radarr, Lidarr, Readarr, Prowlarr).
 5. **API Tier 2, remote apps and alternative web UIs**, and the static root folder.
 6. **Compatibility**: contract tests from a real qBittorrent 5.0's recorded answers;

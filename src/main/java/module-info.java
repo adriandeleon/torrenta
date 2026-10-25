@@ -18,6 +18,8 @@ module com.torrenta {
 
     // Fetching a .torrent from a URL for the Add dialog, and the update check.
     requires java.net.http;
+    // The HTTP plumbing (com.torrenta.http) the qBittorrent-compatible API and streaming sit on.
+    requires jdk.httpserver;
     // The Torznab client reads RSS with StAX.
     requires java.xml;
     // The update check's release payload gets a real parser.

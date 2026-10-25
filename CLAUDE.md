@@ -89,6 +89,7 @@ to try one on purpose).
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
 | Remote engine | `TransmissionEngine` over Transmission's RPC (`RpcClient`: POST JSON, the 409 session-id handshake, basic auth; `Json` tree over jackson-core streaming; `Bencode` reads a `.torrent` for `inspect`; `TransmissionLabels` puts the category in a `category:` label); `Engine.Capability`/`Capabilities` say what an engine can do, `ui.CapabilityRules` is the pure rule the window hides by; `EngineProfile` (local or remote, URL, user, password) in `store.ProfileStore` (`profiles.json`, owner-only, never synced), `engine.profile` picks the next start's; Settings → Engine, `ui.EngineProfileDialog`; `MainWindow.startEngine/switchProfile` build the engine through App's `EngineFactory` | `com.torrenta.engine.transmission`, `engine`, `store`, `ui` |
+| HTTP | `WebServer` (the JDK's `jdk.httpserver`, a virtual thread per request, HTTP or HTTPS from `Tls.fromPkcs12`), `Router` (exact path, then the longest prefix; 405 with `Allow`; `Filter`s answer first), `Request` (body read whole under `Limits` before a handler, `form()`, `parts()`, `cookies()`), `Response` (bytes or a file), the pure `Form`, `Multipart` (parts capped), `Cookies` (`HttpOnly; SameSite=Strict`, `Secure` over HTTPS), `Ranges` (one range 206, past the end 416, else whole), `HttpProblem` (400/413) | `com.torrenta.http` |
 | Session | `Session` (no JavaFX: the poll thread, `Poll` to listeners, share limits, the speed refresh, the watch folders, the RSS service and its rules, the IP filter; `Host` for what the owner hears and the adds it still screens); `IpFilterController`; the window is a listener | `com.torrenta.session` |
 | Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
 | i18n | Termina's: `Messages.tr(key)` / `tr(key, args…)` (MessageFormat in the active locale), English `messages.properties` as base and fallback, `messages_<de|es|fr|it|pt>.properties` as overlays, UTF-8 through `getResourceAsStream`; `ui.language` (`system` by default) chosen in `App.start` after the settings load, before any window, applied on restart; a missing key shows itself and is logged once | `com.torrenta.i18n` |
@@ -103,6 +104,16 @@ shown; `session.Session` polls it once a second on its own thread (`engine-poll`
 poll to its listeners there, `MainWindow.polled` among them, which hands the FX thread an
 immutable list; `addInput` runs on a virtual thread. Inputs that arrive before the engine is up are
 queued by the session (`Session.input`) and handed to the window's input handler once one is.
+
+**The HTTP plumbing is the API's and streaming's, and nothing else's yet** (roadmap 1.2 item 3).
+`module-info` requires `jdk.httpserver` now, so the image carries it (the tests' `--add-reads`
+for it stays for the fetch test's stub). A body is read whole, capped by `Limits` (32 MiB, 64
+parts by default): a `Content-Length` past the cap is 413 before a byte is read, a body that
+runs past it is 413 too. A file response honours one `Range`; several ranges, another unit or a
+range that does not read get the whole file, which RFC 9110 allows. `WebServerTest` drives it
+over loopback with the JDK's client, HTTPS included from a PKCS#12 that `keytool` (from
+`java.home`) makes for the test. No endpoint, setting or listener exists yet: Tier 1 brings the
+routes and the security decisions (auth, `Host`/`Origin`, allowed roots) as `Router` filters.
 
 **The session is the window's toolkit-free half** (roadmap 1.2, item 1, in steps). `Session` owns
 the poll thread, the share limits and the minute's speed refresh; its `Host` hears a share limit
