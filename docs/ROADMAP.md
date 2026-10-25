@@ -488,7 +488,8 @@ so the order is extract, then serve.
 2. **Headless mode**: `torrenta --headless` runs `Session` without the toolkit; inputs are added
    without a dialog (`add.unsafeContent` applies), events go to stdout and the session log,
    SIGTERM goes through `stop()` and its resume-data wait. A `torrenta-nox` launcher in the same
-   image (jpackage `--add-launcher`), a systemd user unit in docs.
+   image (jpackage `--add-launcher`), a systemd user unit in docs. Done: `Headless`, `Startup`,
+   `torrenta-nox` known by its path, `docs/headless.md`.
 3. **HTTP plumbing**: `com.torrenta.http` on `jdk.httpserver` with virtual threads: routes, form
    and multipart bodies (the *arr apps post `.torrent` files multipart), cookies, `Range` (for
    1.4's streaming), HTTPS from a PKCS#12 file.
