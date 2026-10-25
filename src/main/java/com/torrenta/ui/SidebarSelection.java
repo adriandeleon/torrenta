@@ -15,17 +15,25 @@ import com.torrenta.ui.SidebarFilter.Axis;
  * @param category the Categories section's, or ALL
  * @param tag the Tags section's, or ALL
  * @param tracker the Trackers section's, or ALL
+ * @param view the Views section's, or ALL: a saved view's slug, whose query the window ANDs in
  */
-public record SidebarSelection(SidebarFilter status, SidebarFilter category, SidebarFilter tag, SidebarFilter tracker) {
+public record SidebarSelection(
+        SidebarFilter status, SidebarFilter category, SidebarFilter tag, SidebarFilter tracker, SidebarFilter view) {
 
-    public static final SidebarSelection ALL =
-            new SidebarSelection(SidebarFilter.ALL, SidebarFilter.ALL, SidebarFilter.ALL, SidebarFilter.ALL);
+    public static final SidebarSelection ALL = new SidebarSelection(
+            SidebarFilter.ALL, SidebarFilter.ALL, SidebarFilter.ALL, SidebarFilter.ALL, SidebarFilter.ALL);
 
     public SidebarSelection {
         status = onAxis(status, Axis.STATUS);
         category = onAxis(category, Axis.CATEGORY);
         tag = onAxis(tag, Axis.TAG);
         tracker = onAxis(tracker, Axis.TRACKER);
+        view = onAxis(view, Axis.VIEW);
+    }
+
+    /** No view chosen. */
+    public SidebarSelection(SidebarFilter status, SidebarFilter category, SidebarFilter tag, SidebarFilter tracker) {
+        this(status, category, tag, tracker, SidebarFilter.ALL);
     }
 
     private static SidebarFilter onAxis(SidebarFilter f, Axis axis) {
@@ -44,6 +52,7 @@ public record SidebarSelection(SidebarFilter status, SidebarFilter category, Sid
     public SidebarFilter on(Axis axis) {
         return switch (axis) {
             case ALL -> SidebarFilter.ALL;
+            case VIEW -> view;
             case STATUS -> status;
             case CATEGORY -> category;
             case TAG -> tag;
@@ -64,10 +73,11 @@ public record SidebarSelection(SidebarFilter status, SidebarFilter category, Sid
     public SidebarSelection with(SidebarFilter f) {
         return switch (f.axis()) {
             case ALL -> ALL;
-            case STATUS -> new SidebarSelection(f, category, tag, tracker);
-            case CATEGORY -> new SidebarSelection(status, f, tag, tracker);
-            case TAG -> new SidebarSelection(status, category, f, tracker);
-            case TRACKER -> new SidebarSelection(status, category, tag, f);
+            case VIEW -> new SidebarSelection(status, category, tag, tracker, f);
+            case STATUS -> new SidebarSelection(f, category, tag, tracker, view);
+            case CATEGORY -> new SidebarSelection(status, f, tag, tracker, view);
+            case TAG -> new SidebarSelection(status, category, f, tracker, view);
+            case TRACKER -> new SidebarSelection(status, category, tag, f, view);
         };
     }
 
@@ -79,10 +89,11 @@ public record SidebarSelection(SidebarFilter status, SidebarFilter category, Sid
     public SidebarSelection cleared(Axis axis) {
         return switch (axis) {
             case ALL -> ALL;
-            case STATUS -> new SidebarSelection(SidebarFilter.ALL, category, tag, tracker);
-            case CATEGORY -> new SidebarSelection(status, SidebarFilter.ALL, tag, tracker);
-            case TAG -> new SidebarSelection(status, category, SidebarFilter.ALL, tracker);
-            case TRACKER -> new SidebarSelection(status, category, tag, SidebarFilter.ALL);
+            case VIEW -> new SidebarSelection(status, category, tag, tracker, SidebarFilter.ALL);
+            case STATUS -> new SidebarSelection(SidebarFilter.ALL, category, tag, tracker, view);
+            case CATEGORY -> new SidebarSelection(status, SidebarFilter.ALL, tag, tracker, view);
+            case TAG -> new SidebarSelection(status, category, SidebarFilter.ALL, tracker, view);
+            case TRACKER -> new SidebarSelection(status, category, tag, SidebarFilter.ALL, view);
         };
     }
 
@@ -93,13 +104,14 @@ public record SidebarSelection(SidebarFilter status, SidebarFilter category, Sid
         out.put(Axis.CATEGORY, category.format());
         out.put(Axis.TAG, tag.format());
         out.put(Axis.TRACKER, tracker.format());
+        out.put(Axis.VIEW, view.format());
         return out;
     }
 
     /** For the log and the capture hook: the choices that are not All, space-separated, or {@code all}. */
     public String describe() {
         StringBuilder sb = new StringBuilder();
-        for (SidebarFilter f : new SidebarFilter[] {status, category, tag, tracker}) {
+        for (SidebarFilter f : new SidebarFilter[] {view, status, category, tag, tracker}) {
             if (f.kind() == SidebarFilter.Kind.ALL) continue;
             if (!sb.isEmpty()) sb.append(' ');
             sb.append(f.format());
@@ -109,10 +121,15 @@ public record SidebarSelection(SidebarFilter status, SidebarFilter category, Sid
 
     /** The inverse of {@link #format}: each value read on its own axis, unreadable ones All. */
     public static SidebarSelection parse(String status, String category, String tag, String tracker) {
+        return parse(status, category, tag, tracker, null);
+    }
+
+    public static SidebarSelection parse(String status, String category, String tag, String tracker, String view) {
         return new SidebarSelection(
                 SidebarFilter.parse(status, Axis.STATUS),
                 SidebarFilter.parse(category, Axis.CATEGORY),
                 SidebarFilter.parse(tag, Axis.TAG),
-                SidebarFilter.parse(tracker, Axis.TRACKER));
+                SidebarFilter.parse(tracker, Axis.TRACKER),
+                SidebarFilter.parse(view, Axis.VIEW));
     }
 }

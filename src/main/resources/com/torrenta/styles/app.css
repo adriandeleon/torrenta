@@ -949,6 +949,11 @@
 }
 
 .sidebar .tree-cell:filled:selected .label,
+/* A saved view whose query no longer reads: struck through, the reason in its tooltip. */
+.sidebar .tree-cell:filled:broken .label .text {
+    -fx-strikethrough: true;
+}
+
 .sidebar .tree-cell:filled:chosen .label {
     -fx-text-fill: -color-fg-default;
 }

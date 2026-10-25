@@ -197,4 +197,42 @@ class SidebarEntriesTest {
         assertTrue(entries.status.heading.isHeading());
         assertEquals("Status", entries.status.heading.title);
     }
+
+    private static SidebarEntries.View view(String slug, String name, String query) {
+        return new SidebarEntries.View(slug, name, FilterQuery.parse(query, 0));
+    }
+
+    @Test
+    void viewsAreListedInTheirOrderCountedByTheirQueriesAndSayWhenOneNoLongerReads() {
+        SidebarEntries entries = new SidebarEntries();
+        List<Torrent> torrents = List.of(
+                t("1", TorrentState.SEEDING, 0, "Linux", List.of("iso"), List.of(), false),
+                t("2", TorrentState.DOWNLOADING, 5, "Linux", List.of(), List.of(), false),
+                t("3", TorrentState.SEEDING, 0, "", List.of("iso"), List.of(), false));
+        assertTrue(
+                entries.update(List.of(), List.of(), List.of(), torrents).stream()
+                        .noneMatch(s -> s == entries.views),
+                "no views: an empty section, never rebuilt");
+        assertTrue(entries.views.entries().isEmpty(), "not even its All");
+
+        List<SidebarEntries.View> two =
+                List.of(view("isos", "ISOs", "tag:iso"), view("linux-up", "Linux up", "cat:linux state:seeding"));
+        assertTrue(entries.update(two, List.of(), List.of(), torrents).contains(entries.views));
+        assertEquals(List.of("All", "ISOs", "Linux up"), titles(entries.views));
+        assertEquals(2, count(entries, SidebarFilter.view("isos"), Axis.VIEW));
+        assertEquals(1, count(entries, SidebarFilter.view("linux-up"), Axis.VIEW));
+        assertFalse(
+                entries.update(two, List.of(), List.of(), torrents).contains(entries.views),
+                "the same views again: counts move, nothing is rebuilt");
+
+        // Renamed, and the other's query broken: both rebuild the section.
+        List<SidebarEntries.View> changed =
+                List.of(view("isos", "Images", "tag:iso"), view("linux-up", "Linux up", "ratio>lots"));
+        assertTrue(entries.update(changed, List.of(), List.of(), torrents).contains(entries.views));
+        assertEquals(List.of("All", "Images", "Linux up"), titles(entries.views));
+        Entry broken = entries.find(SidebarFilter.view("linux-up"), Axis.VIEW).orElseThrow();
+        assertEquals("ratio takes a number", broken.problem);
+        assertEquals("", entries.find(SidebarFilter.view("isos"), Axis.VIEW).orElseThrow().problem);
+        assertEquals(0, broken.count.get(), "a broken term is read as a name, which none has");
+    }
 }

@@ -30,6 +30,8 @@ import com.torrenta.ui.SidebarEntries.Entry;
 import com.torrenta.ui.SidebarEntries.Section;
 import com.torrenta.ui.SidebarFilter.Axis;
 
+import static com.torrenta.i18n.Messages.tr;
+
 /**
  * The pane of filters beside the list: All, then Status, Categories, Tags and Trackers, each entry
  * with how many torrents it holds. Each section keeps a choice of its own and the list shows what
@@ -52,6 +54,8 @@ final class Sidebar extends VBox {
 
     private static final PseudoClass SECTION = PseudoClass.getPseudoClass("section");
     private static final PseudoClass CHOSEN = PseudoClass.getPseudoClass("chosen");
+    /** A saved view whose query no longer reads: struck through, the reason in its tooltip. */
+    private static final PseudoClass BROKEN = PseudoClass.getPseudoClass("broken");
 
     private final SidebarEntries entries = new SidebarEntries();
     private final TreeView<Entry> tree = new TreeView<>();
@@ -62,6 +66,39 @@ final class Sidebar extends VBox {
     private final Runnable onLeave;
     private final DoubleConsumer onResize;
     private SidebarSelection selection = SidebarSelection.ALL;
+    private ViewActions viewActions;
+
+    /** What the menu on a saved view does: the window's, by the view's slug. */
+    interface ViewActions {
+        void rename(String slug);
+
+        /** The omnibox's query becomes the view's. */
+        void useCurrentFilter(String slug);
+
+        /** There is a query in the omnibox to use. */
+        boolean canUseCurrentFilter();
+
+        void delete(String slug);
+    }
+
+    void setViewActions(ViewActions actions) {
+        this.viewActions = actions;
+        tree.refresh();
+    }
+
+    /** The menu on a saved view: Rename…, Use the Current Filter, Delete…. */
+    private javafx.scene.control.ContextMenu viewMenu(String slug) {
+        javafx.scene.control.MenuItem rename = new javafx.scene.control.MenuItem(tr("sidebar.view.rename"));
+        rename.setOnAction(e -> viewActions.rename(slug));
+        javafx.scene.control.MenuItem use = new javafx.scene.control.MenuItem(tr("sidebar.view.useFilter"));
+        use.setOnAction(e -> viewActions.useCurrentFilter(slug));
+        javafx.scene.control.MenuItem delete = new javafx.scene.control.MenuItem(tr("sidebar.view.delete"));
+        delete.setOnAction(e -> viewActions.delete(slug));
+        javafx.scene.control.ContextMenu menu = new javafx.scene.control.ContextMenu(rename, use, delete);
+        menu.setOnShowing(e -> use.setDisable(!viewActions.canUseCurrentFilter()));
+        return menu;
+    }
+
     private boolean rebuilding;
     /** On the right of the list, so the grip is the left edge. */
     private boolean right;
@@ -97,6 +134,7 @@ final class Sidebar extends VBox {
             mirror(s);
         }
         tree.setRoot(root);
+        if (sections.get(Axis.VIEW).getChildren().isEmpty()) root.getChildren().remove(sections.get(Axis.VIEW));
         tree.setShowRoot(false);
         tree.setFocusTraversable(false);
         tree.getStyleClass().add("sidebar-tree");
@@ -250,9 +288,24 @@ final class Sidebar extends VBox {
      * cleared, and {@code onChoose} hears of it through the section's All.
      */
     void update(List<String> categoryNames, List<String> tagNames, List<Torrent> torrents) {
-        for (Section s : entries.update(categoryNames, tagNames, torrents)) mirror(s);
-        for (Axis axis : entries.stale(selection, torrents))
-            choose(sections.get(axis).getChildren().get(0).getValue());
+        update(List.of(), categoryNames, tagNames, torrents);
+    }
+
+    /** {@link #update}, with the saved views. */
+    void update(
+            List<SidebarEntries.View> views,
+            List<String> categoryNames,
+            List<String> tagNames,
+            List<Torrent> torrents) {
+        for (Section s : entries.update(views, categoryNames, tagNames, torrents)) mirror(s);
+        for (Axis axis : entries.stale(selection, torrents)) {
+            // The Views section is empty once its last view is deleted: its All is not listed then.
+            List<TreeItem<Entry>> listed = sections.get(axis).getChildren();
+            choose(
+                    listed.isEmpty()
+                            ? new Entry(SidebarFilter.ALL, axis)
+                            : listed.getFirst().getValue());
+        }
     }
 
     private void mirror(Section section) {
@@ -262,6 +315,16 @@ final class Sidebar extends VBox {
             List<TreeItem<Entry>> items = new ArrayList<>();
             for (Entry e : section.entries()) items.add(new TreeItem<>(e));
             item.getChildren().setAll(items);
+            // Views appear with the first one saved: until then the section is not there at all.
+            if (section.axis == Axis.VIEW) {
+                List<TreeItem<Entry>> top =
+                        tree.getRoot() == null ? null : tree.getRoot().getChildren();
+                if (top != null) {
+                    boolean shown = top.contains(item);
+                    if (items.isEmpty() && shown) top.remove(item);
+                    else if (!items.isEmpty() && !shown) top.add(1, item);
+                }
+            }
         } finally {
             rebuilding = false;
         }
@@ -359,7 +422,8 @@ final class Sidebar extends VBox {
     }
 
     private String line(Entry e) {
-        return e.title + (e.chosenIn(selection) ? "*" : "") + " (" + e.count.get() + ")";
+        return e.title + (e.chosenIn(selection) ? "*" : "") + " (" + e.count.get() + ")"
+                + (e.problem.isEmpty() ? "" : " [" + e.problem + "]");
     }
 
     /**
@@ -441,10 +505,17 @@ final class Sidebar extends VBox {
             chevron.rotateProperty().unbind();
             if (empty || entry == null) {
                 setGraphic(null);
+                setTooltip(null);
+                setContextMenu(null);
                 pseudoClassStateChanged(SECTION, false);
                 pseudoClassStateChanged(CHOSEN, false);
+                pseudoClassStateChanged(BROKEN, false);
                 return;
             }
+            pseudoClassStateChanged(BROKEN, !entry.problem.isEmpty());
+            boolean view = entry.filter != null && entry.filter.kind() == SidebarFilter.Kind.VIEW;
+            setContextMenu(view && viewActions != null ? viewMenu(entry.filter.value()) : null);
+            setTooltip(entry.problem.isEmpty() ? null : new javafx.scene.control.Tooltip(entry.problem));
             boolean section = entry.isHeading();
             title.setText(section ? entry.title.toUpperCase(java.util.Locale.ROOT) : entry.title);
             pseudoClassStateChanged(SECTION, section);

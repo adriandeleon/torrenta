@@ -198,6 +198,23 @@ class TorrentRowsTest {
                 true,
                 MainWindow.rowFilter("", linux.with(SidebarFilter.TRACKERLESS)).test(row));
         assertEquals(true, MainWindow.rowFilter("", null).test(row), "no selection is All");
+
+        // A saved view is its query, ANDed with the box and the other sections.
+        List<com.torrenta.store.SavedView> views = List.of(
+                new com.torrenta.store.SavedView("isos", "ISOs", "tag:iso state:seeding"),
+                new com.torrenta.store.SavedView("films", "Films", "cat:Movies"));
+        SidebarSelection isos = linux.with(SidebarFilter.view("isos"));
+        assertEquals(true, MainWindow.rowFilter("ubuntu", isos, views, 0).test(row));
+        assertEquals(false, MainWindow.rowFilter("fedora", isos, views, 0).test(row), "the box still counts");
+        assertEquals(
+                false,
+                MainWindow.rowFilter("", SidebarSelection.ALL.with(SidebarFilter.view("films")), views, 0)
+                        .test(row));
+        assertEquals(
+                true,
+                MainWindow.rowFilter("", SidebarSelection.ALL.with(SidebarFilter.view("gone")), views, 0)
+                        .test(row),
+                "a view deleted since it was chosen filters nothing");
         assertEquals(
                 false,
                 MainWindow.rowFilter("", SidebarSelection.ALL.with(SidebarFilter.UNTAGGED))

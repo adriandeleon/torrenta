@@ -7,6 +7,13 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Saved views.** Type a filter in the omnibox (`state:seeding ratio<1 added<30d`, say), press
+  Ctrl+S (View → Save Filter as View…) and name it: it joins a Views section at the top of the
+  sidebar with a live count, and choosing it filters the list as the query does, together with
+  the box and the other sections. Ctrl+Alt+1 to 9 choose the first nine. A view's menu renames it,
+  replaces its query with the current filter, or deletes it. Views sync with the settings, each on
+  its own; a view whose query no longer reads is struck through, the reason in its tooltip.
+
 - **Four more filter keys**: `seeding>2d` (time spent seeding, in all), `eta<30m` (the time left
   the ETA column shows), `seeds<3` (connected seeds) and `uploaded>10g` (sent over the torrent's
   life). Durations take m, h, d or w; `added` keeps its h, d and w.
