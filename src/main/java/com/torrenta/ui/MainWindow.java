@@ -1273,6 +1273,8 @@ public final class MainWindow {
             }
         } else if (action.equals("dialog-add")) {
             if (currentDialog != null && currentDialog.isShowing()) currentDialog.confirm();
+        } else if (action.equals("content-skip")) {
+            if (currentDialog != null && currentDialog.isShowing()) currentDialog.skipFlaggedForCapture();
         } else if (action.startsWith("dialog-press:")) {
             if (currentDialog != null && currentDialog.isShowing())
                 currentDialog.pressForCapture(action.substring("dialog-press:".length()));
@@ -1453,6 +1455,7 @@ public final class MainWindow {
         if (currentDialog != null && currentDialog.isShowing()) {
             System.out.println("capture: dialog=" + currentDialog.title());
             System.out.println("capture: add-dialog=" + currentDialog.summaryForCapture());
+            System.out.println("capture: content-check=" + currentDialog.contentForCapture());
             System.out.println("capture: dialog-hint=" + currentDialog.hint());
         }
         if (limitsDialog != null && limitsDialog.isShowing())
