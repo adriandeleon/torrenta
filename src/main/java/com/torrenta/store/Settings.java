@@ -106,6 +106,11 @@ public final class Settings {
     public static final String WEBAPI_HTTPS_PASSWORD = "webapi.httpsPassword";
     /** Names besides addresses and {@code localhost} the {@code Host} header may carry, by spaces. */
     public static final String WEBAPI_DOMAINS = "webapi.domains";
+    /**
+     * Folders besides the download folder and the categories' where a client may put files, one per
+     * line: {@code savepath} outside all of them is refused.
+     */
+    public static final String WEBAPI_ROOTS = "webapi.roots";
     /** Whether the icon toolbar under the menu bar shows; View → Toolbar flips it. */
     public static final String UI_TOOLBAR = "ui.toolbar";
     /** Whether the sidebar of filters shows beside the list; View → Sidebar flips it. */
@@ -471,6 +476,24 @@ public final class Settings {
 
     public void setWebApiDomains(String domains) {
         properties.setProperty(WEBAPI_DOMAINS, domains == null ? "" : domains.trim());
+    }
+
+    /** The folders added by hand, as written; a line that is not a path is left out. */
+    public List<Path> webApiRoots() {
+        List<Path> out = new java.util.ArrayList<>();
+        for (String line : properties.getProperty(WEBAPI_ROOTS, "").split("\\R")) {
+            if (line.isBlank()) continue;
+            try {
+                out.add(Path.of(line.trim()));
+            } catch (java.nio.file.InvalidPathException e) {
+                // Typed by hand; one bad line does not take the others with it.
+            }
+        }
+        return out;
+    }
+
+    public void setWebApiRoots(String lines) {
+        properties.setProperty(WEBAPI_ROOTS, lines == null ? "" : lines.strip());
     }
 
     public boolean syncEnabled() {

@@ -52,6 +52,9 @@ webapi.port=8080
 webapi.username=admin
 # Names besides addresses and localhost that requests may name, for DNS-rebinding protection.
 webapi.domains=nas.lan
+# Where the apps may put files besides the download folder and the categories' folders, one per
+# line on the Remote access page, written \n between them here; a save path anywhere else is refused.
+webapi.roots=/srv/media/tv\n/srv/media/films
 # HTTPS from a PKCS#12 file; without one, use it on 127.0.0.1 or behind a TLS proxy.
 webapi.httpsFile=/srv/torrenta/cert.p12
 webapi.httpsPassword=…

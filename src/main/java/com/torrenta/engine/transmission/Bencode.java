@@ -22,7 +22,7 @@ import com.torrenta.engine.TorrentPreview;
  * decoder remembers where the top-level {@code info} dictionary sits so that its hashes can be
  * taken over the exact bytes. Pure.
  */
-final class Bencode {
+public final class Bencode {
 
     private final byte[] data;
     private int pos;
@@ -33,6 +33,20 @@ final class Bencode {
 
     private Bencode(byte[] data) {
         this.data = data;
+    }
+
+    /**
+     * Throws unless {@code bytes} reads as a {@code .torrent} within the decoder's bounds (nesting,
+     * lengths, no trailing bytes): what an upload from the network must pass before libtorrent's
+     * own parser sees it.
+     */
+    public static void check(byte[] bytes) throws IOException {
+        try {
+            decode(bytes);
+            preview(bytes);
+        } catch (RuntimeException e) {
+            throw new IOException("not a torrent", e);
+        }
     }
 
     /** Decodes one value; trailing bytes are an error. */
