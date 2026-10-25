@@ -15,7 +15,6 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   many before Enter. A removal asks first, and so does anything on more than 20 torrents; a
   category, tags, a location or a limit set this way can be undone.
 
-
 - **The Add dialog says how the swarm looks before you add.** For a `.torrent` at once, for a
   magnet once its file list is in, a Swarm line under the free space reads Healthy (three seeds and up), Thin (a seed or two, or no
   seed but every piece among the peers), Incomplete (no seed, and pieces of the chosen files that
