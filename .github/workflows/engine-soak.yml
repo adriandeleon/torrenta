@@ -48,22 +48,35 @@ jobs:
           failed=0
           for i in $(seq 1 "$RUNS"); do
             echo "::group::run $i of $RUNS"
+            mkdir -p "soak-reports/run-$i"
+            rm -rf target/surefire-reports
+            # A watchdog: a run past twenty minutes is hung, not slow (a clean one takes three to
+            # seven). Every JVM's stacks are kept before it is killed, so the hang names itself.
+            ( sleep 1200
+              echo "run $i passed twenty minutes: dumping stacks"
+              for pid in $(jps -q); do jcmd "$pid" Thread.print > "soak-reports/run-$i/stacks-$pid.txt" 2>&1 || true; done
+              for pid in $(jps -q); do jcmd "$pid" VM.command_line >> "soak-reports/run-$i/stacks-$pid.txt" 2>&1 || true; done
+              taskkill //F //IM java.exe > /dev/null 2>&1 || pkill -9 java || true ) &
+            watchdog=$!
             if ./mvnw -B --no-transfer-progress test -Dtest=LibtorrentEngineTest \
                  -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true -Dspotless.check.skip=true; then
               echo "run $i: passed"
             else
               echo "::error::run $i failed"
               failed=$((failed + 1))
-              mkdir -p "soak-reports/run-$i"
-              cp -r target/surefire-reports/. "soak-reports/run-$i/" || true
             fi
+            kill "$watchdog" 2> /dev/null || true
+            cp -r target/surefire-reports/. "soak-reports/run-$i/" 2> /dev/null || true
+            echo "--- run $i, last tests ---"; tail -n 4 "soak-reports/run-$i/test-progress.log" 2> /dev/null || true
             echo "::endgroup::"
           done
           echo "$failed of $RUNS runs failed"
           [ "$failed" = 0 ]
 
-      - name: Upload the failed runs' reports
-        if: failure()
+      # Kept whatever happened: a passing run's test-progress.log has every test's start and end,
+      # which is how a run that took too long says which test it spent the time in.
+      - name: Upload the runs' reports
+        if: always()
         uses: actions/upload-artifact@v7
         with:
           name: soak-${{ inputs.os || 'windows-latest' }}-shard-${{ matrix.shard }}
