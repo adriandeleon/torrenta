@@ -101,6 +101,7 @@ final class SettingsWindow {
     /** The pages. Connection, Speed, BitTorrent and Advanced join as their settings arrive. */
     enum Category {
         GENERAL(Group.APPLICATION, "general"),
+        KEYBOARD(Group.APPLICATION, "keyboard"),
         ADDING(Group.APPLICATION, "adding"),
         WATCH(Group.APPLICATION, "watchFolders"),
         AUTOMATION(Group.APPLICATION, "automation"),
@@ -521,7 +522,6 @@ final class SettingsWindow {
     private ChoiceBox<SidebarPlace> sidebarPlace;
     private ChoiceBox<DetailPlace> detailPlace;
     private CheckBox extendedWindow;
-    private ChoiceBox<PaletteKey> paletteKey;
     private CheckBox tray;
     private CheckBox closeToTray;
     private CheckBox osHandler;
@@ -1064,6 +1064,7 @@ final class SettingsWindow {
         if (!StockButtons.confirmed(ask.showAndWait())) return;
         Map<String, String> before = ownedValues();
         settings.reset(OWNED_KEYS);
+        settings.replaceKeyBindings(Map.of());
         settings.saveQuietly();
         Set<ResetHook> hooks = resetHooks(before, ownedValues());
         reload();
@@ -1072,6 +1073,7 @@ final class SettingsWindow {
                     Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
         }
         onAppearanceChanged.run();
+        onKeysChanged.run();
         onEngineSettingsChanged.run();
         onIpFilterChanged.accept(false);
         if (hooks.contains(ResetHook.TRAY)) onTrayChanged.run();
@@ -1195,6 +1197,7 @@ final class SettingsWindow {
         page.setFillWidth(true);
         switch (category) {
             case GENERAL -> buildGeneral(page);
+            case KEYBOARD -> buildKeyboard(page);
             case ENGINE_PROFILES -> buildEngine(page);
             case ADDING -> buildAdding(page);
             case WATCH -> buildWatch(page);
@@ -1305,6 +1308,295 @@ final class SettingsWindow {
     }
 
     // ---------------------------------------------------------------- pages
+
+    // ---------------------------------------------------------------- keyboard
+
+    /** One command's row on the Keyboard page: its recording field, the line under it, and Reset. */
+    private record KeyRow(Keybindings.Command command, TextField field, Label status, Button reset) {}
+
+    private final Map<String, KeyRow> keyRows = new java.util.LinkedHashMap<>();
+
+    private List<Keybindings.Command> keyCommands = List.of();
+    private Map<String, javafx.scene.input.KeyCombination> keyDefaults = Map.of();
+    /** Told after the key bindings changed; the main window moves every chord. */
+    private Runnable onKeysChanged = () -> {};
+    /** The Keyboard page, built empty with the others and filled by {@link #setKeyboard}. */
+    private VBox keyboardPage;
+
+    /** Where a recording field keeps a chord it was refused because another command has it. */
+    private static final Object PENDING_TAKEOVER = new Object();
+
+    /** The Reset All row; the commands' rows follow, under their menus, once {@link #setKeyboard} names them. */
+    private void buildKeyboard(VBox page) {
+        keyboardPage = page;
+        VBox all = section(page, tr("settings.keys.section"));
+        Button resetAll = new Button(tr("settings.keys.resetAll"));
+        resetAll.setOnAction(e -> confirmResetKeys());
+        row(
+                Category.KEYBOARD,
+                all,
+                tr("settings.keys.resetAll.title"),
+                tr("settings.keys.resetAll.desc"),
+                resetAll,
+                tr("settings.keys.keywords"));
+    }
+
+    /**
+     * Every rebindable command, a row each, under the menu it lives in, so the settings search
+     * finds "recheck" the way it finds "port". The main window's table, since its menus are what
+     * define them; given once, after the menus are built.
+     *
+     * <p>Recording is Termina's: focusing a field starts it, the next chord pressed is written
+     * through at once. A chord another command has is not taken on the first press: the row says
+     * whose it is, and the same chord again moves it, which keeps the whole exchange on the
+     * keyboard. Backspace or Delete on its own removes the chord.
+     */
+    void setKeyboard(List<Keybindings.Command> commands, Runnable onChanged) {
+        keyCommands = List.copyOf(commands);
+        keyDefaults = Keybindings.defaults(keyCommands);
+        onKeysChanged = onChanged;
+        Map<String, VBox> sections = new java.util.LinkedHashMap<>();
+        for (Keybindings.Command command : keyCommands) {
+            VBox section = sections.computeIfAbsent(command.group(), group -> section(keyboardPage, group));
+            keyRow(section, command);
+        }
+        reloadKeys();
+        filter(engineQuery);
+    }
+
+    private void keyRow(VBox section, Keybindings.Command command) {
+        TextField field = new TextField();
+        field.setEditable(false);
+        field.setPrefWidth(170);
+        field.getStyleClass().add("shortcut-capture");
+        field.setPromptText(tr("settings.keys.recording"));
+        Label status = new Label();
+        status.getStyleClass().add("settings-row-description");
+        status.setWrapText(true);
+        status.setMaxWidth(260);
+        showKeyStatus(status, null, false);
+        Button reset = new Button(tr("settings.keys.reset"));
+        reset.setOnAction(e -> resetKey(command.id()));
+        KeyRow row = new KeyRow(command, field, status, reset);
+        keyRows.put(command.id(), row);
+
+        // Recording: the field empties so its prompt says what to do, and fills again with the
+        // chord in force when the focus leaves, whether or not anything was recorded.
+        field.focusedProperty().addListener((o, was, focused) -> {
+            field.getProperties().remove(PENDING_TAKEOVER);
+            if (focused) {
+                field.setText("");
+            } else {
+                field.setText(keyText(command.id()));
+                showKeyStatus(status, null, false);
+            }
+        });
+        field.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, e -> onKeyRecorded(row, e));
+
+        HBox fieldRow = new HBox(6, field, reset);
+        fieldRow.setAlignment(Pos.CENTER_LEFT);
+        VBox control = new VBox(2, fieldRow, status);
+        Node line = row(
+                Category.KEYBOARD,
+                section,
+                command.label(),
+                "",
+                control,
+                command.group() + " " + command.id() + " " + tr("settings.keys.keywords"),
+                CapabilityRules.forCommand(command.id()).orElse(null));
+        // Sixty of them, with no description: the ordinary row's padding made the page screens
+        // long, and its top-aligned title sat above the field it names.
+        line.getStyleClass().add("settings-key-row");
+        ((VBox) ((HBox) line).getChildren().getFirst()).setAlignment(Pos.CENTER_LEFT);
+    }
+
+    private void onKeyRecorded(KeyRow row, javafx.scene.input.KeyEvent e) {
+        boolean modified = e.isControlDown() || e.isAltDown() || e.isMetaDown();
+        // Tab and Shift+Tab leave the field, as they do everywhere; Ctrl+Tab is a chord.
+        if (e.getCode() == KeyCode.TAB && !modified) return;
+        // Escape closes the window, as it does from any other row.
+        if (e.getCode() == KeyCode.ESCAPE && !modified) return;
+        e.consume();
+        TextField field = row.field();
+        String id = row.command().id();
+        if (!modified && (e.getCode() == KeyCode.BACK_SPACE || e.getCode() == KeyCode.DELETE)) {
+            writeKeys(KeybindingEdits.clear(keyDefaults, settings.keyBindings(), id));
+            field.setText(keyText(id));
+            showKeyStatus(row.status(), null, false);
+            return;
+        }
+        switch (ShortcutCapture.decide(e.getCode(), e.isControlDown(), e.isAltDown(), e.isMetaDown())) {
+            case IGNORE -> {}
+            case NEEDS_MODIFIER -> showKeyStatus(row.status(), tr("settings.keys.needsModifier"), true);
+            case OK -> {
+                javafx.scene.input.KeyCombination chord = ShortcutCapture.combination(e);
+                String fixed = ShortcutCapture.fixedOwner(chord, Keybindings.MAC);
+                if (fixed != null) {
+                    showKeyStatus(row.status(), tr("settings.keys.fixed", chord.getDisplayText()), true);
+                    return;
+                }
+                String holder = KeybindingEdits.conflict(effectiveKeys(), chord, id, Keybindings.MAC);
+                Object pending = field.getProperties().get(PENDING_TAKEOVER);
+                if (holder != null
+                        && !(pending instanceof javafx.scene.input.KeyCombination p
+                                && Keybindings.same(p, chord, Keybindings.MAC))) {
+                    field.getProperties().put(PENDING_TAKEOVER, chord);
+                    showKeyStatus(
+                            row.status(), tr("settings.keys.taken", chord.getDisplayText(), labelOf(holder)), true);
+                    return;
+                }
+                field.getProperties().remove(PENDING_TAKEOVER);
+                writeKeys(KeybindingEdits.rebind(keyDefaults, settings.keyBindings(), id, chord, Keybindings.MAC));
+                field.setText(chord.getDisplayText());
+                showKeyStatus(row.status(), null, false);
+            }
+        }
+    }
+
+    /**
+     * Puts one command back on its default. When another command has that chord now, asks first:
+     * that command is left with none, and a Reset that quietly unbinds something else is how the
+     * user finds out a chord has stopped working.
+     */
+    private void resetKey(String id) {
+        Map<String, String> stored = settings.keyBindings();
+        String holder = KeybindingEdits.taken(keyDefaults, stored, id, Keybindings.MAC);
+        if (holder != null
+                && !confirmKeys(
+                        tr("settings.keys.reset"),
+                        tr("settings.keys.resetTaken.title", keyDefaults.get(id).getDisplayText()),
+                        tr("settings.keys.resetTaken.detail", labelOf(holder), labelOf(id)))) {
+            return;
+        }
+        writeKeys(KeybindingEdits.reset(keyDefaults, stored, id, Keybindings.MAC));
+    }
+
+    private void confirmResetKeys() {
+        if (confirmKeys(
+                tr("settings.keys.resetAll"),
+                tr("settings.keys.resetAll.confirmTitle"),
+                tr("settings.keys.resetAll.confirmDetail"))) {
+            writeKeys(Map.of());
+        }
+    }
+
+    private boolean confirmKeys(String title, String header, String detail) {
+        Alert ask = new Alert(Alert.AlertType.CONFIRMATION, detail);
+        ask.setTitle(title);
+        ask.setHeaderText(header);
+        ask.initOwner(stage);
+        Fonts.installUiFont(ask.getDialogPane());
+        StockButtons.translate(ask);
+        return StockButtons.confirmed(ask.showAndWait());
+    }
+
+    /** One write and one change: the rows reload, the window moves every chord. */
+    private void writeKeys(Map<String, String> stored) {
+        settings.replaceKeyBindings(stored);
+        settings.saveQuietly();
+        reloadKeys();
+        onKeysChanged.run();
+    }
+
+    private Map<String, javafx.scene.input.KeyCombination> effectiveKeys() {
+        return Keybindings.resolve(keyDefaults, settings.keyBindings(), Keybindings.MAC);
+    }
+
+    /** The chord a command is on, as the platform writes it, or "None". */
+    private String keyText(String id) {
+        javafx.scene.input.KeyCombination chord = effectiveKeys().get(id);
+        return chord == null ? tr("settings.keys.none") : chord.getDisplayText();
+    }
+
+    private String labelOf(String id) {
+        for (Keybindings.Command command : keyCommands) {
+            if (command.id().equals(id)) return command.label();
+        }
+        return id;
+    }
+
+    /** A refusal is red; a note is the warning colour. Hidden when null. */
+    private static void showKeyStatus(Label status, String message, boolean refusal) {
+        status.setText(message == null ? "" : message);
+        status.setStyle(refusal ? "-fx-text-fill: -color-danger-fg;" : "-fx-text-fill: -color-warning-fg;");
+        status.setVisible(message != null);
+        status.setManaged(message != null);
+    }
+
+    private void reloadKeys() {
+        Map<String, javafx.scene.input.KeyCombination> effective = effectiveKeys();
+        for (KeyRow row : keyRows.values()) {
+            String id = row.command().id();
+            // Not while recording: the empty field is the prompt.
+            if (!row.field().isFocused()) {
+                javafx.scene.input.KeyCombination chord = effective.get(id);
+                row.field().setText(chord == null ? tr("settings.keys.none") : chord.getDisplayText());
+            }
+            // Disabled is also off the Tab order, which keeps the page to one stop per command.
+            row.reset().setDisable(!KeybindingEdits.isChanged(keyDefaults, effective, id, Keybindings.MAC));
+        }
+    }
+
+    /**
+     * Presses chords into Keyboard rows' recording fields, as a hand would, and reports what each
+     * row then shows: {@code recheck:Shortcut+Shift+K|Shortcut+Shift+K;limits:BS}, rows by id,
+     * presses by {@code |} (the capture's actions are split on commas), chords in {@code
+     * KeyCombination} notation, {@code BS} for a bare Backspace. For the capture hook.
+     */
+    String pressKeysForCapture(String spec) {
+        StringBuilder out = new StringBuilder();
+        for (String part : spec.split(";")) {
+            int colon = part.indexOf(':');
+            if (colon < 0) continue;
+            KeyRow row = keyRows.get(part.substring(0, colon).trim());
+            if (row == null) {
+                out.append(part, 0, colon).append("=no such row; ");
+                continue;
+            }
+            row.field().requestFocus();
+            for (String token : part.substring(colon + 1).split("\\|")) {
+                String t = token.trim();
+                javafx.scene.input.KeyEvent press;
+                if ("BS".equals(t)) {
+                    press = new javafx.scene.input.KeyEvent(
+                            javafx.scene.input.KeyEvent.KEY_PRESSED,
+                            "",
+                            "",
+                            KeyCode.BACK_SPACE,
+                            false,
+                            false,
+                            false,
+                            false);
+                } else if (Keybindings.parse(t) instanceof javafx.scene.input.KeyCodeCombination parsed
+                        && Keybindings.normalize(parsed, Keybindings.MAC)
+                                instanceof javafx.scene.input.KeyCodeCombination chord) {
+                    press = new javafx.scene.input.KeyEvent(
+                            javafx.scene.input.KeyEvent.KEY_PRESSED,
+                            "",
+                            "",
+                            chord.getCode(),
+                            chord.getShift() == javafx.scene.input.KeyCombination.ModifierValue.DOWN,
+                            chord.getControl() == javafx.scene.input.KeyCombination.ModifierValue.DOWN,
+                            chord.getAlt() == javafx.scene.input.KeyCombination.ModifierValue.DOWN,
+                            chord.getMeta() == javafx.scene.input.KeyCombination.ModifierValue.DOWN);
+                } else {
+                    out.append(t).append("=unreadable; ");
+                    continue;
+                }
+                javafx.event.Event.fireEvent(row.field(), press);
+                out.append(row.command().id())
+                        .append(' ')
+                        .append(t)
+                        .append(" -> [")
+                        .append(row.field().getText())
+                        .append("] ")
+                        .append(row.status().isVisible() ? "\"" + row.status().getText() + "\"" : "-")
+                        .append(row.reset().isDisabled() ? "" : " (reset on)")
+                        .append("; ");
+            }
+        }
+        return out.append("stored=").append(settings.keyBindings()).toString();
+    }
 
     private void buildGeneral(VBox page) {
         VBox languageSection = section(page, tr("settings.general.language.section"));
@@ -1436,23 +1728,6 @@ final class SettingsWindow {
                 tr("settings.general.extendedWindow.desc"),
                 extendedWindow,
                 tr("settings.general.extendedWindow.keywords"));
-
-        VBox keyboard = section(page, tr("settings.general.keyboard"));
-        paletteKey = new ChoiceBox<>();
-        paletteKey.getItems().addAll(PaletteKey.values());
-        paletteKey.valueProperty().addListener((o, was, now) -> {
-            if (loading || now == null) return;
-            settings.setPaletteKey(now.id());
-            settings.saveQuietly();
-            onAppearanceChanged.run();
-        });
-        row(
-                Category.GENERAL,
-                keyboard,
-                tr("settings.general.paletteKey"),
-                tr("settings.general.paletteKey.desc"),
-                paletteKey,
-                tr("settings.general.paletteKey.keywords"));
 
         VBox trayBox = section(page, tr("settings.general.systemTray"));
         tray = new CheckBox();
@@ -3696,6 +3971,7 @@ final class SettingsWindow {
     private void reload() {
         loading = true;
         try {
+            reloadKeys();
             reloadLabels();
             reloadProfiles();
             reloadWatch();
@@ -3716,7 +3992,6 @@ final class SettingsWindow {
             sidebarPlace.setValue(SidebarPlace.of(settings.sidebar(), settings.sidebarSide()));
             detailPlace.setValue(DetailPlace.of(settings.detailVisible(), settings.detailSide()));
             extendedWindow.setSelected(settings.extendedWindow());
-            paletteKey.setValue(PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT));
             tray.setSelected(settings.tray());
             closeToTray.setSelected(settings.closeToTray());
             osHandler.setSelected(settings.osHandler());

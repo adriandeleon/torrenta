@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ChordsTest {
 
@@ -29,15 +30,34 @@ class ChordsTest {
         });
     }
 
-    /** Either palette key can be chosen in Settings, so neither may be a chord of the table's. */
+    /**
+     * The first releases' second palette chord is free, so an old settings file that chose it
+     * (read as {@code keys.palette}) takes no default from anyone.
+     */
     @Test
-    void neitherPaletteKeyIsTaken() {
+    void theOldPaletteChordIsFree() {
         List<String> taken = Chords.all().values().stream()
                 .map(KeyCombination::getDisplayText)
                 .toList();
-        for (PaletteKey k : PaletteKey.values()) {
-            assertFalse(taken.contains(k.chord().getDisplayText()), k + " is taken");
+        assertFalse(
+                taken.contains(KeyCombination.keyCombination("Shortcut+Shift+P").getDisplayText()));
+        assertEquals(KeyCombination.keyCombination("Alt+X"), Chords.of("palette"), "Editora's M-x");
+    }
+
+    @Test
+    void everyEntryIsListedUnderAMenu() {
+        for (String name : Chords.all().keySet()) {
+            assertTrue(List.of("file", "torrent", "view").contains(Chords.group(name)), name);
         }
+        assertEquals("torrent", Chords.group("undo"));
+        assertEquals("view", Chords.group("palette"));
+    }
+
+    @Test
+    void selectAllIsFixedAndEverythingElseRebindable() {
+        assertEquals(Map.of("select-all", Chords.of("select-all")), Chords.fixed());
+        assertFalse(Chords.rebindable().containsKey("select-all"));
+        assertEquals(Chords.all().size() - 1, Chords.rebindable().size());
     }
 
     @Test

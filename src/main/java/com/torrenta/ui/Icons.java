@@ -179,6 +179,7 @@ final class Icons {
     static Glyph forSettingsPage(String id) {
         return switch (id) {
             case "general" -> sliders();
+            case "keyboard" -> palette();
             case "adding" -> download();
             case "watchFolders" -> eye();
             case "automation" -> terminal();
