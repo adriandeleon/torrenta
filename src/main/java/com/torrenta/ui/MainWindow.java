@@ -1266,6 +1266,10 @@ public final class MainWindow {
         } else if (action.equals("settings-definitions-reload")) {
             settingsWindow.show(stage);
             settingsWindow.reloadDefinitionsForCapture();
+        } else if (action.startsWith("settings-definitions-export:")) {
+            // The Search page's Export to zip, past its native chooser.
+            settingsWindow.show(stage);
+            settingsWindow.exportDefinitions(Path.of(action.substring("settings-definitions-export:".length())));
         } else if (action.startsWith("view:")) {
             ViewSwitch.parse(action.substring("view:".length()))
                     .ifPresentOrElse(this::show, () -> System.err.println("capture: no view " + action));
@@ -1582,6 +1586,9 @@ public final class MainWindow {
             System.out.println("capture: search=" + settingsWindow.searchStatus());
         if (settingsWindow.isShowing())
             for (String row : settingsWindow.definitionsForCapture()) System.out.println("capture: definition=" + row);
+        if (settingsWindow.isShowing()
+                && !settingsWindow.definitionStatusForCapture().isEmpty())
+            System.out.println("capture: definitions-status=" + settingsWindow.definitionStatusForCapture());
         if (watcher != null) System.out.println("capture: watch=" + watchStatusText());
         System.out.println("capture: view=" + view.id() + " focus=" + focusForCapture());
         System.out.println("capture: view-strip=" + viewStrip.describe());

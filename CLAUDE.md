@@ -614,6 +614,8 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   difference when none is given outright. The capture hook's `settings-search-add[:<url>]`,
   `settings-search-dialog-test:<url>` (Test pressed in the dialog) and `settings-search-test`
   (the page's Test on the first row) drive the page; a stub serving the caps fixture is enough.
+  `settings-definitions-export:<zip>` is the definitions' Export to zip past its chooser
+  (`DefinitionStore.exportZip`), with a `definitions-status=` line after the shot.
 
 - **The RSS rules run on the fetch thread, under their own lock, after the merge and before the
   feed's listeners hear.** `RssService.finish` hands the articles new by identity to `runRules`

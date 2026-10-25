@@ -1,5 +1,6 @@
 package com.torrenta.store;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -7,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,6 +17,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import com.torrenta.search.Definition;
 import com.torrenta.search.DefinitionException;
@@ -155,6 +159,44 @@ public final class DefinitionStore {
         return out;
     }
 
+    /**
+     * Every {@code *.json} in the folder, loaded or not, into a zip at {@code target} as
+     * {@code search-providers/<name>}, so unpacking it in the config folder puts them back. Written
+     * beside the target and moved into place; returns how many files went in.
+     */
+    public synchronized int exportZip(Path target) throws IOException {
+        Map<String, byte[]> files = new TreeMap<>();
+        for (Path file : files()) files.put(file.getFileName().toString(), Files.readAllBytes(file));
+        Path parent = target.toAbsolutePath().normalize().getParent();
+        if (parent == null) throw new IOException("Nowhere to write " + target);
+        write(parent.resolve(target.getFileName()), zip(files));
+        return files.size();
+    }
+
+    /** The files by name as a zip, each under {@code search-providers/}, in the map's order. */
+    static byte[] zip(Map<String, byte[]> files) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream out = new ZipOutputStream(bytes, StandardCharsets.UTF_8)) {
+            for (Map.Entry<String, byte[]> e : files.entrySet()) {
+                out.putNextEntry(new ZipEntry(FOLDER + "/" + e.getKey()));
+                out.write(e.getValue());
+                out.closeEntry();
+            }
+        }
+        return bytes.toByteArray();
+    }
+
+    /** The export's suggested file name: {@code torrenta-search-providers-2026-10-25.zip}. */
+    public static String exportName(LocalDate day) {
+        return "torrenta-" + FOLDER + "-" + day + ".zip";
+    }
+
+    /** The chosen path with {@code .zip} added when it has none: a chooser does not always add it. */
+    public static Path withZipSuffix(Path chosen) {
+        String name = chosen.getFileName().toString();
+        return name.toLowerCase(Locale.ROOT).endsWith(".zip") ? chosen : chosen.resolveSibling(name + ".zip");
+    }
+
     /** The shipped examples' texts by id. */
     public static Map<String, String> shippedTexts() {
         Map<String, String> out = new TreeMap<>();
@@ -265,10 +307,14 @@ public final class DefinitionStore {
 
     /** Written beside the file and moved into place, so a crash mid-write never truncates it. */
     private static void write(Path file, String text) throws IOException {
+        write(file, text.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void write(Path file, byte[] bytes) throws IOException {
         Files.createDirectories(file.getParent());
         Path tmp = Files.createTempFile(file.getParent(), file.getFileName().toString(), ".part");
         try {
-            Files.writeString(tmp, text, StandardCharsets.UTF_8);
+            Files.write(tmp, bytes);
             Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } finally {
             Files.deleteIfExists(tmp);
