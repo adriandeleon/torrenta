@@ -764,6 +764,7 @@ final class SettingsWindow {
     private TextField remoteAddress;
     private Spinner<Integer> remotePort;
     private TextField remoteDomains;
+    private TextArea remoteRoots;
     private TextField remoteUsername;
     private PasswordField remotePassword;
     private Label remotePasswordState;
@@ -853,6 +854,22 @@ final class SettingsWindow {
                 tr("settings.remote.domains.desc"),
                 remoteDomains,
                 tr("settings.remote.domains.keywords"));
+        remoteRoots = new TextArea();
+        remoteRoots.setPrefRowCount(3);
+        remoteRoots.setPrefColumnCount(20);
+        remoteRoots.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            // Read at each add: nothing to restart.
+            settings.setWebApiRoots(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.REMOTE,
+                server,
+                tr("settings.remote.roots"),
+                tr("settings.remote.roots.desc"),
+                remoteRoots,
+                tr("settings.remote.roots.keywords"));
 
         VBox signIn = section(page, tr("settings.remote.signIn"));
         remoteUsername = new TextField();
@@ -4245,6 +4262,8 @@ final class SettingsWindow {
             remoteAddress.setText(remote.address());
             remotePort.getValueFactory().setValue(remote.port());
             remoteDomains.setText(String.join(" ", remote.domains()));
+            remoteRoots.setText(String.join(
+                    "\n", settings.webApiRoots().stream().map(Path::toString).toList()));
             remoteUsername.setText(remote.username());
             remoteHttpsFile.setText(
                     remote.httpsFile() == null ? "" : remote.httpsFile().toString());

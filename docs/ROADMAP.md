@@ -501,7 +501,14 @@ so the order is extract, then serve.
    tags, share limits, `topPrio`, `setForceStart`). The first is in: `com.torrenta.webapi`
    (`Passwords`, `LoginGuard`, `Sessions`, `Hosts`, `WebApi`, `WebApiService`), Settings → Remote
    access, headless's `--set-remote-password`; every security decision below but the allowed
-   roots, which come with `torrents/add`.
+   roots, which come with `torrents/add`. So is the second: `QbitState` (qBittorrent's rule,
+   stalled as soon as nothing arrives, not the list's minute), `QbitTorrent` (`hash` is the v1
+   hash, `content_path` the file or root folder), `TorrentQuery`, `Reads`, the facts read once
+   through the detail and kept (`FactsCache`), `torrents/tags` beside the list's endpoints. And the
+   third: `Writes` (`torrents/add`: `urls` magnets and http(s) only, uploads through
+   `Bencode.check` and a 10 MiB cap, the screened `Session.add`; the actions), `SavePaths` (the
+   allowed roots on real paths, links followed), `webapi.roots`. Item 4 is done: Sonarr and Radarr
+   against a headless Torrenta is item 6's manual pass.
 5. **API Tier 2, remote apps and alternative web UIs**, and the static root folder.
 6. **Compatibility**: contract tests from a real qBittorrent 5.0's recorded answers;
    `QbittorrentContractTest`, `@EnabledIf` `qbittorrent-nox` is on the PATH as

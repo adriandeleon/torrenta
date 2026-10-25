@@ -3,20 +3,31 @@ package com.torrenta.webapi;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.LongSupplier;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
+import com.torrenta.engine.AddRequest;
+import com.torrenta.engine.Category;
+import com.torrenta.engine.Engine;
+import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
+import com.torrenta.engine.Torrent;
+import com.torrenta.engine.TorrentDetail;
+import com.torrenta.engine.TorrentLimits;
 import com.torrenta.http.Cookies;
 import com.torrenta.http.Request;
 import com.torrenta.http.Response;
 import com.torrenta.http.Router;
+import com.torrenta.session.AddDefaults;
 
 /**
  * qBittorrent's WebUI API at {@code /api/v2}, as far as Torrenta speaks it (roadmap 1.2, item 4:
@@ -46,7 +57,77 @@ public final class WebApi {
 
         /** Where a torrent added without a save path goes. */
         Path defaultSavePath();
+
+        /** The torrents now, the last poll's; empty while no engine is up. */
+        List<Torrent> torrents();
+
+        /** One torrent's detail; empty when it is gone or no engine is up. */
+        Optional<TorrentDetail> detail(String id);
+
+        /** The torrent as a magnet link; empty when the engine cannot say. */
+        String magnet(String id);
+
+        /** Its own rate caps; {@link TorrentLimits#NONE} when it is gone. */
+        TorrentLimits limits(String id);
+
+        /** The share limit set on this torrent alone, if one is. */
+        Optional<ShareLimit> ownShare(String id);
+
+        /** The share limit in force for it: its own, else the global one. */
+        ShareLimit share(Torrent t);
+
+        /** The global share limit, from Settings → Queue and share limits. */
+        ShareLimit globalShare();
+
+        /** When it last moved a byte either way, epoch seconds; its completion or addition before that. */
+        long lastActivity(Torrent t);
+
+        List<Category> categories();
+
+        List<String> tags();
+
+        /** {@code transfer/info}'s facts. */
+        Transfer transfer();
+
+        /** The engine up now; null while none is. The actions call it on the request's thread. */
+        Engine engine();
+
+        /** An add without a dialog, through the content check: the session's ({@code Session.add}). */
+        Torrent add(AddRequest request) throws EngineException;
+
+        /** What an add without a dialog starts from. */
+        AddDefaults addDefaults();
+
+        /** Where a client may put files: the download folder, the categories' folders, those added by hand. */
+        List<Path> allowedRoots();
+
+        /** Creates or replaces a category in the store. */
+        void putCategory(Category category) throws IOException;
+
+        /** Adds tags to the store's list. */
+        void addTags(Collection<String> tags) throws IOException;
+
+        /** A torrent's own share limit; null drops it, so the global one applies. */
+        void setShareOverride(String id, ShareLimit limit);
+
+        /** A {@code .torrent} from a URL, bounded in time and size. */
+        byte[] fetch(URI url) throws IOException;
     }
+
+    /**
+     * The session's traffic as {@code transfer/info} writes it: rates and limits in bytes per
+     * second (0 for no limit), this session's totals in bytes, and qBittorrent's word for the
+     * connection ({@code connected}, {@code firewalled}, {@code disconnected}).
+     */
+    public record Transfer(
+            long downloadRate,
+            long uploadRate,
+            long downloadedSession,
+            long uploadedSession,
+            long downloadLimit,
+            long uploadLimit,
+            long dhtNodes,
+            String connection) {}
 
     /** qBittorrent's own version, the one the *arr apps check against; 5.0 is the level spoken. */
     public static final String VERSION = "v5.0.0";
@@ -94,6 +175,28 @@ public final class WebApi {
                 router,
                 "app/preferences",
                 r -> Response.json(preferences(backend.engineSettings(), backend.defaultSavePath())));
+        FactsCache facts = new FactsCache(backend);
+        Reads reads = new Reads(backend, clock, facts);
+        Writes writes = new Writes(backend, clock, reads);
+        read(router, "torrents/info", reads::info);
+        read(router, "torrents/properties", reads::properties);
+        read(router, "torrents/files", reads::files);
+        read(router, "torrents/categories", reads::categories);
+        read(router, "torrents/tags", reads::tags);
+        read(router, "transfer/info", reads::transfer);
+        router.route("POST", PREFIX + "torrents/add", writes::add);
+        router.route("POST", PREFIX + "torrents/delete", writes::delete);
+        for (String path : List.of("torrents/pause", "torrents/stop"))
+            router.route("POST", PREFIX + path, writes::stop);
+        for (String path : List.of("torrents/resume", "torrents/start"))
+            router.route("POST", PREFIX + path, writes::start);
+        router.route("POST", PREFIX + "torrents/recheck", writes::recheck);
+        router.route("POST", PREFIX + "torrents/setCategory", writes::setCategory);
+        router.route("POST", PREFIX + "torrents/createCategory", writes::createCategory);
+        router.route("POST", PREFIX + "torrents/addTags", writes::addTags);
+        router.route("POST", PREFIX + "torrents/setShareLimits", writes::setShareLimits);
+        router.route("POST", PREFIX + "torrents/topPrio", writes::topPrio);
+        router.route("POST", PREFIX + "torrents/setForceStart", writes::setForceStart);
         return router;
     }
 

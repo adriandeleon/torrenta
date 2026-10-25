@@ -47,18 +47,14 @@ class WebApiTest {
         return new WebApiConfig(true, "127.0.0.1", 0, "admin", passwordHash, null, "", Set.of());
     }
 
-    private static final WebApi.Backend BACKEND = new WebApi.Backend() {
-        @Override
-        public EngineSettings engineSettings() {
-            EngineSettings d = EngineSettings.defaults();
-            return d.withQueue(d.queue().withShare(new ShareLimit(2.0, 0, ShareLimit.Action.REMOVE)));
-        }
+    private static final WebApi.Backend BACKEND = backend();
 
-        @Override
-        public Path defaultSavePath() {
-            return Path.of("/srv/downloads");
-        }
-    };
+    private static FakeBackend backend() {
+        FakeBackend b = new FakeBackend();
+        EngineSettings d = EngineSettings.defaults();
+        b.settings = d.withQueue(d.queue().withShare(new ShareLimit(2.0, 0, ShareLimit.Action.REMOVE)));
+        return b;
+    }
 
     private final AtomicLong now = new AtomicLong(1_000_000);
     private final WebApi api = new WebApi(BACKEND, config(HASH), new Sessions(new SecureRandom()), now::get);
