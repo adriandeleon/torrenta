@@ -81,6 +81,8 @@ import org.libtorrent4j.alerts.IncomingConnectionAlert;
 import org.libtorrent4j.alerts.ListenFailedAlert;
 import org.libtorrent4j.alerts.ListenSucceededAlert;
 import org.libtorrent4j.alerts.PeerConnectAlert;
+import org.libtorrent4j.alerts.PeerDisconnectedAlert;
+import org.libtorrent4j.alerts.PeerErrorAlert;
 import org.libtorrent4j.alerts.PortmapAlert;
 import org.libtorrent4j.alerts.PortmapErrorAlert;
 import org.libtorrent4j.alerts.ReadPieceAlert;
@@ -316,6 +318,10 @@ public final class LibtorrentEngine implements Engine {
         try {
             connectivity.set(Connectivity.NONE.dht(engineSettings.protocol().dht()));
             s = new SessionManager();
+            // Listening before starting: the session opens its listen sockets as it starts, and a
+            // listen_failed posted then was lost to a listener added afterwards (a seeder that
+            // never listened, with neither answer recorded).
+            s.addListener(new Listener());
             s.start(new SessionParams(toPack(engineSettings)));
         } catch (LinkageError e) {
             // The JNI static initialiser wraps a failed System.load in a LinkageError whose own
@@ -323,7 +329,6 @@ public final class LibtorrentEngine implements Engine {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             throw new EngineException(tr("engine.error.load", cause.getMessage()), e);
         }
-        s.addListener(new Listener());
         session = s;
         // The counters' places in a stats alert are the library's to say, and asking is native.
         counterIndex = Counter.resolve();
@@ -730,11 +735,27 @@ public final class LibtorrentEngine implements Engine {
         return running().swig().listen_port();
     }
 
+    /**
+     * Asks the session to open its listen sockets again, for a loopback test whose seeder never
+     * listened: on Windows CI a session has come up with no listen socket and no listen alert of
+     * either kind, its torrents working, the port 0 for two minutes.
+     */
+    void reopenSocketsForTest() throws EngineException {
+        running().swig().reopen_network_sockets();
+    }
+
     /** Tells a fetch about a peer on this machine, for the test that hands its peers over. */
     void connectFetchForTest(MetadataFetch fetch, int port) throws EngineException {
         TorrentHandle h = ((Fetch) fetch).handle(running());
         if (h == null) throw new EngineException(tr("engine.error.fetchEnded"));
         h.swig().connect_peer(new tcp_endpoint(Address.parseIp("127.0.0.1").swig(), port));
+    }
+
+    /** {@link #forgetPeersForTest} for a fetch, the hidden torrent behind a magnet's file list. */
+    void forgetFetchPeersForTest(MetadataFetch fetch) throws EngineException {
+        TorrentHandle h = ((Fetch) fetch).handle(running());
+        if (h == null) throw new EngineException(tr("engine.error.fetchEnded"));
+        h.swig().clear_peers();
     }
 
     /** How many of the torrent's peers it dialled itself, for the same test. */
@@ -749,6 +770,15 @@ public final class LibtorrentEngine implements Engine {
                 .connect_peer(new tcp_endpoint(Address.parseIp("127.0.0.1").swig(), port));
     }
 
+    /**
+     * Forgets the torrent's peer list, for a loopback test whose seeder refused it a few times:
+     * libtorrent stops dialling a peer after three failed attempts, and another connect_peer to
+     * the same address does not bring it back; a cleared list takes it as a new peer.
+     */
+    void forgetPeersForTest(String id) throws EngineException {
+        handle(id).swig().clear_peers();
+    }
+
     /** Tells the torrent about a peer at any address, for the test of where dials leave from. */
     void connectPeerForTest(String id, String address, int port) throws EngineException {
         handle(id).swig().connect_peer(new tcp_endpoint(Address.parseIp(address).swig(), port));
@@ -760,6 +790,32 @@ public final class LibtorrentEngine implements Engine {
      * whose last attempt failed is not dialled again for {@code min_reconnect_time}, so one early
      * refusal would otherwise outlast any test deadline.
      */
+    /**
+     * The session's peer connections as they start and end, for a loopback test that fails to
+     * say why it never got a peer: off (null) unless a test asks, and only the last few kept.
+     */
+    private volatile java.util.Deque<String> peerLog;
+
+    private static final int PEER_LOG_LINES = 40;
+
+    /** Alert thread. One line of the peer log, when a test keeps one. */
+    private void logPeer(String line) {
+        java.util.Deque<String> log = peerLog;
+        if (log == null) return;
+        log.addLast(java.time.Instant.now() + " " + line);
+        while (log.size() > PEER_LOG_LINES) log.pollFirst();
+    }
+
+    /** Starts the peer log; a second call keeps the lines already there. */
+    void recordPeersForTest() {
+        if (peerLog == null) peerLog = new java.util.concurrent.ConcurrentLinkedDeque<>();
+    }
+
+    List<String> peerLogForTest() {
+        java.util.Deque<String> log = peerLog;
+        return log == null ? List.of() : List.copyOf(log);
+    }
+
     void reconnectQuicklyForTest() throws EngineException {
         SettingsPack pack = new SettingsPack();
         pack.setInteger(settings_pack.int_types.min_reconnect_time.swigValue(), 1);
@@ -2523,6 +2579,8 @@ public final class LibtorrentEngine implements Engine {
             AlertType.SAVE_RESUME_DATA.swig(),
             AlertType.SAVE_RESUME_DATA_FAILED.swig(),
             AlertType.READ_PIECE.swig(),
+            AlertType.PEER_DISCONNECTED.swig(),
+            AlertType.PEER_ERROR.swig(),
         };
 
         @Override
@@ -2717,7 +2775,21 @@ public final class LibtorrentEngine implements Engine {
                     case DHT_BOOTSTRAP -> connectivity.updateAndGet(Connectivity::bootstrapped);
                     // Counted, not logged: a busy blocklist refuses peers by the hundred.
                     case PEER_BLOCKED -> blockedPeers.incrementAndGet();
-                    case PEER_CONNECT -> onPeerConnected((PeerConnectAlert) alert);
+                    case PEER_CONNECT -> {
+                        PeerConnectAlert c = (PeerConnectAlert) alert;
+                        logPeer("connect " + c.direction() + " " + c.endpoint());
+                        onPeerConnected(c);
+                    }
+                    case PEER_DISCONNECTED -> {
+                        PeerDisconnectedAlert d = (PeerDisconnectedAlert) alert;
+                        logPeer("disconnected " + d.endpoint() + " " + d.operation() + ": "
+                                + d.error().getMessage() + " (" + d.reason() + ")");
+                    }
+                    case PEER_ERROR -> {
+                        PeerErrorAlert e = (PeerErrorAlert) alert;
+                        logPeer("error " + e.endpoint() + " " + e.operation() + ": "
+                                + e.error().getMessage());
+                    }
                     case SAVE_RESUME_DATA -> onSaved((SaveResumeDataAlert) alert);
                     case SAVE_RESUME_DATA_FAILED -> onSaveFailed((SaveResumeDataFailedAlert) alert);
                     case READ_PIECE -> onPieceRead((ReadPieceAlert) alert);

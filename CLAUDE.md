@@ -504,6 +504,20 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
   write under `~/.torrenta`. `LibtorrentEngineTest` starts a real session on purpose: it is the one
   test that proves the native loads on each CI platform.
+- **A loopback test binds port 0 and waits for its seeder to listen.** The Windows flakes (a
+  loopback download with no peer for two minutes, a different test each time) were a seeder
+  listening on nothing: tests picked a port with a `ServerSocket(0)`, closed it, and had libtorrent
+  bind the number later, which Windows can refuse in between, and the engine added its alert
+  listener after starting the session, so the `listen_failed` was lost (it is added before now).
+  Sessions in `LibtorrentEngineTest` use `isolated(ANY_PORT)`, which listens on `127.0.0.1` only,
+  and read `listenPortForTest()`; seeders pass `awaitListening`. Never `0.0.0.0` with port 0:
+  libtorrent on Windows then gives each local address its own socket and port, `listen_port()`
+  names one that is not loopback's, and every dial of 127.0.0.1 is refused (measured, every run). Two more things the harness knows: libtorrent stops dialling an
+  address after three failed attempts and no `connect_peer` revives it (measured; `max_failcount`
+  through the session does not change it), so `awaitDownload`/`awaitFetch` clear the peer list
+  (`clear_peers`) after five seconds without a peer; and a timeout prints both sides' peer logs
+  (`recordPeersForTest`). To find or rule out a flake, `engine-soak.yml` runs the class in eight
+  parallel shards: Actions → Engine soak from master, or push any commit to a `soak/…` branch.
 - **On macOS the test JVM ends with `_exit`, because libtorrent4j's OpenSSL can abort at `exit()`.**
   libtorrent4j 2.1.0-39 links OpenSSL 3.5.5 statically, and OpenSSL registers its cleanup with
   `atexit`. About one macOS CI run in twenty, that cleanup freed a pointer that was not allocated
