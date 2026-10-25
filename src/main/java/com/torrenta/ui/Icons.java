@@ -148,6 +148,7 @@ final class Icons {
             case "quit" -> power();
             case "settings" -> settings();
             case "search" -> search();
+            case "search-clear" -> trash();
             case "rss" -> rss();
             case "view-next" -> viewNext();
             case "view-previous" -> viewPrevious();

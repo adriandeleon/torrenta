@@ -1239,6 +1239,9 @@ public final class MainWindow {
             showSearch();
             searchPane.setQuery(action.substring("search:".length()));
             searchPane.runSearch();
+        } else if (action.equals("search-clear")) {
+            // After the running search, if any, so the shot is of a tab that had rows.
+            searchPane.afterSearchForCapture(() -> command("search-clear").run().run());
         } else if (action.startsWith("search-keys:")) {
             // Keys pressed in the results table (DOWN+ENTER): the keyboard path to the Add dialog.
             showSearch();
@@ -3544,6 +3547,13 @@ public final class MainWindow {
                 new Command(
                         "retry-engine", tr("command.retryEngine"), null, null, engineDown, () -> startEngine(profile)),
                 new Command("search", tr("command.search"), Chords.of("search"), null, always, this::showSearch),
+                new Command(
+                        "search-clear",
+                        tr("command.searchClear"),
+                        null,
+                        null,
+                        searchPane.clearableProperty(),
+                        this::clearSearch),
                 new Command("rss", tr("command.rss"), Chords.of("rss"), null, always, this::showRss),
                 new Command("rss-run-rules", tr("command.rssRunRules"), null, null, always, rss::runRulesNow),
                 new Command(
@@ -4336,6 +4346,12 @@ public final class MainWindow {
 
     /** Ctrl+Shift+F: the Search view in place of the transfers, the query field focused. */
     private void showSearch() {
+        show(View.SEARCH);
+    }
+
+    /** Clear Search Results, from the palette: the tab emptied and shown, the query focused. */
+    private void clearSearch() {
+        searchPane.clear();
         show(View.SEARCH);
     }
 

@@ -42,7 +42,7 @@ selected torrent, `select-first`, `message-log` / `message-log:<query>` (the sta
   rows, which arrive with the first detail poll; on the Files tab a `file=` line per row shown
   names its `FileKind`, the glyph's rule by extension), `welcome-clipboard:<text>` (the welcome's
   clipboard card as it would read with that text, the real clipboard untouched; a `welcome=` line
-  is printed), `search` / `search:<query>` / `search-keys:<KEY+KEY>`
+  is printed), `search` / `search:<query>` / `search-keys:<KEY+KEY>` / `search-clear` (Clear Search Results, once the search has ended)
   for the Search tab (the keys go where the focus is, once the search has ended; a stand-in server is
   `java scripts/torznab-stub.java 9696 <search.xml> [caps.xml]`), `stats` for the Statistics window
   (the PNG is of it; `stats=` and `stats-graph=` lines after the shot), `detail:speed` for the Speed
