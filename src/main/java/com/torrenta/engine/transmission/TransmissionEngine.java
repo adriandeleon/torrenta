@@ -395,7 +395,7 @@ public final class TransmissionEngine implements Engine {
     }
 
     @Override
-    public MetadataFetch fetchMetadata(String magnet) throws EngineException {
+    public SwarmProbe probe(AddRequest.Source source, boolean privateToo) throws EngineException {
         throw new EngineException(tr("engine.error.transmissionFetch"));
     }
 

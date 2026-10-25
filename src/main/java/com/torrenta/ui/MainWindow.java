@@ -2469,11 +2469,11 @@ public final class MainWindow {
      * FX thread, since cancelling is an engine call.
      */
     private static final class FetchSlot {
-        private Engine.MetadataFetch fetch;
+        private Engine.SwarmProbe fetch;
         private boolean closed;
 
         /** False, and the fetch cancelled, if the dialog closed first. */
-        synchronized boolean set(Engine.MetadataFetch f) {
+        synchronized boolean set(Engine.SwarmProbe f) {
             if (closed) {
                 f.cancel();
                 return false;
@@ -2482,21 +2482,21 @@ public final class MainWindow {
             return true;
         }
 
-        synchronized Engine.MetadataFetch get() {
+        synchronized Engine.SwarmProbe get() {
             return closed ? null : fetch;
         }
 
         /** Cancelled: the dialog closed without adding. */
         synchronized void close() {
-            Engine.MetadataFetch f = take();
+            Engine.SwarmProbe f = take();
             if (f != null) f.cancel();
         }
 
         /**
-         * Added: the fetch, for {@link Engine#add(AddRequest, Engine.MetadataFetch)} to end and
+         * Added: the fetch, for {@link Engine#add(AddRequest, Engine.SwarmProbe)} to end and
          * take the peers from; null if there was none. A fetch that starts later is cancelled.
          */
-        synchronized Engine.MetadataFetch take() {
+        synchronized Engine.SwarmProbe take() {
             closed = true;
             return fetch;
         }
@@ -2521,6 +2521,8 @@ public final class MainWindow {
         dialog.applyCapabilities(capabilities);
         FetchSlot slot = new FetchSlot();
         if (preview == null && source instanceof AddRequest.Magnet magnet) startFetch(magnet, slot, dialog);
+        else if (source instanceof AddRequest.TorrentFile file && preview != null)
+            startProbe(file, preview, slot, dialog);
         currentDialog = dialog;
         Optional<AddDialog.Choice> choice = dialog.showAndWait();
         currentDialog = null;
@@ -2537,7 +2539,7 @@ public final class MainWindow {
         rememberLabels(request.labels());
         if (c.withoutAsking()) rememberAddDefaults(request);
         Thread.ofVirtual().name("engine-add").start(() -> {
-            Engine.MetadataFetch fetch = slot.take();
+            Engine.SwarmProbe fetch = slot.take();
             String outcome;
             try {
                 Torrent added = fetch == null ? e.add(request) : e.add(request, fetch);
@@ -2579,9 +2581,9 @@ public final class MainWindow {
             return;
         }
         Thread.ofVirtual().name("engine-fetch").start(() -> {
-            Engine.MetadataFetch fetch;
+            Engine.SwarmProbe fetch;
             try {
-                fetch = e.fetchMetadata(magnet.uri());
+                fetch = e.probe(magnet, settings.addProbePrivate());
             } catch (EngineException ex) {
                 Platform.runLater(() -> dialog.fetchFailed(ex.getMessage()));
                 return;
@@ -2606,6 +2608,30 @@ public final class MainWindow {
                     }
                 });
             });
+        });
+    }
+
+    /**
+     * Worker: a {@code .torrent}'s own look at the swarm while the dialog is open, as a magnet's
+     * fetch stays to look once its files are in. Not for a private torrent unless the setting lets
+     * it (a private tracker counts the probe's announce), nor where the engine cannot look. A probe
+     * that cannot start (the torrent is in the list already) leaves the line off; the dialog says
+     * nothing about it, since the add itself will.
+     */
+    private void startProbe(AddRequest.TorrentFile file, TorrentPreview preview, FetchSlot slot, AddDialog dialog) {
+        Engine e = engine;
+        boolean privateToo = settings.addProbePrivate();
+        if (e == null || capabilities.lacks(Engine.Capability.SWARM_PREVIEW) || (preview.isPrivate() && !privateToo))
+            return;
+        Thread.ofVirtual().name("engine-probe").start(() -> {
+            Engine.SwarmProbe probe;
+            try {
+                probe = e.probe(file, privateToo);
+            } catch (EngineException ex) {
+                LOG.log(Level.FINE, "No swarm probe: " + ex.getMessage(), ex);
+                return;
+            }
+            if (slot.set(probe)) fetchWatch = new FetchWatch(slot, dialog);
         });
     }
 
@@ -2805,7 +2831,7 @@ public final class MainWindow {
         Engine engine = this.engine;
         if (engine == null) return;
         FetchWatch watch = fetchWatch;
-        Engine.MetadataFetch fetch = watch == null ? null : watch.slot().get();
+        Engine.SwarmProbe fetch = watch == null ? null : watch.slot().get();
         if (fetch != null) {
             if (!fetch.torrent().isDone()) {
                 int peers = fetch.peers();

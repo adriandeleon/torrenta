@@ -170,6 +170,14 @@ public final class LibtorrentEngine implements Engine {
     /** How often the all-time totals are written; a crash costs at most this much counting. */
     private static final long STATS_SAVE_SECONDS = 300;
 
+    /**
+     * libtorrent's message for {@code errors::upload_upload_connection}, the one sign of a seed
+     * that dropped a probe at the handshake. libtorrent4j exposes no error category or enum to
+     * compare with; the text is libtorrent's own, never translated, and pinned with the version
+     * (a {@code .torrent} probe's test meets its seeder only this way).
+     */
+    private static final String UPLOAD_TO_UPLOAD = "upload to upload connection";
+
     /** Peers a fetch hands to its torrent at most; libtorrent's own peer list does the rest. */
     private static final int MAX_HANDED_OVER = 50;
 
@@ -492,7 +500,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public synchronized Torrent add(AddRequest request, MetadataFetch from) throws EngineException {
+    public synchronized Torrent add(AddRequest request, SwarmProbe from) throws EngineException {
         if (!(from instanceof Fetch fetch)) return Engine.super.add(request, from);
         fetch.cancel();
         return add(request, fetch);
@@ -749,14 +757,14 @@ public final class LibtorrentEngine implements Engine {
     }
 
     /** Tells a fetch about a peer on this machine, for the test that hands its peers over. */
-    void connectFetchForTest(MetadataFetch fetch, int port) throws EngineException {
+    void connectFetchForTest(SwarmProbe fetch, int port) throws EngineException {
         TorrentHandle h = ((Fetch) fetch).handle(running());
         if (h == null) throw new EngineException(tr("engine.error.fetchEnded"));
         h.swig().connect_peer(new tcp_endpoint(Address.parseIp("127.0.0.1").swig(), port));
     }
 
     /** {@link #forgetPeersForTest} for a fetch, the hidden torrent behind a magnet's file list. */
-    void forgetFetchPeersForTest(MetadataFetch fetch) throws EngineException {
+    void forgetFetchPeersForTest(SwarmProbe fetch) throws EngineException {
         TorrentHandle h = ((Fetch) fetch).handle(running());
         if (h == null) throw new EngineException(tr("engine.error.fetchEnded"));
         h.swig().clear_peers();
@@ -1040,21 +1048,47 @@ public final class LibtorrentEngine implements Engine {
         }
     }
 
+    /**
+     * A magnet's probe fetches the metadata first, then looks; a {@code .torrent}'s has it and
+     * looks at once. Either is a hidden torrent ({@link Fetch}), the same from then on.
+     */
     @Override
-    public synchronized MetadataFetch fetchMetadata(String magnet) throws EngineException {
+    public synchronized SwarmProbe probe(AddRequest.Source source, boolean privateToo) throws EngineException {
         SessionManager s = running();
         AddTorrentParams params;
-        try {
-            params = AddTorrentParams.parseMagnetUri(magnet);
-        } catch (RuntimeException e) {
-            throw new EngineException(tr("engine.error.badMagnet"), e);
+        String magnet = null;
+        byte[] bytes = null;
+        switch (source) {
+            case AddRequest.Magnet m -> {
+                magnet = m.uri();
+                try {
+                    params = AddTorrentParams.parseMagnetUri(magnet);
+                } catch (RuntimeException e) {
+                    throw new EngineException(tr("engine.error.badMagnet"), e);
+                }
+            }
+            case AddRequest.TorrentFile f -> {
+                bytes = f.bytes();
+                params = load(bytes, f.origin());
+            }
         }
         String id = params.getInfoHashes().getBest().toHex();
         if (find(s, id) != null) throw new EngineException(tr("engine.error.alreadyInList"));
+        if (bytes != null) {
+            TorrentInfo info = params.getTorrentInfo();
+            boolean isPrivate = info != null && info.isPrivate();
+            Reference.reachabilityFence(info);
+            if (isPrivate && !privateToo) {
+                // Never joins: the file list is the .torrent's own, and the swarm is not looked at.
+                Fetch kept = new Fetch(id, null, null, privateToo);
+                kept.end(bytes, null);
+                return kept;
+            }
+        }
         // Upload mode writes nothing; the folder is only somewhere for libtorrent to look, and an
-        // empty one of its own, so that the check at the metadata, while the fetch stays to look at
-        // the swarm, never hashes a copy already in the download folder. Out of the queue's hands,
-        // so a full download queue does not hold the file list back.
+        // empty one of its own, so that the check at the metadata, while the probe stays to look
+        // at the swarm, never hashes a copy already in the download folder. Out of the queue's
+        // hands, so a full download queue does not hold the file list back.
         Path probeDir;
         try {
             probeDir = Files.createTempDirectory("torrenta-probe-");
@@ -1070,7 +1104,7 @@ public final class LibtorrentEngine implements Engine {
         params.setFlags(flags);
         appendDefaultTrackers(params);
 
-        Fetch fetch = new Fetch(id, magnet, probeDir);
+        Fetch fetch = new Fetch(id, magnet, probeDir, privateToo);
         if (fetches.putIfAbsent(id, fetch) != null) {
             deleteQuietly(probeDir);
             throw new EngineException(tr("engine.error.alreadyFetching"));
@@ -1083,11 +1117,14 @@ public final class LibtorrentEngine implements Engine {
             deleteQuietly(probeDir);
             throw new EngineException(ec.message());
         }
+        // A .torrent's file list is in from the start; no metadata alert will say so.
+        if (bytes != null) fetch.listed(bytes);
         return fetch;
     }
 
     /** A probe's folder: empty, since upload mode writes nothing; anything else is left alone. */
     private static void deleteQuietly(Path dir) {
+        if (dir == null) return;
         try {
             Files.deleteIfExists(dir);
         } catch (java.io.IOException e) {
@@ -1099,10 +1136,15 @@ public final class LibtorrentEngine implements Engine {
      * One fetch: the dialog polls {@link #peers()}, waits on {@link #torrent()}, and once the
      * file list is in polls {@link #swarm} while the fetch stays to look.
      */
-    private final class Fetch implements MetadataFetch {
+    private final class Fetch implements SwarmProbe {
         private final String id;
+        /** The link a magnet's probe fetches from; null for a {@code .torrent}'s. */
         private final String magnet;
+        /** Its own empty save path; null for a probe that never joined. */
         private final Path probeDir;
+        /** A private torrent is looked at too ({@link Engine#probe}). */
+        private final boolean privateToo;
+
         private final long started = System.currentTimeMillis();
         private final java.util.concurrent.CompletableFuture<byte[]> torrent =
                 new java.util.concurrent.CompletableFuture<>();
@@ -1111,15 +1153,22 @@ public final class LibtorrentEngine implements Engine {
         /** When the file list came in; 0 before. */
         private volatile long metadataAt;
         /**
-         * Seeds met, as peers connected long enough to show it. A seed drops an upload-only peer
-         * at once, which the fetch is past its metadata, so it is counted the moment it shows.
+         * Seeds met, by address: a seed that dials in comes from a new port each time. A seed
+         * drops an upload-only peer, which the probe is once its file list is in, at the handshake
+         * ({@link #UPLOAD_TO_UPLOAD}), before libtorrent's peer list marks it; so a peer is counted
+         * when it shows its pieces or when it drops the probe that way.
          */
-        private final Set<Endpoint> seedsMet = ConcurrentHashMap.newKeySet();
+        private final Set<String> seedsMet = ConcurrentHashMap.newKeySet();
+
+        /** Alert thread: a peer dropped the probe because both ends only upload. */
+        void seedMet(String address) {
+            seedsMet.add(address);
+        }
         /** Pieces some peer met was seen to hold, gathered over the fetch's life. Under the engine's lock. */
         private final BitSet seen = new BitSet();
         /**
          * The peers it dialled, as each connection succeeds (a {@code peer_connect_alert}), for
-         * {@link #add(AddRequest, MetadataFetch)}. Recorded as they come rather than read at the
+         * {@link #add(AddRequest, SwarmProbe)}. Recorded as they come rather than read at the
          * end: once the metadata is in, the fetch is upload-only and a seed drops it at once.
          */
         private final Set<Endpoint> dialled = ConcurrentHashMap.newKeySet();
@@ -1131,10 +1180,17 @@ public final class LibtorrentEngine implements Engine {
             if (dialled.size() < MAX_HANDED_OVER) dialled.add(peer);
         }
 
-        Fetch(String id, String magnet, Path probeDir) {
+        Fetch(String id, String magnet, Path probeDir, boolean privateToo) {
             this.id = id;
             this.magnet = magnet;
             this.probeDir = probeDir;
+            this.privateToo = privateToo;
+        }
+
+        /** The file list is in: it stays to look at the swarm from now. */
+        void listed(byte[] bytes) {
+            metadataAt = System.currentTimeMillis();
+            torrent.complete(bytes);
         }
 
         /** Under the engine's lock, like every call from outside that reaches the session. */
@@ -1173,16 +1229,15 @@ public final class LibtorrentEngine implements Engine {
             try {
                 for (int i = 0; i < vector.size(); i++) {
                     peer_info p = vector.get(i);
-                    tcp_endpoint remote = p.remote_endpoint();
-                    Endpoint peer = new Endpoint(remote.address().to_string(), remote.port());
+                    String address = p.remote_endpoint().address().to_string();
                     if (p.getFlags().and_(PeerConstants.SEED).non_zero()) {
-                        seedsMet.add(peer);
+                        seedsMet.add(address);
                         continue;
                     }
                     if (!metadata) continue;
                     org.libtorrent4j.swig.bitfield pieces = p.get_pieces();
                     if (pieces.size() > 0 && pieces.all_set()) {
-                        seedsMet.add(peer);
+                        seedsMet.add(address);
                         continue;
                     }
                     for (int j = seen.nextClearBit(0); j < pieces.size(); j = seen.nextClearBit(j + 1)) {
@@ -1269,12 +1324,11 @@ public final class LibtorrentEngine implements Engine {
                 end(null, e);
                 return;
             }
-            if (isPrivate) {
+            if (isPrivate && !privateToo) {
                 end(bytes, null);
                 return;
             }
-            metadataAt = System.currentTimeMillis();
-            torrent.complete(bytes);
+            listed(bytes);
         }
 
         /** This fetch's torrent in the session, as a handle Java owns; null once it has left. */
@@ -2946,6 +3000,7 @@ public final class LibtorrentEngine implements Engine {
                         PeerDisconnectedAlert d = (PeerDisconnectedAlert) alert;
                         logPeer("disconnected " + d.endpoint() + " " + d.operation() + ": "
                                 + d.error().getMessage() + " (" + d.reason() + ")");
+                        onPeerDisconnected(d);
                     }
                     case PEER_ERROR -> {
                         PeerErrorAlert e = (PeerErrorAlert) alert;
@@ -3035,6 +3090,17 @@ public final class LibtorrentEngine implements Engine {
                 Set<String> errors = trackerErrors.get(id);
                 if (errors != null) errors.remove(alert.trackerUrl());
             }
+        }
+
+        /**
+         * A peer that drops a probe because both ends only upload is a seed (or, rarely, a partial
+         * seed): the probe, once its file list is in, is upload-only, and nothing else is.
+         */
+        private void onPeerDisconnected(PeerDisconnectedAlert alert) {
+            if (fetches.isEmpty() || !UPLOAD_TO_UPLOAD.equals(alert.error().getMessage())) return;
+            TorrentHandle handle = alert.handle();
+            Fetch fetch = handle.isValid() ? fetchOf(handle.swig()) : null;
+            if (fetch != null) fetch.seedMet(alert.endpoint().address().toString());
         }
 
         /**

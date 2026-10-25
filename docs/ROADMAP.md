@@ -448,11 +448,10 @@ every match is where a mistake is largest.
    beside the free-space line. **No time estimate** (decided): the probe downloads nothing, so
    there is no rate to measure, and a guess shown as a number reads as a measurement. Transmission
    has no hidden torrents: `Capability.SWARM_PREVIEW`.
-   The first PR is in, for magnets: the fetch stays in the swarm past its metadata
-   (`MetadataFetch.swarm`), `SwarmPreview`, `ui.SwarmVerdict`, the Add dialog's Swarm line; a
-   private torrent's fetch leaves at its metadata. Still to come: a `.torrent`'s own probe (and
-   with it the rename to `SwarmProbe` and `Capability.SWARM_PREVIEW`), and the setting that lets a
-   private torrent be probed.
+   Done in two PRs: the fetch stays in the swarm past its metadata, `SwarmPreview`,
+   `ui.SwarmVerdict` and the Add dialog's Swarm line; then `MetadataFetch` became `SwarmProbe`
+   (`Engine.probe(source, privateToo)`), a `.torrent` got its own probe, `Capability.SWARM_PREVIEW`,
+   and `add.probePrivate` (Settings → Adding torrents, off).
 8. **Leak check** (2 PRs): `net.InterfaceWatch` reads the bound interface every 5 s on the poll
    thread (present, up, addresses; a change re-applies the settings), `Connectivity` keeps the
    swarm's view of this machine from `ExternalIpAlert`. Then an opt-in exit check, since it asks a
