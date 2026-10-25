@@ -44,6 +44,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   tags, place in the queue and share limit, and without a recheck. Removing with the files stays
   final.
 
+- **Search providers sync with the settings.** The Torznab servers in Settings → Search travel to
+  your other computers, but their API keys never do. A server that arrives says "needed here"
+  until you type its key once on that computer; until then a search names it and asks for the key
+  instead of being refused by the server. The definition files you added or changed travel too, a
+  file at a time (the shipped examples you left alone stay out of it), and so does a deletion.
+
 - **Saved views.** Type a filter in the omnibox (`state:seeding ratio<1 added<30d`, say), press
   Ctrl+S (View → Save Filter as View…) and name it: it joins a Views section at the top of the
   sidebar with a live count, and choosing it filters the list as the query does, together with

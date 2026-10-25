@@ -491,7 +491,11 @@ public final class MainWindow {
         settingsWindow.setProfiles(profiles, new ProfilesHost());
         applyAppearance();
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
-        settingsWindow.setSearchProviders(searchStore, searchPane::reloadProviders);
+        settingsWindow.setSearchProviders(searchStore, () -> {
+            searchPane.reloadProviders();
+            // The servers and the definition files travel with the settings.
+            if (sync != null) sync.markDirty();
+        });
         settingsWindow.setSearchDefinitions(
                 definitionStore,
                 () -> opener.accept(definitionStore.dir().toUri().toString()));
@@ -502,7 +506,7 @@ public final class MainWindow {
             Automation a = automation;
             if (a != null) a.testNotification();
         });
-        sync = new SettingsSync(settings, labels, configDir, new SyncHost());
+        sync = new SettingsSync(settings, labels, searchStore, definitionStore, configDir, new SyncHost());
         settingsWindow.setSync(sync);
         sync.addListener(() -> {
             boolean problem = sync.state().phase() == SettingsSync.Phase.PROBLEM;
@@ -1799,6 +1803,13 @@ public final class MainWindow {
             for (String name : change.removedTags()) labelsHost.tagDeleted(name);
             labelsHost.labelsChanged();
             settingsWindow.reloadLabels();
+        }
+
+        @Override
+        public void searchApplied() {
+            reportDefinitionProblems();
+            searchPane.reloadProviders();
+            settingsWindow.reloadSearchPage();
         }
 
         @Override
@@ -5033,6 +5044,7 @@ public final class MainWindow {
         if (definitionStore.refresh()) {
             reportDefinitionProblems();
             searchPane.reloadProviders();
+            if (sync != null) sync.markDirty();
         }
     }
 

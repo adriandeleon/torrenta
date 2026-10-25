@@ -95,7 +95,9 @@ public final class TorznabProvider implements SearchProvider {
 
     // ---- HTTP -----------------------------------------------------------------------------------
 
+    /** A server whose key is on another machine is not asked: it would only refuse. */
     private InputStream fetch(URI uri) throws SearchException {
+        if (endpoint.keyNeeded()) throw new SearchException(tr("search.error.keyNeeded"));
         return SearchHttp.get(
                 client,
                 uri,

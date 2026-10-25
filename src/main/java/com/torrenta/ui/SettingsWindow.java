@@ -2289,7 +2289,7 @@ final class SettingsWindow {
         url.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().url()));
         TableColumn<TorznabEndpoint, String> key = new TableColumn<>(tr("settings.search.column.apiKey"));
-        key.setPrefWidth(80);
+        key.setPrefWidth(100); // "needed here" on a server whose key is on another machine
         key.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().maskedKey()));
         TableColumn<TorznabEndpoint, String> enabled = new TableColumn<>(tr("common.enabled"));
@@ -2552,6 +2552,12 @@ final class SettingsWindow {
         reloadSearch();
         if (select != null) searchTable.getSelectionModel().select(select);
         onSearchProvidersChanged.run();
+    }
+
+    /** FX thread: the Search page's two tables again, after a sync changed what they show. */
+    void reloadSearchPage() {
+        reloadSearch();
+        reloadDefinitions();
     }
 
     /** The store's list into the table; keeps the selection where it can. */
