@@ -31,6 +31,9 @@ import static com.torrenta.i18n.Messages.tr;
  *   <li>{@code ratio}, {@code size} and {@code added} with {@code < <= > >= =} (or after a colon,
  *       {@code size:>4g}): sizes take k/m/g/t in binary units, as {@link Bytes} prints them; ages
  *       take h/d/w, and {@code added<7d} is "added within the last seven days"
+ *   <li>{@code uploaded} (bytes, as size), {@code seeds} (connected seeds, a whole number), and
+ *       {@code seeding} and {@code eta} with {@code <} or {@code >} and m/h/d/w: {@code seeding>2d}
+ *       has seeded more than two days in all, {@code eta<30m} finishes within half an hour
  * </ul>
  *
  * <p>A leading {@code -} negates a term; double quotes keep spaces in a value ({@code
@@ -59,6 +62,8 @@ public final class FilterQuery {
     private static final Pattern NUMBER = Pattern.compile("\\d+(\\.\\d+)?|\\.\\d+");
     private static final Pattern SIZE = Pattern.compile("(\\d+(?:\\.\\d+)?|\\.\\d+)\\s*([kmgt]?)(?:i?b)?");
     private static final Pattern AGE = Pattern.compile("(\\d+)\\s*([hdw])");
+    private static final Pattern DURATION = Pattern.compile("(\\d+)\\s*([mhdw])");
+    private static final Pattern WHOLE = Pattern.compile("\\d+");
     private static final Pattern HEX = Pattern.compile("[0-9a-f]+");
 
     private final List<Predicate<Torrent>> tests;
@@ -115,7 +120,11 @@ public final class FilterQuery {
                     case "is" -> op.equals(":") ? is(value) : Term.invalid(tr("filter.takesColon", key));
                     case "ratio" -> ratio(comparison(op, value));
                     case "size" -> size(comparison(op, value));
+                    case "uploaded" -> uploaded(comparison(op, value));
                     case "added" -> added(comparison(op, value), now);
+                    case "seeding" -> seeding(comparison(op, value));
+                    case "eta" -> eta(comparison(op, value));
+                    case "seeds" -> seeds(comparison(op, value));
                     default -> Term.invalid(tr("filter.unknown", key));
                 };
         if (term.test == null) {
@@ -248,8 +257,25 @@ public final class FilterQuery {
     }
 
     private static Term size(Comparison c) {
-        Matcher m = SIZE.matcher(c.operand.toLowerCase(Locale.ROOT));
-        if (!m.matches()) return Term.invalid(tr("filter.sizeTakesNumber"));
+        Long bound = bytes(c.operand);
+        if (bound == null) return Term.invalid(tr("filter.sizeTakesNumber"));
+        return new Term(
+                t -> c.op.holds(Long.compare(t.size(), bound)), tr("filter.size", c.op.word(), Bytes.human(bound)));
+    }
+
+    /** {@code uploaded>10g}: payload sent over the torrent's life, in the same units as {@code size}. */
+    private static Term uploaded(Comparison c) {
+        Long bound = bytes(c.operand);
+        if (bound == null) return Term.invalid(tr("filter.uploadedTakesNumber"));
+        return new Term(
+                t -> c.op.holds(Long.compare(t.uploaded(), bound)),
+                tr("filter.uploaded", c.op.word(), Bytes.human(bound)));
+    }
+
+    /** A byte count with k/m/g/t in binary units, as {@link Bytes} prints them; null if it does not read. */
+    private static Long bytes(String operand) {
+        Matcher m = SIZE.matcher(operand.toLowerCase(Locale.ROOT));
+        if (!m.matches()) return null;
         int shift =
                 switch (m.group(2)) {
                     case "k" -> 10;
@@ -258,12 +284,80 @@ public final class FilterQuery {
                     case "t" -> 40;
                     default -> 0;
                 };
-        long bound = new BigDecimal(m.group(1))
+        BigDecimal value = new BigDecimal(m.group(1))
                 .multiply(BigDecimal.valueOf(1L << shift))
-                .setScale(0, java.math.RoundingMode.HALF_UP)
-                .longValue();
+                .setScale(0, java.math.RoundingMode.HALF_UP);
+        return value.compareTo(BigDecimal.valueOf(Long.MAX_VALUE)) > 0 ? null : value.longValue();
+    }
+
+    /**
+     * {@code seeding>2d}: time spent finished over the torrent's life ({@link Torrent#seedingTime},
+     * what a seeding-time limit measures), so a torrent that never finished has seeded for none.
+     */
+    private static Term seeding(Comparison c) {
+        if (c.op == Op.EQ) return Term.invalid(tr("filter.seedingTakesComparison"));
+        Span span = span(c.operand);
+        if (span == null) return Term.invalid(tr("filter.seedingTakesNumber"));
         return new Term(
-                t -> c.op.holds(Long.compare(t.size(), bound)), tr("filter.size", c.op.word(), Bytes.human(bound)));
+                t -> c.op.holds(Long.compare(t.seedingTime(), span.seconds())),
+                tr("filter.seeding", c.op.word(), span.words()));
+    }
+
+    /**
+     * {@code eta<30m}: the time left the ETA column shows. A torrent with none (not downloading,
+     * or done) matches neither side; one that is stuck has an endless ETA, over any bound.
+     */
+    private static Term eta(Comparison c) {
+        if (c.op == Op.EQ) return Term.invalid(tr("filter.etaTakesComparison"));
+        Span span = span(c.operand);
+        if (span == null) return Term.invalid(tr("filter.etaTakesNumber"));
+        return new Term(
+                t -> {
+                    long eta = Format.etaSeconds(t);
+                    return eta != Format.NO_ETA && c.op.holds(Long.compare(eta, span.seconds()));
+                },
+                tr("filter.eta", c.op.word(), span.words()));
+    }
+
+    /** {@code seeds<3}: the seeds it is connected to now, as the Seeds column counts them. */
+    private static Term seeds(Comparison c) {
+        if (!WHOLE.matcher(c.operand).matches()) return Term.invalid(tr("filter.seedsTakesWholeNumber"));
+        int bound;
+        try {
+            bound = Integer.parseInt(c.operand);
+        } catch (NumberFormatException e) {
+            return Term.invalid(tr("filter.seedsTakesWholeNumber"));
+        }
+        return new Term(t -> c.op.holds(Integer.compare(t.seeds(), bound)), tr("filter.seeds", c.op.word(), bound));
+    }
+
+    /** A length of time: seconds, and the words for it in the UI language. */
+    private record Span(long seconds, String words) {}
+
+    /** {@code 30m}, {@code 6h}, {@code 2d}, {@code 3w}; null if it does not read or is too long. */
+    private static Span span(String operand) {
+        Matcher m = DURATION.matcher(operand.toLowerCase(Locale.ROOT));
+        if (!m.matches()) return null;
+        String unit =
+                switch (m.group(2)) {
+                    case "m" -> "minutes";
+                    case "h" -> "hours";
+                    case "d" -> "days";
+                    default -> "weeks";
+                };
+        long per =
+                switch (unit) {
+                    case "minutes" -> 60L;
+                    case "hours" -> 3600L;
+                    case "days" -> 86_400L;
+                    default -> 7 * 86_400L;
+                };
+        try {
+            long amount = Long.parseLong(m.group(1));
+            return new Span(Math.multiplyExact(amount, per), tr("filter.span." + unit, amount));
+        } catch (NumberFormatException | ArithmeticException e) {
+            return null;
+        }
     }
 
     /**

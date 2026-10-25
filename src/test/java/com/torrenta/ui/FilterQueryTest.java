@@ -15,6 +15,7 @@ class FilterQueryTest {
     private static final long NOW = 1_800_000_000L;
     private static final long DAY = 86_400L;
     private static final long GIB = 1L << 30;
+    private static final long MIB = 1L << 20;
 
     /** A torrent with every field at a dull default; each call returns a copy with one changed. */
     private static final class T implements Cloneable {
@@ -32,6 +33,10 @@ class FilterQueryTest {
         List<String> tags = List.of();
         String error = "";
         List<String> trackers = List.of();
+        long done;
+        long downloadRate;
+        int seeds;
+        long seedingTime;
 
         static T of(String name) {
             T t = new T();
@@ -100,18 +105,36 @@ class FilterQueryTest {
             return copy(t -> t.error = v);
         }
 
+        /** Downloading {@code size} bytes with {@code done} in, at {@code rate} bytes a second. */
+        T downloading(long size, long done, long rate) {
+            return copy(t -> {
+                t.state = TorrentState.DOWNLOADING;
+                t.size = size;
+                t.done = done;
+                t.downloadRate = rate;
+            });
+        }
+
+        T seeds(int v) {
+            return copy(t -> t.seeds = v);
+        }
+
+        T seeded(long seconds) {
+            return copy(t -> t.seedingTime = seconds);
+        }
+
         Torrent torrent() {
             return new Torrent(
                     id,
                     name,
                     size,
-                    0,
+                    done,
                     0,
                     state,
+                    downloadRate,
                     0,
                     0,
-                    0,
-                    0,
+                    seeds,
                     uploaded,
                     downloaded,
                     added,
@@ -120,7 +143,7 @@ class FilterQueryTest {
                     "",
                     paused,
                     sequential,
-                    0,
+                    seedingTime,
                     category,
                     tags,
                     error,
@@ -358,6 +381,58 @@ class FilterQueryTest {
         assertEquals("added more than 1 week ago", chip("added>1w").label());
         assertEquals("added at most 3 hours ago", chip("added<=3h").label());
         assertEquals("added at least 2 days ago", chip("added>=2d").label());
+    }
+
+    @Test
+    void uploadedTakesTheUnitsSizeDoes() {
+        T sent = T.of("a").transfer(12 * GIB, GIB);
+        assertTrue(matches("uploaded>10g", sent));
+        assertFalse(matches("uploaded<10g", sent));
+        assertTrue(matches("uploaded:>=12g", sent));
+        assertEquals("uploaded over 10.0 GiB", chip("uploaded>10g").label());
+        assertFalse(chip("uploaded>lots").valid());
+        assertFalse(chip("uploaded>99999999999t").valid(), "past what a long holds: not a number to compare");
+    }
+
+    @Test
+    void seedingMeasuresTimeFinishedOverTheTorrentsLife() {
+        T twoDays = T.of("a").state(TorrentState.SEEDING).seeded(2 * DAY + 60);
+        T never = T.of("a");
+        assertTrue(matches("seeding>2d", twoDays));
+        assertFalse(matches("seeding>2d", never));
+        assertTrue(matches("seeding<1w", twoDays));
+        assertTrue(matches("seeding<30m", never), "a torrent that never finished has seeded for none");
+        assertEquals("seeding over 2 days", chip("seeding>2d").label());
+        assertEquals("seeding under 30 minutes", chip("seeding<30m").label());
+        assertFalse(chip("seeding=2d").valid(), "a duration takes < or >");
+        assertEquals("seeding takes < or >", chip("seeding:2d").label());
+        assertFalse(chip("seeding>2").valid(), "a unit is needed");
+    }
+
+    @Test
+    void etaIsTheColumnsAndOnlyForWhatIsDownloading() {
+        T soon = T.of("a").downloading(100 * MIB, 90 * MIB, MIB); // 10 MiB left at 1 MiB/s: 10 s
+        T stuck = T.of("a").downloading(100 * MIB, 90 * MIB, 0);
+        T done = T.of("a").state(TorrentState.SEEDING);
+        assertTrue(matches("eta<1m", soon));
+        assertFalse(matches("eta>1m", soon));
+        assertTrue(matches("eta>1w", stuck), "no rate: an endless ETA, over any bound");
+        assertFalse(matches("eta<1w", stuck));
+        assertFalse(matches("eta<1w", done), "nothing left to wait for matches neither way");
+        assertFalse(matches("eta>1m", done));
+        assertEquals("time left under 30 minutes", chip("eta<30m").label());
+    }
+
+    @Test
+    void seedsCountsTheConnectedSeeds() {
+        T thin = T.of("a").seeds(2);
+        assertTrue(matches("seeds<3", thin));
+        assertFalse(matches("seeds>=3", thin));
+        assertTrue(matches("seeds:2", thin));
+        assertTrue(matches("-seeds>0", T.of("b")), "negated: none connected");
+        assertEquals("seeds under 3", chip("seeds<3").label());
+        assertFalse(chip("seeds<2.5").valid(), "a whole number");
+        assertFalse(chip("seeds<99999999999").valid(), "past an int");
     }
 
     // ---- combining
