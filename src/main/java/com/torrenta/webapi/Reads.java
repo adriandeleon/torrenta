@@ -32,10 +32,31 @@ final class Reads {
     private final LongSupplier clock;
     private final FactsCache facts;
 
-    Reads(WebApi.Backend backend, LongSupplier clock) {
+    Reads(WebApi.Backend backend, LongSupplier clock, FactsCache facts) {
         this.backend = backend;
         this.clock = clock;
-        this.facts = new FactsCache(backend);
+        this.facts = facts;
+    }
+
+    /**
+     * The torrents a client names in {@code hashes} ({@code |} between them, by the hash it knows or
+     * Torrenta's id, any case), or all of them for {@code all}; one it does not have is skipped, as
+     * qBittorrent skips it.
+     */
+    List<Torrent> targets(String hashes, long now) {
+        if (hashes == null || hashes.isBlank()) return List.of();
+        List<Torrent> all = torrents();
+        if (hashes.trim().equalsIgnoreCase("all")) return all;
+        Set<String> wanted = TorrentQuery.hashes(hashes);
+        List<Torrent> out = new ArrayList<>();
+        for (Torrent t : all) {
+            String id = t.id().toLowerCase(java.util.Locale.ROOT);
+            if (wanted.contains(id)
+                    || wanted.contains(
+                            QbitTorrent.hash(t, facts.get(t, now).facts()).toLowerCase(java.util.Locale.ROOT)))
+                out.add(t);
+        }
+        return out;
     }
 
     /** A GET's query and a POST's form, as qBittorrent reads either. */

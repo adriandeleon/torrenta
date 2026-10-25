@@ -65,7 +65,11 @@ public final class TorrentQuery {
 
     /** Lower case; null for every torrent (absent, or {@code all}). */
     static Set<String> hashes(Form params) {
-        String value = params.first("hashes").orElse("");
+        return hashes(params.first("hashes").orElse(""));
+    }
+
+    /** {@code a|b} in lower case; null for every torrent (blank, or {@code all}). */
+    static Set<String> hashes(String value) {
         if (value.isBlank() || value.equalsIgnoreCase("all")) return null;
         return Arrays.stream(value.split("\\|"))
                 .map(h -> h.trim().toLowerCase(Locale.ROOT))

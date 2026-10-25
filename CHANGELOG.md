@@ -18,7 +18,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   the reading ones: `torrents/info` with qBittorrent's states, filters, sort and paging, a torrent's
   `properties` and `files`, the categories, the tags and `transfer/info`. A torrent is listed by its
   v1 hash where it has one (what Sonarr and Radarr look it up by) and `content_path` is the file or
-  the root folder they import from. Adding and acting come next. Headless runs it too, and
+  the root folder they import from. And the acting ones: `torrents/add` (magnets and http(s) links
+  in `urls`, `.torrent` files uploaded, with category, tags, stopped, save path, layout, rename,
+  limits and share limits) through the same content check as any add without a dialog, delete,
+  stop/start (and 4.x's pause/resume), recheck, categories, tags, share limits, top of the queue and
+  force start. A save path outside the allowed folders (the download folder, the categories', and
+  any added on the page) is refused, as is a new category's folder outside them. Headless runs it too, and
   `--set-remote-password` sets the password without a window.
 
 - **Torrenta without a window.** `torrenta --headless`, or the `torrenta-nox` launcher beside the

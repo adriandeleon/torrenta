@@ -3,16 +3,21 @@ package com.torrenta.webapi;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.LongSupplier;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
+import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
+import com.torrenta.engine.Engine;
+import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
@@ -22,6 +27,7 @@ import com.torrenta.http.Cookies;
 import com.torrenta.http.Request;
 import com.torrenta.http.Response;
 import com.torrenta.http.Router;
+import com.torrenta.session.AddDefaults;
 
 /**
  * qBittorrent's WebUI API at {@code /api/v2}, as far as Torrenta speaks it (roadmap 1.2, item 4:
@@ -70,6 +76,9 @@ public final class WebApi {
         /** The share limit in force for it: its own, else the global one. */
         ShareLimit share(Torrent t);
 
+        /** The global share limit, from Settings → Queue and share limits. */
+        ShareLimit globalShare();
+
         /** When it last moved a byte either way, epoch seconds; its completion or addition before that. */
         long lastActivity(Torrent t);
 
@@ -79,6 +88,30 @@ public final class WebApi {
 
         /** {@code transfer/info}'s facts. */
         Transfer transfer();
+
+        /** The engine up now; null while none is. The actions call it on the request's thread. */
+        Engine engine();
+
+        /** An add without a dialog, through the content check: the session's ({@code Session.add}). */
+        Torrent add(AddRequest request) throws EngineException;
+
+        /** What an add without a dialog starts from. */
+        AddDefaults addDefaults();
+
+        /** Where a client may put files: the download folder, the categories' folders, those added by hand. */
+        List<Path> allowedRoots();
+
+        /** Creates or replaces a category in the store. */
+        void putCategory(Category category) throws IOException;
+
+        /** Adds tags to the store's list. */
+        void addTags(Collection<String> tags) throws IOException;
+
+        /** A torrent's own share limit; null drops it, so the global one applies. */
+        void setShareOverride(String id, ShareLimit limit);
+
+        /** A {@code .torrent} from a URL, bounded in time and size. */
+        byte[] fetch(URI url) throws IOException;
     }
 
     /**
@@ -142,13 +175,28 @@ public final class WebApi {
                 router,
                 "app/preferences",
                 r -> Response.json(preferences(backend.engineSettings(), backend.defaultSavePath())));
-        Reads reads = new Reads(backend, clock);
+        FactsCache facts = new FactsCache(backend);
+        Reads reads = new Reads(backend, clock, facts);
+        Writes writes = new Writes(backend, clock, reads);
         read(router, "torrents/info", reads::info);
         read(router, "torrents/properties", reads::properties);
         read(router, "torrents/files", reads::files);
         read(router, "torrents/categories", reads::categories);
         read(router, "torrents/tags", reads::tags);
         read(router, "transfer/info", reads::transfer);
+        router.route("POST", PREFIX + "torrents/add", writes::add);
+        router.route("POST", PREFIX + "torrents/delete", writes::delete);
+        for (String path : List.of("torrents/pause", "torrents/stop"))
+            router.route("POST", PREFIX + path, writes::stop);
+        for (String path : List.of("torrents/resume", "torrents/start"))
+            router.route("POST", PREFIX + path, writes::start);
+        router.route("POST", PREFIX + "torrents/recheck", writes::recheck);
+        router.route("POST", PREFIX + "torrents/setCategory", writes::setCategory);
+        router.route("POST", PREFIX + "torrents/createCategory", writes::createCategory);
+        router.route("POST", PREFIX + "torrents/addTags", writes::addTags);
+        router.route("POST", PREFIX + "torrents/setShareLimits", writes::setShareLimits);
+        router.route("POST", PREFIX + "torrents/topPrio", writes::topPrio);
+        router.route("POST", PREFIX + "torrents/setForceStart", writes::setForceStart);
         return router;
     }
 

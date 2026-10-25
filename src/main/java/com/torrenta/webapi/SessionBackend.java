@@ -1,7 +1,10 @@
 package com.torrenta.webapi;
 
+import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -9,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
 import com.torrenta.engine.Connectivity;
 import com.torrenta.engine.Engine;
@@ -19,9 +23,13 @@ import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentLimits;
+import com.torrenta.net.TorrentFetch;
+import com.torrenta.session.AddDefaults;
 import com.torrenta.session.Session;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.Settings;
+
+import static com.torrenta.i18n.Messages.tr;
 
 /**
  * The API over the running {@link Session}, this machine's {@link Settings} and its {@link
@@ -115,6 +123,11 @@ public final class SessionBackend implements WebApi.Backend {
     }
 
     @Override
+    public ShareLimit globalShare() {
+        return settings.shareLimit();
+    }
+
+    @Override
     public long lastActivity(Torrent t) {
         Long seen = lastActive.get(t.id());
         if (seen != null) return seen;
@@ -161,5 +174,57 @@ public final class SessionBackend implements WebApi.Backend {
         if (c.equals(Connectivity.NONE)) return "connected";
         if (!c.listening()) return "disconnected";
         return c.incoming() ? "connected" : "firewalled";
+    }
+
+    @Override
+    public Engine engine() {
+        return session.engine();
+    }
+
+    @Override
+    public Torrent add(AddRequest request) throws EngineException {
+        Engine e = session.engine();
+        if (e == null) throw new EngineException(tr("status.engineNotRunning"));
+        return session.add(e, request);
+    }
+
+    @Override
+    public AddDefaults addDefaults() {
+        return session.addDefaults();
+    }
+
+    /**
+     * The download folder (a daemon's own too, when the files are not on this machine), each
+     * category's folder, and the folders added by hand on the Remote access page.
+     */
+    @Override
+    public List<Path> allowedRoots() {
+        List<Path> roots = new java.util.ArrayList<>();
+        roots.add(settings.downloadDir());
+        roots.add(session.addDefaults().savePath());
+        for (Category c : labels.categories()) if (!c.savePath().isEmpty()) roots.add(Path.of(c.savePath()));
+        roots.addAll(settings.webApiRoots());
+        return roots;
+    }
+
+    @Override
+    public void putCategory(Category category) throws IOException {
+        labels.putCategory(category);
+    }
+
+    @Override
+    public void addTags(Collection<String> tags) throws IOException {
+        labels.addTags(tags);
+    }
+
+    @Override
+    public void setShareOverride(String id, ShareLimit limit) {
+        settings.setShareOverride(id, limit);
+        settings.saveQuietly();
+    }
+
+    @Override
+    public byte[] fetch(URI url) throws IOException {
+        return new TorrentFetch().fetch(url);
     }
 }
