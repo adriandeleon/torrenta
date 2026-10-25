@@ -24,7 +24,8 @@ final class RemoveConfirm {
         SEARCH_PROVIDER,
         ENGINE_PROFILE,
         CATEGORY,
-        TAG;
+        TAG,
+        VIEW;
 
         /** The catalogue segment: {@code confirm.remove.<key>}. */
         String key() {

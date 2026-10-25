@@ -110,7 +110,8 @@ public final class Settings {
     /** The sidebar's width in px, as its edge was last dragged; this machine's, like its choices. */
     public static final String UI_SIDEBAR_WIDTH = "ui.sidebar.width";
     /** The sections a choice or a fold can name. */
-    public static final java.util.List<String> SIDEBAR_AXES = java.util.List.of("status", "category", "tag", "tracker");
+    public static final java.util.List<String> SIDEBAR_AXES =
+            java.util.List.of("view", "status", "category", "tag", "tracker");
     /** Rows coloured by state (glyph, sentence, progress bar); off leaves the glyphs uncoloured. */
     public static final String UI_STATE_COLORS = "ui.stateColors";
     /** The theme id ({@code editora-dark}, {@code nord-light}, …); the UI maps it and falls back. */
@@ -731,6 +732,23 @@ public final class Settings {
      */
     public boolean filesToPick(String torrentId) {
         return readBoolean(TORRENT_PREFIX + torrentId + PICK_FILES_SUFFIX, false);
+    }
+
+    /** The saved views, in their order ({@link SavedView#read}). */
+    public List<SavedView> savedViews() {
+        Map<String, String> keys = new java.util.HashMap<>();
+        for (String key : properties.stringPropertyNames()) {
+            if (key.startsWith(SavedView.PREFIX) || key.equals(SavedView.ORDER))
+                keys.put(key, properties.getProperty(key));
+        }
+        return SavedView.read(keys);
+    }
+
+    /** Replaces the saved views: their keys written, a view's keys no longer there removed. */
+    public void setSavedViews(List<SavedView> views) {
+        for (String key : List.copyOf(properties.stringPropertyNames()))
+            if (key.startsWith(SavedView.PREFIX)) properties.remove(key);
+        properties.putAll(SavedView.keys(views));
     }
 
     public void setFilesToPick(String torrentId, boolean pending) {

@@ -161,6 +161,13 @@ public final class MainWindow {
     private final TextField filter = new TextField();
     /** The omnibox as a value: chips and text; the field and the chip row draw it. */
     private Omnibox omnibox = Omnibox.EMPTY;
+    /** The omnibox holds a query that Save Filter as View can keep. */
+    private final javafx.beans.property.BooleanProperty filterSaveable =
+            new javafx.beans.property.SimpleBooleanProperty();
+    /** The last poll's torrents, for a sidebar refresh that cannot wait for the next one. */
+    private List<Torrent> lastSnapshot = List.of();
+    /** A name the capture hook types into Save Filter as View's prompt; null for a person's. */
+    private String saveViewForCapture;
 
     private final HBox chipRow = new HBox(4);
     /** Set while the field's text is being written from the value, so the listener stays quiet. */
@@ -521,6 +528,18 @@ public final class MainWindow {
         // Ctrl+Tab and Ctrl+Shift+Tab cycle the views. A filter, ahead of focus traversal, which
         // would otherwise take Ctrl+Tab out of the table; Control on every platform, since Cmd+Tab
         // is macOS's own application switcher and never reaches the window.
+        // Shortcut+Alt+1…9 choose the saved views in order, unless a text field has the focus:
+        // Ctrl+Alt is AltGr on many layouts, and what it types there is the field's.
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+            if (scene.getFocusOwner() instanceof javafx.scene.control.TextInputControl) return;
+            for (int n = 1; n <= 9; n++) {
+                if (Chords.of("saved-view-" + n).match(e)) {
+                    chooseSavedView(n);
+                    e.consume();
+                    return;
+                }
+            }
+        });
         scene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
             if (e.getCode() == KeyCode.TAB && e.isControlDown() && !e.isAltDown() && !e.isMetaDown()) {
                 show(e.isShiftDown() ? ViewSwitch.previous(view) : ViewSwitch.next(view));
@@ -1349,6 +1368,14 @@ public final class MainWindow {
             // rename:<name>: the selection's Rename dialog, filled and confirmed ("~" is a space).
             renameForCapture = action.substring("rename:".length()).replace('~', ' ');
             renameTorrent();
+        } else if (action.startsWith("save-view:")) {
+            // save-view:<name>: Save Filter as View on the omnibox's query, named ("~" is a space).
+            saveViewForCapture = action.substring("save-view:".length()).replace('~', ' ');
+            saveView();
+        } else if (action.startsWith("pick-view:")) {
+            // pick-view:<n>: the n-th saved view chosen, as Shortcut+Alt+n does from the list.
+            chooseSavedView(
+                    Integer.parseInt(action.substring("pick-view:".length()).trim()));
         } else if (action.startsWith("export-to:")) {
             // The selection exported into a folder, as Export does past its (native) chooser.
             export(exportTargets(selectedTorrents(), Path.of(action.substring("export-to:".length()))));
@@ -3293,7 +3320,134 @@ public final class MainWindow {
 
     /** FX thread. The sidebar's entries and counts from the store and this snapshot. */
     private void refreshSidebar(List<Torrent> snapshot) {
-        sidebar.update(labels.categories().stream().map(Category::name).toList(), labels.tags(), snapshot);
+        lastSnapshot = snapshot;
+        sidebar.update(
+                sidebarViews(java.time.Instant.now().getEpochSecond()),
+                labels.categories().stream().map(Category::name).toList(),
+                labels.tags(),
+                snapshot);
+    }
+
+    /** The saved views as the sidebar lists them, each query read with this clock. */
+    private List<SidebarEntries.View> sidebarViews(long now) {
+        return settings.savedViews().stream()
+                .map(v -> new SidebarEntries.View(v.slug(), v.name(), FilterQuery.parse(v.query(), now)))
+                .toList();
+    }
+
+    /** The n-th saved view (1 first), chosen; nothing when there are fewer. */
+    private void chooseSavedView(int n) {
+        List<com.torrenta.store.SavedView> views = settings.savedViews();
+        if (n < 1 || n > views.size()) return;
+        chooseFilter(SidebarFilter.view(views.get(n - 1).slug()));
+    }
+
+    /**
+     * Save Filter as View (Shortcut+S): the omnibox's query kept under a name asked for, the view
+     * then chosen and the box emptied, so the list stays as it was while the filter moves into
+     * the sidebar.
+     */
+    private void saveView() {
+        String query = omnibox.query().strip();
+        if (query.isEmpty() || (promptDialog != null && promptDialog.isShowing())) return;
+        // On the next pulse: a nested event loop cannot start inside an animation or layout pass.
+        Platform.runLater(() -> {
+            javafx.scene.control.TextInputDialog prompt = new javafx.scene.control.TextInputDialog(query);
+            prompt.initOwner(stage);
+            Fonts.installUiFont(prompt.getDialogPane());
+            prompt.setTitle(tr("window.saveView.title"));
+            prompt.setHeaderText(tr("window.saveView.header", query));
+            StockButtons.translate(prompt);
+            prompt.getEditor().setPrefColumnCount(32);
+            String typed = saveViewForCapture;
+            saveViewForCapture = null;
+            if (typed != null) {
+                Platform.runLater(() -> {
+                    prompt.getEditor().setText(typed);
+                    StockButtons.okButton(prompt).fire();
+                });
+            }
+            promptDialog = prompt;
+            prompt.showAndWait()
+                    .map(String::strip)
+                    .filter(name -> !name.isEmpty())
+                    .ifPresent(name -> {
+                        List<com.torrenta.store.SavedView> views =
+                                com.torrenta.store.SavedView.added(settings.savedViews(), name, query);
+                        settings.setSavedViews(views);
+                        settings.saveQuietly();
+                        setOmnibox(Omnibox.EMPTY);
+                        refreshSidebar(lastSnapshot);
+                        chooseFilter(SidebarFilter.view(views.getLast().slug()));
+                        setStatus(tr("status.viewSaved", name));
+                    });
+        });
+    }
+
+    /** The sidebar's menu on a view: Rename…, Use the Current Filter, Delete…; by slug. */
+    private final class ViewActions implements Sidebar.ViewActions {
+        @Override
+        public void rename(String slug) {
+            com.torrenta.store.SavedView view = savedView(slug);
+            if (view == null || (promptDialog != null && promptDialog.isShowing())) return;
+            Platform.runLater(() -> {
+                javafx.scene.control.TextInputDialog prompt = new javafx.scene.control.TextInputDialog(view.name());
+                prompt.initOwner(stage);
+                Fonts.installUiFont(prompt.getDialogPane());
+                prompt.setTitle(tr("window.renameView.title"));
+                prompt.setHeaderText(tr("window.renameView.header", view.name()));
+                StockButtons.translate(prompt);
+                promptDialog = prompt;
+                prompt.showAndWait()
+                        .map(String::strip)
+                        .filter(name -> !name.isEmpty() && !name.equals(view.name()))
+                        .ifPresent(name ->
+                                changeViews(com.torrenta.store.SavedView.renamed(settings.savedViews(), slug, name)));
+            });
+        }
+
+        @Override
+        public void useCurrentFilter(String slug) {
+            String query = omnibox.query().strip();
+            if (savedView(slug) == null || query.isEmpty()) return;
+            changeViews(com.torrenta.store.SavedView.requeried(settings.savedViews(), slug, query));
+            setOmnibox(Omnibox.EMPTY);
+            chooseFilter(SidebarFilter.view(slug));
+        }
+
+        @Override
+        public boolean canUseCurrentFilter() {
+            return filterSaveable.get();
+        }
+
+        @Override
+        public void delete(String slug) {
+            com.torrenta.store.SavedView view = savedView(slug);
+            if (view == null) return;
+            Platform.runLater(() -> {
+                if (!RemoveConfirm.ask(stage, RemoveConfirm.Kind.VIEW, view.name())) return;
+                changeViews(com.torrenta.store.SavedView.removed(settings.savedViews(), slug));
+            });
+        }
+    }
+
+    private com.torrenta.store.SavedView savedView(String slug) {
+        return settings.savedViews().stream()
+                .filter(v -> v.slug().equals(slug))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /** The views replaced, saved, and the sidebar and the list told: a deleted view's choice clears itself. */
+    private void changeViews(List<com.torrenta.store.SavedView> views) {
+        settings.setSavedViews(views);
+        settings.saveQuietly();
+        refreshSidebar(lastSnapshot);
+        if (sidebarSelection.view().kind() == SidebarFilter.Kind.VIEW
+                && views.stream()
+                        .noneMatch(v -> v.slug().equals(sidebarSelection.view().value())))
+            setSidebarSelection(sidebarSelection.cleared(SidebarFilter.Axis.VIEW));
+        else applyFilters();
     }
 
     /** An entry chosen in the sidebar by hand (or a section's All, when its choice vanished). */
@@ -3322,7 +3476,8 @@ public final class MainWindow {
     }
 
     private void applyFilters() {
-        filtered.setPredicate(rowFilter(omnibox.query(), sidebarSelection));
+        filtered.setPredicate(rowFilter(omnibox.query(), sidebarSelection, settings.savedViews()));
+        filterSaveable.set(!omnibox.query().isBlank());
     }
 
     /**
@@ -3756,6 +3911,13 @@ public final class MainWindow {
                         always,
                         this::focusFilter),
                 new Command(
+                        "save-view",
+                        tr("command.saveView"),
+                        Chords.of("save-view"),
+                        null,
+                        filterSaveable,
+                        this::saveView),
+                new Command(
                         "toggle-density",
                         tr("command.toggleDensity"),
                         null,
@@ -4070,6 +4232,7 @@ public final class MainWindow {
                         altSpeedItem,
                         new SeparatorMenuItem(),
                         menuItem("filter"),
+                        menuItem("save-view"),
                         menuItem("focus-sidebar"),
                         menuItem("select-all"),
                         menuItem("event-log"),
@@ -4275,6 +4438,7 @@ public final class MainWindow {
             settings.saveQuietly();
         });
         sidebar.setSidebarWidth(settings.sidebarWidth(SidebarWidth.DEFAULT));
+        sidebar.setViewActions(new ViewActions());
         sidebar.managedProperty().bind(sidebar.visibleProperty());
         sidebar.setVisible(settings.sidebar());
         sidebar.setCollapsed(settings.sidebarCollapsed().stream()
@@ -4290,7 +4454,8 @@ public final class MainWindow {
                 settings.sidebarChoice("status"),
                 settings.sidebarChoice("category"),
                 settings.sidebarChoice("tag"),
-                settings.sidebarChoice("tracker"));
+                settings.sidebarChoice("tracker"),
+                settings.sidebarChoice("view"));
         sidebar.select(sidebarSelection);
         applyFilters();
         transfersFrame = new BorderPane(split);
@@ -4618,9 +4783,35 @@ public final class MainWindow {
 
     /** {@link #rowFilter(String, SidebarSelection)} with the clock that {@code added<7d} counts from. */
     static java.util.function.Predicate<TorrentRow> rowFilter(String text, SidebarSelection sidebar, long now) {
+        return rowFilter(text, sidebar, List.of(), now);
+    }
+
+    /** {@link #rowFilter(String, SidebarSelection)} with the saved views a chosen one is read from. */
+    static java.util.function.Predicate<TorrentRow> rowFilter(
+            String text, SidebarSelection sidebar, List<com.torrenta.store.SavedView> views) {
+        return rowFilter(text, sidebar, views, java.time.Instant.now().getEpochSecond());
+    }
+
+    /**
+     * Every filter, the chosen saved view's query among them: the box, the view, the sidebar's
+     * sections, all of them at once. A view chosen and since deleted filters nothing.
+     */
+    static java.util.function.Predicate<TorrentRow> rowFilter(
+            String text, SidebarSelection sidebar, List<com.torrenta.store.SavedView> views, long now) {
         FilterQuery query = FilterQuery.parse(text, now);
         SidebarSelection s = sidebar == null ? SidebarSelection.ALL : sidebar;
-        return row -> query.matches(row.torrent()) && s.matches(row.torrent());
+        FilterQuery view = viewQuery(s.view(), views, now);
+        return row -> query.matches(row.torrent()) && view.matches(row.torrent()) && s.matches(row.torrent());
+    }
+
+    /** The chosen view's query; {@link FilterQuery#EMPTY} when none is chosen or it is gone. */
+    static FilterQuery viewQuery(SidebarFilter chosen, List<com.torrenta.store.SavedView> views, long now) {
+        if (chosen.kind() != SidebarFilter.Kind.VIEW) return FilterQuery.EMPTY;
+        return views.stream()
+                .filter(v -> v.slug().equals(chosen.value()))
+                .findFirst()
+                .map(v -> FilterQuery.parse(v.query(), now))
+                .orElse(FilterQuery.EMPTY);
     }
 
     private void focusFilter() {

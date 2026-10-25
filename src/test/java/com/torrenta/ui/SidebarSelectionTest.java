@@ -105,4 +105,22 @@ class SidebarSelectionTest {
         assertEquals("all", SidebarSelection.ALL.describe());
         assertEquals("tag:hd", SidebarSelection.ALL.with(HD).describe());
     }
+
+    @Test
+    void aViewIsAnAxisOfItsOwnKeptAndReadBackLikeTheOthers() {
+        SidebarFilter seeding = SidebarFilter.view("needs-seeding");
+        SidebarSelection s = SidebarSelection.ALL.with(HD).with(seeding);
+        assertEquals(seeding, s.view());
+        assertEquals(HD, s.tag(), "choosing a view leaves the other sections alone");
+        assertEquals(SidebarFilter.ALL, s.cleared(Axis.VIEW).view());
+        assertEquals("view:needs-seeding tag:hd", s.describe());
+        assertEquals("view:needs-seeding", s.format().get(Axis.VIEW));
+        assertEquals(s, SidebarSelection.parse("all", "all", "tag:hd", "all", "view:needs-seeding"));
+        assertEquals(
+                SidebarFilter.ALL,
+                SidebarSelection.parse(null, null, null, null, "tag:hd").view(),
+                "a remembered view that is not one is nothing");
+        assertTrue(s.has(seeding));
+        assertEquals(SidebarFilter.ALL, SidebarFilter.parse("view:"), "a view with no slug is no view");
+    }
 }
