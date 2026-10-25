@@ -428,7 +428,7 @@ public final class MainWindow {
         // What arrived before an engine was up, once one is; after engineReady on the FX thread.
         session.setInputHandler(text -> Platform.runLater(() -> addInput(text)));
         this.rss = session.rss();
-        this.webApi = new WebApiService(new SessionBackend(session, settings), System::currentTimeMillis);
+        this.webApi = new WebApiService(new SessionBackend(session, settings, labels), System::currentTimeMillis);
         stage.setTitle(AppInfo.NAME);
         // Before anything else touches the stage: initStyle throws once a stage has been shown, and
         // the setting is read here, once, which is why it applies on restart.

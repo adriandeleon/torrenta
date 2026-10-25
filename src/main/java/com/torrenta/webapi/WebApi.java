@@ -6,13 +6,18 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.LongSupplier;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
+import com.torrenta.engine.Category;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
+import com.torrenta.engine.Torrent;
+import com.torrenta.engine.TorrentDetail;
+import com.torrenta.engine.TorrentLimits;
 import com.torrenta.http.Cookies;
 import com.torrenta.http.Request;
 import com.torrenta.http.Response;
@@ -46,7 +51,50 @@ public final class WebApi {
 
         /** Where a torrent added without a save path goes. */
         Path defaultSavePath();
+
+        /** The torrents now, the last poll's; empty while no engine is up. */
+        List<Torrent> torrents();
+
+        /** One torrent's detail; empty when it is gone or no engine is up. */
+        Optional<TorrentDetail> detail(String id);
+
+        /** The torrent as a magnet link; empty when the engine cannot say. */
+        String magnet(String id);
+
+        /** Its own rate caps; {@link TorrentLimits#NONE} when it is gone. */
+        TorrentLimits limits(String id);
+
+        /** The share limit set on this torrent alone, if one is. */
+        Optional<ShareLimit> ownShare(String id);
+
+        /** The share limit in force for it: its own, else the global one. */
+        ShareLimit share(Torrent t);
+
+        /** When it last moved a byte either way, epoch seconds; its completion or addition before that. */
+        long lastActivity(Torrent t);
+
+        List<Category> categories();
+
+        List<String> tags();
+
+        /** {@code transfer/info}'s facts. */
+        Transfer transfer();
     }
+
+    /**
+     * The session's traffic as {@code transfer/info} writes it: rates and limits in bytes per
+     * second (0 for no limit), this session's totals in bytes, and qBittorrent's word for the
+     * connection ({@code connected}, {@code firewalled}, {@code disconnected}).
+     */
+    public record Transfer(
+            long downloadRate,
+            long uploadRate,
+            long downloadedSession,
+            long uploadedSession,
+            long downloadLimit,
+            long uploadLimit,
+            long dhtNodes,
+            String connection) {}
 
     /** qBittorrent's own version, the one the *arr apps check against; 5.0 is the level spoken. */
     public static final String VERSION = "v5.0.0";
@@ -94,6 +142,13 @@ public final class WebApi {
                 router,
                 "app/preferences",
                 r -> Response.json(preferences(backend.engineSettings(), backend.defaultSavePath())));
+        Reads reads = new Reads(backend, clock);
+        read(router, "torrents/info", reads::info);
+        read(router, "torrents/properties", reads::properties);
+        read(router, "torrents/files", reads::files);
+        read(router, "torrents/categories", reads::categories);
+        read(router, "torrents/tags", reads::tags);
+        read(router, "transfer/info", reads::transfer);
         return router;
     }
 

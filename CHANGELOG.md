@@ -14,9 +14,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   `Host` header checked against DNS rebinding and a browser's `Origin` against the server itself;
   the session cookie `HttpOnly` and `SameSite=Strict`; HTTPS from a PKCS#12 file, and a warning for
   an address other machines reach over plain HTTP. A port in use is said, with a free one offered.
-  This first part answers sign-in and the `app/*` endpoints (version, preferences, the default save
-  path); the torrents come next. Headless runs it too, and `--set-remote-password` sets the
-  password without a window.
+  It answers sign-in, the `app/*` endpoints (version, preferences, the default save path) and
+  the reading ones: `torrents/info` with qBittorrent's states, filters, sort and paging, a torrent's
+  `properties` and `files`, the categories, the tags and `transfer/info`. A torrent is listed by its
+  v1 hash where it has one (what Sonarr and Radarr look it up by) and `content_path` is the file or
+  the root folder they import from. Adding and acting come next. Headless runs it too, and
+  `--set-remote-password` sets the password without a window.
 
 - **Torrenta without a window.** `torrenta --headless`, or the `torrenta-nox` launcher beside the
   app's own, runs everything the window does but the window: torrents, watch folders, RSS rules,

@@ -59,7 +59,8 @@ final class Headless {
         session.setEngineFactory(profile -> Startup.createEngine(profile, settings, configDir));
         session.setInputHandler(text -> Thread.ofVirtual().name("headless-add").start(() -> add(session, text, out)));
         // Remote access, as Settings → Remote access left it: a server is where the *arr apps live.
-        WebApiService webApi = new WebApiService(new SessionBackend(session, settings), System::currentTimeMillis);
+        WebApiService webApi =
+                new WebApiService(new SessionBackend(session, settings, labels), System::currentTimeMillis);
         Runtime.getRuntime()
                 .addShutdownHook(new Thread(
                         () -> {
