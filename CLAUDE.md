@@ -118,8 +118,18 @@ RSS service with its rules, and the IP filter (`session.IpFilterController`, the
 first) and the watch folders; `stop()` ends the poll and the watching; `close()` the feeds too. An
 add without a dialog is still the window's to screen (`Host.add`, its `screenedAdd`), and an RSS
 rule's request is the window's to build (`Host.ruleRequest`, `RuleAdd` with the Add dialog's
-defaults); both move with the add pipeline, which headless needs. Still the window's: the engine's
-start and switch, the add pipeline, automation, statistics, the inputs.
+defaults); both move with the add pipeline, which headless needs. The third step moved the
+engine's life: `Session.startEngine(profile)` builds it through the `EngineFactory` (App's
+`createEngine`), tells the host `engineCreated` (to listen from its first event) and starts it on
+an `engine-start` thread, then `start`s it and says `engineReady`, or `engineFailed`;
+`switchTo(profile)` stops the poll and the watcher, stops the old engine on a virtual thread and
+starts the next; `stopEngine()` is the quit. A generation counter stops an engine that finishes
+starting after a newer start was asked for (a switch while it was still connecting), and its
+failure says nothing; the window had that race too. The session polls from the moment an engine
+is up and the window takes it in `engineReady` on the FX thread a moment later, so
+`MainWindow.polled` draws only polls of `this.engine`, and `screenedAdd` asks the engine for its
+capabilities rather than the window's copy, which a watch folder's add can precede. Still the
+window's: the add pipeline, automation, statistics, the inputs.
 
 ## Releasing
 
@@ -544,10 +554,12 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   `@AfterAll`; it is `@EnabledIf` the daemon and `transmission-create` are on the PATH.
 - **Profiles are machine-local secrets.** `profiles.json` is written owner-only where POSIX modes
   exist, `EngineProfile.toString()` never prints the password, `engine.*` is in `SyncKeys`'s local
-  prefixes. `App.createEngine` is the one place an engine is built; `MainWindow.switchProfile` stops
-  the poll, the watcher and the old engine (on a worker), empties the list and runs `startEngine`,
-  which ends in `engineReady` again; `engineUp` stays counted down, so a rule's add during the gap
-  sees `engine == null` and fails plainly.
+  prefixes. `App.createEngine` is the one place an engine is built (the session's `EngineFactory`);
+  `MainWindow.switchProfile` empties the list and asks `Session.switchTo`, which stops the poll, the
+  watcher and the old engine (on a worker) and starts the next, ending in `engineReady` again; the
+  session's `engineUp` stays counted down, so a rule's add during the gap sees no engine and fails
+  plainly. The capture action `switch-profile:<id>` switches; a remote profile at an address
+  nothing listens on fails at once with Retry.
 - **"Open" means a peer from outside reached the port, and nothing less.** `engine.Connectivity`
   is kept on the alert thread from `listen_succeeded`/`listen_failed` (TCP only), `portmap`/
   `portmap_error` (either transport mapping is enough), `incoming_connection` (an address on this

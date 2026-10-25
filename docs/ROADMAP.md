@@ -480,9 +480,9 @@ so the order is extract, then serve.
    as `UiStringSweepTest` fails on a literal. Order: poll and share limits; watch folders, RSS and
    the IP filter; `switchProfile`. The first step is in: the poll, the share limits and the speed
    refresh, with `SessionTest`'s JavaFX guard. So is the second: the watch folders, the RSS service
-   and its rules, the IP filter. The add pipeline (`screenedAdd` and the content check's pending
-   magnets, with the Add dialog's defaults out of `AddDialog`) follows `switchProfile`, before
-   headless needs it.
+   and its rules, the IP filter. And the third: the engine's start, switch and stop. The add
+   pipeline (`screenedAdd` and the content check's pending magnets, with the Add dialog's defaults
+   out of `AddDialog`) is next, before headless needs it.
 2. **Headless mode**: `torrenta --headless` runs `Session` without the toolkit; inputs are added
    without a dialog (`add.unsafeContent` applies), events go to stdout and the session log,
    SIGTERM goes through `stop()` and its resume-data wait. A `torrenta-nox` launcher in the same

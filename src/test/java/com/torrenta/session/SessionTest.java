@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
@@ -14,6 +15,7 @@ import java.util.stream.Stream;
 
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
+import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.store.Settings;
@@ -146,8 +148,125 @@ class SessionTest {
         assertEquals(null, session.watcher(), "and not after");
     }
 
+    private static final EngineProfile OTHER =
+            new EngineProfile("nas", "NAS", EngineProfile.Kind.REMOTE, "http://nas:9091/transmission/rpc", "", "");
+
+    /**
+     * The session builds the profile's engine, tells the owner before starting it (to listen from
+     * its first event), starts it off the caller's thread and polls it; a switch stops the poll and
+     * the old engine and polls the new one; quitting stops the engine in use.
+     */
+    @Test
+    void theSessionStartsSwitchesAndStopsTheEngine(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        AtomicInteger localStops = new AtomicInteger();
+        AtomicInteger otherStops = new AtomicInteger();
+        Engine local = engine(List::of, id -> {}, () -> {}, localStops);
+        Engine other = engine(List::of, id -> {}, () -> {}, otherStops);
+        session.setEngineFactory(profile -> profile.isLocal() ? local : other);
+        List<Engine> polled = new CopyOnWriteArrayList<>();
+        session.addListener(p -> polled.add(p.engine()));
+
+        session.startEngine(EngineProfile.LOCAL);
+        await(() -> host.ready.contains(local) && polled.contains(local));
+        assertEquals(List.of(local), host.created, "heard of before it started");
+        assertEquals(local, session.engine());
+
+        session.switchTo(OTHER);
+        await(() -> host.ready.contains(other) && polled.contains(other) && localStops.get() == 1);
+        assertEquals(OTHER, session.profile());
+        int beforeQuit = polled.size();
+        session.stopEngine();
+        assertEquals(1, otherStops.get(), "stopped at quit, on the caller's thread");
+        Thread.sleep(Session.POLL_MS * 2);
+        assertEquals(beforeQuit, polled.size(), "and no longer polled");
+        assertTrue(host.failed.isEmpty(), host.failed.toString());
+    }
+
+    /** An engine that cannot be built, or cannot start, is the owner's to hear of; nothing is polled. */
+    @Test
+    void anEngineThatCannotStartIsSaidAndNotPolled(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        session.setEngineFactory(profile -> engine(
+                List::of,
+                id -> {},
+                () -> {
+                    throw new IllegalStateException("no native library");
+                },
+                new AtomicInteger()));
+        session.startEngine(EngineProfile.LOCAL);
+        await(() -> !host.failed.isEmpty());
+        assertEquals("no native library", host.failed.get(0).getMessage());
+        assertEquals(null, session.engine());
+
+        session.setEngineFactory(profile -> {
+            throw new IllegalArgumentException("bad profile");
+        });
+        session.startEngine(OTHER);
+        assertEquals("bad profile", host.failed.get(1).getMessage(), "said at once, on the caller's thread");
+    }
+
+    /**
+     * A switch while the first engine is still connecting: that one, once up, is stopped rather
+     * than polled beside the next, and says nothing.
+     */
+    @Test
+    void anEngineOvertakenByASwitchIsStoppedNeverPolled(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        CountDownLatch slow = new CountDownLatch(1);
+        AtomicInteger slowStops = new AtomicInteger();
+        Engine connecting = engine(
+                List::of,
+                id -> {},
+                () -> {
+                    try {
+                        slow.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                },
+                slowStops);
+        Engine next = engine(List::of, id -> {}, () -> {}, new AtomicInteger());
+        session.setEngineFactory(profile -> profile.isLocal() ? connecting : next);
+        List<Engine> polled = new CopyOnWriteArrayList<>();
+        session.addListener(p -> polled.add(p.engine()));
+        session.startEngine(EngineProfile.LOCAL);
+        session.switchTo(OTHER);
+        await(() -> polled.contains(next));
+        slow.countDown();
+        await(() -> slowStops.get() == 1);
+        Thread.sleep(Session.POLL_MS * 2);
+        assertFalse(polled.contains(connecting), "never polled");
+        assertEquals(List.of(next), host.ready, "only the newer one is said to be ready");
+        session.stopEngine();
+    }
+
     private static final class RecordingHost implements Session.Host {
         final AtomicInteger watchStatus = new AtomicInteger();
+        final List<Engine> created = new CopyOnWriteArrayList<>();
+        final List<Engine> ready = new CopyOnWriteArrayList<>();
+        final List<com.torrenta.engine.EngineException> failed = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void engineCreated(Engine engine) {
+            created.add(engine);
+        }
+
+        @Override
+        public void engineReady(Engine engine) {
+            ready.add(engine);
+        }
+
+        @Override
+        public void engineFailed(com.torrenta.engine.EngineException failure) {
+            failed.add(failure);
+        }
 
         @Override
         public void watchStatusChanged() {
@@ -179,6 +298,15 @@ class SessionTest {
 
     /** The few calls a session makes, answered; anything else is a test that needs more. */
     private static Engine engine(java.util.function.Supplier<List<Torrent>> torrents, Pauser pauser) {
+        return engine(torrents, pauser, () -> {}, new AtomicInteger());
+    }
+
+    /** {@code starting} runs inside {@code start()} (a wait, or a throw); {@code stops} counts {@code stop()}. */
+    private static Engine engine(
+            java.util.function.Supplier<List<Torrent>> torrents,
+            Pauser pauser,
+            Runnable starting,
+            AtomicInteger stops) {
         return (Engine) Proxy.newProxyInstance(
                 Engine.class.getClassLoader(),
                 new Class<?>[] {Engine.class},
@@ -193,6 +321,14 @@ class SessionTest {
                     }
                     case "pause" -> {
                         pauser.pause((String) args[0]);
+                        yield null;
+                    }
+                    case "start" -> {
+                        starting.run();
+                        yield null;
+                    }
+                    case "stop" -> {
+                        stops.incrementAndGet();
                         yield null;
                     }
                     case "toString" -> "test engine";

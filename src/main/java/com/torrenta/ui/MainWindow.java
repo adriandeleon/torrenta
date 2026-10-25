@@ -348,7 +348,6 @@ public final class MainWindow {
     /** The profile the engine is built from; the local one until App says otherwise. */
     private EngineProfile profile = EngineProfile.LOCAL;
 
-    private EngineFactory engineFactory;
     private final ProfileStore profiles;
     /** The engine could not start: the empty state says why and offers Retry and another profile. */
     private final javafx.beans.property.BooleanProperty engineDown = new javafx.beans.property.SimpleBooleanProperty();
@@ -1622,7 +1621,10 @@ public final class MainWindow {
         });
     }
 
-    /** FX thread. The engine has started; flush what was queued and begin polling. */
+    /**
+     * FX thread. The engine has started and the session polls it; the window takes it from here,
+     * and draws its polls from now ({@link #polled} ignores any before).
+     */
     public void engineReady(Engine engine) {
         this.engine = engine;
         this.engineDescription = engine.description();
@@ -1634,9 +1636,6 @@ public final class MainWindow {
         List<String> queued = List.copyOf(pendingInputs);
         pendingInputs.clear();
         queued.forEach(this::addInput);
-
-        // The poll, the IP filter (from disk first, so no peer slips in) and the watch folders.
-        session.start(engine);
         maybeCheckForUpdates();
     }
 
@@ -1690,6 +1689,21 @@ public final class MainWindow {
         @Override
         public void problem(EngineEvent event) {
             Platform.runLater(() -> setStatus(event.message(), event.level()));
+        }
+
+        @Override
+        public void engineCreated(Engine engine) {
+            listenTo(engine);
+        }
+
+        @Override
+        public void engineReady(Engine engine) {
+            Platform.runLater(() -> MainWindow.this.engineReady(engine));
+        }
+
+        @Override
+        public void engineFailed(EngineException failure) {
+            Platform.runLater(() -> MainWindow.this.engineFailed(failure));
         }
 
         @Override
@@ -1955,13 +1969,9 @@ public final class MainWindow {
 
     // ---- the engine's life ----------------------------------------------------------------------
 
-    /** Builds the engine for a profile; App's, since the stores and the settings are its to hand over. */
-    public interface EngineFactory {
-        Engine create(EngineProfile profile);
-    }
-
-    public void setEngineFactory(EngineFactory factory) {
-        this.engineFactory = factory;
+    /** How the session builds an engine for a profile; App's, since the stores and the settings are its. */
+    public void setEngineFactory(Session.EngineFactory factory) {
+        session.setEngineFactory(factory);
     }
 
     /** The profile in use; the local engine's until {@link #startEngine} says otherwise. */
@@ -1970,55 +1980,35 @@ public final class MainWindow {
     }
 
     /**
-     * FX thread. Builds the engine for {@code next} and starts it on a worker (loading a native
-     * library or reaching a daemon takes longer than a frame should wait); the status bar says so
-     * meanwhile and the title names a remote profile. {@link #engineReady} or {@link #engineFailed}
-     * follows on the FX thread.
+     * FX thread. The session builds the engine for {@code next} and starts it on a thread of its
+     * own (loading a native library or reaching a daemon takes longer than a frame should wait);
+     * the status bar says so meanwhile and the title names a remote profile. {@link #engineReady}
+     * or {@link #engineFailed} follows on the FX thread.
      */
     public void startEngine(EngineProfile next) {
-        if (engineFactory == null) throw new IllegalStateException("no engine factory");
+        engineStarting(next);
+        session.startEngine(next);
+    }
+
+    /** FX thread: what the window says while an engine for {@code next} comes up. */
+    private void engineStarting(EngineProfile next) {
         profile = next;
         applyTitle();
         showEngineProblem(null);
         setStatus(
                 next.isLocal() ? tr("status.starting") : tr("status.connecting", next.displayName(), next.hostLine()));
-        Engine fresh;
-        try {
-            fresh = engineFactory.create(next);
-        } catch (RuntimeException e) {
-            engineFailed(new EngineException(e.getMessage() == null ? e.toString() : e.getMessage(), e));
-            return;
-        }
-        listenTo(fresh);
-        Thread starter = new Thread(
-                () -> {
-                    try {
-                        fresh.start();
-                        Platform.runLater(() -> engineReady(fresh));
-                    } catch (EngineException e) {
-                        Platform.runLater(() -> engineFailed(e));
-                    } catch (RuntimeException e) {
-                        LOG.log(java.util.logging.Level.WARNING, "The engine failed to start", e);
-                        Platform.runLater(() -> engineFailed(
-                                new EngineException(e.getMessage() == null ? e.toString() : e.getMessage(), e)));
-                    }
-                },
-                "engine-start");
-        starter.setDaemon(true);
-        starter.start();
     }
 
     /** Any thread, from App.stop after the poll: stops the engine in use, if one came up. */
     public void stopEngine() {
-        Engine e = engine;
         engine = null;
-        if (e != null) e.stop();
+        session.stopEngine();
     }
 
     /**
      * FX thread. Another profile was chosen: remembered for the next start, and the engine is
      * replaced in place when it is not the one running. The list empties while the new one comes
-     * up; the poll, the watcher and the old engine stop first, on their own threads.
+     * up; the session stops the poll, the watcher and the old engine first, on their own threads.
      */
     private void switchProfile(EngineProfile next) {
         settings.setEngineProfile(next.id());
@@ -2028,18 +2018,16 @@ public final class MainWindow {
             setStatus(tr("status.profileInUse", next.displayName()));
             return;
         }
-        Engine old = engine;
         engine = null;
         engineDescription = "";
-        stopPolling();
         fetchWatch = null;
         long now = System.currentTimeMillis() / 1000;
         rows.apply(List.of(), now);
         refreshSidebar(List.of());
         detail.clear();
         showRates(Engine.Rates.ZERO, 0);
-        if (old != null) Thread.ofVirtual().name("engine-stop").start(old::stop);
-        startEngine(next);
+        engineStarting(next);
+        session.switchTo(next);
     }
 
     /** FX thread. A list of the profiles to pick from; the choice switches at once. */
@@ -2248,7 +2236,7 @@ public final class MainWindow {
         // engine cannot stop on metadata (a daemon); then it is checked while it runs.
         boolean stop = mode != UnsafeContent.ADD
                 && request.stopCondition() == AddRequest.StopCondition.NONE
-                && capabilities.has(Engine.Capability.STOP_CONDITION);
+                && e.capabilities().has(Engine.Capability.STOP_CONDITION);
         Torrent added = e.add(stop ? request.withStopCondition(AddRequest.StopCondition.METADATA_RECEIVED) : request);
         if (before.contains(added.id())) return added;
         String mark = new UnsafeContent.Pending(mode, stop && !request.startPaused()).format();
@@ -2749,6 +2737,8 @@ public final class MainWindow {
     /** Poll thread: one poll of the session's, drawn into the window and whatever it watches. */
     private void polled(Session.Poll poll) {
         Engine engine = poll.engine();
+        // The session polls from the moment the engine is up; the window draws from engineReady.
+        if (engine != this.engine) return;
         List<Torrent> snapshot = poll.torrents();
         Engine.Rates current = poll.rates();
         long nowSeconds = poll.nowSeconds();

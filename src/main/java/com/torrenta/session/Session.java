@@ -22,6 +22,7 @@ import com.torrenta.engine.Category;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
+import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
@@ -45,19 +46,36 @@ import static com.torrenta.i18n.Messages.tr;
  * SessionTest} fails on any of it), so every callback runs on a thread of the session's or the
  * caller's, and an owner that draws hops to its own toolkit thread.
  *
- * <p>The lifecycle: {@link #open} starts what needs no engine (the feeds); {@link #start} takes an
- * engine and starts the poll, the IP filter and the watch folders; {@link #stop} gives the engine
- * back; {@link #close} ends the feeds too. The engine itself is still started and switched by the
- * owner, and an add without a dialog is still screened by it ({@link Host#add}); both move here
- * later.
+ * <p>The lifecycle: {@link #open} starts what needs no engine (the feeds); {@link #startEngine}
+ * builds the profile's engine ({@link EngineFactory}), starts it on a thread of its own, and then
+ * the poll, the IP filter and the watch folders ({@link #start}); {@link #switchTo} replaces it
+ * with another profile's; {@link #stopEngine} ends it, and {@link #close} the feeds too. An add
+ * without a dialog is still screened by the owner ({@link Host#add}); that moves here later.
  */
 public final class Session {
 
     /** How often the engine is polled. */
     public static final long POLL_MS = 1000;
 
+    /** Builds the engine for a profile: the application's, since the stores and settings are its to hand over. */
+    public interface EngineFactory {
+        Engine create(EngineProfile profile);
+    }
+
     /** What the session tells its owner; any thread, so an owner that draws must hop. */
     public interface Host {
+
+        /** An engine was built and is about to start: the moment to listen to its events, from the first. */
+        default void engineCreated(Engine engine) {}
+
+        /**
+         * The engine started, and the session polls it, applies the IP filter and watches the
+         * folders. The engine-start thread; a poll may be heard before this is.
+         */
+        default void engineReady(Engine engine) {}
+
+        /** The engine could not be built or started; the session has none. The engine-start thread. */
+        default void engineFailed(EngineException failure) {}
 
         /**
          * A finished torrent reached its share limit and was paused, removed or super seeded (or the
@@ -110,6 +128,15 @@ public final class Session {
     private final Host host;
     private final IpFilterController ipFilter;
     private final RssService rss;
+    private volatile EngineFactory engineFactory;
+    private volatile EngineProfile profile = EngineProfile.LOCAL;
+    /** The engine started last and not yet stopped: what {@link #stopEngine} and {@link #switchTo} end. */
+    private volatile Engine running;
+    /**
+     * Counts {@link #startEngine} calls: an engine that finishes starting after a newer start was
+     * asked for (a switch while it was still connecting) is stopped, never polled beside the next.
+     */
+    private final java.util.concurrent.atomic.AtomicLong generation = new java.util.concurrent.atomic.AtomicLong();
     /** Counted down at the first {@link #start}, and never again: a rule's add waits on it. */
     private final CountDownLatch engineUp = new CountDownLatch(1);
 
@@ -171,6 +198,86 @@ public final class Session {
     /** The watch folders while an engine is up; null otherwise. */
     public WatchFolders watcher() {
         return watcher;
+    }
+
+    public void setEngineFactory(EngineFactory factory) {
+        this.engineFactory = factory;
+    }
+
+    /** The profile the engine is, or is being, started from; the local engine's at first. */
+    public EngineProfile profile() {
+        return profile;
+    }
+
+    /**
+     * Any thread. Builds the engine for {@code next} and starts it on an {@code engine-start}
+     * thread (loading a native library or reaching a daemon takes longer than a caller should
+     * wait), then polls it ({@link #start}); the host hears {@link Host#engineReady} or {@link
+     * Host#engineFailed}. The host hears {@link Host#engineCreated} first, on this thread.
+     */
+    public void startEngine(EngineProfile next) {
+        EngineFactory factory = engineFactory;
+        if (factory == null) throw new IllegalStateException("no engine factory");
+        profile = next;
+        long mine = generation.incrementAndGet();
+        Engine fresh;
+        try {
+            fresh = factory.create(next);
+        } catch (RuntimeException e) {
+            host.engineFailed(new EngineException(e.getMessage() == null ? e.toString() : e.getMessage(), e));
+            return;
+        }
+        host.engineCreated(fresh);
+        Thread starter = new Thread(
+                () -> {
+                    try {
+                        fresh.start();
+                    } catch (EngineException e) {
+                        // A start overtaken by a newer one says nothing: the newer one will.
+                        if (generation.get() == mine) host.engineFailed(e);
+                        return;
+                    } catch (RuntimeException e) {
+                        LOG.log(Level.WARNING, "The engine failed to start", e);
+                        if (generation.get() == mine)
+                            host.engineFailed(
+                                    new EngineException(e.getMessage() == null ? e.toString() : e.getMessage(), e));
+                        return;
+                    }
+                    synchronized (this) {
+                        if (generation.get() != mine) {
+                            fresh.stop();
+                            return;
+                        }
+                        running = fresh;
+                        start(fresh);
+                    }
+                    host.engineReady(fresh);
+                },
+                "engine-start");
+        starter.setDaemon(true);
+        starter.start();
+    }
+
+    /**
+     * Any thread. Another profile's engine in place of the one running: the poll and the watch
+     * folders stop first, the old engine stops on a thread of its own, the next one starts as
+     * {@link #startEngine} starts it.
+     */
+    public void switchTo(EngineProfile next) {
+        Engine old = running;
+        running = null;
+        stop();
+        if (old != null) Thread.ofVirtual().name("engine-stop").start(old::stop);
+        startEngine(next);
+    }
+
+    /** Any thread, at quit: the poll and the watch folders, then the engine itself, on this thread. */
+    public void stopEngine() {
+        generation.incrementAndGet();
+        Engine e = running;
+        running = null;
+        stop();
+        if (e != null) e.stop();
     }
 
     /** Starts what needs no engine: the feeds, which fetch on their schedule from now. */
