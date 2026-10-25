@@ -478,7 +478,8 @@ so the order is extract, then serve.
    rules, the IP filter, automation, statistics, the instance hand-off and the input queue out of
    `MainWindow`, which then listens and calls. A test fails on any JavaFX import under `session`,
    as `UiStringSweepTest` fails on a literal. Order: poll and share limits; watch folders, RSS and
-   the IP filter; `switchProfile`.
+   the IP filter; `switchProfile`. The first step is in: the poll, the share limits and the speed
+   refresh, with `SessionTest`'s JavaFX guard.
 2. **Headless mode**: `torrenta --headless` runs `Session` without the toolkit; inputs are added
    without a dialog (`add.unsafeContent` applies), events go to stdout and the session log,
    SIGTERM goes through `stop()` and its resume-data wait. A `torrenta-nox` launcher in the same
