@@ -1,4 +1,4 @@
-package com.torrenta.ui;
+package com.torrenta.session;
 
 import java.nio.file.Path;
 import java.util.List;
@@ -27,7 +27,7 @@ class RuleAddTest {
         Path incomplete = Path.of("incomplete").toAbsolutePath();
         Path tv = Path.of("tv").toAbsolutePath();
         Path own = Path.of("own").toAbsolutePath();
-        AddDialog.Defaults defaults = new AddDialog.Defaults(downloads, true, true, true, incomplete, true, false);
+        AddDefaults defaults = new AddDefaults(downloads, true, true, true, incomplete, true, false);
 
         AddRequest plain = RuleAdd.request(rule(Rule.AddPaused.DEFAULT, "", ""), MAGNET, defaults, Optional.empty());
         assertEquals(downloads, plain.savePath());
@@ -50,7 +50,7 @@ class RuleAddTest {
         assertTrue(own1.startPaused());
         assertEquals(incomplete, own1.storage().incompletePath());
 
-        AddDialog.Defaults direct = new AddDialog.Defaults(downloads, false, false, false, incomplete, false, false);
+        AddDefaults direct = new AddDefaults(downloads, false, false, false, incomplete, false, false);
         AddRequest d = RuleAdd.request(rule(Rule.AddPaused.DEFAULT, "", ""), MAGNET, direct, Optional.empty());
         assertFalse(d.startPaused());
         assertNull(d.storage().incompletePath());

@@ -3,6 +3,7 @@ package com.torrenta.ui;
 import java.util.List;
 
 import com.torrenta.engine.Torrent;
+import com.torrenta.session.SpeedHistory;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;

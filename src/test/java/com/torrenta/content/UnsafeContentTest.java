@@ -1,4 +1,4 @@
-package com.torrenta.ui;
+package com.torrenta.content;
 
 import java.nio.file.Path;
 import java.util.List;

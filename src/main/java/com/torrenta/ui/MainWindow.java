@@ -1,7 +1,6 @@
 package com.torrenta.ui;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -66,7 +65,7 @@ import javafx.stage.StageStyle;
 
 import com.torrenta.AppInfo;
 import com.torrenta.automation.Automation;
-import com.torrenta.automation.Notifiers;
+import com.torrenta.content.UnsafeContent;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
 import com.torrenta.engine.Connectivity;
@@ -97,14 +96,16 @@ import com.torrenta.rss.Article;
 import com.torrenta.rss.Feed;
 import com.torrenta.rss.RssService;
 import com.torrenta.rss.RssStore;
-import com.torrenta.rss.Rule;
 import com.torrenta.search.DeclarativeProvider;
 import com.torrenta.search.SearchProvider;
 import com.torrenta.search.SearchResult;
 import com.torrenta.search.TorznabEndpoint;
 import com.torrenta.search.TorznabProvider;
+import com.torrenta.session.AddDefaults;
 import com.torrenta.session.IpFilterController;
+import com.torrenta.session.RuleAdd;
 import com.torrenta.session.Session;
+import com.torrenta.session.SpeedHistory;
 import com.torrenta.store.DefinitionStore;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.ProfileStore;
@@ -203,19 +204,8 @@ public final class MainWindow {
     private final StatisticsWindow statsWindow;
     /** Whether the poll should read the engine's counters: only while the Statistics window shows. */
     private volatile boolean statsWanted;
-    /** The session rates, one sample per poll, for the Statistics window's graph. */
-    private final SpeedHistory sessionHistory = new SpeedHistory();
     /** The window's bounds when last neither maximised nor minimised; what is saved. */
     private WindowGeometry.Bounds normalBounds;
-    /**
-     * The last {@link SpeedHistory#RECENT_SECONDS} of every torrent's rates, by id: a few KiB each,
-     * so the Speed tab is not empty the first time a torrent is chosen. Gone with the torrent.
-     */
-    private final java.util.concurrent.ConcurrentMap<String, SpeedHistory> recentHistories =
-            new java.util.concurrent.ConcurrentHashMap<>();
-    /** The rates of every torrent that has been selected, by id, for the Speed tab; gone with the torrent. */
-    private final java.util.concurrent.ConcurrentMap<String, SpeedHistory> torrentHistories =
-            new java.util.concurrent.ConcurrentHashMap<>();
     /** What the status bar has said; the popup over it shows the history. */
     private final MessageLog messages = new MessageLog();
 
@@ -265,9 +255,8 @@ public final class MainWindow {
     private final Set<String> reportedDefinitionProblems = new java.util.HashSet<>();
 
     /** Runs the person's commands and shows notifications; made with the engine in {@link #listenTo}. */
-    private volatile Automation automation;
-
     private Sidebar sidebar;
+
     private SidebarSelection sidebarSelection = SidebarSelection.ALL;
     private String lastClipboardOffer = "";
     private final DetailPane detail = new DetailPane();
@@ -354,13 +343,11 @@ public final class MainWindow {
     /** Bumped on the FX thread whenever a "pick files when ready" mark is set or cleared. */
     private final javafx.beans.property.IntegerProperty pickFilesMarks =
             new javafx.beans.property.SimpleIntegerProperty();
-    /** Torrents whose content-check mark is being handled, so a tick does not handle one twice. */
-    private final Set<String> screening = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private VBox engineProblem;
+
     private Label engineProblemText;
     /** What the daemon's own blocklist fetch last said, for the IP filter page of a remote engine. */
-    private final List<String> pendingInputs = new ArrayList<>();
     /** Opened when the engine is up: a rule's add from a feed fetched before then waits on it. */
     private final java.util.concurrent.CountDownLatch engineUp = new java.util.concurrent.CountDownLatch(1);
 
@@ -420,6 +407,8 @@ public final class MainWindow {
         this.session =
                 new Session(settings, configDir, labels, watchStore, rssStore, Platform::runLater, new SessionHost());
         session.addListener(this::polled);
+        // What arrived before an engine was up, once one is; after engineReady on the FX thread.
+        session.setInputHandler(text -> Platform.runLater(() -> addInput(text)));
         this.rss = session.rss();
         stage.setTitle(AppInfo.NAME);
         // Before anything else touches the stage: initStyle throws once a stage has been shown, and
@@ -489,10 +478,7 @@ public final class MainWindow {
                 () -> opener.accept(definitionStore.dir().toUri().toString()));
         settingsWindow.setRss(rss);
         session.open();
-        settingsWindow.setOnTestNotification(() -> {
-            Automation a = automation;
-            if (a != null) a.testNotification();
-        });
+        settingsWindow.setOnTestNotification(session::testNotification);
         sync = new SettingsSync(settings, labels, searchStore, definitionStore, configDir, new SyncHost());
         settingsWindow.setSync(sync);
         sync.addListener(() -> {
@@ -1604,23 +1590,6 @@ public final class MainWindow {
     }
 
     /**
-     * Any thread, before {@code engine.start()}: the start itself raises events (engine started,
-     * listening on a port) that a listener attached afterwards would never hear. Events arrive on
-     * the engine's alert thread; the log and the status bar are FX-owned, hence the hop.
-     */
-    public void listenTo(Engine engine) {
-        automation = new Automation(engine, settings::automation, Notifiers.forPlatform(), this::reportFromWorker);
-        engine.addListener(event -> {
-            // The automation decides on the alert thread and does its work on threads of its own.
-            automation.handle(event);
-            Platform.runLater(() -> {
-                log.add(event);
-                setStatus(event.message(), event.level());
-            });
-        });
-    }
-
-    /**
      * Any thread: an event from a worker of the window's own (the automation) into the log. A
      * command's output lines go to the log only; the status bar keeps the line that says it ran.
      */
@@ -1643,9 +1612,6 @@ public final class MainWindow {
         applyTitle();
         engineUp.countDown();
         setStatus(engineDescription);
-        List<String> queued = List.copyOf(pendingInputs);
-        pendingInputs.clear();
-        queued.forEach(this::addInput);
         maybeCheckForUpdates();
     }
 
@@ -1676,9 +1642,6 @@ public final class MainWindow {
     private final class SessionHost implements Session.Host {
         @Override
         public void seedingDone(EngineEvent event, Torrent torrent, boolean removed) {
-            // The snapshot goes along: a removed torrent cannot be looked up for the placeholders.
-            Automation a = automation;
-            if (a != null) a.handle(event, torrent);
             Platform.runLater(() -> {
                 log.add(event);
                 setStatus(event.message());
@@ -1702,8 +1665,11 @@ public final class MainWindow {
         }
 
         @Override
-        public void engineCreated(Engine engine) {
-            listenTo(engine);
+        public void event(EngineEvent event) {
+            Platform.runLater(() -> {
+                log.add(event);
+                setStatus(event.message(), event.level());
+            });
         }
 
         @Override
@@ -1714,16 +1680,6 @@ public final class MainWindow {
         @Override
         public void engineFailed(EngineException failure) {
             Platform.runLater(() -> MainWindow.this.engineFailed(failure));
-        }
-
-        @Override
-        public Torrent add(Engine engine, AddRequest request) throws EngineException {
-            return screenedAdd(engine, request);
-        }
-
-        @Override
-        public AddRequest ruleRequest(Rule rule, Article article) throws IOException {
-            return MainWindow.this.ruleRequest(rule, article);
         }
 
         @Override
@@ -2104,26 +2060,20 @@ public final class MainWindow {
      * machine's when the files are not here (a daemon's download folder is a path on its machine).
      * Any thread.
      */
-    private AddDialog.Defaults addDefaults() {
-        AddDialog.Defaults d = AddDialog.Defaults.from(settings);
-        Engine e = engine;
-        if (e != null && capabilities.lacks(Engine.Capability.LOCAL_FILES)) {
-            String remote = e.downloadDir();
-            if (!remote.isEmpty()) return d.withSavePath(Path.of(remote));
-        }
-        return d;
+    private AddDefaults addDefaults() {
+        return session.addDefaults();
     }
 
     /** {@code via} is for the dialog's header; null reads it off the input itself. */
     private void addInput(String input, AddDialog.Via via) {
         if (engine == null) {
-            pendingInputs.add(input);
+            session.input(input);
             return;
         }
         String text = input.trim();
         Engine e = engine;
         boolean withoutAsking = settings.addWithoutAsking();
-        AddDialog.Defaults defaults = addDefaults();
+        AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("engine-inspect").start(() -> {
             try {
                 if (Inputs.isDirectLink(text)) {
@@ -2145,17 +2095,7 @@ public final class MainWindow {
                             case FILE -> AddDialog.Via.FILE;
                             case URL -> AddDialog.Via.URL;
                         };
-                AddRequest.Source source =
-                        switch (kind) {
-                            case MAGNET -> new AddRequest.Magnet(text);
-                            case FILE -> {
-                                Path file = Path.of(text);
-                                if (!Files.isRegularFile(file))
-                                    throw new EngineException(tr("status.noSuchFile", text));
-                                yield new AddRequest.TorrentFile(Files.readAllBytes(file), text);
-                            }
-                            case URL -> new AddRequest.TorrentFile(new TorrentFetch().fetch(URI.create(text)), text);
-                        };
+                AddRequest.Source source = session.resolve(text);
                 addSource(e, source, shownVia, withoutAsking, defaults);
             } catch (EngineException | IOException | RuntimeException ex) {
                 String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
@@ -2201,11 +2141,11 @@ public final class MainWindow {
      * handed to the Add dialog on the FX thread.
      */
     private void addSource(
-            Engine e, AddRequest.Source source, AddDialog.Via via, boolean withoutAsking, AddDialog.Defaults defaults)
+            Engine e, AddRequest.Source source, AddDialog.Via via, boolean withoutAsking, AddDefaults defaults)
             throws EngineException {
         if (withoutAsking) {
             try {
-                Torrent added = screenedAdd(e, AddDialog.withoutAsking(source, defaults));
+                Torrent added = session.add(e, defaults.withoutAsking(source));
                 Platform.runLater(() -> setStatus(tr("status.added", added.name())));
             } catch (UnsafeContent.Refused refused) {
                 reportFromWorker(EngineEvent.session(EngineEvent.Level.WARNING, refused.line()));
@@ -2214,117 +2154,6 @@ public final class MainWindow {
         }
         TorrentPreview preview = source instanceof AddRequest.TorrentFile file ? e.inspect(file.bytes()) : null;
         Platform.runLater(() -> openDialog(source, preview, via));
-    }
-
-    /**
-     * Worker. An add without a dialog, through the content check ({@link UnsafeContent},
-     * {@code add.unsafeContent}): a {@code .torrent} is checked before it is added, its flagged
-     * files skipped or the add refused; a magnet has no files yet, so it is added to stop once its
-     * metadata is in and marked for {@link #screenPending}. What was found is logged; a refusal is
-     * thrown, so each path reports it as it reports a failed add. A torrent already in the list
-     * is left as it is: the engine hands it back, and its files are not this add's to change.
-     */
-    private Torrent screenedAdd(Engine e, AddRequest request) throws EngineException {
-        UnsafeContent mode = UnsafeContent.byName(settings.addUnsafeContent());
-        Set<String> before = new java.util.HashSet<>();
-        for (Torrent t : e.torrents()) before.add(t.id());
-        if (request.source() instanceof AddRequest.TorrentFile file) {
-            TorrentPreview preview = e.inspect(file.bytes());
-            if (before.contains(preview.id())) return e.add(request);
-            ContentCheck check = UnsafeContent.check(preview, request);
-            UnsafeContent.Decision decision = UnsafeContent.decide(mode, check, UnsafeContent.wanted(preview, request));
-            if (decision.refused()) throw new UnsafeContent.Refused(preview.name(), decision, check);
-            Torrent added = e.add(
-                    decision == UnsafeContent.Decision.SKIP
-                            ? UnsafeContent.withSkipped(request, check.indices())
-                            : request);
-            String line = UnsafeContent.logLine(decision, added.name(), check, false);
-            if (!line.isEmpty()) reportFromWorker(EngineEvent.warning(added.id(), added.name(), line));
-            return added;
-        }
-        // A magnet: stopped once its files are known, unless a person chose otherwise or the
-        // engine cannot stop on metadata (a daemon); then it is checked while it runs.
-        boolean stop = mode != UnsafeContent.ADD
-                && request.stopCondition() == AddRequest.StopCondition.NONE
-                && e.capabilities().has(Engine.Capability.STOP_CONDITION);
-        Torrent added = e.add(stop ? request.withStopCondition(AddRequest.StopCondition.METADATA_RECEIVED) : request);
-        if (before.contains(added.id())) return added;
-        String mark = new UnsafeContent.Pending(mode, stop && !request.startPaused()).format();
-        Platform.runLater(() -> {
-            settings.setUnsafeContentPending(added.id(), mark);
-            settings.saveQuietly();
-        });
-        return added;
-    }
-
-    /**
-     * Poll thread. A magnet added without a dialog waits, stopped, for its file list; once it has
-     * one, the content check runs under the setting it was added with: started as it is (a
-     * warning when something was found), started without the flagged files, or removed before
-     * anything was downloaded. The mark goes on the FX thread; {@link #screening} keeps the next
-     * tick from handling a torrent twice meanwhile.
-     */
-    private void screenPending(Engine engine, List<Torrent> snapshot) {
-        Map<String, String> pending = settings.unsafeContentPending();
-        if (pending.isEmpty()) return;
-        Map<String, Torrent> byId = new java.util.HashMap<>();
-        for (Torrent t : snapshot) byId.put(t.id(), t);
-        for (Map.Entry<String, String> entry : pending.entrySet()) {
-            String id = entry.getKey();
-            Torrent t = byId.get(id);
-            if (t == null) {
-                // Marked after this tick's snapshot was taken, or removed since: the next tick knows.
-                if (!screening.add(id)) continue;
-                boolean gone;
-                try {
-                    gone = engine.torrents().stream().noneMatch(x -> x.id().equals(id));
-                } catch (RuntimeException ex) {
-                    gone = false;
-                }
-                if (gone) clearPending(id);
-                else screening.remove(id);
-                continue;
-            }
-            if (t.state() == com.torrenta.engine.TorrentState.FETCHING_METADATA || !screening.add(id)) continue;
-            try {
-                List<TorrentDetail.FileStatus> files = engine.detail(id).files();
-                if (files.isEmpty()) {
-                    screening.remove(id);
-                    continue;
-                }
-                UnsafeContent.Pending p = UnsafeContent.Pending.parse(entry.getValue());
-                ContentCheck check = ContentCheck.of(
-                        UnsafeContent.previewOf(t, files),
-                        i -> files.stream()
-                                .anyMatch(f -> f.index() == i && f.priority() != com.torrenta.engine.Priority.IGNORE));
-                int wanted = (int) files.stream()
-                        .filter(f -> f.priority() != com.torrenta.engine.Priority.IGNORE)
-                        .count();
-                UnsafeContent.Decision decision = UnsafeContent.decide(p.mode(), check, wanted);
-                if (decision.refused()) {
-                    engine.remove(id, false);
-                } else {
-                    if (decision == UnsafeContent.Decision.SKIP)
-                        for (int index : check.indices())
-                            engine.setFilePriority(id, index, com.torrenta.engine.Priority.IGNORE);
-                    if (p.resume()) engine.resume(id);
-                }
-                String line = UnsafeContent.logLine(decision, t.name(), check, true);
-                if (!line.isEmpty()) reportFromWorker(EngineEvent.warning(id, t.name(), line));
-            } catch (EngineException ex) {
-                reportFromWorker(EngineEvent.warning(id, t.name(), ex.getMessage()));
-            }
-            clearPending(id);
-        }
-    }
-
-    /** Any thread. A torrent's content-check mark cleared and saved, and the guard let go after. */
-    private void clearPending(String id) {
-        Platform.runLater(() -> {
-            settings.setUnsafeContentPending(id, null);
-            settings.saveQuietly();
-            screening.remove(id);
-        });
     }
 
     /**
@@ -2340,7 +2169,7 @@ public final class MainWindow {
         String fetching = SearchAdd.fetchingText(result);
         if (!fetching.isEmpty()) setStatus(fetching);
         boolean withoutAsking = settings.addWithoutAsking();
-        AddDialog.Defaults defaults = addDefaults();
+        AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("search-add").start(() -> {
             try {
                 AddRequest.Source source = SearchAdd.sourceOf(result, new TorrentFetch()::fetch);
@@ -2366,10 +2195,10 @@ public final class MainWindow {
         String fetching = RssAdd.fetchingText(article);
         if (!fetching.isEmpty()) setStatus(fetching);
         boolean withoutAsking = settings.addWithoutAsking();
-        AddDialog.Defaults defaults = addDefaults();
+        AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("rss-add").start(() -> {
             try {
-                AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
+                AddRequest.Source source = RuleAdd.sourceOf(article, new TorrentFetch()::fetch);
                 if (!fetching.isEmpty())
                     Platform.runLater(() -> setStatus(tr("status.fetched", article.displayTitle())));
                 addSource(e, source, AddDialog.Via.RSS, withoutAsking, defaults);
@@ -2764,21 +2593,8 @@ public final class MainWindow {
                 Platform.runLater(() -> watch.dialog().showSwarm(swarm));
             }
         }
-        sessionHistory.add(nowSeconds, current.download(), current.upload());
-        Set<String> present = new java.util.HashSet<>();
-        for (Torrent t : snapshot) {
-            present.add(t.id());
-            recentHistories
-                    .computeIfAbsent(t.id(), k -> SpeedHistory.recent())
-                    .add(nowSeconds, t.downloadRate(), t.uploadRate());
-            SpeedHistory h = torrentHistories.get(t.id());
-            if (h != null) h.add(nowSeconds, t.downloadRate(), t.uploadRate());
-        }
-        recentHistories.keySet().retainAll(present);
-        torrentHistories.keySet().retainAll(present);
         // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
         com.torrenta.engine.SessionStats stats = statsWanted ? engine.stats() : null;
-        screenPending(engine, snapshot);
         TorrentDetail shown = fetchDetail(engine);
         Connectivity connectivity = engine.connectivity();
         long unproven = portClock.tick(connectivity, NetworkStatus.anyRunning(snapshot), nowSeconds);
@@ -2797,7 +2613,7 @@ public final class MainWindow {
             showNetwork(port, dht, space);
             showLeak(leak, checking);
             applyDetail(shown, nowSeconds);
-            if (stats != null) statsWindow.update(stats, sessionHistory, nowSeconds);
+            if (stats != null) statsWindow.update(stats, session.history(), nowSeconds);
         });
     }
 
@@ -2821,7 +2637,7 @@ public final class MainWindow {
         if (shown != null && shown.general().id().equals(detailId)) {
             TorrentRow row = rows.get(detailId);
             detail.show(shown, row == null ? null : row.torrent(), row == null ? 0 : row.quietSeconds(), nowSeconds);
-            detail.showSpeed(torrentHistories.get(detailId), nowSeconds);
+            detail.showSpeed(session.followed(detailId), nowSeconds);
         } else if (detailId == null) detail.clear();
     }
 
@@ -4612,11 +4428,7 @@ public final class MainWindow {
                     detailId = selected.size() == 1 ? selected.get(0).id() : null;
                     // The Speed tab's full history starts with the first selection, from the short one
                     // every torrent keeps, so the tab has the last two minutes to show at once.
-                    if (detailId != null)
-                        torrentHistories.computeIfAbsent(detailId, k -> {
-                            SpeedHistory recent = recentHistories.get(k);
-                            return recent == null ? new SpeedHistory() : recent.widened();
-                        });
+                    if (detailId != null) session.follow(detailId);
                     if (detailId == null && detailWanted) detail.clear();
                     refreshDetailNow();
                 });
@@ -4769,13 +4581,6 @@ public final class MainWindow {
      * with the rule's save path, category and paused choice and the rest of the defaults; the
      * engine's refusal is the reason thrown.
      */
-    /** The fetch thread: what a rule adds for an article, with the add dialog's defaults. */
-    private AddRequest ruleRequest(Rule rule, Article article) throws IOException {
-        AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
-        Optional<Path> categoryFolder = labels.category(rule.category()).flatMap(Category::path);
-        return RuleAdd.request(rule, source, addDefaults(), categoryFolder);
-    }
-
     /**
      * FX thread. The article's torrent added at once with the defaults, no dialog, and the article
      * marked downloaded: the context menu's Download.
@@ -4788,11 +4593,11 @@ public final class MainWindow {
         }
         String fetching = RssAdd.fetchingText(article);
         if (!fetching.isEmpty()) setStatus(fetching);
-        AddDialog.Defaults defaults = addDefaults();
+        AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("rss-download").start(() -> {
             try {
-                AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
-                Torrent added = screenedAdd(e, AddDialog.withoutAsking(source, defaults));
+                AddRequest.Source source = RuleAdd.sourceOf(article, new TorrentFetch()::fetch);
+                Torrent added = session.add(e, defaults.withoutAsking(source));
                 rss.markDownloaded(article.feedId(), article.identity());
                 Platform.runLater(() -> setStatus(tr("status.added", added.name())));
             } catch (UnsafeContent.Refused refused) {
@@ -5896,7 +5701,7 @@ public final class MainWindow {
     private void showRates(Engine.Rates r, long nowSeconds) {
         downRate.setText(tr("status.rateDown", Bytes.rate(r.download())));
         upRate.setText(tr("status.rateUp", Bytes.rate(r.upload())));
-        List<SpeedHistory.Sample> minute = sessionHistory.samples(60, nowSeconds);
+        List<SpeedHistory.Sample> minute = session.history().samples(60, nowSeconds);
         downSpark.show(minute, 60, nowSeconds);
         upSpark.show(minute, 60, nowSeconds);
     }

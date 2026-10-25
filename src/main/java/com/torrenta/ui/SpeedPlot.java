@@ -2,6 +2,8 @@ package com.torrenta.ui;
 
 import java.util.List;
 
+import com.torrenta.session.SpeedHistory;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**

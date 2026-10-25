@@ -21,6 +21,8 @@ import javafx.scene.paint.Paint;
 import javafx.scene.shape.StrokeLineJoin;
 import javafx.scene.text.Font;
 
+import com.torrenta.session.SpeedHistory;
+
 /**
  * A speed graph: download and upload over the chosen window, drawn on a canvas from a
  * {@link SpeedHistory}, with the window chips above and the rate now and the peak below. The
