@@ -498,6 +498,23 @@ class LibtorrentEngineTest {
         }
     }
 
+    /**
+     * A second fetch of a magnet while its first is still running is refused. No peer can answer
+     * here (an isolated session, a hash nobody has), so the first is still running when asked:
+     * the check cannot race a fetch that finishes in milliseconds, as one from loopback can.
+     */
+    @Test
+    void aSecondFetchOfAMagnetStillBeingFetchedIsRefused(@TempDir Path dir) throws Exception {
+        try (LibtorrentEngine engine = new LibtorrentEngine(
+                () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(freePort()))) {
+            engine.start();
+            com.torrenta.engine.Engine.MetadataFetch fetch = engine.fetchMetadata(MAGNET);
+            assertThrows(EngineException.class, () -> engine.fetchMetadata(MAGNET), "one fetch per magnet");
+            fetch.cancel();
+            assertTrue(engine.torrents().isEmpty());
+        }
+    }
+
     @Test
     void aMagnetsFileListIsFetchedFromAPeerWithoutAddingIt(@TempDir Path dir) throws Exception {
         Path seeds = dir.resolve("seeds");
@@ -518,7 +535,8 @@ class LibtorrentEngineTest {
             engine.addListener(events::add);
             com.torrenta.engine.Engine.MetadataFetch fetch = engine.fetchMetadata(magnet);
             assertTrue(engine.torrents().isEmpty(), "a fetch is not a torrent in the list");
-            assertThrows(EngineException.class, () -> engine.fetchMetadata(magnet), "one fetch per magnet");
+            // "One fetch per magnet" is aSecondFetchOfAMagnetStillBeingFetchedIsRefused's: from a
+            // seeder on loopback this fetch can be over before a second call (CI saw it).
 
             byte[] fetched = fetch.torrent().get(LOOPBACK_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
             TorrentPreview preview = engine.inspect(fetched);
