@@ -726,6 +726,15 @@ public final class LibtorrentEngine implements Engine {
         return running().swig().listen_port();
     }
 
+    /**
+     * Asks the session to open its listen sockets again, for a loopback test whose seeder never
+     * listened: on Windows CI a session has come up with no listen socket and no listen alert of
+     * either kind, its torrents working, the port 0 for two minutes.
+     */
+    void reopenSocketsForTest() throws EngineException {
+        running().swig().reopen_network_sockets();
+    }
+
     /** Tells a fetch about a peer on this machine, for the test that hands its peers over. */
     void connectFetchForTest(MetadataFetch fetch, int port) throws EngineException {
         TorrentHandle h = ((Fetch) fetch).handle(running());

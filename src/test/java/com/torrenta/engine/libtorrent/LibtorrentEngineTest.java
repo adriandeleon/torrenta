@@ -738,14 +738,32 @@ class LibtorrentEngineTest {
      * no peer and no sign of why (CI's flakes: a seeder whose port was 0 for two minutes).
      */
     private static int awaitListening(String who, LibtorrentEngine engine) throws Exception {
-        long deadline = System.currentTimeMillis() + LOOPBACK_SECONDS * 1000;
+        long start = System.currentTimeMillis();
+        long deadline = start + LOOPBACK_SECONDS * 1000;
+        boolean reopened = false;
         while (engine.listenPortForTest() == 0) {
-            if (System.currentTimeMillis() > deadline)
-                throw new AssertionError(who + " never listened: " + engine.connectivity());
+            long now = System.currentTimeMillis();
+            // A session can come up with no listen socket and say nothing about it (Windows CI):
+            // asked to reopen its sockets once, and said, so the soak shows whether that cures it.
+            if (!reopened && now - start > REOPEN_AFTER_MS) {
+                System.err.println("awaitListening: " + who + " was not listening after " + REOPEN_AFTER_MS + " ms ("
+                        + engine.connectivity() + "); reopening its sockets");
+                engine.reopenSocketsForTest();
+                reopened = true;
+            }
+            if (now > deadline)
+                throw new AssertionError(who + " never listened" + (reopened ? ", its sockets reopened at 10 s" : "")
+                        + ": " + engine.connectivity());
             Thread.sleep(25);
         }
+        if (reopened)
+            System.err.println("awaitListening: " + who + " listened on " + engine.listenPortForTest()
+                    + " after its sockets were reopened, " + (System.currentTimeMillis() - start) + " ms in");
         return engine.listenPortForTest();
     }
+
+    /** How long a session may take to listen before its sockets are reopened; it listens in milliseconds. */
+    private static final long REOPEN_AFTER_MS = 10_000;
 
     /**
      * {@link #onPort}, with no way to find a peer but being told (no DHT, no local discovery) and
