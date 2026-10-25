@@ -5,7 +5,8 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
 
 ## Commands
 
-- Run: `./mvnw javafx:run`
+- Run: `./mvnw javafx:run`; without a window, `scripts/dev-run.sh -- --headless` (stdout is the
+  log, SIGTERM stops it; `docs/headless.md`)
 - Test + format check: `./mvnw verify` (Spotless/Palantir runs at `verify`; `./mvnw spotless:apply`
   fixes formatting)
 - Native app image: **`./mvnw clean -Pdist -DskipTests package`** ⇒ `target/dist/Torrenta{.app}`;
@@ -66,7 +67,7 @@ to try one on purpose).
 
 | Layer | What | Where |
 |---|---|---|
-| Entry | `--help`/`--version`, toolkit start, theme | `com.torrenta.App`, `com.torrenta.cli` |
+| Entry | `--help`/`--version`, toolkit start, theme; `Startup` (language, native folder, profile, `createEngine`: what the window and headless share, no JavaFX); `Headless` (`--headless`, or the `torrenta-nox` launcher: the `Session` with a stdout/session-log host, every input added without asking, a shutdown hook that stops the engine) | `com.torrenta.App`, `com.torrenta.cli` |
 | Events | `EngineEvent` (level, torrent, message), raised by the engine from libtorrent alerts and by its own start/stop/remove; `Engine.addListener` | `com.torrenta.engine` |
 | Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Engine.probe` (a `SwarmProbe`: a magnet's file list, then for either kind a look at the swarm, while the dialog is open), `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL), `FileRenames.Layout` (the content layout, `add.contentLayout`); `ui.AddDialog` (rules as statics), `FileTree` (wanted + priority ladder), `FreeSpace` (disk bar and sentence), `SwarmVerdict` (the Swarm line, from the fetch's `SwarmPreview`), `content.ContentCheck` (pure: what in the wanted files deserves a look — a disguised program, bidi in a name, a shortcut, a program or link in a media torrent, an archive where the name promises media, a bait name from `content.baitWords` — the card above the tree with Skip these files), `content.UnsafeContent` (`add.unsafeContent`, Skip by default: what an add without a dialog does with what the check found — watch folders through `WatchFolders.Host.add`, RSS rules, an article's Download, Add without asking all go through `Session.add`; a `.torrent` is checked before the add, a magnet is added to stop on metadata and marked `torrent.<hash>.unsafeContent`, and `screenPending` in the poll checks it once its files are known: resumed, trimmed, or removed) | `com.torrenta.engine`, `com.torrenta.net`, `ui` |
 | Create | `CreateRequest` (path, `Format` v1/v2/hybrid, piece size or 0, private, tracker tiers, web seeds, comment, `source` tag, align, seed), `CreatedTorrent` (bytes, engine id, both hashes, counts, magnet, the seeding torrent or the add's problem), `PieceSize` (the automatic rule: ~1,500 pieces, 16 KiB … 16 MiB; `count` packed or aligned), `Engine.create(request, CreateProgress)` blocking on the caller's worker, cancellable at the next piece; `libtorrent.PieceHasher` (v1 pieces and v2 piece layers in Java, bit for bit libtorrent's); `ui.CreateDialog` (modeless, sizes the source live, Save as…, atomic write), `CreateText` (tier parser, summary, outcome) | `com.torrenta.engine`, `.libtorrent`, `ui` |
@@ -103,6 +104,18 @@ shown; `session.Session` polls it once a second on its own thread (`engine-poll`
 poll to its listeners there, `MainWindow.polled` among them, which hands the FX thread an
 immutable list; `addInput` runs on a virtual thread. Inputs that arrive before the engine is up are
 queued by the session (`Session.input`) and handed to the window's input handler once one is.
+
+**Headless never loads the toolkit.** `App.main` sends `--headless` to `Headless.run` before
+`launch`, with `java.awt.headless` set; `Headless` and `Startup` use nothing of JavaFX (`App`
+extends `Application`, which is why `createEngine` left it). jpackage hands a launcher's own
+`arguments` only when the person gives none, so `torrenta-nox --config-dir …` arrives without
+`--headless` and once opened the window; the launcher is known by `jpackage.app-path`
+(`CommandLine.headless(launcherPath)`), the `arguments=--headless` in `src/jpackage/` covers no
+arguments at all. Windows gets `win-console=true` (`torrenta-nox-windows.properties`, the
+`os-windows` profile), which no other platform accepts. SIGTERM runs the shutdown hook:
+`stopEngine` (the engine's bounded resume-data wait), `close`, the instance lock; an engine that
+cannot start returns 1. A run of the packaged launcher is `target/dist/Torrenta/bin/torrenta-nox`
+under `timeout -s TERM`; `dev-run.sh` execs the JVM, so the signal reaches it there too.
 
 **The session is the window's toolkit-free half** (roadmap 1.2, item 1, in steps). `Session` owns
 the poll thread, the share limits and the minute's speed refresh; its `Host` hears a share limit

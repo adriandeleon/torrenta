@@ -7,6 +7,13 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Torrenta without a window.** `torrenta --headless`, or the `torrenta-nox` launcher beside the
+  app's own, runs everything the window does but the window: torrents, watch folders, RSS rules,
+  the IP filter, share limits, the speed schedule, run-on-event commands. What arrives (the command
+  line, another Torrenta, a watch folder, a rule) is added without asking, through the content
+  check; the log is stdout and `torrenta-session.log`; SIGTERM or Ctrl+C stops it cleanly, the last
+  resume data written first. `docs/headless.md` has a systemd user unit.
+
 - **A leak check you can see.** With a binding set, a shield beside the port says Protected,
   Exposed, Halted (the interface is down, so nothing goes out) or Unchecked; a click shows the
   three addresses it decided from. Settings → Connection → "Check where traffic leaves" (off: it

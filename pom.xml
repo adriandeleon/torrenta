@@ -50,6 +50,8 @@
         <!-- jpackage wants .icns on macOS, .ico on Windows, .png on Linux; the os-* profiles pick. -->
         <jpackage.icon>${project.basedir}/branding/torrenta.png</jpackage.icon>
         <jpackage.imageName>Torrenta</jpackage.imageName>
+        <!-- torrenta-nox, the headless launcher: a console program on Windows, which only it takes. -->
+        <jpackage.noxLauncher>${project.basedir}/src/jpackage/torrenta-nox.properties</jpackage.noxLauncher>
         <skip.mac.version.fix>true</skip.mac.version.fix>
         <!-- Installers are minutes of work the dev loop never wants; CI and the release turn them on. -->
         <skip.installers>true</skip.installers>
@@ -347,6 +349,7 @@
             <properties>
                 <prism.pipeline>d3d,es2,sw</prism.pipeline>
                 <jpackage.icon>${project.basedir}/branding/torrenta.ico</jpackage.icon>
+                <jpackage.noxLauncher>${project.basedir}/src/jpackage/torrenta-nox-windows.properties</jpackage.noxLauncher>
                 <native.ext>dll</native.ext>
             </properties>
             <dependencies>
@@ -548,6 +551,14 @@
                                     <icon>${jpackage.icon}</icon>
                                     <destination>${project.build.directory}/dist</destination>
                                     <module>com.torrenta/com.torrenta.App</module>
+                                    <!-- The same image without a window: torrenta-nox runs App with
+                                         the headless flag, for a server and the systemd unit in docs. -->
+                                    <launchers>
+                                        <launcher>
+                                            <name>torrenta-nox</name>
+                                            <file>${jpackage.noxLauncher}</file>
+                                        </launcher>
+                                    </launchers>
                                     <modulePaths>
                                         <modulePath>${project.build.directory}/mods</modulePath>
                                     </modulePaths>

@@ -89,6 +89,11 @@ public final class DebugLog {
         }
     }
 
+    /** A line of the application's own, stamped: a headless run's events, which no window shows. */
+    public static void note(String text) {
+        append(stamp(text));
+    }
+
     static synchronized void append(String line) {
         ENTRIES.addLast(line);
         while (ENTRIES.size() > MAX_ENTRIES) ENTRIES.removeFirst();
