@@ -118,6 +118,9 @@ import com.torrenta.tray.Trays;
 import com.torrenta.update.ReleaseInfo;
 import com.torrenta.update.UpdateCheck;
 import com.torrenta.update.UpdateService;
+import com.torrenta.webapi.SessionBackend;
+import com.torrenta.webapi.WebApiConfig;
+import com.torrenta.webapi.WebApiService;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -366,6 +369,9 @@ public final class MainWindow {
     /** The engine's poll, its share limits and its speed schedule, without the window (roadmap 1.2). */
     private final Session session;
 
+    /** Remote access, qBittorrent's API over the session (roadmap 1.2); off unless Settings says. */
+    private final WebApiService webApi;
+
     /** The tray icon once one has come up, else null; set on the FX thread, read by the poll. */
     private volatile TorrentaTray tray;
     /** Why there is no tray, once an attempt has said; empty before one and while there is one. */
@@ -422,6 +428,7 @@ public final class MainWindow {
         // What arrived before an engine was up, once one is; after engineReady on the FX thread.
         session.setInputHandler(text -> Platform.runLater(() -> addInput(text)));
         this.rss = session.rss();
+        this.webApi = new WebApiService(new SessionBackend(session, settings, labels), System::currentTimeMillis);
         stage.setTitle(AppInfo.NAME);
         // Before anything else touches the stage: initStyle throws once a stage has been shown, and
         // the setting is read here, once, which is why it applies on restart.
@@ -490,6 +497,8 @@ public final class MainWindow {
         settingsWindow.setOnTestNotification(session::testNotification);
         sync = new SettingsSync(settings, labels, searchStore, definitionStore, configDir, new SyncHost());
         settingsWindow.setSync(sync);
+        settingsWindow.setRemoteAccess(webApi::status, this::applyRemoteAccess);
+        applyRemoteAccess(settingsWindow::showRemoteStatus);
         sync.addListener(() -> {
             boolean problem = sync.state().phase() == SettingsSync.Phase.PROBLEM;
             syncBadge.setVisible(problem);
@@ -928,8 +937,31 @@ public final class MainWindow {
         rememberDivider();
         rememberWindow();
         session.close();
+        webApi.close();
         updates.shutdown();
         sync.shutdown();
+    }
+
+    /**
+     * Remote access brought in line with the settings, on a worker (it binds a socket, and an
+     * HTTPS file is read); the log hears a change of state, {@code then} the status on the FX thread.
+     */
+    private void applyRemoteAccess(java.util.function.Consumer<WebApiService.Status> then) {
+        WebApiConfig config = settings.webApi();
+        Thread.ofVirtual().name("webapi-configure").start(() -> {
+            WebApiService.Status before = webApi.status();
+            WebApiService.Status after = webApi.configure(config);
+            Platform.runLater(() -> {
+                if (!after.equals(before)
+                        && (after.state() != WebApiService.State.OFF || before.state() != WebApiService.State.OFF)) {
+                    EngineEvent.Level level = after.state() == WebApiService.State.FAILED
+                            ? EngineEvent.Level.WARNING
+                            : EngineEvent.Level.INFO;
+                    log.add(EngineEvent.session(level, after.text()));
+                }
+                then.accept(after);
+            });
+        });
     }
 
     /** Any thread, idempotent; from App.stop, after the engine. */

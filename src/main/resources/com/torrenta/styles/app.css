@@ -1632,3 +1632,8 @@
     -fx-padding: 1 8 1 8;
     -fx-font-weight: bold;
 }
+
+/* Remote access over plain HTTP from other machines: the password crosses the network readable. */
+.settings-row-description.settings-warning {
+    -fx-text-fill: -color-warning-fg;
+}

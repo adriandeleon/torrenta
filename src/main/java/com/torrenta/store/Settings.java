@@ -16,6 +16,7 @@ import com.torrenta.automation.AutomationSettings;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
+import com.torrenta.webapi.WebApiConfig;
 
 /**
  * User preferences, stored as a plain properties file.
@@ -91,6 +92,25 @@ public final class Settings {
     public static final String SYNC_BRANCH = "sync.branch";
     public static final String SYNC_INTERVAL = "sync.intervalMinutes";
     public static final String SYNC_LAST = "sync.lastEpochMs";
+    /**
+     * Remote access, qBittorrent's WebUI API ({@code com.torrenta.webapi}): machine-local, never
+     * synced, the password kept only as its PBKDF2 hash.
+     */
+    public static final String WEBAPI_ENABLED = "webapi.enabled";
+
+    public static final String WEBAPI_ADDRESS = "webapi.address";
+    public static final String WEBAPI_PORT = "webapi.port";
+    public static final String WEBAPI_USERNAME = "webapi.username";
+    public static final String WEBAPI_PASSWORD = "webapi.password";
+    public static final String WEBAPI_HTTPS_FILE = "webapi.httpsFile";
+    public static final String WEBAPI_HTTPS_PASSWORD = "webapi.httpsPassword";
+    /** Names besides addresses and {@code localhost} the {@code Host} header may carry, by spaces. */
+    public static final String WEBAPI_DOMAINS = "webapi.domains";
+    /**
+     * Folders besides the download folder and the categories' where a client may put files, one per
+     * line: {@code savepath} outside all of them is refused.
+     */
+    public static final String WEBAPI_ROOTS = "webapi.roots";
     /** Whether the icon toolbar under the menu bar shows; View → Toolbar flips it. */
     public static final String UI_TOOLBAR = "ui.toolbar";
     /** Whether the sidebar of filters shows beside the list; View → Sidebar flips it. */
@@ -406,6 +426,74 @@ public final class Settings {
         merged.forEach((key, value) -> {
             if (com.torrenta.sync.SyncKeys.isSynced(key) && value != null) properties.setProperty(key, value);
         });
+    }
+
+    /** Remote access as set; off, on {@code 127.0.0.1:8080}, until someone changes it. */
+    public WebApiConfig webApi() {
+        String https = properties.getProperty(WEBAPI_HTTPS_FILE, "").trim();
+        java.util.Set<String> domains = new java.util.LinkedHashSet<>();
+        for (String d : properties.getProperty(WEBAPI_DOMAINS, "").trim().split("[\\s,;]+"))
+            if (!d.isEmpty()) domains.add(d.toLowerCase(java.util.Locale.ROOT));
+        return new WebApiConfig(
+                readBoolean(WEBAPI_ENABLED, false),
+                properties
+                        .getProperty(WEBAPI_ADDRESS, WebApiConfig.DEFAULT_ADDRESS)
+                        .trim(),
+                readInt(WEBAPI_PORT, WebApiConfig.DEFAULT_PORT, 1, 65535),
+                properties.getProperty(WEBAPI_USERNAME, WebApiConfig.DEFAULT_USERNAME),
+                properties.getProperty(WEBAPI_PASSWORD, "").trim(),
+                https.isEmpty() ? null : Path.of(https),
+                properties.getProperty(WEBAPI_HTTPS_PASSWORD, ""),
+                domains);
+    }
+
+    public void setWebApiEnabled(boolean enabled) {
+        properties.setProperty(WEBAPI_ENABLED, String.valueOf(enabled));
+    }
+
+    public void setWebApiAddress(String address) {
+        properties.setProperty(WEBAPI_ADDRESS, address == null ? "" : address.trim());
+    }
+
+    public void setWebApiPort(int port) {
+        properties.setProperty(WEBAPI_PORT, String.valueOf(port));
+    }
+
+    public void setWebApiUsername(String username) {
+        properties.setProperty(WEBAPI_USERNAME, username == null ? "" : username);
+    }
+
+    /** {@code webapi.Passwords.hash}'s text, never a password. */
+    public void setWebApiPasswordHash(String hash) {
+        properties.setProperty(WEBAPI_PASSWORD, hash == null ? "" : hash);
+    }
+
+    /** A PKCS#12 file and its password; a blank file is plain HTTP. */
+    public void setWebApiHttps(String file, String password) {
+        properties.setProperty(WEBAPI_HTTPS_FILE, file == null ? "" : file.trim());
+        properties.setProperty(WEBAPI_HTTPS_PASSWORD, password == null ? "" : password);
+    }
+
+    public void setWebApiDomains(String domains) {
+        properties.setProperty(WEBAPI_DOMAINS, domains == null ? "" : domains.trim());
+    }
+
+    /** The folders added by hand, as written; a line that is not a path is left out. */
+    public List<Path> webApiRoots() {
+        List<Path> out = new java.util.ArrayList<>();
+        for (String line : properties.getProperty(WEBAPI_ROOTS, "").split("\\R")) {
+            if (line.isBlank()) continue;
+            try {
+                out.add(Path.of(line.trim()));
+            } catch (java.nio.file.InvalidPathException e) {
+                // Typed by hand; one bad line does not take the others with it.
+            }
+        }
+        return out;
+    }
+
+    public void setWebApiRoots(String lines) {
+        properties.setProperty(WEBAPI_ROOTS, lines == null ? "" : lines.strip());
     }
 
     public boolean syncEnabled() {

@@ -20,6 +20,8 @@ class SyncKeysTest {
         assertTrue(SyncKeys.isSynced("ipfilter.bans"));
         assertFalse(SyncKeys.isSynced("sync.url"));
         assertFalse(SyncKeys.isSynced("sync.enabled"));
+        assertFalse(SyncKeys.isSynced("webapi.password"), "remote access's password hash stays here");
+        assertFalse(SyncKeys.isSynced("webapi.enabled"), "and so does whether the door is open");
         assertFalse(SyncKeys.isSynced("download.dir"), "a folder of this machine");
         assertFalse(SyncKeys.isSynced("download.incompleteDir"), "so is the incomplete folder");
         assertTrue(SyncKeys.isSynced("download.incompleteEnabled"), "but whether it is used travels");
