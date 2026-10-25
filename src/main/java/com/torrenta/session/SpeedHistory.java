@@ -1,4 +1,4 @@
-package com.torrenta.ui;
+package com.torrenta.session;
 
 import java.util.ArrayList;
 import java.util.List;

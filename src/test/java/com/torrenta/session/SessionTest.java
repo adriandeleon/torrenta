@@ -27,6 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SessionTest {
@@ -282,7 +283,7 @@ class SessionTest {
                         case "rates" -> Engine.Rates.ZERO;
                         case "capabilities" -> Engine.Capabilities.ALL;
                         case "refreshLimits" -> false;
-                        case "setIpFilter", "start", "stop" -> null;
+                        case "setIpFilter", "start", "stop", "addListener" -> null;
                         case "inspect" -> FILM;
                         case "add" -> {
                             added.add((AddRequest) args[0]);
@@ -372,7 +373,115 @@ class SessionTest {
                 "and saved so");
     }
 
+    /** The listeners and adds of the plain proxy engines, for the tests that look at them. */
+    private static final List<java.util.function.Consumer<EngineEvent>> LISTENERS = new CopyOnWriteArrayList<>();
+
+    private static final List<Object> ADDED = new CopyOnWriteArrayList<>();
+
+    /** The engine's events reach the owner from the first, through the session's own listener. */
+    @Test
+    void theEnginesEventsReachTheOwner(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        LISTENERS.clear();
+        session.setEngineFactory(profile -> engine(List::of, id -> {}));
+        session.startEngine(EngineProfile.LOCAL);
+        try {
+            await(() -> !host.ready.isEmpty());
+            assertEquals(1, LISTENERS.size(), "attached before the start");
+            EngineEvent added = EngineEvent.info("a", "name", "Added name");
+            LISTENERS.get(0).accept(added);
+            assertEquals(List.of(added), host.events);
+        } finally {
+            session.stopEngine();
+        }
+    }
+
+    /**
+     * An input with no engine up waits, and is handed on once one is, in order; one that comes
+     * while an engine is up is handed on at once.
+     */
+    @Test
+    void anInputWaitsForAnEngineAndIsHandedOnInOrder(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        List<String> handed = new CopyOnWriteArrayList<>();
+        session.setInputHandler(handed::add);
+        session.input("magnet:?xt=urn:btih:one");
+        session.input("/tmp/two.torrent");
+        assertTrue(handed.isEmpty(), "no engine yet");
+        session.setEngineFactory(profile -> engine(List::of, id -> {}));
+        session.startEngine(EngineProfile.LOCAL);
+        try {
+            await(() -> handed.size() == 2);
+            assertEquals(List.of("magnet:?xt=urn:btih:one", "/tmp/two.torrent"), handed);
+            session.input("magnet:?xt=urn:btih:three");
+            assertEquals("magnet:?xt=urn:btih:three", handed.get(2), "at once while one is up");
+        } finally {
+            session.stopEngine();
+        }
+    }
+
+    /** "Add without asking" of a magnet: the defaults' request, through the session's own add. */
+    @Test
+    void anInputAddedWithoutAskingIsTheDefaultsRequest(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        settings.set(Settings.ADD_UNSAFE_CONTENT, "ADD");
+        Session session = session(dir, settings, new RecordingHost());
+        assertThrows(
+                com.torrenta.engine.EngineException.class, () -> session.addWithoutAsking("magnet:?xt=urn:btih:x"));
+        ADDED.clear();
+        session.setEngineFactory(profile -> engine(List::of, id -> {}));
+        session.startEngine(EngineProfile.LOCAL);
+        try {
+            await(() -> session.engine() != null);
+            session.addWithoutAsking("  magnet:?xt=urn:btih:x  ");
+            AddRequest request = (AddRequest) ADDED.get(0);
+            assertEquals(new AddRequest.Magnet("magnet:?xt=urn:btih:x"), request.source());
+            assertEquals(settings.downloadDir(), request.savePath());
+            assertEquals(
+                    com.torrenta.engine.LinkRequest.of("https://example.org/file.iso"),
+                    addLink(session, "https://example.org/file.iso"),
+                    "a link that is not a torrent goes to curl");
+        } finally {
+            session.stopEngine();
+        }
+    }
+
+    private static Object addLink(Session session, String url) throws Exception {
+        ADDED.clear();
+        session.addWithoutAsking(url);
+        return ADDED.get(0);
+    }
+
+    /** The session keeps its rates and every torrent's; a followed torrent's history grows from then. */
+    @Test
+    void theHistoriesAreKeptAndAFollowedTorrentsGrows(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        Session session = session(dir, settings, new RecordingHost());
+        session.setEngineFactory(profile -> engine(() -> List.of(seed("s", 0, false)), id -> {}));
+        session.startEngine(EngineProfile.LOCAL);
+        try {
+            await(() -> !session.history().isEmpty());
+            assertEquals(null, session.followed("s"), "not followed yet");
+            session.follow("s");
+            SpeedHistory followed = session.followed("s");
+            assertTrue(followed != null && !followed.isEmpty(), "starts from the recent one");
+        } finally {
+            session.stopEngine();
+        }
+    }
+
     private static final class RecordingHost implements Session.Host {
+        final List<EngineEvent> events = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void event(EngineEvent event) {
+            events.add(event);
+        }
+
         final List<EngineEvent> reports = new CopyOnWriteArrayList<>();
 
         @Override
@@ -462,6 +571,14 @@ class SessionTest {
                     case "stop" -> {
                         stops.incrementAndGet();
                         yield null;
+                    }
+                    case "addListener" -> {
+                        LISTENERS.add((java.util.function.Consumer<EngineEvent>) args[0]);
+                        yield null;
+                    }
+                    case "addLink", "add" -> {
+                        ADDED.add(args[0]);
+                        yield seed("added", 0, false);
                     }
                     case "toString" -> "test engine";
                     case "hashCode" -> System.identityHashCode(proxy);

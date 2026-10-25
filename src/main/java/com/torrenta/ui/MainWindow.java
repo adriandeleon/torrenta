@@ -1,7 +1,6 @@
 package com.torrenta.ui;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -66,7 +65,6 @@ import javafx.stage.StageStyle;
 
 import com.torrenta.AppInfo;
 import com.torrenta.automation.Automation;
-import com.torrenta.automation.Notifiers;
 import com.torrenta.content.UnsafeContent;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
@@ -107,6 +105,7 @@ import com.torrenta.session.AddDefaults;
 import com.torrenta.session.IpFilterController;
 import com.torrenta.session.RuleAdd;
 import com.torrenta.session.Session;
+import com.torrenta.session.SpeedHistory;
 import com.torrenta.store.DefinitionStore;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.ProfileStore;
@@ -205,19 +204,8 @@ public final class MainWindow {
     private final StatisticsWindow statsWindow;
     /** Whether the poll should read the engine's counters: only while the Statistics window shows. */
     private volatile boolean statsWanted;
-    /** The session rates, one sample per poll, for the Statistics window's graph. */
-    private final SpeedHistory sessionHistory = new SpeedHistory();
     /** The window's bounds when last neither maximised nor minimised; what is saved. */
     private WindowGeometry.Bounds normalBounds;
-    /**
-     * The last {@link SpeedHistory#RECENT_SECONDS} of every torrent's rates, by id: a few KiB each,
-     * so the Speed tab is not empty the first time a torrent is chosen. Gone with the torrent.
-     */
-    private final java.util.concurrent.ConcurrentMap<String, SpeedHistory> recentHistories =
-            new java.util.concurrent.ConcurrentHashMap<>();
-    /** The rates of every torrent that has been selected, by id, for the Speed tab; gone with the torrent. */
-    private final java.util.concurrent.ConcurrentMap<String, SpeedHistory> torrentHistories =
-            new java.util.concurrent.ConcurrentHashMap<>();
     /** What the status bar has said; the popup over it shows the history. */
     private final MessageLog messages = new MessageLog();
 
@@ -267,9 +255,8 @@ public final class MainWindow {
     private final Set<String> reportedDefinitionProblems = new java.util.HashSet<>();
 
     /** Runs the person's commands and shows notifications; made with the engine in {@link #listenTo}. */
-    private volatile Automation automation;
-
     private Sidebar sidebar;
+
     private SidebarSelection sidebarSelection = SidebarSelection.ALL;
     private String lastClipboardOffer = "";
     private final DetailPane detail = new DetailPane();
@@ -361,7 +348,6 @@ public final class MainWindow {
 
     private Label engineProblemText;
     /** What the daemon's own blocklist fetch last said, for the IP filter page of a remote engine. */
-    private final List<String> pendingInputs = new ArrayList<>();
     /** Opened when the engine is up: a rule's add from a feed fetched before then waits on it. */
     private final java.util.concurrent.CountDownLatch engineUp = new java.util.concurrent.CountDownLatch(1);
 
@@ -421,6 +407,8 @@ public final class MainWindow {
         this.session =
                 new Session(settings, configDir, labels, watchStore, rssStore, Platform::runLater, new SessionHost());
         session.addListener(this::polled);
+        // What arrived before an engine was up, once one is; after engineReady on the FX thread.
+        session.setInputHandler(text -> Platform.runLater(() -> addInput(text)));
         this.rss = session.rss();
         stage.setTitle(AppInfo.NAME);
         // Before anything else touches the stage: initStyle throws once a stage has been shown, and
@@ -490,10 +478,7 @@ public final class MainWindow {
                 () -> opener.accept(definitionStore.dir().toUri().toString()));
         settingsWindow.setRss(rss);
         session.open();
-        settingsWindow.setOnTestNotification(() -> {
-            Automation a = automation;
-            if (a != null) a.testNotification();
-        });
+        settingsWindow.setOnTestNotification(session::testNotification);
         sync = new SettingsSync(settings, labels, searchStore, definitionStore, configDir, new SyncHost());
         settingsWindow.setSync(sync);
         sync.addListener(() -> {
@@ -1605,23 +1590,6 @@ public final class MainWindow {
     }
 
     /**
-     * Any thread, before {@code engine.start()}: the start itself raises events (engine started,
-     * listening on a port) that a listener attached afterwards would never hear. Events arrive on
-     * the engine's alert thread; the log and the status bar are FX-owned, hence the hop.
-     */
-    public void listenTo(Engine engine) {
-        automation = new Automation(engine, settings::automation, Notifiers.forPlatform(), this::reportFromWorker);
-        engine.addListener(event -> {
-            // The automation decides on the alert thread and does its work on threads of its own.
-            automation.handle(event);
-            Platform.runLater(() -> {
-                log.add(event);
-                setStatus(event.message(), event.level());
-            });
-        });
-    }
-
-    /**
      * Any thread: an event from a worker of the window's own (the automation) into the log. A
      * command's output lines go to the log only; the status bar keeps the line that says it ran.
      */
@@ -1644,9 +1612,6 @@ public final class MainWindow {
         applyTitle();
         engineUp.countDown();
         setStatus(engineDescription);
-        List<String> queued = List.copyOf(pendingInputs);
-        pendingInputs.clear();
-        queued.forEach(this::addInput);
         maybeCheckForUpdates();
     }
 
@@ -1677,9 +1642,6 @@ public final class MainWindow {
     private final class SessionHost implements Session.Host {
         @Override
         public void seedingDone(EngineEvent event, Torrent torrent, boolean removed) {
-            // The snapshot goes along: a removed torrent cannot be looked up for the placeholders.
-            Automation a = automation;
-            if (a != null) a.handle(event, torrent);
             Platform.runLater(() -> {
                 log.add(event);
                 setStatus(event.message());
@@ -1703,8 +1665,11 @@ public final class MainWindow {
         }
 
         @Override
-        public void engineCreated(Engine engine) {
-            listenTo(engine);
+        public void event(EngineEvent event) {
+            Platform.runLater(() -> {
+                log.add(event);
+                setStatus(event.message(), event.level());
+            });
         }
 
         @Override
@@ -2102,7 +2067,7 @@ public final class MainWindow {
     /** {@code via} is for the dialog's header; null reads it off the input itself. */
     private void addInput(String input, AddDialog.Via via) {
         if (engine == null) {
-            pendingInputs.add(input);
+            session.input(input);
             return;
         }
         String text = input.trim();
@@ -2130,17 +2095,7 @@ public final class MainWindow {
                             case FILE -> AddDialog.Via.FILE;
                             case URL -> AddDialog.Via.URL;
                         };
-                AddRequest.Source source =
-                        switch (kind) {
-                            case MAGNET -> new AddRequest.Magnet(text);
-                            case FILE -> {
-                                Path file = Path.of(text);
-                                if (!Files.isRegularFile(file))
-                                    throw new EngineException(tr("status.noSuchFile", text));
-                                yield new AddRequest.TorrentFile(Files.readAllBytes(file), text);
-                            }
-                            case URL -> new AddRequest.TorrentFile(new TorrentFetch().fetch(URI.create(text)), text);
-                        };
+                AddRequest.Source source = session.resolve(text);
                 addSource(e, source, shownVia, withoutAsking, defaults);
             } catch (EngineException | IOException | RuntimeException ex) {
                 String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
@@ -2638,18 +2593,6 @@ public final class MainWindow {
                 Platform.runLater(() -> watch.dialog().showSwarm(swarm));
             }
         }
-        sessionHistory.add(nowSeconds, current.download(), current.upload());
-        Set<String> present = new java.util.HashSet<>();
-        for (Torrent t : snapshot) {
-            present.add(t.id());
-            recentHistories
-                    .computeIfAbsent(t.id(), k -> SpeedHistory.recent())
-                    .add(nowSeconds, t.downloadRate(), t.uploadRate());
-            SpeedHistory h = torrentHistories.get(t.id());
-            if (h != null) h.add(nowSeconds, t.downloadRate(), t.uploadRate());
-        }
-        recentHistories.keySet().retainAll(present);
-        torrentHistories.keySet().retainAll(present);
         // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
         com.torrenta.engine.SessionStats stats = statsWanted ? engine.stats() : null;
         TorrentDetail shown = fetchDetail(engine);
@@ -2670,7 +2613,7 @@ public final class MainWindow {
             showNetwork(port, dht, space);
             showLeak(leak, checking);
             applyDetail(shown, nowSeconds);
-            if (stats != null) statsWindow.update(stats, sessionHistory, nowSeconds);
+            if (stats != null) statsWindow.update(stats, session.history(), nowSeconds);
         });
     }
 
@@ -2694,7 +2637,7 @@ public final class MainWindow {
         if (shown != null && shown.general().id().equals(detailId)) {
             TorrentRow row = rows.get(detailId);
             detail.show(shown, row == null ? null : row.torrent(), row == null ? 0 : row.quietSeconds(), nowSeconds);
-            detail.showSpeed(torrentHistories.get(detailId), nowSeconds);
+            detail.showSpeed(session.followed(detailId), nowSeconds);
         } else if (detailId == null) detail.clear();
     }
 
@@ -4485,11 +4428,7 @@ public final class MainWindow {
                     detailId = selected.size() == 1 ? selected.get(0).id() : null;
                     // The Speed tab's full history starts with the first selection, from the short one
                     // every torrent keeps, so the tab has the last two minutes to show at once.
-                    if (detailId != null)
-                        torrentHistories.computeIfAbsent(detailId, k -> {
-                            SpeedHistory recent = recentHistories.get(k);
-                            return recent == null ? new SpeedHistory() : recent.widened();
-                        });
+                    if (detailId != null) session.follow(detailId);
                     if (detailId == null && detailWanted) detail.clear();
                     refreshDetailNow();
                 });
@@ -5762,7 +5701,7 @@ public final class MainWindow {
     private void showRates(Engine.Rates r, long nowSeconds) {
         downRate.setText(tr("status.rateDown", Bytes.rate(r.download())));
         upRate.setText(tr("status.rateUp", Bytes.rate(r.upload())));
-        List<SpeedHistory.Sample> minute = sessionHistory.samples(60, nowSeconds);
+        List<SpeedHistory.Sample> minute = session.history().samples(60, nowSeconds);
         downSpark.show(minute, 60, nowSeconds);
         upSpark.show(minute, 60, nowSeconds);
     }

@@ -54,6 +54,7 @@ import com.torrenta.content.FileKind;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
+import com.torrenta.session.SpeedHistory;
 
 import static com.torrenta.i18n.Messages.tr;
 

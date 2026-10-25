@@ -482,8 +482,9 @@ so the order is extract, then serve.
    refresh, with `SessionTest`'s JavaFX guard. So is the second: the watch folders, the RSS service
    and its rules, the IP filter. And the third: the engine's start, switch and stop. And the
    fourth: the add pipeline (`Session.add`, the content check's pending magnets, `AddDefaults`),
-   with the content rules in `com.torrenta.content`. Left in the window for headless to need next:
-   automation, statistics, the input queue.
+   with the content rules in `com.torrenta.content`. And the fifth: automation, the speed
+   histories and the input queue (`Session.input`, `resolve`, `addWithoutAsking`). Item 1 is done:
+   headless has a session to run.
 2. **Headless mode**: `torrenta --headless` runs `Session` without the toolkit; inputs are added
    without a dialog (`add.unsafeContent` applies), events go to stdout and the session log,
    SIGTERM goes through `stop()` and its resume-data wait. A `torrenta-nox` launcher in the same

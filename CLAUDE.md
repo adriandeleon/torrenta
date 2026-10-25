@@ -80,7 +80,7 @@ to try one on purpose).
 | Search | `search.SearchProvider` (name + blocking `search(query, category)` throwing `SearchException`), `SearchResult` (sealed `Link`: `Magnet`/`TorrentUrl`; the hash is read off a magnet; `identity()` is hash else link), `SearchCategory` (Newznab numbers), `ResultRanker` (pure: dedupe keeps the better-seeded copy, rank by seeds → query coverage → date → name), `SearchService` (virtual thread per provider, 20 s each, one request per 2 s per provider through a `Ticker`, answers cached for 5 min (`fresh`), `SearchOutcome` with per-provider failures), `TorznabEndpoint` (+ `problem(url)`, the dialog's rule), `TorznabProvider` (`t=caps`/`t=search`, StAX, no entities); `store.SearchProviderStore` (`search-providers.json`; synced without the keys, `sync.SyncSearch`); `ui.SearchProviderDialog`, Settings → Search. Declarative: `Definition` (the file, parsed and validated with the key at fault in `DefinitionException`), `DeclarativeProvider` (the one generic provider: `url`, `extract`, pure), `JsonExtractor` (tree + JSON-pointer paths), `HtmlParser` + `HtmlNode` + `Selector` (the lenient parser and the small CSS subset, no jsoup), `SizeText`/`DateText`, `SearchHttp` (the shared GET); `store.DefinitionStore` (`search-providers/<id>.json`, `refresh()` by size+mtime, `installExamples()` from `search/examples/index.txt`); `search.disabled` in settings (synced); `docs/search-providers.md` is the format | `com.torrenta.search`, `store`, `ui` |
 | Search | `search.SearchProvider`/`SearchResult`/`SearchCategory`, `SearchService` (parallel providers, dedupe through `ResultRanker`, rate limit, a 5-minute cache; `Progress` reports each provider as it answers, in arrival order, on the searching thread), `TorznabProvider` + `TorznabEndpoint`, `store.SearchProviderStore` (`search-providers.json`); `ui.SearchPane` (the tab: query, chips, status line, results table remembered as `search.columns`), `SearchRows` (in-place reconcile by identity), `SearchStatus` (the line), `SearchChips` (which providers are on), `SearchAdd` (result → `AddRequest.Source`) | `com.torrenta.search`, `store`, `ui` |
 | RSS rules | `rss.Rule` (the record; `recordMatch` caps the memory at 1000), `EpisodeFilter` (qBittorrent's `1x2;1x3-5;2x1-` parsed with the term at fault; `find` reads `S01E02`/`1x02`/`Season 1 Episode 2` off a title), `RuleMatcher` (compiled once per rule: feed, phrases or regex, episode filter, age, smart memory; `problem(rule)` is the dialog's rule), `RuleEngine` (`apply`: first enabled rule wins, one copy of an episode per batch; `record`: the memory after the adds that went through; the log lines), `RssService.setDownloader`/`runRulesNow`/`markDownloaded`, `Article.downloaded`; `RssStore` `rules.json`; `ui.RuleDialog` (live Matches on a 250 ms pause, matched on a virtual thread), `session.RuleAdd` (rule → `AddRequest`, article → source), `RuleText` (create-rule-from-title and the table's words) | `com.torrenta.rss`, `ui` |
-| Statistics | `engine.SessionStats` (the record; `UNKNOWN` = -1 for a counter the library lacks), `Engine.stats()` (from the last `session_stats` alert, no session round trip), `store.StatsStore` (`stats.properties`: all-time down/up/active, pure `encode`/`decode`, atomic save), `ui.SpeedHistory` (ring buffers: a second for 10 min, a minute for 24 h), `SpeedPlot` (the pure point mapping and the binary ceiling ladder), `SpeedGraph` (the canvas, theme colours through zero-sized swatches), `StatsText` (the rows), `StatisticsWindow` (`Ctrl+Shift+T`), the detail pane's Speed tab | `com.torrenta.engine`, `store`, `ui` |
+| Statistics | `engine.SessionStats` (the record; `UNKNOWN` = -1 for a counter the library lacks), `Engine.stats()` (from the last `session_stats` alert, no session round trip), `store.StatsStore` (`stats.properties`: all-time down/up/active, pure `encode`/`decode`, atomic save), `session.SpeedHistory` (ring buffers, kept by the session's poll: a second for 10 min, a minute for 24 h), `SpeedPlot` (the pure point mapping and the binary ceiling ladder), `SpeedGraph` (the canvas, theme colours through zero-sized swatches), `StatsText` (the rows), `StatisticsWindow` (`Ctrl+Shift+T`), the detail pane's Speed tab | `com.torrenta.engine`, `store`, `ui` |
 | Direct downloads | `direct.WithDownloads` (an `Engine` around the torrent engine: one list, every id-call routed by `DirectDownload.isId`, `Inputs.isDirectLink` adds, torrent-only calls refused with the reason, a finished `.torrent` handed over), `DirectDownloads` (the service: one curl process per running download, a `direct-downloads` thread ticking each second for sizes, rates and the queue, `downloads.json` + `downloads/<id>.headers/.err`), `DirectDownload` (the record + its JSON; id `url-<sha1 of the link>`), `Curl` (pure: argv, the `--config -` text, `outcome` of an exit, `shellCommand` for the Overview's command by hand, `TorrentDetail.command`, POSIX or Windows quoting, never the proxy's password), `CurlHeaders` (the last block of `--dump-header`), `DirectNames` (link → safe name, `unused`); `Torrent.direct()`, `Settings.directOptions()` (`download.curl`, `download.linksAtOnce`) | `com.torrenta.engine.direct` |
 | Update | `update.UpdateCheck` (pure: payload, version rules, due), `UpdateService` (GitHub, off the FX thread, `-Dtorrenta.updateEndpoint` for a capture) — Termina's, verbatim | `com.torrenta.update` |
 | Desktop | `os.SingleInstance` (one per config dir: a `FileLock` on `instance.lock` decides, a loopback `ServerSocket` whose port and token are `instance.port`/`instance.token`, owner-only; `claim` hands off or binds, `deliverTo` flushes what arrived first), `InstanceMessage` (pure: token line, one input per line, blank line ends, caps, `absolute` against the sender's cwd), `Handlers` (pure argv: `xdgMimeDefault`, `windowsRegister/Unregister`, `desktopId` by `StartupWMClass`, `apply` with a `Runner`), `MacHandlers` (AWT `Desktop` open handlers), `Badge` + `BadgeState` (pure count + rate + short text) + `Badges.create` (`AwtBadge` dock text on macOS, `UnityBadge` LauncherEntry signal on Linux, none on Windows), `AwtUse.headful` (the one rule for `java.awt.headless`); `Settings.osHandler/osBadge` (`os.*`, never synced); `MainWindow.openFromOutside` | `com.torrenta.os`, `store`, `ui` |
@@ -102,7 +102,7 @@ modified, and on stop, and re-adds them on start. Removing a torrent deletes its
 shown; `session.Session` polls it once a second on its own thread (`engine-poll`) and hands each
 poll to its listeners there, `MainWindow.polled` among them, which hands the FX thread an
 immutable list; `addInput` runs on a virtual thread. Inputs that arrive before the engine is up are
-queued.
+queued by the session (`Session.input`) and handed to the window's input handler once one is.
 
 **The session is the window's toolkit-free half** (roadmap 1.2, item 1, in steps). `Session` owns
 the poll thread, the share limits and the minute's speed refresh; its `Host` hears a share limit
@@ -136,8 +136,19 @@ saved from its threads, where the window hopped to the FX thread. The rules them
 for `com.torrenta.content` (`FileKind`, `ContentCheck`, `UnsafeContent`, with their tests; a file
 kind's glyph is `Icons.forKind`, the one thing of the UI's they had); `AddDialog.Defaults` is
 `session.AddDefaults` (with `withoutAsking`), and `RuleAdd` (with `sourceOf`, from `RssAdd`, which
-keeps the RSS tab's words) is the session's. `Host` no longer adds or builds requests. Still the
-window's: automation, statistics, the inputs.
+keeps the RSS tab's words) is the session's. `Host` no longer adds or builds requests. The fifth
+step finished it. The session builds the `Automation` with each engine and attaches its own
+listener before the start: the automation hears every event, then `Host.event` (the window's log
+and status line), and a share limit's `SEEDING_DONE` goes through the automation with its
+snapshot before `Host.seedingDone`; Test notification is `Session.testNotification`. The speed
+histories are the session's (`session.SpeedHistory`, moved with its test): the session-wide one,
+every torrent's recent one, and a followed torrent's (`follow(id)` from the selection, `followed`
+for the Speed tab), kept in the poll before the listeners hear it. The inputs: `input(text)` holds
+one while no engine is up and hands it to the input handler once one is (after `engineReady`, so
+the window's handler, which hops to the FX thread, runs behind the window's own), `resolve(text)`
+is a magnet, a `.torrent` read or fetched, and `addWithoutAsking(text)` is the add a headless run
+needs, a link that is not a torrent going to curl. Nothing of the session's is left in the window:
+it draws, asks and listens.
 
 ## Releasing
 
@@ -327,7 +338,7 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   `ADDED` (never a torrent restored at start: `restoring.remove(id)` decides), `FINISHED`
   (`torrent_finished_alert`, which also fires after a check that finds every piece), `ERROR`
   (torrent, file and tracker errors; the tracker's is level WARNING); `SEEDING_DONE` is raised by
-  the window's share-limit poll, which hands the snapshot along because a REMOVE has already taken
+  the session's share-limit poll, which hands the snapshot along because a REMOVE has already taken
   the torrent out of the session. `Automation.handle` is called on the alert thread and returns at
   once; the command runs on a virtual thread with no shell (`ProcessBuilder` on the substituted
   tokens), stdin from the null device, output capped. `TorrentBuilder` makes hybrids, so the id
