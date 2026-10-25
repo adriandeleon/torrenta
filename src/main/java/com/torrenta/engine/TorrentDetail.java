@@ -15,6 +15,8 @@ import java.util.List;
  * @param webSeeds the web seeds (BEP 19 HTTP sources), as {@link Engine#webSeeds} lists them
  * @param encryptedArchives the indices of the archives whose first bytes say they ask for a
  *     password ({@link ArchiveProbe}); empty until read, and always for an engine that cannot
+ * @param command a download from a link: the command line that fetches the same file by hand
+ *     ({@code Curl.shellCommand}); empty for a torrent
  */
 public record TorrentDetail(
         General general,
@@ -24,12 +26,26 @@ public record TorrentDetail(
         boolean[] pieces,
         int[] availability,
         List<String> webSeeds,
-        java.util.Set<Integer> encryptedArchives) {
+        java.util.Set<Integer> encryptedArchives,
+        String command) {
 
     public TorrentDetail {
         availability = availability == null ? new int[0] : availability;
         webSeeds = webSeeds == null ? List.of() : List.copyOf(webSeeds);
         encryptedArchives = encryptedArchives == null ? java.util.Set.of() : java.util.Set.copyOf(encryptedArchives);
+        command = command == null ? "" : command;
+    }
+
+    public TorrentDetail(
+            General general,
+            List<FileStatus> files,
+            List<Peer> peers,
+            List<Tracker> trackers,
+            boolean[] pieces,
+            int[] availability,
+            List<String> webSeeds,
+            java.util.Set<Integer> encryptedArchives) {
+        this(general, files, peers, trackers, pieces, availability, webSeeds, encryptedArchives, "");
     }
 
     public TorrentDetail(

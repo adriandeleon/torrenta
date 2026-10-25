@@ -450,7 +450,18 @@ public final class DirectDownloads {
                 id, d.savePath(), false, 0, 0, 0, 0, t.done(), 0, 0, active, 0, 0, r == null ? 0 : 1, d.url(), "", "");
         List<TorrentDetail.FileStatus> files =
                 List.of(new TorrentDetail.FileStatus(0, d.onDisk(), t.size(), t.done(), Priority.NORMAL));
-        return new TorrentDetail(general, files, List.of(), List.of(), new boolean[0]);
+        String command = Curl.shellCommand(
+                options.get().curl(), d.url(), Path.of(d.savePath(), d.file()), userAgent, proxy, Curl.Shell.current());
+        return new TorrentDetail(
+                general,
+                files,
+                List.of(),
+                List.of(),
+                new boolean[0],
+                new int[0],
+                List.of(),
+                java.util.Set.of(),
+                command);
     }
 
     // ---- the ticking thread -------------------------------------------------------------------------

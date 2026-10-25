@@ -145,6 +145,8 @@ final class DetailPane extends VBox {
     private final Label trackerValue = value();
     /** A download's link, in the place a torrent's info-hash has. */
     private final Label sourceValue = value();
+    /** A download's command line for fetching it by hand ({@link TorrentDetail#command}). */
+    private final Label commandValue = value();
     /** The facts' rows only a torrent has, and the one only a download from a link has. */
     private final List<Node> torrentFacts = new java.util.ArrayList<>();
 
@@ -199,6 +201,7 @@ final class DetailPane extends VBox {
     private Runnable onReannounce = () -> {};
     private Consumer<String> onBanPeer = address -> {};
     private Consumer<String> onCopyPeer = address -> {};
+    private Consumer<String> onCopyCommand = command -> {};
     private MenuItem banItem;
     private TableView<TorrentDetail.Peer> peerTable;
     private ContextMenu peerMenu;
@@ -304,6 +307,11 @@ final class DetailPane extends VBox {
 
     void setOnCopyPeer(Consumer<String> handler) {
         onCopyPeer = handler;
+    }
+
+    /** The Overview's Copy beside a download's command line. */
+    void setOnCopyCommand(Consumer<String> handler) {
+        onCopyCommand = handler;
     }
 
     /**
@@ -431,6 +439,7 @@ final class DetailPane extends VBox {
                 "graph=" + overviewDown.getText() + " " + overviewUp.getText(),
                 "facts=" + peersValue.getText() + " | " + downloadedValue.getText() + " | " + uploadedValue.getText()
                         + " | " + hashValue.getText(),
+                "command=" + (commandValue.isManaged() ? commandValue.getText() : "none"),
                 "log=" + (logItems == null ? 0 : logItems.size()));
     }
 
@@ -481,6 +490,7 @@ final class DetailPane extends VBox {
         for (Node n : directFacts) shown(n, direct);
         shown(reannounceButton, !direct);
         sourceValue.setText(direct ? g.currentTracker() : "");
+        commandValue.setText(detail.command());
         savePathValue.setText(g.savePath());
         hashValue.setText(OverviewText.shortHash(g.id()));
         availabilityValue.setText(
@@ -708,6 +718,9 @@ final class DetailPane extends VBox {
         torrentFacts.addAll(fact(row++, tr("detail.general.uploaded"), uploadedValue));
         fact(row++, tr("detail.general.savePath"), savePathValue);
         directFacts.addAll(fact(row++, tr("detail.general.source"), sourceValue));
+        List<Node> command = fact(row++, tr("detail.general.command"), commandBox());
+        GridPane.setValignment(command.get(0), javafx.geometry.VPos.TOP);
+        directFacts.addAll(command);
         torrentFacts.addAll(fact(row++, tr("detail.general.infoHash"), hash));
         Region gap = new Region();
         gap.setMinHeight(6);
@@ -721,6 +734,20 @@ final class DetailPane extends VBox {
         torrentFacts.addAll(fact(row++, tr("detail.general.tracker"), trackerValue));
         torrentFacts.addAll(fact(row, tr("detail.general.private"), privateValue));
         for (Node n : directFacts) shown(n, false);
+    }
+
+    /** The command line, wrapped, with a Copy under it: the line is long and made to be pasted. */
+    private Node commandBox() {
+        commandValue.getStyleClass().add("mono");
+        commandValue.setWrapText(true);
+        commandValue.setMinHeight(Region.USE_PREF_SIZE);
+        Hyperlink copy = new Hyperlink(tr("detail.overview.copy"));
+        copy.getStyleClass().add("overview-copy");
+        copy.setFocusTraversable(false);
+        copy.setOnAction(e -> onCopyCommand.accept(commandValue.getText()));
+        VBox box = new VBox(2, commandValue, copy);
+        box.setAlignment(Pos.TOP_LEFT);
+        return box;
     }
 
     /** The row's name and value, for showing and hiding them together. */

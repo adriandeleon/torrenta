@@ -23,6 +23,7 @@ import java.util.logging.Logger;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.BooleanBinding;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.beans.value.ObservableBooleanValue;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
@@ -469,6 +470,7 @@ public final class MainWindow {
         detail.setMoreMenu(buildContextMenu());
         detail.setEvents(log.events());
         palette = new CommandPalette(host, this::focusList, paletteChord.getDisplayText());
+        palette.setResolver(this::typedCommand);
         logWindow = new LogWindow(stage, log);
         statsWindow = new StatisticsWindow(stage, settings.statsWindowSeconds(), this::rememberStatsWindow);
         statsWindow.showingProperty().addListener((o, was, now) -> statsWanted = now);
@@ -522,6 +524,12 @@ public final class MainWindow {
             content.putString(address);
             Clipboard.getSystemClipboard().setContent(content);
             setStatus(tr("status.copied.address", address));
+        });
+        detail.setOnCopyCommand(command -> {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(command);
+            Clipboard.getSystemClipboard().setContent(content);
+            setStatus(tr("status.copied.command"));
         });
         log.installLogBridge(Platform::runLater);
         reportDefinitionProblems();
@@ -3108,6 +3116,151 @@ public final class MainWindow {
         });
     }
 
+    /** A typed command's row is always live: what it can act on is said in its words, not by greying. */
+    private static final ObservableBooleanValue TYPED_ENABLED = new ReadOnlyBooleanWrapper(true);
+
+    /**
+     * The palette's row for a command typed with what it takes ({@code set-category Films}): what it
+     * does and what it acts on, or what does not read; empty when the text names no such command.
+     */
+    private Optional<Command> typedCommand(String text) {
+        return OmniCommand.parse(text).map(parsed -> switch (parsed) {
+            case OmniCommand.Problem problem ->
+                new Command(
+                        "omni",
+                        problem.message(),
+                        null,
+                        "",
+                        TYPED_ENABLED,
+                        () -> setStatus(problem.message(), EngineEvent.Level.WARNING));
+            case OmniCommand.Ready ready -> {
+                boolean filtering = !omnibox.chips().isEmpty();
+                List<Torrent> targets = Actions.targets(
+                        selectedTorrents(),
+                        filtered.stream().map(TorrentRow::torrent).toList(),
+                        filtering);
+                String what = filtering
+                        ? tr("omni.targets.matching", targets.size())
+                        : tr("omni.targets.selected", targets.size());
+                yield new Command(
+                        "omni",
+                        tr("omni.row", ready.command().describe(), what),
+                        null,
+                        "",
+                        TYPED_ENABLED,
+                        () -> runTyped(ready.command(), targets));
+            }
+        });
+    }
+
+    /**
+     * FX thread. A typed command on its targets: asked about first when it removes or acts on
+     * more than {@link OmniCommand#ASK_ABOVE}; undoable where the menu's own command is.
+     */
+    private void runTyped(OmniCommand command, List<Torrent> all) {
+        boolean torrentsOnly =
+                switch (command.verb()) {
+                    case RECHECK, REANNOUNCE, SEQUENTIAL, QUEUE, LIMIT_UP -> true;
+                    default -> false;
+                };
+        List<Torrent> targets = torrentsOnly ? Actions.torrentsOnly(all) : all;
+        if (targets.isEmpty()) {
+            setStatus(tr("omni.nothing"));
+            return;
+        }
+        Engine.Capability needs =
+                switch (command.verb()) {
+                    case SEQUENTIAL -> Engine.Capability.SEQUENTIAL_DOWNLOAD;
+                    case QUEUE -> Engine.Capability.QUEUE_ORDER;
+                    case SET_LOCATION -> Engine.Capability.MOVE_STORAGE;
+                    default -> null;
+                };
+        if (needs != null && capabilities.lacks(needs)) {
+            setStatus(tr("omni.unsupported", command.verb().word()), EngineEvent.Level.WARNING);
+            return;
+        }
+        if (command.verb() == OmniCommand.Verb.REMOVE) {
+            if (!RemoveConfirm.ask(
+                    stage, tr("common.remove"), Actions.removeQuestion(targets.size(), false), tr("common.remove")))
+                return;
+            removeTorrents(targets, false);
+            return;
+        }
+        if (command.asks(targets.size())
+                && !RemoveConfirm.ask(
+                        stage,
+                        tr("omni.confirm.header"),
+                        tr("omni.confirm", command.describe(), targets.size()),
+                        tr("omni.confirm.button"))) return;
+        String text = command.text();
+        switch (command.verb()) {
+            case SET_CATEGORY -> {
+                rememberLabels(new TorrentLabels(text, List.of()));
+                onTorrentsUndoable(tr("actions.verb.filedUnder", text), targets, (e, t) -> {
+                    String was = e.category(t.id());
+                    e.setCategory(t.id(), text);
+                    return engine -> engine.setCategory(t.id(), was);
+                });
+            }
+            case ADD_TAG, REMOVE_TAG -> {
+                boolean add = command.verb() == OmniCommand.Verb.ADD_TAG;
+                if (add) rememberLabels(new TorrentLabels("", List.of(text)));
+                onTorrentsUndoable(tr("actions.verb.tagsSet"), targets, (e, t) -> {
+                    List<String> was = List.copyOf(e.tags(t.id()));
+                    List<String> tags = new ArrayList<>(was);
+                    if (add && !tags.contains(text)) tags.add(text);
+                    if (!add) tags.remove(text);
+                    e.setTags(t.id(), tags);
+                    return engine -> engine.setTags(t.id(), was);
+                });
+            }
+            case SET_LOCATION ->
+                onTorrentsUndoable(tr("actions.verb.moving", text), targets, (e, t) -> {
+                    String was = t.savePath();
+                    e.moveStorage(t.id(), text, true);
+                    return engine -> engine.moveStorage(t.id(), was, true);
+                });
+            case LIMIT_DOWN, LIMIT_UP -> {
+                boolean down = command.verb() == OmniCommand.Verb.LIMIT_DOWN;
+                int rate = (int) command.bytes();
+                onTorrentsUndoable(tr("actions.verb.limitsSet"), targets, (e, t) -> {
+                    TorrentLimits was = e.limits(t.id());
+                    e.setLimits(
+                            t.id(),
+                            new TorrentLimits(
+                                    down ? rate : was.downloadLimit(),
+                                    down ? was.uploadLimit() : rate,
+                                    was.maxConnections(),
+                                    was.maxUploads(),
+                                    was.firstAndLastFirst()));
+                    return engine -> engine.setLimits(t.id(), was);
+                });
+            }
+            case SEQUENTIAL ->
+                onTorrents(
+                        command.on() ? tr("actions.verb.sequentialOn") : tr("actions.verb.sequentialOff"),
+                        targets,
+                        (e, t) -> e.setSequential(t.id(), command.on()));
+            case QUEUE ->
+                onTorrents(
+                        switch (command.move()) {
+                            case TOP -> tr("actions.verb.queueTop");
+                            case UP -> tr("actions.verb.queueUp");
+                            case DOWN -> tr("actions.verb.queueDown");
+                            case BOTTOM -> tr("actions.verb.queueBottom");
+                        },
+                        targets,
+                        (e, t) -> e.queueMove(t.id(), command.move()));
+            case PAUSE -> onTorrents(tr("actions.verb.paused"), targets, (e, t) -> e.pause(t.id()));
+            case RESUME -> onTorrents(tr("actions.verb.resumed"), targets, (e, t) -> e.resume(t.id()));
+            case RECHECK -> onTorrents(tr("actions.verb.rechecking"), targets, (e, t) -> e.recheck(t.id()));
+            case REANNOUNCE -> onTorrents(tr("actions.verb.reannounced"), targets, (e, t) -> e.reannounce(t.id()));
+            case REMOVE -> {
+                // Asked and done above.
+            }
+        }
+    }
+
     /** FX thread. Keeps an undo, and offers it in the status bar for ten seconds. */
     private void remember(String label, UndoStack.Undo undo) {
         undoStack.push(label, System.currentTimeMillis(), undo);
@@ -3219,6 +3372,11 @@ public final class MainWindow {
                 Actions.removeQuestion(selected.size(), deleteFiles),
                 deleteFiles ? tr("window.remove.button.delete") : tr("common.remove"));
         if (!yes) return;
+        removeTorrents(selected, deleteFiles);
+    }
+
+    /** The removal itself, the question asked already: undoable where the engine can take it back. */
+    private void removeTorrents(List<Torrent> selected, boolean deleteFiles) {
         if (!deleteFiles && capabilities.has(Engine.Capability.UNDO_REMOVE)) {
             // Taken out whole, so Shortcut+Z can put each back as it was; its own share limit too.
             onTorrentsUndoable(tr("actions.verb.removed"), selected, (e, t) -> {
