@@ -353,24 +353,33 @@ public final class LibtorrentEngine implements Engine {
             return;
         }
         restoring.addAll(stored.keySet());
-        for (Map.Entry<String, byte[]> entry : stored.entrySet()) {
-            restoreLabels(entry.getKey());
-            restoreStorage(entry.getKey());
-            error_code ec = new error_code();
-            add_torrent_params params = libtorrent.read_resume_data_ex(Vectors.bytes2byte_vector(entry.getValue()), ec);
-            if (ec.value() != 0) {
-                LOG.warning("Resume data for " + entry.getKey() + " is unreadable (" + ec.message() + "); skipped");
-                continue;
-            }
-            restoreNames(entry.getKey(), params);
-            error_code added = new error_code();
-            s.swig().add_torrent(params, added);
-            if (added.value() != 0) {
-                LOG.warning("Could not bring back " + entry.getKey() + ": " + added.message());
-                continue;
-            }
-            rememberTrackers(entry.getKey(), new AddTorrentParams(params).getTrackers());
+        for (Map.Entry<String, byte[]> entry : stored.entrySet()) addFromStore(s, entry.getKey(), entry.getValue());
+    }
+
+    /**
+     * One torrent back from what the store holds: its sidecars read, its resume data added as it
+     * is (no recheck), its renamed files put back first. The caller marks it {@link #restoring},
+     * so its add alert reads "Restored" and nothing that runs on an add runs. False, and said in
+     * the log, when it could not be brought back.
+     */
+    private boolean addFromStore(SessionManager s, String id, byte[] resume) {
+        restoreLabels(id);
+        restoreStorage(id);
+        error_code ec = new error_code();
+        add_torrent_params params = libtorrent.read_resume_data_ex(Vectors.bytes2byte_vector(resume), ec);
+        if (ec.value() != 0) {
+            LOG.warning("Resume data for " + id + " is unreadable (" + ec.message() + "); skipped");
+            return false;
         }
+        restoreNames(id, params);
+        error_code added = new error_code();
+        s.swig().add_torrent(params, added);
+        if (added.value() != 0) {
+            LOG.warning("Could not bring back " + id + ": " + added.message());
+            return false;
+        }
+        rememberTrackers(id, new AddTorrentParams(params).getTrackers());
+        return true;
     }
 
     /** The sidecar, if there is one; an unreadable one costs the labels, not the torrent. */
@@ -1179,6 +1188,75 @@ public final class LibtorrentEngine implements Engine {
                 throw new EngineException(tr("engine.error.resumeStayed", e.getMessage()), e);
             }
         }
+    }
+
+    /**
+     * Saves answered, by id, for a {@link #detach} waiting on its own torrent's: the alert thread
+     * counts one down once the blob is written (or libtorrent said it was not).
+     */
+    private final Map<String, java.util.concurrent.CountDownLatch> saveWaits = new ConcurrentHashMap<>();
+
+    /**
+     * Asks for the torrent's resume data with the disk cache flushed and waits for it, bounded as
+     * {@link #stop} is, so what is kept is the torrent as it is now: the periodic blob can be two
+     * minutes old, and pieces it does not know of would be downloaded again. The store then holds
+     * everything; it is read, and the torrent removed as {@link #remove} does.
+     */
+    @Override
+    public synchronized Detached detach(String id) throws EngineException {
+        SessionManager s = running();
+        TorrentHandle handle = find(s, id);
+        if (handle == null) throw new EngineException(tr("engine.error.noSuchTorrent", id));
+        String name = nameOf(handle);
+        int queue = handle.status().queuePosition();
+        java.util.concurrent.CountDownLatch saved = new java.util.concurrent.CountDownLatch(1);
+        saveWaits.put(id, saved);
+        try {
+            requestSave(handle, false, true);
+            if (!saved.await(STOP_FLUSH_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS))
+                LOG.warning("Resume data for " + id + " did not come in time; the undo keeps the last one written");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            saveWaits.remove(id);
+        }
+        byte[] resume;
+        byte[] labelBytes;
+        byte[] storageBytes;
+        try {
+            resume = store.load(id).orElseThrow(() -> new EngineException(tr("engine.error.noUndoData", name)));
+            labelBytes = store.loadLabels(id).orElse(null);
+            storageBytes = store.loadStorage(id).orElse(null);
+        } catch (IOException e) {
+            throw new EngineException(tr("engine.error.noUndoData", name), e);
+        }
+        remove(id, false);
+        return new Detached(id, name, resume, labelBytes, storageBytes, queue);
+    }
+
+    /** Writes the detached torrent back into the store and adds it from there, as at start. */
+    @Override
+    public synchronized void reattach(Detached torrent) throws EngineException {
+        SessionManager s = running();
+        String id = torrent.id();
+        if (find(s, id) != null) throw new EngineException(tr("engine.error.alreadyBack", torrent.name()));
+        synchronized (store) {
+            removed.remove(id);
+            try {
+                store.save(id, torrent.resume());
+                if (torrent.labels().length > 0) store.saveLabels(id, torrent.labels());
+                if (torrent.storage().length > 0) store.saveStorage(id, torrent.storage());
+            } catch (IOException e) {
+                throw new EngineException(tr("engine.error.couldNotReattach", torrent.name(), e.getMessage()), e);
+            }
+        }
+        restoring.add(id);
+        if (!addFromStore(s, id, torrent.resume())) {
+            restoring.remove(id);
+            throw new EngineException(tr("engine.error.couldNotReattach", torrent.name(), ""));
+        }
+        TorrentHandle back = find(s, id);
+        if (back != null && torrent.queuePosition() >= 0) back.queuePositionSet(torrent.queuePosition());
     }
 
     @Override
@@ -2739,10 +2817,18 @@ public final class LibtorrentEngine implements Engine {
         private void onSaved(SaveResumeDataAlert alert) {
             pendingSaves.decrementAndGet();
             write(alert.params());
+            savedFor(alert.params().getInfoHashes().getBest().toHex());
+        }
+
+        /** A detach waiting on this torrent's save hears it is done. */
+        private void savedFor(String id) {
+            java.util.concurrent.CountDownLatch waiting = saveWaits.get(id);
+            if (waiting != null) waiting.countDown();
         }
 
         private void onSaveFailed(SaveResumeDataFailedAlert alert) {
             pendingSaves.decrementAndGet();
+            if (alert.handle().isValid()) savedFor(id(alert.handle()));
             // "Resume data not modified" is the normal answer to an only-if-modified request.
             if (alert.error().isError()) {
                 LOG.fine("Resume data not written for " + alert.handle().infoHash() + ": " + alert.message());

@@ -1079,6 +1079,16 @@
     -fx-cursor: hand;
 }
 
+/* Undo, after the message that said what was done: the accent, a link to click. */
+.status-bar .status-undo {
+    -fx-text-fill: -color-accent-fg;
+    -fx-cursor: hand;
+}
+
+.status-bar .status-undo:hover {
+    -fx-underline: true;
+}
+
 .status-bar .status-message.status-warning,
 .message-log-text.message-log-warning {
     -fx-text-fill: -color-warning-fg;

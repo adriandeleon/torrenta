@@ -7,6 +7,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Undo.** Remove (keeping the files), Set Location, a category and tags can be taken back: the
+  status bar offers Undo for ten seconds after each, and Ctrl+Z (Torrent → Undo) takes back the
+  last ten for ten minutes. A removed torrent comes back exactly as it was, with its category,
+  tags, place in the queue and share limit, and without a recheck. Removing with the files stays
+  final.
+
 - **Saved views.** Type a filter in the omnibox (`state:seeding ratio<1 added<30d`, say), press
   Ctrl+S (View → Save Filter as View…) and name it: it joins a Views section at the top of the
   sidebar with a live count, and choosing it filters the list as the query does, together with

@@ -35,7 +35,7 @@ selected torrent, `select-first`, `message-log` / `message-log:<query>` (the sta
   `overview-diagnosis=`, `overview-pieces=`, `overview-graph=`, `overview-facts=` after the shot;
   every capture prints `status-bar=`), `remedy` / `remedy:<NAME>` to press the diagnosis card's first remedy or a named one (`SKIP_FILE`
   …), waiting for a card that offers it (prints `remedy-pressed=`),
-  `export-to:<folder>` for Export .torrent past its native chooser, `save-view:<name>` (Save Filter as View on the omnibox's query, `~` for a space), `pick-view:<n>` (the n-th saved view), `rename:<name>` (`~` for a
+  `export-to:<folder>` for Export .torrent past its native chooser, `save-view:<name>` (Save Filter as View on the omnibox's query, `~` for a space), `pick-view:<n>` (the n-th saved view), `remove-confirmed` (Remove on the selection, its question answered yes) and `undo-after:<ms>` (Shortcut+Z that much later; an `undo=` line first), `rename:<name>` (`~` for a
   space) to fill and confirm the Rename dialog, `files-rename:<row>:<name>` for a Files-tab row,
   `web-seeds-add:<urls>` (`~` between URLs) and `web-seed-remove:<row>` for the Trackers tab's web
   seeds (a `web-seeds=` line, with `editable=`, while that tab shows),
@@ -404,6 +404,18 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   a restart of an unfinished torrent reads them again. The RAR fixtures in the test resources
   were built to the format by hand and checked with unrar (`unrar lt` calls them encrypted, `t`
   passes the plain ones); there is no RAR creator here.
+- **Undo takes back Remove (its files kept), Set Location, a category and tags** (`ui.UndoStack`:
+  the last ten, the status bar's Undo for ten seconds, Shortcut+Z for ten minutes, Torrent → Undo).
+  Each is an `onTorrentsUndoable` action that hands back its inverse. A removal goes through
+  `Engine.detach`/`reattach` (`Capability.UNDO_REMOVE`, libtorrent's): detach asks for resume data
+  with the disk cache flushed and waits for that torrent's own answer (`saveWaits`, bounded as
+  `stop()` is), since the periodic blob can be two minutes old; reattach writes blob and sidecars
+  back and adds through `addFromStore`, the path `restore()` uses, so it reads "Restored", run-on-
+  added does not fire, and there is no recheck (`aDetachedTorrentComesBackAsItWasWithoutARecheck`
+  changes a byte while it is out, and it stays complete). The detached torrent is held in memory
+  only: the blob leaves the store at once, so a quit ends the undo rather than a crash bringing the
+  torrent back. Rename is not undoable: the window cannot tell a given name from the torrent's own.
+  Shortcut+Z is a scene filter that stands aside in a text field, which has an undo of its own.
 - **A remote engine is a second `Engine`, and the window hides what it lacks.** `Engine.capabilities()`
   is valid after `start()` (a daemon's depends on its RPC version); `MainWindow.applyCapabilities`
   runs in `engineReady` and sets one `BooleanProperty` per capability that the gated commands'

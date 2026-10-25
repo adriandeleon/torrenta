@@ -101,6 +101,12 @@ public final class TorrentStore {
         }
     }
 
+    /** One torrent's blob, if it is stored. */
+    public synchronized Optional<byte[]> load(String id) throws IOException {
+        Path file = fileFor(id, SUFFIX);
+        return Files.isRegularFile(file) ? Optional.of(Files.readAllBytes(file)) : Optional.empty();
+    }
+
     public synchronized boolean contains(String id) {
         return Files.isRegularFile(fileFor(id, SUFFIX));
     }
