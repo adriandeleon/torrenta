@@ -318,6 +318,10 @@ public final class LibtorrentEngine implements Engine {
         try {
             connectivity.set(Connectivity.NONE.dht(engineSettings.protocol().dht()));
             s = new SessionManager();
+            // Listening before starting: the session opens its listen sockets as it starts, and a
+            // listen_failed posted then was lost to a listener added afterwards (a seeder that
+            // never listened, with neither answer recorded).
+            s.addListener(new Listener());
             s.start(new SessionParams(toPack(engineSettings)));
         } catch (LinkageError e) {
             // The JNI static initialiser wraps a failed System.load in a LinkageError whose own
@@ -325,7 +329,6 @@ public final class LibtorrentEngine implements Engine {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             throw new EngineException(tr("engine.error.load", cause.getMessage()), e);
         }
-        s.addListener(new Listener());
         session = s;
         // The counters' places in a stats alert are the library's to say, and asking is native.
         counterIndex = Counter.resolve();
