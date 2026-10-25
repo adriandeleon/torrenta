@@ -74,7 +74,7 @@ to try one on purpose).
 | Detail | `TorrentDetail` (general, files with their piece range, peers, trackers, pieces, per-piece availability, web seeds) from `Engine.detail(id)`; `ui.Diagnosis` (why it is not moving + remedies; first after an error, a wanted archive that asks for a password, Skip or Remove), `OverviewText`, `PieceStrip`, `Sparkline`; `engine.ArchiveProbe` (pure: ZIP, RAR 4/5, 7z encryption from the first 64 KiB, a 7z's last too; `Reading` gathers them from pieces) and `TorrentDetail.encryptedArchives`; `setFilePriority`, `renamePath` (`FileRenames.plan`/`problem`), `addTrackers`, `removeTracker`, `webSeeds`/`addWebSeeds`/`removeWebSeed` (`WebSeeds`: an http(s) URL with a host, `fresh` against what the torrent has; `Capability.WEB_SEEDS` to edit); `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
 | Engine settings | `EngineSettings` (engine-neutral record; `listenInterfaces()` is the tested string), `Settings.engineSettings()` clamps the `connection.*` and `proxy.*` keys, `LibtorrentEngine.toPack` maps onto `settings_pack`; applied at start (`SessionParams`) and live (`applySettings`) | `com.torrenta.engine`, `store`, `.libtorrent` |
 | Binding | `net.InterfaceWatch` (the bound interface: there, up, its addresses; read every 5 s in the poll), `Engine.rebind`, `Connectivity.externalAddress` (`external_ip_alert`), `ui.NetworkStatus.port(…, bound)`; the leak check: `net.LeakCheck.verdict` (pure: Protected, Exposed, Halted, Unbound, Unknown), `net.ExitCheck` (opt-in, two GETs to the person's address-echo URL, one from the bound address), `ui.LeakView` (pill, sentence, the three addresses), `LeakCard` (the shield pill's card), `ExposurePause` (`connection.pauseWhenExposed`) | `com.torrenta.net`, `engine`, `ui` |
-| IP filter | `IpRange` (literals only, never resolves), `Blocklist` (pure parser for .p2p/.dat/CIDR/plain), `net.BlocklistFetch` (gzip by magic), `ui.IpFilterController` (cache, schedule, bans → `Engine.setIpFilter`), `peer_blocked` alerts counted | `com.torrenta.engine`, `net`, `ui` |
+| IP filter | `IpRange` (literals only, never resolves), `Blocklist` (pure parser for .p2p/.dat/CIDR/plain), `net.BlocklistFetch` (gzip by magic), `session.IpFilterController` (cache, schedule, bans → `Engine.setIpFilter`; the session applies it at start and every hour), `peer_blocked` alerts counted | `com.torrenta.engine`, `net`, `session` |
 | Watch folders | `WatchFolder` (entry + pure rules: destination, request, names, `.magnet` lines, magnet id, `Growth`), `WatchFolders` (the service: `configure`, `start`, `stop`, `poll`), `store.WatchFolderStore` (`watch-folders.json`), `ui.WatchFolderDialog`, Settings → Watch folders | `com.torrenta.engine`, `store`, `ui` |
 | Automation | `automation.EventCommand` (pure: `tokens` splits like a shell, `substitute` fills qBittorrent's `%N %L %G %F %R %D %C %Z %T %I %J %K %%` per token, `subject` from a `Torrent` + `TorrentDetail`), `Automation` (the service: `plan` is the rule, `handle(event)` runs on a virtual thread, `Subprocess` with a 10-min ceiling, outcomes back as events), `Notifier` + `Notifiers.forPlatform` (`notify-send` / `osascript` / `toast.ps1` through PowerShell, text as arguments), `AutomationSettings` from `Settings.automation()`; `EngineEvent.Kind` says which events count | `com.torrenta.automation` |
 | Search | `search.SearchProvider` (name + blocking `search(query, category)` throwing `SearchException`), `SearchResult` (sealed `Link`: `Magnet`/`TorrentUrl`; the hash is read off a magnet; `identity()` is hash else link), `SearchCategory` (Newznab numbers), `ResultRanker` (pure: dedupe keeps the better-seeded copy, rank by seeds → query coverage → date → name), `SearchService` (virtual thread per provider, 20 s each, one request per 2 s per provider through a `Ticker`, answers cached for 5 min (`fresh`), `SearchOutcome` with per-provider failures), `TorznabEndpoint` (+ `problem(url)`, the dialog's rule), `TorznabProvider` (`t=caps`/`t=search`, StAX, no entities); `store.SearchProviderStore` (`search-providers.json`; synced without the keys, `sync.SyncSearch`); `ui.SearchProviderDialog`, Settings → Search. Declarative: `Definition` (the file, parsed and validated with the key at fault in `DefinitionException`), `DeclarativeProvider` (the one generic provider: `url`, `extract`, pure), `JsonExtractor` (tree + JSON-pointer paths), `HtmlParser` + `HtmlNode` + `Selector` (the lenient parser and the small CSS subset, no jsoup), `SizeText`/`DateText`, `SearchHttp` (the shared GET); `store.DefinitionStore` (`search-providers/<id>.json`, `refresh()` by size+mtime, `installExamples()` from `search/examples/index.txt`); `search.disabled` in settings (synced); `docs/search-providers.md` is the format | `com.torrenta.search`, `store`, `ui` |
@@ -89,7 +89,7 @@ to try one on purpose).
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
 | Remote engine | `TransmissionEngine` over Transmission's RPC (`RpcClient`: POST JSON, the 409 session-id handshake, basic auth; `Json` tree over jackson-core streaming; `Bencode` reads a `.torrent` for `inspect`; `TransmissionLabels` puts the category in a `category:` label); `Engine.Capability`/`Capabilities` say what an engine can do, `ui.CapabilityRules` is the pure rule the window hides by; `EngineProfile` (local or remote, URL, user, password) in `store.ProfileStore` (`profiles.json`, owner-only, never synced), `engine.profile` picks the next start's; Settings → Engine, `ui.EngineProfileDialog`; `MainWindow.startEngine/switchProfile` build the engine through App's `EngineFactory` | `com.torrenta.engine.transmission`, `engine`, `store`, `ui` |
-| Session | `Session` (no JavaFX: the poll thread, `Poll` to listeners, share limits, the speed refresh; `Host` for what the owner hears); the window is a listener | `com.torrenta.session` |
+| Session | `Session` (no JavaFX: the poll thread, `Poll` to listeners, share limits, the speed refresh, the watch folders, the RSS service and its rules, the IP filter; `Host` for what the owner hears and the adds it still screens); `IpFilterController`; the window is a listener | `com.torrenta.session` |
 | Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
 | i18n | Termina's: `Messages.tr(key)` / `tr(key, args…)` (MessageFormat in the active locale), English `messages.properties` as base and fallback, `messages_<de|es|fr|it|pt>.properties` as overlays, UTF-8 through `getResourceAsStream`; `ui.language` (`system` by default) chosen in `App.start` after the settings load, before any window, applied on restart; a missing key shows itself and is logged once | `com.torrenta.i18n` |
 
@@ -112,8 +112,24 @@ detail pane's immediate fetch) so it never overlaps a poll. A listener or a poll
 logged and the next poll still runs: a `scheduleAtFixedRate` task that throws is never run again,
 which used to stop the window's polling for good. `SessionTest` fails on any `javafx.` under
 `com.torrenta.session`, and drives the session with an `Engine` made by `java.lang.reflect.Proxy`
-(the few calls it makes, anything else refused). Still the window's, to move next: the engine's
-start and switch, watch folders, RSS rules, the IP filter, automation, statistics, the inputs.
+(the few calls it makes, anything else refused). The second step moved the watch folders, the
+RSS service with its rules, and the IP filter (`session.IpFilterController`, the class unchanged):
+`open()` starts the feeds, which need no engine; `start(engine)` the poll, the IP filter (from disk
+first) and the watch folders; `stop()` ends the poll and the watching; `close()` the feeds too. An
+add without a dialog is still the window's to screen (`Host.add`, its `screenedAdd`), and an RSS
+rule's request is the window's to build (`Host.ruleRequest`, `RuleAdd` with the Add dialog's
+defaults); both move with the add pipeline, which headless needs. The third step moved the
+engine's life: `Session.startEngine(profile)` builds it through the `EngineFactory` (App's
+`createEngine`), tells the host `engineCreated` (to listen from its first event) and starts it on
+an `engine-start` thread, then `start`s it and says `engineReady`, or `engineFailed`;
+`switchTo(profile)` stops the poll and the watcher, stops the old engine on a virtual thread and
+starts the next; `stopEngine()` is the quit. A generation counter stops an engine that finishes
+starting after a newer start was asked for (a switch while it was still connecting), and its
+failure says nothing; the window had that race too. The session polls from the moment an engine
+is up and the window takes it in `engineReady` on the FX thread a moment later, so
+`MainWindow.polled` draws only polls of `this.engine`, and `screenedAdd` asks the engine for its
+capabilities rather than the window's copy, which a watch folder's add can precede. Still the
+window's: the add pipeline, automation, statistics, the inputs.
 
 ## Releasing
 
@@ -310,8 +326,9 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   (`getBest()`, the v2 hash cut to 20 bytes) is neither `%I` nor `%J`; `TorrentDetail.General`
   carries both full hashes. Notifier scripts never see the text inline: `osascript` reads
   `argv`, `toast.ps1` its parameters.
-- **Watch folders are a thread of the window, not of the engine** (`engine.WatchFolders`, owned by
-  `MainWindow`, started in `engineReady`, stopped on hide, restarted by the Settings page): one
+- **Watch folders are a thread of the session, not of the engine** (`engine.WatchFolders`, owned by
+  `session.Session`, started in `start(engine)`, stopped with the poll, restarted by the Settings
+  page through `Session.restartWatching`): one
   `WatchService` thread plus a poll every minute as the safety net, every engine call on the
   watcher's own scheduler thread. A file is read once its size has held for two looks
   (`WatchFolder.Growth`), a second apart after an event; a file that is not a torrent is renamed
@@ -537,10 +554,12 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   `@AfterAll`; it is `@EnabledIf` the daemon and `transmission-create` are on the PATH.
 - **Profiles are machine-local secrets.** `profiles.json` is written owner-only where POSIX modes
   exist, `EngineProfile.toString()` never prints the password, `engine.*` is in `SyncKeys`'s local
-  prefixes. `App.createEngine` is the one place an engine is built; `MainWindow.switchProfile` stops
-  the poll, the watcher and the old engine (on a worker), empties the list and runs `startEngine`,
-  which ends in `engineReady` again; `engineUp` stays counted down, so a rule's add during the gap
-  sees `engine == null` and fails plainly.
+  prefixes. `App.createEngine` is the one place an engine is built (the session's `EngineFactory`);
+  `MainWindow.switchProfile` empties the list and asks `Session.switchTo`, which stops the poll, the
+  watcher and the old engine (on a worker) and starts the next, ending in `engineReady` again; the
+  session's `engineUp` stays counted down, so a rule's add during the gap sees no engine and fails
+  plainly. The capture action `switch-profile:<id>` switches; a remote profile at an address
+  nothing listens on fails at once with Retry.
 - **"Open" means a peer from outside reached the port, and nothing less.** `engine.Connectivity`
   is kept on the alert thread from `listen_succeeded`/`listen_failed` (TCP only), `portmap`/
   `portmap_error` (either transport mapping is enough), `incoming_connection` (an address on this
@@ -645,7 +664,7 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
 
 - **The RSS rules run on the fetch thread, under their own lock, after the merge and before the
   feed's listeners hear.** `RssService.finish` hands the articles new by identity to `runRules`
-  only when the switch is on; the downloader (the window's `downloadForRule`) waits on
+  only when the switch is on; the downloader (the session's `downloadForRule`) waits on
   `engineUp` because the feeds due at start are fetched before the engine is up, and a rule's
   failure is reported, not retried: the article is no longer new. The service stamps the feed's
   id on every article a source hands over (a stub's items had none, and the log line then had

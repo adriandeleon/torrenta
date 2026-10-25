@@ -12,7 +12,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.logging.Level;
@@ -96,7 +95,6 @@ import com.torrenta.os.Handlers;
 import com.torrenta.os.MacHandlers;
 import com.torrenta.rss.Article;
 import com.torrenta.rss.Feed;
-import com.torrenta.rss.FeedFetcher;
 import com.torrenta.rss.RssService;
 import com.torrenta.rss.RssStore;
 import com.torrenta.rss.Rule;
@@ -105,6 +103,7 @@ import com.torrenta.search.SearchProvider;
 import com.torrenta.search.SearchResult;
 import com.torrenta.search.TorznabEndpoint;
 import com.torrenta.search.TorznabProvider;
+import com.torrenta.session.IpFilterController;
 import com.torrenta.session.Session;
 import com.torrenta.store.DefinitionStore;
 import com.torrenta.store.LabelStore;
@@ -265,7 +264,6 @@ public final class MainWindow {
     /** The definition problems already said in the log, so a broken file is reported once. */
     private final Set<String> reportedDefinitionProblems = new java.util.HashSet<>();
 
-    private WatchFolders watcher;
     /** Runs the person's commands and shows notifications; made with the engine in {@link #listenTo}. */
     private volatile Automation automation;
 
@@ -290,7 +288,6 @@ public final class MainWindow {
 
     private final UpdateService updates = new UpdateService();
     private final SettingsWindow settingsWindow;
-    private final IpFilterController ipFilter;
     private final MenuItem downloadUpdateItem = new MenuItem();
     private MenuBar menuBar;
     private final MenuItem skipUpdateItem = new MenuItem();
@@ -351,7 +348,6 @@ public final class MainWindow {
     /** The profile the engine is built from; the local one until App says otherwise. */
     private EngineProfile profile = EngineProfile.LOCAL;
 
-    private EngineFactory engineFactory;
     private final ProfileStore profiles;
     /** The engine could not start: the empty state says why and offers Retry and another profile. */
     private final javafx.beans.property.BooleanProperty engineDown = new javafx.beans.property.SimpleBooleanProperty();
@@ -364,8 +360,6 @@ public final class MainWindow {
     private VBox engineProblem;
     private Label engineProblemText;
     /** What the daemon's own blocklist fetch last said, for the IP filter page of a remote engine. */
-    private volatile String blocklistStatus = "";
-
     private final List<String> pendingInputs = new ArrayList<>();
     /** Opened when the engine is up: a rule's add from a feed fetched before then waits on it. */
     private final java.util.concurrent.CountDownLatch engineUp = new java.util.concurrent.CountDownLatch(1);
@@ -406,10 +400,7 @@ public final class MainWindow {
     public MainWindow(Stage stage, Settings settings, Path configDir, Consumer<String> opener) {
         this.stage = stage;
         this.settings = settings;
-        this.session = new Session(settings, new SessionHost());
-        session.addListener(this::polled);
         this.opener = opener;
-        this.ipFilter = new IpFilterController(settings, configDir);
         for (Engine.Capability c : Engine.Capability.values()) {
             capabilityOn.put(c, new javafx.beans.property.SimpleBooleanProperty(true));
         }
@@ -426,12 +417,10 @@ public final class MainWindow {
         definitionStore.load();
         this.rssStore = new RssStore(configDir);
         rssStore.load();
-        this.rss = new RssService(
-                rssStore,
-                new FeedFetcher(),
-                settings::rssRefreshMinutes,
-                r -> Thread.ofVirtual().name("rss-fetch").start(r),
-                Platform::runLater);
+        this.session =
+                new Session(settings, configDir, labels, watchStore, rssStore, Platform::runLater, new SessionHost());
+        session.addListener(this::polled);
+        this.rss = session.rss();
         stage.setTitle(AppInfo.NAME);
         // Before anything else touches the stage: initStyle throws once a stage has been shown, and
         // the setting is read here, once, which is why it applies on restart.
@@ -499,8 +488,7 @@ public final class MainWindow {
                 definitionStore,
                 () -> opener.accept(definitionStore.dir().toUri().toString()));
         settingsWindow.setRss(rss);
-        rss.setDownloader(this::downloadForRule, settings::rssAutoDownload, this::reportRule);
-        rss.start();
+        session.open();
         settingsWindow.setOnTestNotification(() -> {
             Automation a = automation;
             if (a != null) a.testNotification();
@@ -949,9 +937,7 @@ public final class MainWindow {
         shutDown = true;
         rememberDivider();
         rememberWindow();
-        stopPolling();
-        stopWatching();
-        rss.stop();
+        session.close();
         updates.shutdown();
         sync.shutdown();
     }
@@ -1591,7 +1577,7 @@ public final class MainWindow {
         if (settingsWindow.isShowing()
                 && !settingsWindow.definitionStatusForCapture().isEmpty())
             System.out.println("capture: definitions-status=" + settingsWindow.definitionStatusForCapture());
-        if (watcher != null) System.out.println("capture: watch=" + watchStatusText());
+        if (session.watcher() != null) System.out.println("capture: watch=" + watchStatusText());
         System.out.println("capture: view=" + view.id() + " focus=" + focusForCapture());
         System.out.println("capture: view-strip=" + viewStrip.describe());
         System.out.println("capture: search-tab=" + (searchShowing() ? "showing" : "hidden"));
@@ -1645,7 +1631,10 @@ public final class MainWindow {
         });
     }
 
-    /** FX thread. The engine has started; flush what was queued and begin polling. */
+    /**
+     * FX thread. The engine has started and the session polls it; the window takes it from here,
+     * and draws its polls from now ({@link #polled} ignores any before).
+     */
     public void engineReady(Engine engine) {
         this.engine = engine;
         this.engineDescription = engine.description();
@@ -1657,69 +1646,16 @@ public final class MainWindow {
         List<String> queued = List.copyOf(pendingInputs);
         pendingInputs.clear();
         queued.forEach(this::addInput);
-
-        session.start(engine);
         maybeCheckForUpdates();
-        // The filter from disk first, so no peer slips in while a download runs; the schedule next.
-        // An engine that fetches its own blocklist (a daemon) is told the URL instead.
-        if (capabilities.has(Engine.Capability.IP_FILTER)) {
-            ipFilter.setEngine(engine);
-            Thread.ofVirtual().name("ip-filter").start(() -> {
-                ipFilter.applyStored(this::reportIpFilter);
-                ipFilter.refreshIfDue(this::reportIpFilter);
-            });
-            session.schedule(() -> ipFilter.refreshIfDue(this::reportIpFilter), 1, 1, TimeUnit.HOURS);
-        } else if (capabilities.has(Engine.Capability.BLOCKLIST_URL) && settings.ipFilterEnabled()) {
-            // Only when a blocklist is wanted: the daemon's own state is not worth a status line otherwise.
-            refreshBlocklist();
-        }
-        watcher = new WatchFolders(engine, new WatcherHost());
-        restartWatching();
     }
 
     // ---- watch folders --------------------------------------------------------------------------
-
-    /** What the watcher needs; called on its thread, so everything FX-owned hops. */
-    private final class WatcherHost implements WatchFolders.Host {
-        @Override
-        public Path defaultDownloadDir() {
-            return settings.downloadDir();
-        }
-
-        @Override
-        public Optional<com.torrenta.engine.Category> category(String name) {
-            return labels.category(name);
-        }
-
-        @Override
-        public AddRequest.Storage storage(Path destination) {
-            return settings.storage(destination);
-        }
-
-        @Override
-        public void report(EngineEvent event) {
-            Platform.runLater(() -> {
-                log.add(event);
-                setStatus(event.message(), event.level());
-            });
-        }
-
-        @Override
-        public void statusChanged() {
-            Platform.runLater(settingsWindow::refreshWatchStatus);
-        }
-
-        @Override
-        public Torrent add(Engine engine, AddRequest request) throws EngineException {
-            return screenedAdd(engine, request);
-        }
-    }
 
     /** What the Settings page needs. */
     private final class WatchHost implements SettingsWindow.WatchHost {
         @Override
         public void watchFoldersChanged() {
-            restartWatching();
+            session.restartWatching();
         }
 
         @Override
@@ -1729,26 +1665,9 @@ public final class MainWindow {
     }
 
     private String watchStatusText() {
-        WatchFolders w = watcher;
+        WatchFolders w = session.watcher();
         return WatchFolders.statusText(
                 watchStore.entries().size(), w == null ? List.of() : w.missing(), w != null && w.isRunning());
-    }
-
-    /** Any thread. (Re)starts the watcher on the stored list; a no-op until the engine is up. */
-    private void restartWatching() {
-        WatchFolders w = watcher;
-        if (w == null) return;
-        List<com.torrenta.engine.WatchFolder> entries = watchStore.entries();
-        // start() waits for a poll in progress, which may be inside the engine: not on the FX thread.
-        Thread.ofVirtual().name("watch-folders-start").start(() -> {
-            w.start(entries);
-            Platform.runLater(settingsWindow::refreshWatchStatus);
-        });
-    }
-
-    private void stopWatching() {
-        WatchFolders w = watcher;
-        if (w != null) Thread.ofVirtual().name("watch-folders-stop").start(w::stop);
     }
 
     // ---- speed ----------------------------------------------------------------------------------
@@ -1780,6 +1699,46 @@ public final class MainWindow {
         @Override
         public void problem(EngineEvent event) {
             Platform.runLater(() -> setStatus(event.message(), event.level()));
+        }
+
+        @Override
+        public void engineCreated(Engine engine) {
+            listenTo(engine);
+        }
+
+        @Override
+        public void engineReady(Engine engine) {
+            Platform.runLater(() -> MainWindow.this.engineReady(engine));
+        }
+
+        @Override
+        public void engineFailed(EngineException failure) {
+            Platform.runLater(() -> MainWindow.this.engineFailed(failure));
+        }
+
+        @Override
+        public Torrent add(Engine engine, AddRequest request) throws EngineException {
+            return screenedAdd(engine, request);
+        }
+
+        @Override
+        public AddRequest ruleRequest(Rule rule, Article article) throws IOException {
+            return MainWindow.this.ruleRequest(rule, article);
+        }
+
+        @Override
+        public void report(EngineEvent event) {
+            reportFromWorker(event);
+        }
+
+        @Override
+        public void watchStatusChanged() {
+            Platform.runLater(settingsWindow::refreshWatchStatus);
+        }
+
+        @Override
+        public void ipFilterReport(String text) {
+            reportIpFilter(text);
         }
     }
 
@@ -1836,35 +1795,7 @@ public final class MainWindow {
     // ---- IP filter ------------------------------------------------------------------------------
 
     private void refreshIpFilter(boolean force) {
-        if (capabilities.has(Engine.Capability.IP_FILTER)) {
-            Thread.ofVirtual().name("ip-filter").start(() -> ipFilter.refresh(force, this::reportIpFilter));
-        } else if (capabilities.has(Engine.Capability.BLOCKLIST_URL)) {
-            refreshBlocklist();
-        }
-    }
-
-    /**
-     * Any thread. An engine that fetches its own blocklist is told the URL and the switch from the
-     * IP filter page, and asked to fetch now; what it says lands in the page's status line.
-     */
-    private void refreshBlocklist() {
-        Engine e = engine;
-        if (e == null) return;
-        String url = settings.ipFilterUrl();
-        boolean on = settings.ipFilterEnabled();
-        Thread.ofVirtual().name("blocklist").start(() -> {
-            String text;
-            try {
-                long ranges = e.setBlocklist(url, on);
-                text = !on || url.isBlank()
-                        ? tr("status.blocklist.off")
-                        : tr("status.blocklist.applied", ranges < 0 ? 0 : ranges, ranges < 0 ? 0 : 1);
-            } catch (EngineException ex) {
-                text = tr("status.blocklist.failed", ex.getMessage());
-            }
-            blocklistStatus = text;
-            reportIpFilter(text);
-        });
+        session.refreshIpFilter(force);
     }
 
     private void reportIpFilter(String text) {
@@ -1875,8 +1806,8 @@ public final class MainWindow {
     }
 
     private String ipFilterStatusText() {
-        if (capabilities.lacks(Engine.Capability.IP_FILTER)) return blocklistStatus;
-        IpFilterController.Status s = ipFilter.status();
+        if (capabilities.lacks(Engine.Capability.IP_FILTER)) return session.blocklistStatus();
+        IpFilterController.Status s = session.ipFilter().status();
         long blocked = engine == null ? 0 : engine.blockedPeers();
         if (s.loadedAt() == 0) return s.note().isEmpty() ? tr("status.ipFilter.nothingLoaded") : s.note();
         return tr(
@@ -2048,13 +1979,9 @@ public final class MainWindow {
 
     // ---- the engine's life ----------------------------------------------------------------------
 
-    /** Builds the engine for a profile; App's, since the stores and the settings are its to hand over. */
-    public interface EngineFactory {
-        Engine create(EngineProfile profile);
-    }
-
-    public void setEngineFactory(EngineFactory factory) {
-        this.engineFactory = factory;
+    /** How the session builds an engine for a profile; App's, since the stores and the settings are its. */
+    public void setEngineFactory(Session.EngineFactory factory) {
+        session.setEngineFactory(factory);
     }
 
     /** The profile in use; the local engine's until {@link #startEngine} says otherwise. */
@@ -2063,55 +1990,35 @@ public final class MainWindow {
     }
 
     /**
-     * FX thread. Builds the engine for {@code next} and starts it on a worker (loading a native
-     * library or reaching a daemon takes longer than a frame should wait); the status bar says so
-     * meanwhile and the title names a remote profile. {@link #engineReady} or {@link #engineFailed}
-     * follows on the FX thread.
+     * FX thread. The session builds the engine for {@code next} and starts it on a thread of its
+     * own (loading a native library or reaching a daemon takes longer than a frame should wait);
+     * the status bar says so meanwhile and the title names a remote profile. {@link #engineReady}
+     * or {@link #engineFailed} follows on the FX thread.
      */
     public void startEngine(EngineProfile next) {
-        if (engineFactory == null) throw new IllegalStateException("no engine factory");
+        engineStarting(next);
+        session.startEngine(next);
+    }
+
+    /** FX thread: what the window says while an engine for {@code next} comes up. */
+    private void engineStarting(EngineProfile next) {
         profile = next;
         applyTitle();
         showEngineProblem(null);
         setStatus(
                 next.isLocal() ? tr("status.starting") : tr("status.connecting", next.displayName(), next.hostLine()));
-        Engine fresh;
-        try {
-            fresh = engineFactory.create(next);
-        } catch (RuntimeException e) {
-            engineFailed(new EngineException(e.getMessage() == null ? e.toString() : e.getMessage(), e));
-            return;
-        }
-        listenTo(fresh);
-        Thread starter = new Thread(
-                () -> {
-                    try {
-                        fresh.start();
-                        Platform.runLater(() -> engineReady(fresh));
-                    } catch (EngineException e) {
-                        Platform.runLater(() -> engineFailed(e));
-                    } catch (RuntimeException e) {
-                        LOG.log(java.util.logging.Level.WARNING, "The engine failed to start", e);
-                        Platform.runLater(() -> engineFailed(
-                                new EngineException(e.getMessage() == null ? e.toString() : e.getMessage(), e)));
-                    }
-                },
-                "engine-start");
-        starter.setDaemon(true);
-        starter.start();
     }
 
     /** Any thread, from App.stop after the poll: stops the engine in use, if one came up. */
     public void stopEngine() {
-        Engine e = engine;
         engine = null;
-        if (e != null) e.stop();
+        session.stopEngine();
     }
 
     /**
      * FX thread. Another profile was chosen: remembered for the next start, and the engine is
      * replaced in place when it is not the one running. The list empties while the new one comes
-     * up; the poll, the watcher and the old engine stop first, on their own threads.
+     * up; the session stops the poll, the watcher and the old engine first, on their own threads.
      */
     private void switchProfile(EngineProfile next) {
         settings.setEngineProfile(next.id());
@@ -2121,20 +2028,16 @@ public final class MainWindow {
             setStatus(tr("status.profileInUse", next.displayName()));
             return;
         }
-        Engine old = engine;
         engine = null;
         engineDescription = "";
-        stopPolling();
-        stopWatching();
-        watcher = null;
         fetchWatch = null;
         long now = System.currentTimeMillis() / 1000;
         rows.apply(List.of(), now);
         refreshSidebar(List.of());
         detail.clear();
         showRates(Engine.Rates.ZERO, 0);
-        if (old != null) Thread.ofVirtual().name("engine-stop").start(old::stop);
-        startEngine(next);
+        engineStarting(next);
+        session.switchTo(next);
     }
 
     /** FX thread. A list of the profiles to pick from; the choice switches at once. */
@@ -2343,7 +2246,7 @@ public final class MainWindow {
         // engine cannot stop on metadata (a daemon); then it is checked while it runs.
         boolean stop = mode != UnsafeContent.ADD
                 && request.stopCondition() == AddRequest.StopCondition.NONE
-                && capabilities.has(Engine.Capability.STOP_CONDITION);
+                && e.capabilities().has(Engine.Capability.STOP_CONDITION);
         Torrent added = e.add(stop ? request.withStopCondition(AddRequest.StopCondition.METADATA_RECEIVED) : request);
         if (before.contains(added.id())) return added;
         String mark = new UnsafeContent.Pending(mode, stop && !request.startPaused()).format();
@@ -2844,6 +2747,8 @@ public final class MainWindow {
     /** Poll thread: one poll of the session's, drawn into the window and whatever it watches. */
     private void polled(Session.Poll poll) {
         Engine engine = poll.engine();
+        // The session polls from the moment the engine is up; the window draws from engineReady.
+        if (engine != this.engine) return;
         List<Torrent> snapshot = poll.torrents();
         Engine.Rates current = poll.rates();
         long nowSeconds = poll.nowSeconds();
@@ -4864,27 +4769,11 @@ public final class MainWindow {
      * with the rule's save path, category and paused choice and the rest of the defaults; the
      * engine's refusal is the reason thrown.
      */
-    private void downloadForRule(Rule rule, Article article) throws IOException {
-        // The feeds due at start are fetched before the engine is up; the add waits for it, bounded.
-        try {
-            engineUp.await(60, TimeUnit.SECONDS);
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-        }
-        Engine e = engine;
-        if (e == null) throw new IOException(tr("status.engineNotRunning"));
+    /** The fetch thread: what a rule adds for an article, with the add dialog's defaults. */
+    private AddRequest ruleRequest(Rule rule, Article article) throws IOException {
         AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
         Optional<Path> categoryFolder = labels.category(rule.category()).flatMap(Category::path);
-        try {
-            screenedAdd(e, RuleAdd.request(rule, source, addDefaults(), categoryFolder));
-        } catch (EngineException ex) {
-            throw new IOException(ex.getMessage() == null ? ex.toString() : ex.getMessage(), ex);
-        }
-    }
-
-    /** The fetch thread: a rule's add, or its failure, into the log and the status bar. */
-    private void reportRule(String message, boolean failed) {
-        reportFromWorker(EngineEvent.session(failed ? EngineEvent.Level.WARNING : EngineEvent.Level.INFO, message));
+        return RuleAdd.request(rule, source, addDefaults(), categoryFolder);
     }
 
     /**
