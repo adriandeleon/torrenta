@@ -86,6 +86,7 @@ import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.WatchFolders;
+import com.torrenta.net.InterfaceWatch;
 import com.torrenta.net.TorrentFetch;
 import com.torrenta.os.Badge;
 import com.torrenta.os.BadgeState;
@@ -958,7 +959,8 @@ public final class MainWindow {
         return "port=\"" + (portStatus.isVisible() ? portStatus.getText() : "") + "\" dot=" + dot + " dht=\""
                 + (dhtStatus.isVisible() ? dhtStatus.getText() : "") + "\" free=\""
                 + (freeStatus.isVisible() ? freeStatus.getText() : "") + "\" low="
-                + freeStatus.getStyleClass().contains("free-low");
+                + freeStatus.getStyleClass().contains("free-low") + " portTip=\""
+                + (portStatus.isVisible() ? portTip.getText().replace("\n", " / ") : "") + "\"";
     }
 
     /**
@@ -2792,7 +2794,8 @@ public final class MainWindow {
         TorrentDetail shown = fetchDetail(engine);
         Connectivity connectivity = engine.connectivity();
         long unproven = portClock.tick(connectivity, NetworkStatus.anyRunning(snapshot), nowSeconds);
-        Optional<NetworkStatus.Port> port = NetworkStatus.port(connectivity, unproven);
+        Optional<NetworkStatus.Port> port =
+                NetworkStatus.port(connectivity, unproven, watchInterface(engine, nowSeconds));
         Optional<String> dht = NetworkStatus.dht(connectivity, engine.stats().dhtNodes());
         Optional<NetworkStatus.Free> space = freeSpace(nowSeconds);
         pushTray(TrayStatus.of(snapshot, current));
@@ -5676,6 +5679,42 @@ public final class MainWindow {
         Path dir = settings.downloadDir();
         free = FreeSpace.disk(dir).map(d -> NetworkStatus.free(d, folderText(dir)));
         return free;
+    }
+
+    /** Poll thread: the bound interface as last read; null before the first look. */
+    private InterfaceWatch.State bound;
+
+    private long boundCheckedAt;
+
+    /**
+     * Poll thread: the interface the settings bind to, read every five seconds ({@link
+     * InterfaceWatch}). A binding that stops reaching anyone, or comes back, is said in the log
+     * and the status bar; the same binding coming up, going down or changing its addresses binds
+     * the engine again, since libtorrent does not notice an interface that returns. A daemon's
+     * network is not this machine's, so it is never looked at for one.
+     */
+    private InterfaceWatch.State watchInterface(Engine engine, long nowSeconds) {
+        if (capabilities.lacks(Engine.Capability.LISTEN_DETAILS)) return InterfaceWatch.State.UNBOUND;
+        if (bound != null && nowSeconds - boundCheckedAt < 5) return bound;
+        boundCheckedAt = nowSeconds;
+        InterfaceWatch.State before = bound;
+        InterfaceWatch.State now =
+                InterfaceWatch.of(settings.get(Settings.CONN_INTERFACE, ""), InterfaceWatch.system());
+        bound = now;
+        InterfaceWatch.change(before, now)
+                .ifPresent(change -> Platform.runLater(() -> {
+                    EngineEvent.Level level = change.warning() ? EngineEvent.Level.WARNING : EngineEvent.Level.INFO;
+                    log.add(EngineEvent.session(level, change.text()));
+                    setStatus(change.text(), level);
+                }));
+        if (before != null && before.bound().equals(now.bound()) && !before.equals(now)) {
+            try {
+                engine.rebind();
+            } catch (EngineException e) {
+                LOG.log(Level.FINE, "Rebinding after an interface change failed", e);
+            }
+        }
+        return now;
     }
 
     /** A folder as the welcome and the status bar write it: {@code ~} under home, off Windows. */

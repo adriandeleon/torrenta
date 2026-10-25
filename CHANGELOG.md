@@ -7,6 +7,13 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **A VPN that drops is said at once.** With Settings → Connection bound to an interface or an
+  address, Torrenta looks at it every five seconds: when it goes down or disappears, the port in
+  the status bar turns red ("tun0 missing · reaching no one") and the log says so; nothing goes
+  out another way in the meantime. When it comes back, or its address changes, Torrenta binds to
+  it again by itself. The port's tooltip names the interface and its addresses, and the address
+  peers see this machine as, once libtorrent has settled on one.
+
 - **The Add dialog says how the swarm looks before you add a magnet.** Once its file list is in,
   a Swarm line under the free space reads Healthy (three seeds and up), Thin (a seed or two, or no
   seed but every piece among the peers), Incomplete (no seed, and pieces of the chosen files that
