@@ -7,6 +7,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Four more filter keys**: `seeding>2d` (time spent seeding, in all), `eta<30m` (the time left
+  the ETA column shows), `seeds<3` (connected seeds) and `uploaded>10g` (sent over the torrent's
+  life). Durations take m, h, d or w; `added` keeps its h, d and w.
+
 - **The Add dialog says when a torrent's files deserve a look.** A card above the file tree names
   what it found: a program named like a video or a document (`Film.mkv.exe`, spaces before the
   last dot included), a name whose real extension is hidden by right-to-left characters, a
