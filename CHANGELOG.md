@@ -64,6 +64,9 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   still left by the system's own route: from the LAN address, and through the default route once
   the VPN interface had gone. Now every dialled peer leaves from the bound address or interface,
   and none is dialled when it is missing.
+- **The port's state is no longer missed at startup.** The engine heard libtorrent only once the
+  session had started, so the answer to opening the listening port (open, or refused because
+  another program has it) could come and go unheard, and the status bar kept checking.
 
 ## 0.2.0 — 2026-10-24
 
