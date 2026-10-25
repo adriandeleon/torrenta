@@ -59,6 +59,9 @@ final class SearchProviderDialog {
     private final Button save = new Button(tr("common.save"));
     private final Tester tester;
     private int categories;
+    /** The edited entry waits for a key that another machine has; it keeps waiting while the field is blank. */
+    private boolean keyNeeded;
+
     private TorznabEndpoint result;
 
     /** @param existing the entry being edited, or null for a new one */
@@ -154,13 +157,18 @@ final class SearchProviderDialog {
             apiKey.setText(existing.apiKey());
             enabled.setSelected(existing.enabled());
             categories = existing.categories();
+            keyNeeded = existing.keyNeeded();
             if (categories >= 0) status.setText(categoriesLine(existing.name(), categories));
+            if (keyNeeded) {
+                apiKey.setPromptText(tr("dialog.provider.apiKey.needed"));
+                apiKeyShown.setPromptText(apiKey.getPromptText());
+            }
         }
     }
 
     /** Blocks on a nested event loop, as a dialog does; empty when cancelled. */
     Optional<TorznabEndpoint> showAndWait() {
-        (url.getText().isBlank() ? url : name).requestFocus();
+        (url.getText().isBlank() ? url : keyNeeded ? apiKey : name).requestFocus();
         stage.showAndWait();
         return Optional.ofNullable(result);
     }
@@ -236,7 +244,8 @@ final class SearchProviderDialog {
     }
 
     private TorznabEndpoint endpoint() {
-        return new TorznabEndpoint(name.getText(), url.getText(), apiKey.getText(), enabled.isSelected(), categories);
+        return new TorznabEndpoint(
+                name.getText(), url.getText(), apiKey.getText(), enabled.isSelected(), categories, keyNeeded);
     }
 
     private static Label hint(String text) {

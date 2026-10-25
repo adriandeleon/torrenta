@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.List;
+import java.util.Map;
 
 import com.torrenta.search.Definition;
 import org.junit.jupiter.api.Test;
@@ -122,5 +123,30 @@ class DefinitionStoreTest {
         // The user deletes one: it comes back on the next start, as the README says.
         Files.delete(mine);
         assertEquals(List.of(mine), store.installExamples());
+    }
+
+    @Test
+    void syncReadsTheTextsAndPutsAndRemovesFiles(@TempDir Path dir) throws IOException {
+        DefinitionStore store = new DefinitionStore(dir);
+        store.installExamples();
+        Map<String, String> shipped = DefinitionStore.shippedTexts();
+        assertFalse(shipped.isEmpty(), "the examples are listed");
+        assertEquals(shipped, store.texts(), "a fresh folder is the shipped examples");
+        Files.writeString(store.dir().resolve("Not An Id.json"), "{}");
+
+        store.put("mine", good("mine", "Mine"));
+        assertEquals(good("mine", "Mine"), store.texts().get("mine"));
+        assertFalse(store.texts().containsKey("Not An Id"), "only names a definition can have");
+
+        String example = shipped.keySet().iterator().next();
+        store.put(example, good(example, "Edited"));
+        store.installExamples();
+        assertTrue(Files.exists(store.dir().resolve(example + ".json.example")));
+        store.remove(example);
+        assertEquals(shipped.get(example), store.texts().get(example), "an example comes back as shipped");
+        assertFalse(Files.exists(store.dir().resolve(example + ".json.example")), "and needs no copy beside it");
+
+        store.remove("mine");
+        assertFalse(Files.exists(store.dir().resolve("mine.json")));
     }
 }

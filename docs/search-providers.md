@@ -18,6 +18,11 @@ written over: the shipped text goes beside it as `<id>.json.example` instead (an
 when your file matches the shipped one). Delete an example and it comes back on the next start;
 switch it off in Settings to be rid of it.
 
+With settings sync on (Settings → Sync), the files travel with the settings: one you add, change or
+delete on one computer is added, changed or deleted on the others, a file at a time. An example
+you have not changed is not sent, since every computer has it already; turning an edited example
+back into the shipped text turns it back on the others too.
+
 ## The file
 
 ```json

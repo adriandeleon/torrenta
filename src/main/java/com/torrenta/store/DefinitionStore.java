@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.stream.Stream;
 
 import com.torrenta.search.Definition;
@@ -135,6 +136,52 @@ public final class DefinitionStore {
             }
         }
         return written;
+    }
+
+    /**
+     * Each file's text by id, as it is on disk now: what settings sync sends. Only the names a
+     * definition can have; a file that cannot be read is left out.
+     */
+    public synchronized Map<String, String> texts() {
+        Map<String, String> out = new TreeMap<>();
+        for (Path file : files()) {
+            String name = file.getFileName().toString();
+            if (!name.endsWith(SUFFIX)) continue;
+            String id = name.substring(0, name.length() - SUFFIX.length());
+            if (!Definition.ID.matcher(id).matches()) continue;
+            String text = readQuietly(file);
+            if (text != null) out.put(id, text);
+        }
+        return out;
+    }
+
+    /** The shipped examples' texts by id. */
+    public static Map<String, String> shippedTexts() {
+        Map<String, String> out = new TreeMap<>();
+        for (String name : exampleNames()) {
+            String text = example(name);
+            if (text != null && name.endsWith(SUFFIX))
+                out.put(name.substring(0, name.length() - SUFFIX.length()), text);
+        }
+        return out;
+    }
+
+    /** Writes {@code <id>.json}, as sync brings it; the next {@link #load} reads it. */
+    public synchronized void put(String id, String text) throws IOException {
+        if (!Definition.ID.matcher(id).matches()) throw new IOException("not a definition id: " + id);
+        write(dir.resolve(id + SUFFIX), text);
+        if (text.equals(shippedTexts().get(id))) Files.deleteIfExists(dir.resolve(id + SUFFIX + EXAMPLE_SUFFIX));
+    }
+
+    /**
+     * Removes {@code <id>.json}, as sync removes it; a shipped example gets its shipped text back
+     * instead, since that is what an example left out of the sync means.
+     */
+    public synchronized void remove(String id) throws IOException {
+        if (!Definition.ID.matcher(id).matches()) throw new IOException("not a definition id: " + id);
+        String shipped = shippedTexts().get(id);
+        if (shipped != null) put(id, shipped);
+        else Files.deleteIfExists(dir.resolve(id + SUFFIX));
     }
 
     /** The shipped examples' file names, from the index beside them. */

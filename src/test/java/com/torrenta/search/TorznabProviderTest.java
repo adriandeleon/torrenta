@@ -92,6 +92,17 @@ class TorznabProviderTest {
     }
 
     @Test
+    void aServerWhoseKeyIsOnAnotherMachineIsNotAsked() {
+        TorznabProvider waiting = new TorznabProvider(
+                new TorznabEndpoint("Prowlarr", base.resolve("/1/api").toString(), "", true, -1, true));
+        lastQuery.set("untouched");
+        SearchException e = assertThrows(SearchException.class, () -> waiting.search("debian", SearchCategory.ALL));
+        assertEquals(com.torrenta.i18n.Messages.tr("search.error.keyNeeded"), e.getMessage());
+        assertThrows(SearchException.class, waiting::capabilities);
+        assertEquals("untouched", lastQuery.get(), "no request was made");
+    }
+
+    @Test
     void capsSayWhoTheServerIsAndWhatItKnows() throws SearchException {
         TorznabProvider.Capabilities caps = prowlarr("secret").capabilities();
         assertEquals("Prowlarr", caps.title());
