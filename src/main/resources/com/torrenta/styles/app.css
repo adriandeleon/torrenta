@@ -1158,6 +1158,38 @@
     -fx-text-fill: -color-fg-muted;
 }
 
+/* The leak check (LeakView): a shield pill beside the port, coloured by the verdict, and its card
+   in the message log's chrome. Unchecked stays muted: it is not a warning, only not known. */
+.status-bar .leak-pill {
+    -fx-text-fill: -color-fg-muted;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 6;
+    -fx-padding: 1 8 1 6;
+    -fx-graphic-text-gap: 5;
+    -fx-cursor: hand;
+}
+
+.status-bar .leak-pill .icon-line { -fx-stroke: -color-fg-muted; }
+.status-bar .leak-pill.leak-protected { -fx-text-fill: -color-success-fg; }
+.status-bar .leak-pill.leak-protected .icon-line { -fx-stroke: -color-success-fg; }
+.status-bar .leak-pill.leak-exposed {
+    -fx-text-fill: -color-danger-fg;
+    -fx-border-color: -color-danger-emphasis;
+}
+.status-bar .leak-pill.leak-exposed .icon-line { -fx-stroke: -color-danger-fg; }
+.status-bar .leak-pill.leak-halted { -fx-text-fill: -color-warning-fg; }
+.status-bar .leak-pill.leak-halted .icon-line { -fx-stroke: -color-warning-fg; }
+
+.leak-card .leak-sentence {
+    -fx-text-fill: -color-fg-default;
+    -fx-padding: 0 4 0 4;
+}
+
+.leak-card .leak-sentence.leak-exposed { -fx-text-fill: -color-danger-fg; }
+.leak-card .leak-rows { -fx-padding: 2 4 2 4; }
+.leak-card .leak-value { -fx-text-fill: -color-fg-muted; }
+.leak-card .leak-value.leak-address { -fx-text-fill: -color-fg-default; -fx-font-family: monospace; }
+
 .message-log .message-log-footer {
     -fx-padding: 6 4 0 4;
 }
