@@ -89,6 +89,7 @@ to try one on purpose).
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
 | Remote engine | `TransmissionEngine` over Transmission's RPC (`RpcClient`: POST JSON, the 409 session-id handshake, basic auth; `Json` tree over jackson-core streaming; `Bencode` reads a `.torrent` for `inspect`; `TransmissionLabels` puts the category in a `category:` label); `Engine.Capability`/`Capabilities` say what an engine can do, `ui.CapabilityRules` is the pure rule the window hides by; `EngineProfile` (local or remote, URL, user, password) in `store.ProfileStore` (`profiles.json`, owner-only, never synced), `engine.profile` picks the next start's; Settings → Engine, `ui.EngineProfileDialog`; `MainWindow.startEngine/switchProfile` build the engine through App's `EngineFactory` | `com.torrenta.engine.transmission`, `engine`, `store`, `ui` |
+| Session | `Session` (no JavaFX: the poll thread, `Poll` to listeners, share limits, the speed refresh; `Host` for what the owner hears); the window is a listener | `com.torrenta.session` |
 | Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
 | i18n | Termina's: `Messages.tr(key)` / `tr(key, args…)` (MessageFormat in the active locale), English `messages.properties` as base and fallback, `messages_<de|es|fr|it|pt>.properties` as overlays, UTF-8 through `getResourceAsStream`; `ui.language` (`system` by default) chosen in `App.start` after the settings load, before any window, applied on restart; a missing key shows itself and is logged once | `com.torrenta.i18n` |
 
@@ -98,8 +99,21 @@ resume data (with the info dict), writes them on add, on metadata, on finish, ev
 modified, and on stop, and re-adds them on start. Removing a torrent deletes its blob.
 
 **Nothing on the FX thread calls the engine.** `App` starts it on a worker after the window is
-shown; `MainWindow` polls it once a second on its own thread and hands the FX thread an immutable
-list; `addInput` runs on a virtual thread. Inputs that arrive before the engine is up are queued.
+shown; `session.Session` polls it once a second on its own thread (`engine-poll`) and hands each
+poll to its listeners there, `MainWindow.polled` among them, which hands the FX thread an
+immutable list; `addInput` runs on a virtual thread. Inputs that arrive before the engine is up are
+queued.
+
+**The session is the window's toolkit-free half** (roadmap 1.2, item 1, in steps). `Session` owns
+the poll thread, the share limits and the minute's speed refresh; its `Host` hears a share limit
+done (`SEEDING_DONE` with the snapshot) and which speed pair is in force, on any thread, so the
+window hops. `schedule`/`execute` put work on the poll thread (the IP filter's hourly refresh, the
+detail pane's immediate fetch) so it never overlaps a poll. A listener or a poll that throws is
+logged and the next poll still runs: a `scheduleAtFixedRate` task that throws is never run again,
+which used to stop the window's polling for good. `SessionTest` fails on any `javafx.` under
+`com.torrenta.session`, and drives the session with an `Engine` made by `java.lang.reflect.Proxy`
+(the few calls it makes, anything else refused). Still the window's, to move next: the engine's
+start and switch, watch folders, RSS rules, the IP filter, automation, statistics, the inputs.
 
 ## Releasing
 
@@ -339,8 +353,8 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   a pure rule with the overnight case tested. Limits are KiB/s in settings and bytes/s in the
   pack; 0 is "none" on both sides.
 - **libtorrent's share limits pause nothing.** `share_ratio_limit` and `seed_time_limit` only rank
-  seeds for the queue (`seed_rank`); the pausing or removing is `ShareLimit.decide` in the window's
-  poll, once a second, against `Torrent.seedingTime` (`finished_duration`, so a torrent with files
+  seeds for the queue (`seed_rank`); the pausing or removing is `ShareLimit.decide` in the session's
+  poll (`Session.enforceShareLimits`), once a second, against `Torrent.seedingTime` (`finished_duration`, so a torrent with files
   left out counts). Active counts are `-1` for "no limit" in the pack; `0` would park every torrent.
   A torrent's own share limit is `torrent.<hash>.share` in the settings file (the `torrent.` prefix
   never syncs); its rate caps and counts are the handle's and travel in the resume data.

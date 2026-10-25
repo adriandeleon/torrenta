@@ -12,8 +12,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -107,6 +105,7 @@ import com.torrenta.search.SearchProvider;
 import com.torrenta.search.SearchResult;
 import com.torrenta.search.TorznabEndpoint;
 import com.torrenta.search.TorznabProvider;
+import com.torrenta.session.Session;
 import com.torrenta.store.DefinitionStore;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.ProfileStore;
@@ -134,7 +133,6 @@ import static com.torrenta.i18n.Messages.tr;
  */
 public final class MainWindow {
 
-    private static final long POLL_MS = 1000;
     private static final Logger LOG = Logger.getLogger(MainWindow.class.getName());
 
     private final Stage stage;
@@ -329,9 +327,7 @@ public final class MainWindow {
     private final java.util.concurrent.atomic.AtomicBoolean detailRefreshQueued =
             new java.util.concurrent.atomic.AtomicBoolean();
     /** The global share limit as the poll thread applies it; refreshed with the engine settings. */
-    private volatile ShareLimit globalShareLimit = ShareLimit.NONE;
     /** Per-torrent share limits as of the last poll, for the status sentences ("ratio 1.2 of 2"). */
-    private volatile java.util.Map<String, ShareLimit> shareOverrides = java.util.Map.of();
 
     /**
      * Set on the FX thread, read by the poll thread and workers: volatile, and copied to a local
@@ -374,7 +370,8 @@ public final class MainWindow {
     /** Opened when the engine is up: a rule's add from a feed fetched before then waits on it. */
     private final java.util.concurrent.CountDownLatch engineUp = new java.util.concurrent.CountDownLatch(1);
 
-    private ScheduledExecutorService poller;
+    /** The engine's poll, its share limits and its speed schedule, without the window (roadmap 1.2). */
+    private final Session session;
 
     /** The tray icon once one has come up, else null; set on the FX thread, read by the poll. */
     private volatile TorrentaTray tray;
@@ -409,6 +406,8 @@ public final class MainWindow {
     public MainWindow(Stage stage, Settings settings, Path configDir, Consumer<String> opener) {
         this.stage = stage;
         this.settings = settings;
+        this.session = new Session(settings, new SessionHost());
+        session.addListener(this::polled);
         this.opener = opener;
         this.ipFilter = new IpFilterController(settings, configDir);
         for (Engine.Capability c : Engine.Capability.values()) {
@@ -1644,18 +1643,12 @@ public final class MainWindow {
         showEngineProblem(null);
         applyTitle();
         engineUp.countDown();
-        globalShareLimit = settings.shareLimit();
         setStatus(engineDescription);
         List<String> queued = List.copyOf(pendingInputs);
         pendingInputs.clear();
         queued.forEach(this::addInput);
 
-        poller = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "engine-poll");
-            t.setDaemon(true);
-            return t;
-        });
-        poller.scheduleAtFixedRate(this::poll, 0, POLL_MS, TimeUnit.MILLISECONDS);
+        session.start(engine);
         maybeCheckForUpdates();
         // The filter from disk first, so no peer slips in while a download runs; the schedule next.
         // An engine that fetches its own blocklist (a daemon) is told the URL instead.
@@ -1665,13 +1658,11 @@ public final class MainWindow {
                 ipFilter.applyStored(this::reportIpFilter);
                 ipFilter.refreshIfDue(this::reportIpFilter);
             });
-            poller.scheduleAtFixedRate(() -> ipFilter.refreshIfDue(this::reportIpFilter), 1, 1, TimeUnit.HOURS);
+            session.schedule(() -> ipFilter.refreshIfDue(this::reportIpFilter), 1, 1, TimeUnit.HOURS);
         } else if (capabilities.has(Engine.Capability.BLOCKLIST_URL) && settings.ipFilterEnabled()) {
             // Only when a blocklist is wanted: the daemon's own state is not worth a status line otherwise.
             refreshBlocklist();
         }
-        // The schedule is checked every minute; a change of state applies the other pair.
-        poller.scheduleAtFixedRate(this::refreshLimits, 0, 60, TimeUnit.SECONDS);
         watcher = new WatchFolders(engine, new WatcherHost());
         restartWatching();
     }
@@ -1752,19 +1743,33 @@ public final class MainWindow {
 
     // ---- speed ----------------------------------------------------------------------------------
 
-    private void refreshLimits() {
-        Engine e = engine;
-        if (e == null) return;
-        try {
-            boolean alternative = e.refreshLimits(java.time.LocalDateTime.now());
+    /** What the session tells the window; any thread, so everything hops to the FX thread. */
+    private final class SessionHost implements Session.Host {
+        @Override
+        public void seedingDone(EngineEvent event, Torrent torrent, boolean removed) {
+            // The snapshot goes along: a removed torrent cannot be looked up for the placeholders.
+            Automation a = automation;
+            if (a != null) a.handle(event, torrent);
+            Platform.runLater(() -> {
+                log.add(event);
+                setStatus(event.message());
+                if (removed) forgetOverride(torrent.id());
+            });
+        }
+
+        @Override
+        public void limitsRefreshed(boolean alternative) {
             Platform.runLater(() -> {
                 altSpeedToggle.setText(alternative ? tr("status.altSpeed.on") : tr("status.altSpeed.off"));
                 altSpeedToggle.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("active"), alternative);
                 altSpeedOn = alternative;
                 if (altSpeedItem != null) altSpeedItem.setSelected(alternative);
             });
-        } catch (EngineException ex) {
-            Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
+        }
+
+        @Override
+        public void problem(EngineEvent event) {
+            Platform.runLater(() -> setStatus(event.message(), event.level()));
         }
     }
 
@@ -1891,11 +1896,11 @@ public final class MainWindow {
         if (engine == null) return;
         Engine e = engine;
         var current = settings.engineSettings();
-        globalShareLimit = current.queue().share();
+        session.settingsChanged(current);
         Thread.ofVirtual().name("engine-settings").start(() -> {
             try {
                 e.applySettings(current);
-                refreshLimits();
+                session.refreshLimits();
             } catch (EngineException ex) {
                 Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
             }
@@ -2110,7 +2115,6 @@ public final class MainWindow {
         engine = null;
         engineDescription = "";
         stopPolling();
-        poller = null;
         stopWatching();
         watcher = null;
         fetchWatch = null;
@@ -2827,9 +2831,12 @@ public final class MainWindow {
         e.consume();
     }
 
-    private void poll() {
-        Engine engine = this.engine;
-        if (engine == null) return;
+    /** Poll thread: one poll of the session's, drawn into the window and whatever it watches. */
+    private void polled(Session.Poll poll) {
+        Engine engine = poll.engine();
+        List<Torrent> snapshot = poll.torrents();
+        Engine.Rates current = poll.rates();
+        long nowSeconds = poll.nowSeconds();
         FetchWatch watch = fetchWatch;
         Engine.SwarmProbe fetch = watch == null ? null : watch.slot().get();
         if (fetch != null) {
@@ -2842,9 +2849,6 @@ public final class MainWindow {
                 Platform.runLater(() -> watch.dialog().showSwarm(swarm));
             }
         }
-        List<Torrent> snapshot = engine.torrents();
-        Engine.Rates current = engine.rates();
-        long nowSeconds = System.currentTimeMillis() / 1000;
         sessionHistory.add(nowSeconds, current.download(), current.upload());
         Set<String> present = new java.util.HashSet<>();
         for (Torrent t : snapshot) {
@@ -2859,7 +2863,6 @@ public final class MainWindow {
         torrentHistories.keySet().retainAll(present);
         // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
         com.torrenta.engine.SessionStats stats = statsWanted ? engine.stats() : null;
-        enforceShareLimits(engine, snapshot);
         screenPending(engine, snapshot);
         TorrentDetail shown = fetchDetail(engine);
         Connectivity connectivity = engine.connectivity();
@@ -2913,76 +2916,16 @@ public final class MainWindow {
      * it never overlaps a poll; requests made while one is queued share it.
      */
     private void refreshDetailNow() {
-        ScheduledExecutorService p = poller;
-        if (p == null || !detailWanted || detailId == null || !detailRefreshQueued.compareAndSet(false, true)) return;
-        try {
-            p.execute(() -> {
-                detailRefreshQueued.set(false);
-                Engine engine = this.engine;
-                TorrentDetail shown = engine == null ? null : fetchDetail(engine);
-                if (shown == null) return;
-                long nowSeconds = System.currentTimeMillis() / 1000;
-                Platform.runLater(() -> applyDetail(shown, nowSeconds));
-            });
-        } catch (java.util.concurrent.RejectedExecutionException e) {
-            detailRefreshQueued.set(false); // stopping: no more polls of any kind
-        }
-    }
-
-    /**
-     * Poll thread. libtorrent ranks seeds by the share limits but pauses nothing by them, so the
-     * rule is applied here, once a second: a finished torrent past its own or the global limit is
-     * paused, removed (with its files or without) or super seeded, and the log says so. A paused one no longer qualifies, so it is done once;
-     * resuming it by hand seeds it until the next tick, raising the limit seeds it for good.
-     */
-    private void enforceShareLimits(Engine engine, List<Torrent> snapshot) {
-        ShareLimit global = globalShareLimit;
-        java.util.Map<String, ShareLimit> overrides = settings.shareOverrides();
-        shareOverrides = overrides;
-        if (!global.limited() && overrides.isEmpty()) return;
-        for (Torrent t : snapshot) {
-            Optional<ShareLimit.Action> due = ShareLimit.decide(t, global, overrides.get(t.id()));
-            if (due.isEmpty()) continue;
-            // A synced setting can ask a daemon for super seeding, which it lacks; failing that
-            // every second would fill the log, so the limit does nothing there.
-            if (due.get() == ShareLimit.Action.SUPER_SEED && capabilities.lacks(Engine.Capability.SUPER_SEEDING))
-                continue;
-            String text;
-            try {
-                text = switch (due.get()) {
-                    case PAUSE -> {
-                        engine.pause(t.id());
-                        yield tr("log.shareLimit.paused", t.name());
-                    }
-                    case REMOVE -> {
-                        engine.remove(t.id(), false);
-                        yield tr("log.shareLimit.removed", t.name());
-                    }
-                    case REMOVE_DATA -> {
-                        engine.remove(t.id(), true);
-                        yield tr("log.shareLimit.removedData", t.name());
-                    }
-                    case SUPER_SEED -> {
-                        engine.setSuperSeeding(t.id(), true);
-                        yield tr("log.shareLimit.superSeeding", t.name());
-                    }
-                };
-            } catch (EngineException e) {
-                text = tr("log.shareLimit.failed", t.name(), e.getMessage());
-            }
-            String message = text;
-            boolean removed = due.get() == ShareLimit.Action.REMOVE || due.get() == ShareLimit.Action.REMOVE_DATA;
-            EngineEvent event =
-                    EngineEvent.of(EngineEvent.Kind.SEEDING_DONE, EngineEvent.Level.INFO, t.id(), t.name(), message);
-            // The snapshot goes along: a removed torrent cannot be looked up for the placeholders.
-            Automation a = automation;
-            if (a != null) a.handle(event, t);
-            Platform.runLater(() -> {
-                log.add(event);
-                setStatus(message);
-                if (removed) forgetOverride(t.id());
-            });
-        }
+        if (!detailWanted || detailId == null || !detailRefreshQueued.compareAndSet(false, true)) return;
+        boolean queued = session.execute(() -> {
+            detailRefreshQueued.set(false);
+            Engine engine = this.engine;
+            TorrentDetail shown = engine == null ? null : fetchDetail(engine);
+            if (shown == null) return;
+            long nowSeconds = System.currentTimeMillis() / 1000;
+            Platform.runLater(() -> applyDetail(shown, nowSeconds));
+        });
+        if (!queued) detailRefreshQueued.set(false); // stopping, or not started: no more polls of any kind
     }
 
     /** FX thread. A graph's window chip was chosen: remembered, and the other graph follows. */
@@ -3079,15 +3022,9 @@ public final class MainWindow {
      * torrents, and the sidebar would take that for the choices' entries having gone.
      */
     public void stopPolling() {
-        if (poller == null) return;
-        poller.shutdownNow();
         // A poll in flight finishes before the engine is stopped behind it; the engine's own lock
         // guards that too, this just keeps the quit orderly.
-        try {
-            poller.awaitTermination(3, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        session.stop();
     }
 
     // ---- commands -------------------------------------------------------------------------------
@@ -5566,8 +5503,7 @@ public final class MainWindow {
 
     /** The share limit in force for a torrent: its own, else the global one. */
     private ShareLimit shareLimitFor(Torrent t) {
-        ShareLimit own = shareOverrides.get(t.id());
-        return own != null ? own : globalShareLimit;
+        return session.shareLimitFor(t);
     }
 
     /**
