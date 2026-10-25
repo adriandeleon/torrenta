@@ -71,6 +71,14 @@ public final class WatchFolders implements AutoCloseable {
 
         /** The list of missing folders changed; the Settings page's status line wants to know. */
         default void statusChanged() {}
+
+        /**
+         * The add itself: the engine's, unless the application screens it first (the content
+         * check). A refusal is an {@link EngineException}, reported like any failed add.
+         */
+        default Torrent add(Engine engine, AddRequest request) throws EngineException {
+            return engine.add(request);
+        }
     }
 
     private final Engine engine;
@@ -326,7 +334,7 @@ public final class WatchFolders implements AutoCloseable {
             Path destination = entry.destination(host.defaultDownloadDir(), host.category(entry.category()));
             AddRequest request = entry.request(candidate.source(), destination, host.storage(destination));
             try {
-                Torrent added = engine.add(request);
+                Torrent added = host.add(engine, request);
                 present.add(added.id());
                 host.report(EngineEvent.info(added.id(), added.name(), tr("engine.watch.added", added.name(), where)));
             } catch (EngineException | RuntimeException e) {

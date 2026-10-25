@@ -14,6 +14,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   name promises a film and nothing else is there, a file named for a password or a codec. Red for
   danger, amber for a caution; Skip these files unticks them and keeps the rest. A program in a
   software torrent is not flagged, and a file you skip stops being reported.
+- **Adds without a dialog run the same check.** Watch folders, RSS rules, an article's Download
+  and Add without asking follow Settings → Adding torrents → Flagged files when adding without a
+  dialog: skip those files (the default), refuse the torrent, or add them anyway; the event log
+  says which, and what was found. A magnet has no file list yet, so it stops once its metadata is
+  in, is checked, and then starts, starts without the flagged files, or is removed before
+  anything was downloaded; a restart in between keeps it waiting.
 
 - **Settings sync carries the category names and tags.** A category or tag added on one computer
   appears on the others, and one deleted is deleted everywhere (torrents filed under it there let
