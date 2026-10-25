@@ -125,10 +125,18 @@ public final class Settings {
     /** A tray (menu-bar) icon with the rates and a menu; on by default, where the desktop has one. */
     public static final String UI_TRAY = "ui.tray";
     /**
-     * Which chord opens the command palette, by {@code ui.PaletteKey} id ({@code alt-x}, Editora's
-     * M-x, or {@code shortcut-shift-p}); the UI maps it and falls back.
+     * The palette's chord as the first releases chose it, {@code alt-x} or {@code shortcut-shift-p}.
+     * Read only as {@code keys.palette} when that line is absent (see {@link #keyBindings()}), and
+     * dropped by the first {@link #replaceKeyBindings}.
      */
     public static final String UI_PALETTE_KEY = "ui.paletteKey";
+    /**
+     * The user's key bindings, one line per command: {@code keys.recheck=Shortcut+Shift+K}, in
+     * {@code KeyCombination} notation. Termina's format; see {@link #keyBindings()}.
+     */
+    public static final String KEYS_PREFIX = "keys.";
+    /** A binding's value meaning "no chord at all", as against blank or absent, which is the default. */
+    public static final String UNBOUND = "none";
     /** Closing the window hides it behind the tray icon and keeps the torrents going; on by default. */
     public static final String UI_CLOSE_TO_TRAY = "ui.closeToTray";
     /** Register as the handler for .torrent files and magnet links at start; on by default. This machine's. */
@@ -552,13 +560,51 @@ public final class Settings {
         properties.setProperty(UI_STATE_COLORS, String.valueOf(on));
     }
 
-    /** The palette's chord id as written, trimmed; empty when unset. */
-    public String paletteKey() {
-        return properties.getProperty(UI_PALETTE_KEY, "").trim();
+    /**
+     * The user's key bindings, by command id with the prefix stripped: {@code recheck ->
+     * Shortcut+Shift+K}, or {@code recheck -> none} for a command the user has unbound. A command
+     * that is absent, or whose line is blank, keeps its default.
+     *
+     * <p>Strings rather than chords, because this class knows nothing of the toolkit. Nothing is
+     * validated here: the window resolves the whole table at once ({@code ui.Keybindings}), and a
+     * line that does not parse, names no command, or takes a chord another line already took is
+     * dropped there, clamped on read like every other setting.
+     *
+     * <p>{@code ui.paletteKey=shortcut-shift-p}, the first releases' palette choice, reads as {@code
+     * palette -> Shortcut+Shift+P} while there is no {@code keys.palette} line.
+     */
+    public Map<String, String> keyBindings() {
+        Map<String, String> bindings = new java.util.TreeMap<>();
+        for (String name : properties.stringPropertyNames()) {
+            if (!name.startsWith(KEYS_PREFIX) || name.length() == KEYS_PREFIX.length()) continue;
+            String value = properties.getProperty(name).trim();
+            if (!value.isEmpty()) bindings.put(name.substring(KEYS_PREFIX.length()), value);
+        }
+        if (!bindings.containsKey("palette")
+                && "shortcut-shift-p"
+                        .equalsIgnoreCase(
+                                properties.getProperty(UI_PALETTE_KEY, "").trim())) {
+            bindings.put("palette", "Shortcut+Shift+P");
+        }
+        return bindings;
     }
 
-    public void setPaletteKey(String id) {
-        properties.setProperty(UI_PALETTE_KEY, id);
+    /**
+     * Replaces every binding at once, so a rebind that takes a chord from another command is one
+     * change: the window never applies a table with the chord on both. Not saved here. The old
+     * palette choice goes with the rest, since the table now says what the palette is on.
+     */
+    public void replaceKeyBindings(Map<String, String> bindings) {
+        for (String name : List.copyOf(properties.stringPropertyNames())) {
+            if (name.startsWith(KEYS_PREFIX)) properties.remove(name);
+        }
+        properties.remove(UI_PALETTE_KEY);
+        if (bindings == null) return;
+        new java.util.TreeMap<>(bindings).forEach((id, chord) -> {
+            if (id != null && !id.isBlank() && chord != null && !chord.isBlank()) {
+                properties.setProperty(KEYS_PREFIX + id.trim(), chord.trim());
+            }
+        });
     }
 
     public boolean sidebar() {

@@ -38,6 +38,19 @@ public record Command(
         return hint.isEmpty() ? null : new HintCombination(hint);
     }
 
+    /**
+     * This command on {@code chord}: the user's binding laid over the default it was built with
+     * ({@code this}). A command a handler of the window's own fires ({@code byScene}: a scene
+     * accelerator or key filter) carries no accelerator and shows the chord as its hint; any other
+     * carries the chord as its accelerator. With no chord, a key the list handles itself (Space,
+     * Delete) is still shown, and a moved accelerator leaves nothing.
+     */
+    Command rebound(KeyCombination chord, boolean byScene) {
+        if (byScene) return new Command(id, label, null, chord == null ? "" : chord.getDisplayText(), enabled, run);
+        if (chord != null) return new Command(id, label, chord, null, enabled, run);
+        return new Command(id, label, null, accelerator != null ? "" : hint, enabled, run);
+    }
+
     /** A menu item wired to this command; one per menu, since an item has one parent. */
     public MenuItem menuItem() {
         MenuItem item = new MenuItem(label);

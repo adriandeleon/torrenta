@@ -193,8 +193,20 @@ public final class MainWindow {
     private ToolBar toolbar;
     private final StackPane host = new StackPane();
     private final CommandPalette palette;
-    /** The chord that opens the palette, as {@code ui.paletteKey} says; see {@link #applyPaletteKey}. */
-    private KeyCombination paletteChord;
+    /**
+     * Every chord in force, by command id (or the {@link Chords} table's own name): the defaults
+     * with the user's key bindings laid over them by {@link #applyKeybindings}. A null value is a
+     * command the user has left with none.
+     */
+    private Map<String, KeyCombination> keyChords = Chords.all();
+    /** The commands as built, on their default chords; {@link #commands} is these, rebound. */
+    private List<Command> baseCommands = List.of();
+    /** The menu items that are not a command's own {@link #menuItem}: the View menu's check items, the palette's. */
+    private final Map<String, MenuItem> chordItems = new java.util.HashMap<>();
+    /** The scene accelerators {@link #applyKeybindings} put in, so the next pass can take them out. */
+    private final List<KeyCombination> sceneChords = new ArrayList<>();
+
+    private Label filterBadge;
 
     private Button paletteButton;
     private MenuItem paletteItem;
@@ -438,12 +450,9 @@ public final class MainWindow {
         root.setCenter(buildCenter());
         statusBar = buildStatusBar();
         root.setBottom(statusBar);
-        commands = buildCommands();
+        baseCommands = buildCommands();
+        commands = baseCommands;
         installWelcome();
-        // The strip is built with the centre, before the chords it shows exist.
-        viewStrip.showChords(v -> Chords.view(v).getDisplayText());
-        paletteChord =
-                PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT).chord();
         // The toolbar first: the View menu's check item binds to its visibility.
         ToolBar bar = buildToolbar();
         // An extended window has no system title bar, so the menu bar takes its place; asking the
@@ -457,7 +466,7 @@ public final class MainWindow {
                 id -> commands.stream().filter(c -> c.id().equals(id)).findFirst());
         detail.setMoreMenu(buildContextMenu());
         detail.setEvents(log.events());
-        palette = new CommandPalette(host, this::focusList, paletteChord.getDisplayText());
+        palette = new CommandPalette(host, this::focusList, Chords.of("palette").getDisplayText());
         palette.setResolver(this::typedCommand);
         logWindow = new LogWindow(stage, log);
         statsWindow = new StatisticsWindow(stage, settings.statsWindowSeconds(), this::rememberStatsWindow);
@@ -533,27 +542,14 @@ public final class MainWindow {
                         .getResource("/com/torrenta/styles/app.css")
                         .toExternalForm());
         Fonts.installUiFont(scene);
-        scene.getAccelerators().put(Chords.of("filter-find"), this::focusFilter);
-        scene.getAccelerators().put(Chords.of("filter"), this::focusFilter);
-        scene.getAccelerators().put(paletteChord, () -> palette.show(CapabilityRules.commands(commands, capabilities)));
-        scene.getAccelerators().put(Chords.of("event-log"), logWindow::show);
-        scene.getAccelerators().put(Chords.of("statistics"), statsWindow::show);
-        scene.getAccelerators().put(Chords.of("message-log"), messagePopup::toggle);
-        scene.getAccelerators().put(Chords.of("add-clipboard"), this::addFromClipboard);
-        // Set Category is a submenu, and a submenu carries no accelerator: the chord is the scene's.
-        scene.getAccelerators().put(Chords.of("set-category"), this::chooseCategoryByChord);
-        // Ctrl+1, 2, 3: each view by its place on the strip, beside the views' own chords
-        // (Esc, Ctrl+Shift+F, Ctrl+R), which the menus keep showing.
-        for (View v : View.values()) scene.getAccelerators().put(Chords.view(v), () -> show(v));
-        // Ctrl+Tab and Ctrl+Shift+Tab cycle the views. A filter, ahead of focus traversal, which
-        // would otherwise take Ctrl+Tab out of the table; Control on every platform, since Cmd+Tab
-        // is macOS's own application switcher and never reaches the window.
+        // The scene accelerators (the filter's, the palette's, the logs', Ctrl+1/2/3 …) are put in
+        // by applyKeybindings, once the scene is the stage's, and moved by it after every rebind.
         // Shortcut+Alt+1…9 choose the saved views in order, unless a text field has the focus:
         // Ctrl+Alt is AltGr on many layouts, and what it types there is the field's.
         scene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
             if (scene.getFocusOwner() instanceof javafx.scene.control.TextInputControl) return;
             for (int n = 1; n <= 9; n++) {
-                if (Chords.of("saved-view-" + n).match(e)) {
+                if (matches("saved-view-" + n, e)) {
                     chooseSavedView(n);
                     e.consume();
                     return;
@@ -564,14 +560,18 @@ public final class MainWindow {
         // it is the field's own undo, which a scene accelerator would steal.
         scene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
             if (scene.getFocusOwner() instanceof javafx.scene.control.TextInputControl) return;
-            if (Chords.of("undo").match(e)) {
+            if (matches("undo", e)) {
                 undoNewest();
                 e.consume();
             }
         });
+        // Ctrl+Tab and Ctrl+Shift+Tab cycle the views. A filter, ahead of focus traversal, which
+        // would otherwise take Ctrl+Tab out of the table; Control on every platform, since Cmd+Tab
+        // is macOS's own application switcher and never reaches the window.
         scene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
-            if (e.getCode() == KeyCode.TAB && e.isControlDown() && !e.isAltDown() && !e.isMetaDown()) {
-                show(e.isShiftDown() ? ViewSwitch.previous(view) : ViewSwitch.next(view));
+            boolean next = matches("view-next", e);
+            if (next || matches("view-previous", e)) {
+                show(next ? ViewSwitch.next(view) : ViewSwitch.previous(view));
                 e.consume();
             }
         });
@@ -587,6 +587,10 @@ public final class MainWindow {
             }
         });
         stage.setScene(scene);
+        // After the menus and the scene: the Keyboard page lists the commands under their menus,
+        // and the first pass puts the scene's accelerators in.
+        settingsWindow.setKeyboard(keyboardCommands(), this::applyKeybindings);
+        applyKeybindings();
         placeWindow(opening);
         // The live setting, not one captured at startup: the checkbox can change while the window
         // is open. Conditional on a tray having actually appeared, not on the preference alone:
@@ -1211,6 +1215,12 @@ public final class MainWindow {
         } else if (action.startsWith("settings:")) {
             settingsWindow.show(stage);
             settingsWindow.searchForCapture(action.substring("settings:".length()));
+        } else if (action.startsWith("settings-keys:")) {
+            // Chords pressed into the Keyboard page's rows: settings-keys:recheck:Shortcut+K|Shortcut+K;limits:BS.
+            settingsWindow.show(stage);
+            settingsWindow.selectPageForCapture("KEYBOARD");
+            System.out.println("capture: keys-pressed="
+                    + settingsWindow.pressKeysForCapture(action.substring("settings-keys:".length())));
         } else if (action.startsWith("settings-key:")) {
             // A key in the open Settings window, where its focus is (settings-key:ESCAPE).
             settingsWindow.keyForCapture(KeyCode.valueOf(action.substring("settings-key:".length())));
@@ -1766,6 +1776,7 @@ public final class MainWindow {
                     Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
             applyEngineSettings();
             applyAppearance();
+            applyKeybindings();
             refreshIpFilter(false);
             if (settingsWindow.isShowing()) settingsWindow.reloadFromSettings();
         }
@@ -2691,21 +2702,18 @@ public final class MainWindow {
     private void offerClipboard() {
         // The welcome's card says it already, with the link's name.
         if (welcome != null && welcome.isVisible()) return;
+        // The offer is a key to press; with Add from Clipboard on none, there is nothing to offer.
+        String key = chordText("add-clipboard");
+        if (key.isEmpty()) return;
         clipboardCandidate().ifPresent(text -> {
             if (text.equals(lastClipboardOffer)) return;
             lastClipboardOffer = text;
             setStatus(
                     Inputs.classify(text) == Inputs.Kind.MAGNET
-                            ? tr(
-                                    "status.clipboard.magnet",
-                                    Chords.of("add-clipboard").getDisplayText())
+                            ? tr("status.clipboard.magnet", key)
                             : Inputs.isDirectLink(text)
-                                    ? tr(
-                                            "status.clipboard.link",
-                                            Chords.of("add-clipboard").getDisplayText())
-                                    : tr(
-                                            "status.clipboard.torrent",
-                                            Chords.of("add-clipboard").getDisplayText()));
+                                    ? tr("status.clipboard.link", key)
+                                    : tr("status.clipboard.torrent", key));
         });
     }
 
@@ -4279,12 +4287,16 @@ public final class MainWindow {
     /** A toolbar button for a command: its label and chord as the name, its enabled state followed. */
     private Button toolButton(String id, javafx.scene.Node icon) {
         Command c = command(id);
-        String name = c.label().replace("…", "");
-        if (!c.hint().isEmpty()) name = tr("toolbar.withChord", name, c.hint());
-        Button b = Icons.toolbarButton(icon, name, c.run());
+        Button b = Icons.toolbarButton(icon, toolName(c), c.run());
         b.disableProperty().bind(Bindings.not(c.enabled()));
         commandButtons.put(id, b);
         return b;
+    }
+
+    /** A toolbar button's name: the command's label and, when it has one, its chord. */
+    private static String toolName(Command c) {
+        String name = c.label().replace("…", "");
+        return c.hint().isEmpty() ? name : tr("toolbar.withChord", name, c.hint());
     }
 
     private Command command(String id) {
@@ -4410,21 +4422,24 @@ public final class MainWindow {
 
         paletteItem = new MenuItem(tr("menu.view.commandPalette"));
         paletteItem.setGraphic(menuIcon(Icons.palette()));
-        paletteItem.setAccelerator(paletteChord);
+        paletteItem.setAccelerator(chord("palette"));
+        chordItems.put("palette", paletteItem);
         paletteItem.setOnAction(e -> palette.show(CapabilityRules.commands(commands, capabilities)));
         CheckMenuItem toolbarItem = new CheckMenuItem(tr("menu.view.toolbar"));
         toolbarItem.setGraphic(menuIcon(Icons.toolbar()));
         toolbarItem.selectedProperty().bindBidirectional(toolbar.visibleProperty());
         CheckMenuItem sidebarItem = new CheckMenuItem(tr("menu.view.sidebar"));
         sidebarItem.setGraphic(menuIcon(Icons.sidebar()));
-        sidebarItem.setAccelerator(Chords.of("toggle-sidebar"));
+        sidebarItem.setAccelerator(chord("toggle-sidebar"));
+        chordItems.put("toggle-sidebar", sidebarItem);
         sidebarItem.selectedProperty().bindBidirectional(sidebar.visibleProperty());
         sidebarRightItem = new CheckMenuItem(tr("menu.view.sidebarRight"));
         sidebarRightItem.setSelected(SidebarPlace.of(true, settings.sidebarSide()) == SidebarPlace.RIGHT);
         sidebarRightItem.setOnAction(e -> switchSidebarSide());
         detailItem = new CheckMenuItem(tr("menu.view.detail"));
         detailItem.setGraphic(menuIcon(Icons.detailPane()));
-        detailItem.setAccelerator(Chords.of("toggle-detail"));
+        detailItem.setAccelerator(chord("toggle-detail"));
+        chordItems.put("toggle-detail", detailItem);
         detailItem.setSelected(detailPlace.shown());
         detailItem.setOnAction(e -> toggleDetail());
         // Checked while the alternative limits are in force, by hand or by the schedule; the
@@ -4433,6 +4448,7 @@ public final class MainWindow {
         altSpeedItem = new CheckMenuItem(altSpeed.label());
         altSpeedItem.setGraphic(menuIcon(Icons.forCommand("alt-speed")));
         altSpeedItem.setAccelerator(altSpeed.accelerator());
+        chordItems.put("alt-speed", altSpeedItem);
         altSpeedItem.setOnAction(e -> {
             altSpeedItem.setSelected(altSpeedOn);
             altSpeed.run().run();
@@ -4993,6 +5009,8 @@ public final class MainWindow {
         // a key badge, read from the same chord the command and the menu use.
         Label badge = new Label(Chords.of("filter").getDisplayText());
         badge.getStyleClass().add("key-badge");
+        badge.managedProperty().bind(badge.visibleProperty());
+        filterBadge = badge;
         HBox box = new HBox(Icons.find(), chipRow, filter, badge);
         box.getStyleClass().add("filter-box");
         box.setAlignment(Pos.CENTER_LEFT);
@@ -5259,7 +5277,6 @@ public final class MainWindow {
         applyDetailPlace();
         applyDensity(Density.byId(settings.density(), Density.DEFAULT));
         applyWindowStyle();
-        applyPaletteKey();
     }
 
     /**
@@ -5277,27 +5294,193 @@ public final class MainWindow {
     }
 
     private String paletteButtonName() {
-        return tr("toolbar.palette.tooltip", paletteChord.getDisplayText());
+        String chord = chordText("palette");
+        return chord.isEmpty() ? tr("menu.view.commandPalette").replace("…", "") : tr("toolbar.palette.tooltip", chord);
+    }
+
+    // ---- key bindings ---------------------------------------------------------------------------
+
+    /**
+     * The chords a handler of the window's own fires, not a menu item: scene accelerators, by the
+     * {@link Chords} name or command id they answer to. Set Category is a submenu, and a submenu
+     * carries no accelerator; Ctrl+1, 2, 3 show each view by its place on the strip, beside the
+     * views' own chords, which the menus keep showing.
+     */
+    private Map<String, Runnable> sceneActions() {
+        Map<String, Runnable> actions = new java.util.LinkedHashMap<>();
+        actions.put("filter-find", this::focusFilter);
+        actions.put("filter", this::focusFilter);
+        actions.put("palette", () -> palette.show(CapabilityRules.commands(commands, capabilities)));
+        actions.put("event-log", logWindow::show);
+        actions.put("statistics", statsWindow::show);
+        actions.put("message-log", messagePopup::toggle);
+        actions.put("add-clipboard", this::addFromClipboard);
+        actions.put("set-category", this::chooseCategoryByChord);
+        for (View v : View.values()) actions.put(Chords.viewName(v), () -> show(v));
+        return actions;
+    }
+
+    /** The chords the scene's key filters read for themselves ({@link #matches}): they never enter a text field. */
+    private static boolean byFilter(String id) {
+        return id.equals("undo")
+                || id.equals("view-next")
+                || id.equals("view-previous")
+                || id.startsWith("saved-view-");
+    }
+
+    /** The chord {@code id} is on now, or null for none. */
+    private KeyCombination chord(String id) {
+        return keyChords.get(id);
+    }
+
+    /** The chord {@code id} is on now as the platform writes it, or empty for none. */
+    private String chordText(String id) {
+        KeyCombination c = chord(id);
+        return c == null ? "" : c.getDisplayText();
+    }
+
+    /** Whether {@code e} is the chord {@code id} is on now. */
+    private boolean matches(String id, KeyEvent e) {
+        KeyCombination c = chord(id);
+        return c != null && c.match(e);
     }
 
     /**
-     * The palette's chord, re-read from the settings: the accelerator moves, and the menu item, the
-     * toolbar tooltip and the palette's chip say the new one. Before the scene exists (the
-     * constructor's first pass) there is no accelerator to move; the scene is built with the chord.
+     * Every command the Keyboard page lists, under the menu it lives in, on its default chord: the
+     * {@link Chords} table in its order (Select All, the list's own key, left out), then every
+     * other command, which has none until the user gives it one. After the menus, which say where
+     * a command is.
      */
-    private void applyPaletteKey() {
-        KeyCombination wanted =
-                PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT).chord();
-        if (wanted.equals(paletteChord)) return;
-        Scene scene = host.getScene();
-        if (scene != null) {
-            scene.getAccelerators().remove(paletteChord);
-            scene.getAccelerators().put(wanted, () -> palette.show(CapabilityRules.commands(commands, capabilities)));
+    private List<Keybindings.Command> keyboardCommands() {
+        Map<MenuItem, String> idOfItem = new java.util.IdentityHashMap<>();
+        commandItems.forEach((id, items) -> items.forEach(item -> idOfItem.put(item, id)));
+        chordItems.forEach((id, item) -> idOfItem.put(item, id));
+        // Each command's menu and its place there, in the menus' order.
+        Map<String, String> menuOf = new LinkedHashMap<>();
+        for (Menu menu : menuBar.getMenus()) collectMenu(menu, menu.getText(), idOfItem, menuOf);
+        List<String> placed = new ArrayList<>(menuOf.keySet());
+        Map<String, String> tableGroups =
+                Map.of("file", tr("menu.file"), "torrent", tr("menu.torrent"), "view", tr("menu.view"));
+        String other = tr("settings.keys.group.other");
+        List<Keybindings.Command> out = new ArrayList<>();
+        Set<String> listed = new HashSet<>();
+        Chords.rebindable().forEach((id, chord) -> {
+            String group = menuOf.getOrDefault(id, tableGroups.get(Chords.group(id)));
+            out.add(new Keybindings.Command(id, group, keyLabel(id), chord));
+            listed.add(id);
+        });
+        for (Command c : baseCommands) {
+            if (listed.contains(c.id()) || Chords.fixed().containsKey(c.id())) continue;
+            out.add(new Keybindings.Command(c.id(), menuOf.getOrDefault(c.id(), other), c.label(), null));
+            listed.add(c.id());
         }
-        paletteChord = wanted;
-        paletteItem.setAccelerator(wanted);
-        Icons.name(paletteButton, paletteButtonName());
-        palette.setOpenerChord(wanted.getDisplayText());
+        // Under each menu in turn, File first, and in the menu's own order within it; what is on
+        // no menu after, in the table's order (the sort is stable).
+        List<String> groups = new ArrayList<>();
+        for (Menu menu : menuBar.getMenus()) groups.add(menu.getText());
+        groups.add(other);
+        List<Keybindings.Command> sorted = new ArrayList<>(out);
+        sorted.sort(java.util.Comparator.<Keybindings.Command>comparingInt(k -> groups.indexOf(k.group()))
+                .thenComparingInt(k -> placed.contains(k.id()) ? placed.indexOf(k.id()) : Integer.MAX_VALUE));
+        return sorted;
+    }
+
+    private static void collectMenu(
+            Menu menu, String title, Map<MenuItem, String> idOfItem, Map<String, String> menuOf) {
+        for (MenuItem item : menu.getItems()) {
+            String id = idOfItem.get(item);
+            if (id != null) menuOf.putIfAbsent(id, title);
+            if (item instanceof Menu sub) collectMenu(sub, title, idOfItem, menuOf);
+        }
+    }
+
+    /** What the Keyboard page calls a table entry: the command's label, or the entry's own words. */
+    private String keyLabel(String id) {
+        for (Command c : baseCommands) if (c.id().equals(id)) return c.label();
+        if (id.equals("palette")) return tr("menu.view.commandPalette").replace("…", "");
+        if (id.equals("filter-find")) return tr("settings.keys.filterFind");
+        for (View v : View.values()) if (id.equals(Chords.viewName(v))) return tr("settings.keys.view", v.label());
+        if (id.startsWith("saved-view-")) return tr("settings.keys.savedView", id.substring("saved-view-".length()));
+        return id;
+    }
+
+    /**
+     * Puts every command on the chord the user's key bindings give it, live: the commands (so the
+     * palette, the detail pane and the table's own chords read the new ones), every menu item's
+     * accelerator, the scene's accelerators and filters, and everything that names a chord in
+     * words (toolbar, view strip, filter badge, welcome, undo offer).
+     *
+     * <p>Menu accelerators are taken off before any is put back on: JavaFX takes an item's old
+     * chord out of the scene when it changes, which would take it from an item that had just moved
+     * onto it.
+     */
+    private void applyKeybindings() {
+        Scene scene = host.getScene();
+        List<Keybindings.Command> keyboard = keyboardCommands();
+        keyChords = Keybindings.resolve(Keybindings.defaults(keyboard), settings.keyBindings(), Keybindings.MAC);
+        Map<String, KeyCombination> withFixed = new java.util.LinkedHashMap<>(keyChords);
+        withFixed.putAll(Chords.fixed());
+        keyChords = java.util.Collections.unmodifiableMap(withFixed);
+        commands = baseCommands.stream()
+                .map(c -> Chords.fixed().containsKey(c.id())
+                        ? c
+                        : c.rebound(
+                                chord(c.id()),
+                                c.accelerator() == null && Chords.all().containsKey(c.id())))
+                .toList();
+
+        if (scene != null) {
+            for (KeyCombination k : sceneChords) scene.getAccelerators().remove(k);
+        }
+        sceneChords.clear();
+        commandItems.values().forEach(items -> items.forEach(item -> item.setAccelerator(null)));
+        chordItems.values().forEach(item -> item.setAccelerator(null));
+        commandItems.forEach((id, items) -> {
+            KeyCombination shown = command(id).menuAccelerator();
+            items.forEach(item -> item.setAccelerator(shown));
+        });
+        chordItems.forEach((id, item) -> item.setAccelerator(chord(id)));
+        if (scene != null) {
+            Map<String, Runnable> actions = sceneActions();
+            actions.forEach((id, action) -> putSceneChord(scene, chord(id), action));
+            for (Command c : commands) {
+                String id = c.id();
+                if (actions.containsKey(id) || byFilter(id) || Chords.fixed().containsKey(id)) continue;
+                if (commandItems.containsKey(id) || chordItems.containsKey(id)) continue;
+                // On no menu (the palette's alone): the scene is the only place its chord can live.
+                putSceneChord(scene, c.accelerator(), () -> {
+                    Command now = command(id);
+                    if (now.enabled().get()) now.run().run();
+                });
+            }
+        }
+
+        commandButtons.forEach((id, button) -> Icons.name(button, toolName(command(id))));
+        if (paletteButton != null) Icons.name(paletteButton, paletteButtonName());
+        palette.setOpenerChord(chordText("palette"));
+        viewStrip.showChords(v -> chordText(Chords.viewName(v)));
+        filterBadge.setText(chordText("filter"));
+        filterBadge.setVisible(!filterBadge.getText().isEmpty());
+        undoOffer.setText(undoOfferText());
+        detail.setCommands(
+                id -> commands.stream().filter(c -> c.id().equals(id)).findFirst());
+        if (welcome != null) {
+            welcome.showChords(
+                    WELCOME_KEYS.stream().map(k -> command(k.getKey()).hint()).toList(),
+                    command("add-clipboard").hint());
+        }
+    }
+
+    private void putSceneChord(Scene scene, KeyCombination chord, Runnable action) {
+        if (chord == null) return;
+        scene.getAccelerators().put(chord, action);
+        sceneChords.add(chord);
+    }
+
+    /** The status bar's Undo, with its chord while it has one. */
+    private String undoOfferText() {
+        String chord = chordText("undo");
+        return chord.isEmpty() ? command("undo").label() : tr("status.undo.offer", chord);
     }
 
     /**
@@ -5560,13 +5743,16 @@ public final class MainWindow {
         refreshWelcomeClipboard();
     }
 
+    /** The welcome's four keys: the command, and what the welcome says it does. */
+    private static final List<Map.Entry<String, String>> WELCOME_KEYS = List.of(
+            Map.entry("add-file", "welcome.key.open"),
+            Map.entry("add-clipboard", "welcome.key.clipboard"),
+            Map.entry("filter", "welcome.key.omnibox"),
+            Map.entry("settings", "welcome.key.settings"));
+
     private Welcome buildWelcome() {
         List<Welcome.Key> keys = new ArrayList<>();
-        for (var k : List.of(
-                Map.entry("add-file", "welcome.key.open"),
-                Map.entry("add-clipboard", "welcome.key.clipboard"),
-                Map.entry("filter", "welcome.key.omnibox"),
-                Map.entry("settings", "welcome.key.settings"))) {
+        for (var k : WELCOME_KEYS) {
             Command c = command(k.getKey());
             keys.add(new Welcome.Key(c.hint(), tr(k.getValue()), c.run()));
         }
@@ -5677,7 +5863,7 @@ public final class MainWindow {
         status.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(status, Priority.SOMETIMES);
         // Undo, after the message that said what was done; for ten seconds, then Shortcut+Z alone.
-        undoOffer.setText(tr("status.undo.offer", Chords.of("undo").getDisplayText()));
+        undoOffer.setText(undoOfferText());
         undoOffer.getStyleClass().add("status-undo");
         undoOffer.setMinWidth(Region.USE_PREF_SIZE);
         undoOffer.managedProperty().bind(undoOffer.visibleProperty());

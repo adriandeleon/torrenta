@@ -7,6 +7,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Shortcuts you can change.** Settings → Keyboard lists every command under its menu with the
+  chord it is on: click one and press the new chord, press a chord another command has twice to
+  move it, Backspace to leave a command with none, Reset to put it back. Commands with no chord
+  can be given one. Applied at once to the menus, the palette, the toolbar's tooltips and the
+  view strip, and synced with the other settings (`keys.<command>=Shortcut+Shift+K`, with
+  Shortcut meaning Cmd on a Mac and Ctrl elsewhere). The palette's chord moved here from General;
+  a Ctrl+Shift+P chosen there is kept.
+
 - **A leak check you can see.** With a binding set, a shield beside the port says Protected,
   Exposed, Halted (the interface is down, so nothing goes out) or Unchecked; a click shows the
   three addresses it decided from. Settings → Connection → "Check where traffic leaves" (off: it
