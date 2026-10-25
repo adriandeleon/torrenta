@@ -86,7 +86,9 @@ import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.WatchFolders;
+import com.torrenta.net.ExitCheck;
 import com.torrenta.net.InterfaceWatch;
+import com.torrenta.net.LeakCheck;
 import com.torrenta.net.TorrentFetch;
 import com.torrenta.os.Badge;
 import com.torrenta.os.BadgeState;
@@ -147,6 +149,21 @@ public final class MainWindow {
     // The status bar's network half (NetworkStatus): port with its dot, DHT, free space.
     private final Label portStatus = new Label();
     private final Region portDot = new Region();
+    /** The leak check's shield, beside the port: hidden while nothing is bound. */
+    private final Label leakPill = new Label();
+
+    private LeakCard leakCard;
+    /** The exit check's last answers; written by its worker, read by the poll. */
+    private volatile ExitCheck.Exits exits = ExitCheck.Exits.NONE;
+    /** An exit check is out; the card's Check now waits on it. */
+    private volatile boolean exitChecking;
+    /** Check now was pressed: the next poll asks whatever the interval says. */
+    private volatile boolean exitCheckWanted;
+    /** Poll thread: the binding and the swarm's view the last exit check was asked for. */
+    private String exitAskedFor = "";
+    /** Poll thread: the torrents pauseWhenExposed paused, to resume when protected. */
+    private Set<String> exposureHeld = Set.of();
+
     private final Tooltip portTip = new Tooltip();
     private final Label dhtStatus = new Label();
     private final Label freeStatus = new Label();
@@ -458,6 +475,8 @@ public final class MainWindow {
         detail.setSpeedWindow(settings.statsWindowSeconds());
         detail.setOnSpeedWindowChanged(this::rememberStatsWindow);
         messagePopup = new MessageLogPopup(host, statusBar, messages, this::focusList);
+        leakCard = new LeakCard(
+                host, statusBar, this::focusList, () -> exitCheckWanted = true, () -> openSettingsPage("CONNECTION"));
         settingsWindow = new SettingsWindow(settings);
         settingsWindow.setOnShowDebugLog(this::showDebugLog);
         settingsWindow.setOnEngineSettingsChanged(this::applyEngineSettings);
@@ -960,7 +979,9 @@ public final class MainWindow {
                 + (dhtStatus.isVisible() ? dhtStatus.getText() : "") + "\" free=\""
                 + (freeStatus.isVisible() ? freeStatus.getText() : "") + "\" low="
                 + freeStatus.getStyleClass().contains("free-low") + " portTip=\""
-                + (portStatus.isVisible() ? portTip.getText().replace("\n", " / ") : "") + "\"";
+                + (portStatus.isVisible() ? portTip.getText().replace("\n", " / ") : "") + "\" leak=\""
+                + (leakPill.isVisible() ? leakPill.getText() : "") + "\" leakCard=\""
+                + (leakPill.isVisible() ? leakCard.textForCapture() : "") + "\"";
     }
 
     /**
@@ -1171,6 +1192,10 @@ public final class MainWindow {
             logWindow.show();
         } else if (action.equals("stats")) {
             statsWindow.show();
+        } else if (action.equals("leak-card")) {
+            leakCard.show();
+        } else if (action.equals("leak-check")) {
+            exitCheckWanted = true;
         } else if (action.equals("message-log")) {
             messagePopup.show();
         } else if (action.startsWith("message-log:")) {
@@ -2794,8 +2819,10 @@ public final class MainWindow {
         TorrentDetail shown = fetchDetail(engine);
         Connectivity connectivity = engine.connectivity();
         long unproven = portClock.tick(connectivity, NetworkStatus.anyRunning(snapshot), nowSeconds);
-        Optional<NetworkStatus.Port> port =
-                NetworkStatus.port(connectivity, unproven, watchInterface(engine, nowSeconds));
+        InterfaceWatch.State binding = watchInterface(engine, nowSeconds);
+        Optional<NetworkStatus.Port> port = NetworkStatus.port(connectivity, unproven, binding);
+        Optional<LeakView> leak = checkLeaks(engine, binding, connectivity.externalAddress(), snapshot, nowSeconds);
+        boolean checking = exitChecking;
         Optional<String> dht = NetworkStatus.dht(connectivity, engine.stats().dhtNodes());
         Optional<NetworkStatus.Free> space = freeSpace(nowSeconds);
         pushTray(TrayStatus.of(snapshot, current));
@@ -2805,6 +2832,7 @@ public final class MainWindow {
             refreshSidebar(snapshot);
             showRates(current, nowSeconds);
             showNetwork(port, dht, space);
+            showLeak(leak, checking);
             applyDetail(shown, nowSeconds);
             if (stats != null) statsWindow.update(stats, sessionHistory, nowSeconds);
         });
@@ -5595,6 +5623,11 @@ public final class MainWindow {
         freeStatus.setOnMouseClicked(
                 e -> opener.accept(settings.downloadDir().toUri().toString()));
         for (Label l : List.of(portStatus, dhtStatus, freeStatus)) reveal(l, false);
+        // The leak check's shield: only while something is bound; a click opens its card.
+        leakPill.getStyleClass().add("leak-pill");
+        leakPill.setGraphic(Icons.shield().at(14));
+        leakPill.setOnMouseClicked(e -> leakCard.toggle());
+        reveal(leakPill, false);
         // The message is the one that gives way: the rates, the switch and the counts keep their width.
         status.setMinWidth(0);
         status.setMaxWidth(Double.MAX_VALUE);
@@ -5610,6 +5643,7 @@ public final class MainWindow {
         HBox bar = new HBox(
                 12,
                 portStatus,
+                leakPill,
                 dhtStatus,
                 status,
                 undoOffer,
@@ -5623,8 +5657,16 @@ public final class MainWindow {
                 errorBadge);
         bar.setAlignment(Pos.CENTER_LEFT);
         for (Region r : List.<Region>of(
-                portStatus, dhtStatus, down, up, altSpeedToggle, freeStatus, updateBadge, syncBadge, errorBadge))
-            r.setMinWidth(Region.USE_PREF_SIZE);
+                portStatus,
+                leakPill,
+                dhtStatus,
+                down,
+                up,
+                altSpeedToggle,
+                freeStatus,
+                updateBadge,
+                syncBadge,
+                errorBadge)) r.setMinWidth(Region.USE_PREF_SIZE);
         bar.setPadding(new Insets(4, 10, 4, 10));
         bar.getStyleClass().add("status-bar");
         return bar;
@@ -5679,6 +5721,86 @@ public final class MainWindow {
         Path dir = settings.downloadDir();
         free = FreeSpace.disk(dir).map(d -> NetworkStatus.free(d, folderText(dir)));
         return free;
+    }
+
+    /**
+     * Poll thread: the leak check (roadmap 1.1, item 8). With the exit check on, its two requests
+     * are asked again every ten minutes, at once when the binding or the swarm's view of this
+     * machine moved, and when Check now was pressed, on a worker of their own; the verdict is
+     * decided every poll from the last answers. {@code connection.pauseWhenExposed} acts on it
+     * ({@link ExposurePause}). Nothing for an unbound session, or a daemon's.
+     */
+    private Optional<LeakView> checkLeaks(
+            Engine engine, InterfaceWatch.State binding, String swarmSees, List<Torrent> torrents, long nowSeconds) {
+        if (capabilities.lacks(Engine.Capability.LISTEN_DETAILS)) return Optional.empty();
+        boolean on = settings.exitCheck();
+        if (on && binding.presence() == InterfaceWatch.Presence.UP && !exitChecking) {
+            String askedFor = binding + "|" + swarmSees;
+            boolean moved = exitCheckWanted || !askedFor.equals(exitAskedFor);
+            if (ExitCheck.due(exits, nowSeconds, moved)) {
+                exitAskedFor = askedFor;
+                exitCheckWanted = false;
+                exitChecking = true;
+                String url = settings.exitCheckUrl().isEmpty() ? ExitCheck.DEFAULT_URL : settings.exitCheckUrl();
+                java.util.Optional<java.net.InetAddress> local = ExitCheck.localAddress(binding);
+                Thread.ofVirtual().name("exit-check").start(() -> {
+                    try {
+                        exits = ExitCheck.ask(url, local, nowSeconds);
+                    } finally {
+                        exitChecking = false;
+                    }
+                });
+            }
+        }
+        if (!on) exitCheckWanted = false;
+        ExitCheck.Exits known = on ? exits : ExitCheck.Exits.NONE;
+        LeakCheck.Verdict verdict = LeakCheck.verdict(binding, swarmSees, known.bound(), known.around());
+        holdWhileExposed(engine, verdict, on && settings.pauseWhenExposed(), torrents);
+        if (verdict == LeakCheck.Verdict.UNBOUND) return Optional.empty();
+        return Optional.of(LeakView.of(verdict, binding, swarmSees, known, on));
+    }
+
+    /** Poll thread: one {@link ExposurePause} step, said in the log when it paused or resumed. */
+    private void holdWhileExposed(Engine engine, LeakCheck.Verdict verdict, boolean enabled, List<Torrent> torrents) {
+        ExposurePause.Step step = ExposurePause.next(verdict, enabled, torrents, exposureHeld);
+        exposureHeld = step.held();
+        if (step.nothing()) return;
+        for (String id : step.pause()) {
+            try {
+                engine.pause(id);
+            } catch (EngineException e) {
+                LOG.log(Level.FINE, "Not paused while exposed: " + id, e);
+            }
+        }
+        for (String id : step.resume()) {
+            try {
+                engine.resume(id);
+            } catch (EngineException e) {
+                LOG.log(Level.FINE, "Not resumed once protected: " + id, e);
+            }
+        }
+        String text = step.pause().isEmpty()
+                ? tr("leak.resumed", step.resume().size())
+                : tr("leak.paused", step.pause().size());
+        EngineEvent.Level level = step.pause().isEmpty() ? EngineEvent.Level.INFO : EngineEvent.Level.WARNING;
+        Platform.runLater(() -> {
+            log.add(EngineEvent.session(level, text));
+            setStatus(text, level);
+        });
+    }
+
+    /** FX thread: the shield and its card as the poll decided them; none hides the pill. */
+    private void showLeak(Optional<LeakView> leak, boolean checking) {
+        reveal(leakPill, leak.isPresent());
+        if (leak.isEmpty()) {
+            leakCard.hide();
+            return;
+        }
+        LeakView view = leak.get();
+        leakPill.setText(view.pill());
+        leakPill.getStyleClass().removeIf(c -> c.startsWith("leak-") && !c.equals("leak-pill"));
+        leakPill.getStyleClass().add(view.styleClass());
+        leakCard.update(view, checking);
     }
 
     /** Poll thread: the bound interface as last read; null before the first look. */
