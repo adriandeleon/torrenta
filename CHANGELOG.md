@@ -7,6 +7,13 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Torrenta without a window.** `torrenta --headless`, or the `torrenta-nox` launcher beside the
+  app's own, runs everything the window does but the window: torrents, watch folders, RSS rules,
+  the IP filter, share limits, the speed schedule, run-on-event commands. What arrives (the command
+  line, another Torrenta, a watch folder, a rule) is added without asking, through the content
+  check; the log is stdout and `torrenta-session.log`; SIGTERM or Ctrl+C stops it cleanly, the last
+  resume data written first. `docs/headless.md` has a systemd user unit.
+
 - **Shortcuts you can change.** Settings → Keyboard lists every command under its menu with the
   chord it is on: click one and press the new chord, press a chord another command has twice to
   move it, Backspace to leave a command with none, Reset to put it back. Commands with no chord
