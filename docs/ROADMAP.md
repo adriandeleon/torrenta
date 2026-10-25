@@ -438,6 +438,8 @@ every match is where a mistake is largest.
    names the target first ("Pause: 14 matching torrents"); destructive ones and anything over 20
    confirm through `RemoveConfirm`; `Actions.torrentsOnly` still applies and the skipped are
    counted; each is one undo entry. Up recalls the last ten (`ui.omnibox.history`, never synced).
+   The first PR is in: the verbs, their arguments, the targets, the confirm and the undo. Still to
+   come: completion of names and paths, a ratio verb, the count of what was skipped, and history.
 7. **Swarm preview** (2 PRs): every add gets a hidden upload-mode probe (`MetadataFetch` becomes
    `SwarmProbe`; a `.torrent` gets one as a magnet does), off by default for a private torrent,
    where a probe's announce counts. `SwarmPreview` (the scrape counts, the highest per tracker

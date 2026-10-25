@@ -7,6 +7,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Commands for many torrents at once, typed.** In the omnibox, `>` and a command with what it
+  takes: `>set-category Films`, `>add-tag keep`, `>remove-tag old`, `>set-location /srv/media`,
+  `>limit-down 500k` (or `none`), `>limit-up 1m`, `>sequential on`, `>queue top`, `>pause`,
+  `>resume`, `>recheck`, `>reannounce`, `>remove`. While a filter is in the box it acts on every
+  torrent the filter shows, otherwise on the selection, and the palette's row says which and how
+  many before Enter. A removal asks first, and so does anything on more than 20 torrents; a
+  category, tags, a location or a limit set this way can be undone.
+
+
 - **The Add dialog says how the swarm looks before you add.** For a `.torrent` at once, for a
   magnet once its file list is in, a Swarm line under the free space reads Healthy (three seeds and up), Thin (a seed or two, or no
   seed but every piece among the peers), Incomplete (no seed, and pieces of the chosen files that
