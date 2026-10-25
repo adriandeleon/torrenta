@@ -102,6 +102,66 @@ public final class Curl {
         return sb.toString();
     }
 
+    // ---- by hand -----------------------------------------------------------------------------------
+
+    /**
+     * The shell a command line is written for: POSIX's single quotes, or Windows' double quotes
+     * with {@code curl.exe}, since PowerShell's own {@code curl} is another program.
+     */
+    public enum Shell {
+        POSIX,
+        WINDOWS;
+
+        public static Shell of(String osName) {
+            return osName != null && osName.toLowerCase(java.util.Locale.ROOT).startsWith("windows") ? WINDOWS : POSIX;
+        }
+
+        public static Shell current() {
+            return of(System.getProperty("os.name", ""));
+        }
+
+        /** Characters this shell does nothing with outside quotes; a comma splits words in cmd. */
+        String safe() {
+            return this == WINDOWS ? "-_./:\\" : "-_./:@+,";
+        }
+    }
+
+    /**
+     * A command line a person can paste to fetch the same file by hand: the link, the options a
+     * download runs with, the file it ends as. Not what runs (that takes its options on stdin, and
+     * its progress, headers and resume are the app's): a person sees their own link here, and the
+     * proxy's password is left out, so curl asks for it.
+     */
+    public static String shellCommand(
+            String program, String url, Path output, String userAgent, Proxy proxy, Shell shell) {
+        List<String> args = new java.util.ArrayList<>();
+        args.add(
+                program == null || program.isBlank()
+                        ? (shell == Shell.WINDOWS ? "curl.exe" : "curl")
+                        : program.strip());
+        args.addAll(List.of("--location", "--fail", "--globoff", "--remote-time"));
+        args.addAll(List.of("--proto", PROTOCOLS, "--proto-redir", REDIRECT_PROTOCOLS));
+        args.addAll(List.of("--retry", "5", "--retry-connrefused"));
+        if (userAgent != null && !userAgent.isBlank()) args.addAll(List.of("--user-agent", userAgent));
+        Proxy p = proxy == null ? Proxy.NONE : proxy;
+        if (!p.isNone()) {
+            args.addAll(List.of("--proxy", p.scheme() + "://" + bracketed(p.host()) + ":" + p.port()));
+            if (!p.user().isEmpty()) args.addAll(List.of("--proxy-user", p.user()));
+        }
+        args.addAll(List.of("--output", output.toString(), url));
+        return String.join(" ", args.stream().map(a -> shellQuote(a, shell)).toList());
+    }
+
+    /** One argument as {@code shell} reads it, quoted only when it has to be. */
+    static String shellQuote(String arg, Shell shell) {
+        String safe = shell.safe();
+        if (!arg.isEmpty()
+                && arg.chars().allMatch(c -> safe.indexOf(c) >= 0 || (c < 128 && Character.isLetterOrDigit(c)))) {
+            return arg;
+        }
+        return shell == Shell.WINDOWS ? "\"" + arg.replace("\"", "\\\"") + "\"" : "'" + arg.replace("'", "'\\''") + "'";
+    }
+
     /** A value in curl's config syntax: in double quotes, with backslash escapes. */
     static String quote(String value) {
         StringBuilder sb = new StringBuilder("\"");

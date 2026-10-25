@@ -57,6 +57,50 @@ class CurlTest {
     }
 
     @Test
+    void theCommandByHandHasTheLinkTheFileAndTheOptionsQuotedForTheShell() {
+        String posix = Curl.shellCommand(
+                "",
+                "https://x.org/a b?t=it's&x=[1]",
+                Path.of("/dl/My File.iso"),
+                "Torrenta/1.0",
+                Curl.Proxy.NONE,
+                Curl.Shell.POSIX);
+        assertEquals(
+                "curl --location --fail --globoff --remote-time --proto '=http,https,ftp,ftps,sftp'"
+                        + " --proto-redir '=http,https,ftp,ftps' --retry 5 --retry-connrefused"
+                        + " --user-agent Torrenta/1.0 --output '/dl/My File.iso'"
+                        + " 'https://x.org/a b?t=it'\\''s&x=[1]'",
+                posix);
+        String windows = Curl.shellCommand(
+                "", "https://x.org/a.iso", Path.of("dl.iso"), "", Curl.Proxy.NONE, Curl.Shell.WINDOWS);
+        assertTrue(windows.startsWith("curl.exe --location "), windows);
+        assertTrue(windows.contains(" --proto \"=http,https,ftp,ftps,sftp\" "), windows);
+        assertTrue(windows.endsWith(" --output dl.iso https://x.org/a.iso"), windows);
+        assertFalse(windows.contains("--user-agent"));
+    }
+
+    @Test
+    void theCommandByHandNamesTheProxyButNeverItsPassword() {
+        String line = Curl.shellCommand(
+                " /opt/curl ",
+                "https://x.org/a",
+                Path.of("/dl/a"),
+                "",
+                new Curl.Proxy("socks5h", "::1", 1080, "me", "s3cret"),
+                Curl.Shell.POSIX);
+        assertTrue(line.startsWith("/opt/curl --location"), line);
+        assertTrue(line.contains(" --proxy 'socks5h://[::1]:1080' --proxy-user me "), line);
+        assertFalse(line.contains("s3cret"));
+    }
+
+    @Test
+    void theShellIsWindowsOnlyOnWindows() {
+        assertEquals(Curl.Shell.WINDOWS, Curl.Shell.of("Windows 11"));
+        assertEquals(Curl.Shell.POSIX, Curl.Shell.of("Linux"));
+        assertEquals(Curl.Shell.POSIX, Curl.Shell.of("Mac OS X"));
+    }
+
+    @Test
     void quotingEscapesBackslashesQuotesAndLineBreaks() {
         assertEquals("\"C:\\\\dl\\\\a\\\"b\\n\"", Curl.quote("C:\\dl\\a\"b\n"));
     }
