@@ -729,6 +729,9 @@ class LibtorrentEngineTest {
     /** Port 0: the system picks a free one as the session binds; {@code listenPortForTest} says which. */
     private static final int ANY_PORT = 0;
 
+    /** Where every loopback session listens; see {@link #isolated}. */
+    private static final String LOOPBACK = "127.0.0.1";
+
     /**
      * Waits until the session listens, and says why not if it never does: a peer told to dial
      * port 0 is dropped without an attempt, and a loopback test then waits out its deadline with
@@ -759,7 +762,11 @@ class LibtorrentEngineTest {
         return new com.torrenta.engine.EngineSettings(
                 d.listenPort(),
                 d.randomPort(),
-                d.listenInterface(),
+                // Loopback, and only loopback: every peer these tests dial is 127.0.0.1. Bound to
+                // 0.0.0.0 with port 0, libtorrent on Windows gives each local address a socket of
+                // its own, each its own port, and listen_port() names one that is not loopback's
+                // (measured: every dial of 127.0.0.1 at that port refused, in every run).
+                LOOPBACK,
                 d.ipv6(),
                 d.upnp(),
                 d.maxConnections(),

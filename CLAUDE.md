@@ -497,8 +497,10 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   listening on nothing: tests picked a port with a `ServerSocket(0)`, closed it, and had libtorrent
   bind the number later, which Windows can refuse in between, and the engine added its alert
   listener after starting the session, so the `listen_failed` was lost (it is added before now).
-  Sessions in `LibtorrentEngineTest` use `isolated(ANY_PORT)` and read `listenPortForTest()`;
-  seeders pass `awaitListening`. Two more things the harness knows: libtorrent stops dialling an
+  Sessions in `LibtorrentEngineTest` use `isolated(ANY_PORT)`, which listens on `127.0.0.1` only,
+  and read `listenPortForTest()`; seeders pass `awaitListening`. Never `0.0.0.0` with port 0:
+  libtorrent on Windows then gives each local address its own socket and port, `listen_port()`
+  names one that is not loopback's, and every dial of 127.0.0.1 is refused (measured, every run). Two more things the harness knows: libtorrent stops dialling an
   address after three failed attempts and no `connect_peer` revives it (measured; `max_failcount`
   through the session does not change it), so `awaitDownload`/`awaitFetch` clear the peer list
   (`clear_peers`) after five seconds without a peer; and a timeout prints both sides' peer logs
