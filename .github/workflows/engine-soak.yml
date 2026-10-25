@@ -1,0 +1,84 @@
+name: Engine soak
+
+# Runs LibtorrentEngineTest over and over, in parallel shards, to find or rule out a flake that a
+# single CI run shows once in a while. Manual from master (Actions → Engine soak → Run workflow),
+# or by pushing a branch named soak/… (whose own copy of this file then runs, with the defaults).
+# A failing shard uploads its surefire reports; the loopback tests print each side's peer log.
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: 'Runner'
+        type: choice
+        options: [windows-latest, macos-latest, ubuntu-latest]
+        default: windows-latest
+      runs:
+        description: 'Runs of the class per shard (8 shards)'
+        default: '3'
+  push:
+    branches: ['soak/**']
+
+jobs:
+  soak:
+    name: Soak ${{ inputs.os || 'windows-latest' }} (shard ${{ matrix.shard }})
+    runs-on: ${{ inputs.os || 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Run the engine tests repeatedly
+        shell: bash
+        env:
+          RUNS: ${{ inputs.runs || '3' }}
+          MALLOC_PERTURB_: '165'
+        run: |
+          ./mvnw -B --no-transfer-progress -q test-compile
+          failed=0
+          for i in $(seq 1 "$RUNS"); do
+            echo "::group::run $i of $RUNS"
+            mkdir -p "soak-reports/run-$i"
+            rm -rf target/surefire-reports
+            # A watchdog: a run past twenty minutes is hung, not slow (a clean one takes three to
+            # seven). Every JVM's stacks are kept before it is killed, so the hang names itself.
+            ( sleep 1200
+              echo "run $i passed twenty minutes: dumping stacks"
+              for pid in $(jps -q); do jcmd "$pid" Thread.print > "soak-reports/run-$i/stacks-$pid.txt" 2>&1 || true; done
+              for pid in $(jps -q); do jcmd "$pid" VM.command_line >> "soak-reports/run-$i/stacks-$pid.txt" 2>&1 || true; done
+              taskkill //F //IM java.exe > /dev/null 2>&1 || pkill -9 java || true ) &
+            watchdog=$!
+            if ./mvnw -B --no-transfer-progress test -Dtest=LibtorrentEngineTest \
+                 -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true -Dspotless.check.skip=true; then
+              echo "run $i: passed"
+            else
+              echo "::error::run $i failed"
+              failed=$((failed + 1))
+            fi
+            kill "$watchdog" 2> /dev/null || true
+            cp -r target/surefire-reports/. "soak-reports/run-$i/" 2> /dev/null || true
+            echo "--- run $i, last tests ---"; tail -n 4 "soak-reports/run-$i/test-progress.log" 2> /dev/null || true
+            echo "::endgroup::"
+          done
+          echo "$failed of $RUNS runs failed"
+          [ "$failed" = 0 ]
+
+      # Kept whatever happened: a passing run's test-progress.log has every test's start and end,
+      # which is how a run that took too long says which test it spent the time in.
+      - name: Upload the runs' reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: soak-${{ inputs.os || 'windows-latest' }}-shard-${{ matrix.shard }}
+          path: soak-reports/
+          retention-days: 7

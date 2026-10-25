@@ -70,8 +70,9 @@ public interface Engine extends AutoCloseable {
     /**
      * Starts fetching a magnet's metadata without adding it, so the Add dialog can show the files
      * while it is open. The magnet joins the swarm writing nothing, is in no snapshot and no
-     * store, and leaves once the metadata is in or the fetch is cancelled. Fails if the magnet is
-     * already in the session.
+     * store, and stays to look at the swarm ({@link MetadataFetch#swarm}) until it is added or
+     * cancelled; a private torrent leaves once its metadata is in. Fails if the magnet is already
+     * in the session.
      */
     MetadataFetch fetchMetadata(String magnet) throws EngineException;
 
@@ -124,6 +125,41 @@ public interface Engine extends AutoCloseable {
      * #downloadDir()} is.
      */
     void moveStorage(String id, String destination, boolean moveFiles) throws EngineException;
+
+    /**
+     * Removes the torrent (not its files) and hands back what puts it back as it was: its resume
+     * data written fresh for the occasion, its labels, its storage record, its place in the
+     * queue. Only with {@link Capability#UNDO_REMOVE}.
+     */
+    default Detached detach(String id) throws EngineException {
+        throw new EngineException(tr("engine.error.noUndo"));
+    }
+
+    /**
+     * Puts a detached torrent back, without a recheck, as a restored one: nothing that runs on an
+     * add runs on it. Refused when a torrent of that id is in the list again.
+     */
+    default void reattach(Detached torrent) throws EngineException {
+        throw new EngineException(tr("engine.error.noUndo"));
+    }
+
+    /**
+     * A torrent taken out by {@link #detach}. The bytes are the engine's own: its resume data and
+     * its sidecars, opaque here as they are in the store.
+     *
+     * @param id the torrent's id
+     * @param name its name, for what the undo says
+     * @param resume its resume data, fresh
+     * @param labels its labels sidecar, or empty
+     * @param storage its storage record, or empty
+     * @param queuePosition its place in the queue, or -1
+     */
+    record Detached(String id, String name, byte[] resume, byte[] labels, byte[] storage, int queuePosition) {
+        public Detached {
+            labels = labels == null ? new byte[0] : labels;
+            storage = storage == null ? new byte[0] : storage;
+        }
+    }
 
     /**
      * Super seeding: a seed offers each peer only pieces nobody else has yet, so a first seed's
@@ -293,6 +329,18 @@ public interface Engine extends AutoCloseable {
          */
         java.util.concurrent.CompletableFuture<byte[]> torrent();
 
+        /**
+         * What the fetch has seen of the swarm so far, with the pieces counted over the files at
+         * {@code wanted} (indices): once the file list is in, it stays in the swarm downloading
+         * nothing, to look, until it is added or cancelled. Empty where the engine cannot look,
+         * once the fetch is over, and for a private torrent, whose fetch leaves at its metadata
+         * (a probe's announce would count against the person on a private tracker). Not on the FX
+         * thread.
+         */
+        default java.util.Optional<SwarmPreview> swarm(java.util.Set<Integer> wanted) {
+            return java.util.Optional.empty();
+        }
+
         /** Leaves the swarm. Idempotent; must come before the same magnet is added for real. */
         void cancel();
     }
@@ -361,7 +409,12 @@ public interface Engine extends AutoCloseable {
         /** The content layout on add: in a folder of its own, or without the torrent's root folder. */
         CONTENT_LAYOUT,
         /** Adding and removing a torrent's web seeds; any engine lists them. */
-        WEB_SEEDS;
+        WEB_SEEDS,
+        /**
+         * A removal that can be taken back: {@link #detach} keeps what brings the torrent back as
+         * it was, and {@link #reattach} brings it back without a recheck.
+         */
+        UNDO_REMOVE;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

@@ -59,6 +59,8 @@ final class Chords {
                 "view-previous",
                 new KeyCodeCombination(KeyCode.TAB, KeyCombination.CONTROL_DOWN, KeyCombination.SHIFT_DOWN));
         t.put("filter", chord(KeyCode.K));
+        // A filter of the scene's, like Ctrl+Tab: a text field keeps Ctrl+Z for its own undo.
+        t.put("undo", chord(KeyCode.Z));
         t.put("save-view", chord(KeyCode.S));
         // The first nine saved views. A filter of the scene's, not accelerators: Ctrl+Alt is AltGr
         // on many layouts, and AltGr+2 types an @ that a text field must keep.

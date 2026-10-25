@@ -421,6 +421,60 @@ class LibtorrentEngineTest {
         }
     }
 
+    /**
+     * Undo's engine half: a detached torrent comes back as it was, labels and queue place and
+     * all, as a restored one (nothing that runs on an add runs), and without a recheck. The proof
+     * of the last is a byte changed in a downloaded file while it was out, its size kept: from its
+     * resume data the torrent stays complete, where a recheck would fail that piece.
+     */
+    @Test
+    void aDetachedTorrentComesBackAsItWasWithoutARecheck(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "pair");
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine engine = engine(dir, store)) {
+            engine.addListener(events::add);
+            engine.start();
+            Torrent t = engine.add(downloadsTorrent(dir, torrent));
+            await(
+                    "seeding from the files already there",
+                    () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+            engine.setCategory(t.id(), "Linux");
+            engine.setTags(t.id(), List.of("keep"));
+
+            com.torrenta.engine.Engine.Detached detached = engine.detach(t.id());
+            assertTrue(engine.torrents().isEmpty(), "out of the list");
+            assertFalse(store.contains(t.id()), "and out of the store, as a removal is");
+            assertEquals("pair", detached.name());
+            assertTrue(Files.isRegularFile(downloads.resolve("pair").resolve("a.bin")), "the files stay");
+
+            Path a = downloads.resolve("pair").resolve("a.bin");
+            byte[] bytes = Files.readAllBytes(a);
+            bytes[0] ^= 0x5a;
+            Files.write(a, bytes);
+
+            events.clear();
+            engine.reattach(detached);
+            await("back in the list", () -> engine.torrents().size() == 1);
+            Torrent back = engine.torrents().get(0);
+            assertEquals(t.id(), back.id());
+            assertEquals("Linux", back.category());
+            assertEquals(List.of("keep"), back.tags());
+            // Past any checking: a recheck would have ended in DOWNLOADING, short the changed piece.
+            await("seeding again", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+            assertTrue(engine.torrents().get(0).progress() >= 1.0, "no recheck found the changed byte");
+            await(
+                    "said as restored",
+                    () -> events.stream().anyMatch(e -> e.message().equals("Restored pair")));
+            assertTrue(
+                    events.stream().noneMatch(e -> e.kind() == EngineEvent.Kind.ADDED),
+                    "run-on-added does not run for a torrent put back: " + events);
+            await("in the store again", () -> store.contains(t.id()));
+            assertThrows(EngineException.class, () -> engine.reattach(detached), "it is back already");
+        }
+    }
+
     @Test
     void inspectShowsTheFilesWithoutAdding(@TempDir Path dir) throws Exception {
         Path downloads = dir.resolve("downloads");
@@ -444,29 +498,48 @@ class LibtorrentEngineTest {
         }
     }
 
+    /**
+     * A second fetch of a magnet while its first is still running is refused. No peer can answer
+     * here (an isolated session, a hash nobody has), so the first is still running when asked:
+     * the check cannot race a fetch that finishes in milliseconds, as one from loopback can.
+     */
+    @Test
+    void aSecondFetchOfAMagnetStillBeingFetchedIsRefused(@TempDir Path dir) throws Exception {
+        try (LibtorrentEngine engine = new LibtorrentEngine(
+                () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(freePort()))) {
+            engine.start();
+            com.torrenta.engine.Engine.MetadataFetch fetch = engine.fetchMetadata(MAGNET);
+            assertThrows(EngineException.class, () -> engine.fetchMetadata(MAGNET), "one fetch per magnet");
+            fetch.cancel();
+            assertTrue(engine.torrents().isEmpty());
+        }
+    }
+
     @Test
     void aMagnetsFileListIsFetchedFromAPeerWithoutAddingIt(@TempDir Path dir) throws Exception {
         Path seeds = dir.resolve("seeds");
         byte[] torrent = twoFileTorrent(seeds, "pair");
         try (LibtorrentEngine seeder = new LibtorrentEngine(
-                        () -> seeds, new TorrentStore(dir.resolve("seed-store")), isolated(freePort()));
+                        () -> seeds, new TorrentStore(dir.resolve("seed-store")), isolated(ANY_PORT));
                 LibtorrentEngine engine = new LibtorrentEngine(
-                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(freePort()))) {
+                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(ANY_PORT))) {
             seeder.start();
             Torrent seeded = seeder.add(AddRequest.defaults(new AddRequest.TorrentFile(torrent, "pair"), seeds));
             await("seeding", () -> seeder.torrents().get(0).state() == TorrentState.SEEDING);
             // The port asked for is not always the one bound (libtorrent moves on when it is taken).
-            String magnet = seeder.magnetLink(seeded.id()) + "&x.pe=127.0.0.1:" + seeder.listenPortForTest();
+            String magnet = seeder.magnetLink(seeded.id()) + "&x.pe=127.0.0.1:" + awaitListening("the seeder", seeder);
 
             engine.start();
+            engine.recordPeersForTest();
             engine.reconnectQuicklyForTest();
             List<EngineEvent> events = new CopyOnWriteArrayList<>();
             engine.addListener(events::add);
             com.torrenta.engine.Engine.MetadataFetch fetch = engine.fetchMetadata(magnet);
             assertTrue(engine.torrents().isEmpty(), "a fetch is not a torrent in the list");
-            assertThrows(EngineException.class, () -> engine.fetchMetadata(magnet), "one fetch per magnet");
+            // "One fetch per magnet" is aSecondFetchOfAMagnetStillBeingFetchedIsRefused's: from a
+            // seeder on loopback this fetch can be over before a second call (CI saw it).
 
-            byte[] fetched = fetch.torrent().get(LOOPBACK_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
+            byte[] fetched = awaitFetch(engine, fetch, seeder.listenPortForTest());
             TorrentPreview preview = engine.inspect(fetched);
             assertEquals("pair", preview.name());
             assertEquals(
@@ -476,10 +549,24 @@ class LibtorrentEngineTest {
             assertTrue(
                     preview.trackers().contains("udp://tracker.example.org:6969/announce"),
                     "the link's trackers are in the .torrent: " + preview.trackers());
-            assertEquals(0, fetch.peers(), "over once the metadata is in");
-            await("the fetch has left the session", () -> engine.torrents().isEmpty());
+
+            // It stays to look at the swarm, hidden, downloading nothing: the seeder that handed
+            // over the metadata is a seed to it, so every piece of the ticked file is held.
+            int first = preview.files().get(0).index();
+            com.torrenta.engine.SwarmPreview look = awaitSwarm(fetch, Set.of(first), p -> p.seeds() >= 1);
+            assertTrue(look.hasPieces(), "the file list is in: " + look);
+            assertTrue(look.metadataAt() >= look.started(), look.toString());
+            assertTrue(look.wanted() > 0 && look.wanted() < look.pieces(), "one file of two: " + look);
+            assertEquals(look.wanted(), look.wantedSeen(), "a seed holds them all: " + look);
+            assertTrue(engine.torrents().isEmpty(), "still not a torrent in the list");
+            assertFalse(
+                    Files.exists(dir.resolve("downloads").resolve("pair")),
+                    "nothing in the download folder while it looks: " + onDisk(dir.resolve("downloads")));
             assertTrue(events.stream().noneMatch(e -> e.torrentId() != null), "a fetch raises no events: " + events);
             assertTrue(new TorrentStore(dir.resolve("store")).loadAll().isEmpty(), "and writes nothing");
+            fetch.cancel();
+            assertEquals(0, fetch.peers(), "over once cancelled");
+            assertTrue(fetch.swarm(Set.of(first)).isEmpty(), "and looks no more");
 
             Torrent added = engine.add(
                     AddRequest.defaults(new AddRequest.TorrentFile(fetched, magnet), dir.resolve("downloads")));
@@ -493,13 +580,13 @@ class LibtorrentEngineTest {
         Path seeds = dir.resolve("seeds");
         byte[] torrent = twoFileTorrent(seeds, "pair");
         try (LibtorrentEngine seeder = new LibtorrentEngine(
-                        () -> seeds, new TorrentStore(dir.resolve("seed-store")), isolated(freePort()));
+                        () -> seeds, new TorrentStore(dir.resolve("seed-store")), isolated(ANY_PORT));
                 LibtorrentEngine engine = new LibtorrentEngine(
-                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(freePort()));
+                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(ANY_PORT));
                 LibtorrentEngine control = new LibtorrentEngine(
                         () -> dir.resolve("control"),
                         new TorrentStore(dir.resolve("control-store")),
-                        isolated(freePort()))) {
+                        isolated(ANY_PORT))) {
             seeder.start();
             Torrent seeded = seeder.add(AddRequest.defaults(new AddRequest.TorrentFile(torrent, "pair"), seeds));
             await("seeding", () -> seeder.torrents().get(0).state() == TorrentState.SEEDING);
@@ -508,10 +595,11 @@ class LibtorrentEngineTest {
             String magnet = seeder.magnetLink(seeded.id());
 
             engine.start();
+            engine.recordPeersForTest();
             engine.reconnectQuicklyForTest();
             Engine.MetadataFetch fetch = engine.fetchMetadata(magnet);
-            engine.connectFetchForTest(fetch, seeder.listenPortForTest());
-            byte[] fetched = fetch.torrent().get(LOOPBACK_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
+            engine.connectFetchForTest(fetch, awaitListening("the seeder", seeder));
+            byte[] fetched = awaitFetch(engine, fetch, seeder.listenPortForTest());
 
             // Once the metadata is in, the fetch is upload-only and the seed drops it at once; the
             // torrent still knows where the seed is, and downloads all of it from there.
@@ -535,20 +623,18 @@ class LibtorrentEngineTest {
     @Test
     void addingNowStartsWithThePeersTheFetchFound(@TempDir Path dir) throws Exception {
         try (LibtorrentEngine other = new LibtorrentEngine(
-                        () -> dir.resolve("other"),
-                        new TorrentStore(dir.resolve("other-store")),
-                        isolated(freePort()));
+                        () -> dir.resolve("other"), new TorrentStore(dir.resolve("other-store")), isolated(ANY_PORT));
                 LibtorrentEngine engine = new LibtorrentEngine(
-                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(freePort()))) {
+                        () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(ANY_PORT))) {
             // Another peer after the same magnet, without its metadata either: the fetch stays a
             // fetch, as it is when the person presses Add now.
             other.start();
             other.add(MAGNET);
             engine.start();
+            engine.recordPeersForTest();
             engine.reconnectQuicklyForTest();
             Engine.MetadataFetch fetch = engine.fetchMetadata(MAGNET);
-            engine.connectFetchForTest(fetch, other.listenPortForTest());
-            await("the fetch is connected", () -> fetch.peers() > 0);
+            awaitFetchPeer(engine, fetch, awaitListening("the other peer", other));
 
             AddRequest now = new AddRequest(
                     new AddRequest.Magnet(MAGNET),
@@ -693,7 +779,7 @@ class LibtorrentEngineTest {
 
     /** {@link #isolated} bound to an address or interface name. */
     private static com.torrenta.engine.EngineSettings boundTo(String bound) throws java.io.IOException {
-        com.torrenta.engine.EngineSettings d = isolated(freePort());
+        com.torrenta.engine.EngineSettings d = isolated(ANY_PORT);
         return new com.torrenta.engine.EngineSettings(
                 d.listenPort(),
                 d.randomPort(),
@@ -714,11 +800,56 @@ class LibtorrentEngineTest {
                 d.queue());
     }
 
+    /**
+     * A port picked here and bound later, for the few tests that need to know it before the
+     * session exists. Everything else binds {@link #ANY_PORT}: between this socket closing and
+     * libtorrent binding, Windows can refuse the number (a previous test's connections on it,
+     * in TIME_WAIT), and a session refused its only port listens on nothing at all.
+     */
     private static int freePort() throws java.io.IOException {
         try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
             return socket.getLocalPort();
         }
     }
+
+    /** Port 0: the system picks a free one as the session binds; {@code listenPortForTest} says which. */
+    private static final int ANY_PORT = 0;
+
+    /** Where every loopback session listens; see {@link #isolated}. */
+    private static final String LOOPBACK = "127.0.0.1";
+
+    /**
+     * Waits until the session listens, and says why not if it never does: a peer told to dial
+     * port 0 is dropped without an attempt, and a loopback test then waits out its deadline with
+     * no peer and no sign of why (CI's flakes: a seeder whose port was 0 for two minutes).
+     */
+    private static int awaitListening(String who, LibtorrentEngine engine) throws Exception {
+        long start = System.currentTimeMillis();
+        long deadline = start + LOOPBACK_SECONDS * 1000;
+        boolean reopened = false;
+        while (engine.listenPortForTest() == 0) {
+            long now = System.currentTimeMillis();
+            // A session can come up with no listen socket and say nothing about it (Windows CI):
+            // asked to reopen its sockets once, and said, so the soak shows whether that cures it.
+            if (!reopened && now - start > REOPEN_AFTER_MS) {
+                System.err.println("awaitListening: " + who + " was not listening after " + REOPEN_AFTER_MS + " ms ("
+                        + engine.connectivity() + "); reopening its sockets");
+                engine.reopenSocketsForTest();
+                reopened = true;
+            }
+            if (now > deadline)
+                throw new AssertionError(who + " never listened" + (reopened ? ", its sockets reopened at 10 s" : "")
+                        + ": " + engine.connectivity());
+            Thread.sleep(25);
+        }
+        if (reopened)
+            System.err.println("awaitListening: " + who + " listened on " + engine.listenPortForTest()
+                    + " after its sockets were reopened, " + (System.currentTimeMillis() - start) + " ms in");
+        return engine.listenPortForTest();
+    }
+
+    /** How long a session may take to listen before its sockets are reopened; it listens in milliseconds. */
+    private static final long REOPEN_AFTER_MS = 10_000;
 
     /**
      * {@link #onPort}, with no way to find a peer but being told (no DHT, no local discovery) and
@@ -735,7 +866,11 @@ class LibtorrentEngineTest {
         return new com.torrenta.engine.EngineSettings(
                 d.listenPort(),
                 d.randomPort(),
-                d.listenInterface(),
+                // Loopback, and only loopback: every peer these tests dial is 127.0.0.1. Bound to
+                // 0.0.0.0 with port 0, libtorrent on Windows gives each local address a socket of
+                // its own, each its own port, and listen_port() names one that is not loopback's
+                // (measured: every dial of 127.0.0.1 at that port refused, in every run).
+                LOOPBACK,
                 d.ipv6(),
                 d.upnp(),
                 d.maxConnections(),
@@ -1422,8 +1557,9 @@ class LibtorrentEngineTest {
      */
     private static LibtorrentEngine seeder(Path dir, byte[] torrent, Consumer<EngineEvent> listener) throws Exception {
         LibtorrentEngine seed = new LibtorrentEngine(
-                () -> dir.resolve("seed"), new TorrentStore(dir.resolve("seedstore")), isolated(freePort()));
+                () -> dir.resolve("seed"), new TorrentStore(dir.resolve("seedstore")), isolated(ANY_PORT));
         seed.addListener(listener);
+        seed.recordPeersForTest();
         seed.start();
         seed.add(new AddRequest(
                 new AddRequest.TorrentFile(torrent, "pair.torrent"),
@@ -1435,6 +1571,7 @@ class LibtorrentEngineTest {
                 Map.of(),
                 TorrentLabels.NONE));
         await("seeder seeding", () -> seed.torrents().get(0).state() == TorrentState.SEEDING);
+        awaitListening("the seeder", seed);
         return seed;
     }
 
@@ -1444,7 +1581,9 @@ class LibtorrentEngineTest {
     }
 
     private static LibtorrentEngine downloader(Path dir, TorrentStore store) throws Exception {
-        return new LibtorrentEngine(() -> dir.resolve("downloads"), store, isolated(freePort()));
+        LibtorrentEngine engine = new LibtorrentEngine(() -> dir.resolve("downloads"), store, isolated(ANY_PORT));
+        engine.recordPeersForTest();
+        return engine;
     }
 
     /**
@@ -1452,29 +1591,167 @@ class LibtorrentEngineTest {
      * at most once a second: a second connection from the same address makes the seeder drop
      * one as a duplicate, which stalls the transfer. A failed attempt is dialled again a second
      * later rather than a minute ({@link LibtorrentEngine#reconnectQuicklyForTest}); without that
-     * the repeated {@code connect_peer} does nothing. The deadline is long because CI runners
-     * are slow, not because the transfer is: it takes well under a second.
+     * the repeated {@code connect_peer} does nothing. After three failed attempts libtorrent stops
+     * dialling the address altogether, and no {@code connect_peer} brings it back (measured: three
+     * refusals, then a seeder on that very port, then twenty seconds of silence); so a torrent
+     * that has gone {@link #FORGET_AFTER_MS} without a peer forgets its list before the next dial,
+     * and the seeder is a new peer to it: a few early failures (refused, dropped, timed out at the
+     * three seconds the test allows) no longer cost the whole deadline. CI's own flakes were the
+     * seeder, not this: it listened on nothing ({@link #awaitListening}). The deadline is long
+     * because CI runners are slow, not because the transfer is: it takes well under a second.
      */
     private static void awaitDownload(
             String what, LibtorrentEngine engine, String id, LibtorrentEngine seed, Condition condition)
             throws Exception {
         engine.reconnectQuicklyForTest();
-        int port = seed.listenPortForTest();
+        int port = awaitListening("the seeder", seed);
         long deadline = System.currentTimeMillis() + LOOPBACK_SECONDS * 1000;
         long nextConnect = 0;
+        long lonelySince = System.currentTimeMillis();
         while (!condition.test()) {
             if (System.currentTimeMillis() > deadline) {
+                // Which end failed, and how: the seeder's port then and now, whether it listened,
+                // and each side's peer connections as they started and ended.
                 throw new AssertionError("timed out waiting for: " + what + "; torrent " + engine.torrents()
                         + "; files "
                         + engine.detail(id).files() + "; on disk "
-                        + onDisk(Path.of(engine.torrents().get(0).savePath()).getParent()));
+                        + onDisk(Path.of(engine.torrents().get(0).savePath()).getParent())
+                        + "; seeder port dialled " + port + ", now " + seed.listenPortForTest()
+                        + ", " + seed.connectivity() + ", torrents " + seed.torrents()
+                        + "\n  downloader's peers:\n    " + String.join("\n    ", engine.peerLogForTest())
+                        + "\n  seeder's peers:\n    " + String.join("\n    ", seed.peerLogForTest()));
             }
-            if (System.currentTimeMillis() >= nextConnect
-                    && engine.torrents().get(0).peers() == 0) {
+            long now = System.currentTimeMillis();
+            if (engine.torrents().get(0).peers() > 0) {
+                lonelySince = now;
+            } else if (now >= nextConnect) {
+                if (now - lonelySince >= FORGET_AFTER_MS) {
+                    engine.forgetPeersForTest(id);
+                    lonelySince = now;
+                }
                 engine.connectPeerForTest(id, port);
-                nextConnect = System.currentTimeMillis() + 1000;
+                nextConnect = now + 1000;
             }
             Thread.sleep(25);
+        }
+    }
+
+    /**
+     * How long a loopback torrent may go without a peer before its peer list is forgotten: long
+     * enough for a dial and a handshake on a slow runner, short of libtorrent's third failure.
+     */
+    private static final long FORGET_AFTER_MS = 5000;
+
+    /** A fetch connected to the peer on {@code port}: dialled once a second, forgetting as {@link #awaitFetch} does. */
+    private static void awaitFetchPeer(LibtorrentEngine engine, Engine.MetadataFetch fetch, int port) throws Exception {
+        long deadline = System.currentTimeMillis() + LOOPBACK_SECONDS * 1000;
+        long lonelySince = System.currentTimeMillis();
+        while (fetch.peers() == 0) {
+            long now = System.currentTimeMillis();
+            if (now > deadline) {
+                throw new AssertionError("timed out connecting the fetch to port " + port + "\n  peers:\n    "
+                        + String.join("\n    ", engine.peerLogForTest()));
+            }
+            if (now - lonelySince >= FORGET_AFTER_MS) {
+                engine.forgetFetchPeersForTest(fetch);
+                lonelySince = now;
+            }
+            engine.connectFetchForTest(fetch, port);
+            Thread.sleep(1000);
+        }
+    }
+
+    /**
+     * A magnet fetch's metadata, from the seeder on {@code port}, with {@link #awaitDownload}'s
+     * redial: the fetch is a hidden torrent with the same peer list, and gives up on the seeder the
+     * same way after three failures.
+     */
+    private static byte[] awaitFetch(LibtorrentEngine engine, Engine.MetadataFetch fetch, int port) throws Exception {
+        long deadline = System.currentTimeMillis() + LOOPBACK_SECONDS * 1000;
+        long lonelySince = System.currentTimeMillis();
+        while (true) {
+            try {
+                return fetch.torrent().get(1, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (java.util.concurrent.TimeoutException notYet) {
+                long now = System.currentTimeMillis();
+                if (now > deadline) {
+                    throw new AssertionError("timed out fetching the metadata from port " + port + "\n  peers:\n    "
+                            + String.join("\n    ", engine.peerLogForTest()));
+                }
+                if (fetch.peers() > 0) {
+                    lonelySince = now;
+                } else if (now - lonelySince >= FORGET_AFTER_MS) {
+                    engine.forgetFetchPeersForTest(fetch);
+                    engine.connectFetchForTest(fetch, port);
+                    lonelySince = now;
+                }
+            }
+        }
+    }
+
+    /** What a fetch sees of the swarm, once it shows what {@code until} asks: polled as the dialog polls it. */
+    private static com.torrenta.engine.SwarmPreview awaitSwarm(
+            Engine.MetadataFetch fetch,
+            Set<Integer> wanted,
+            java.util.function.Predicate<com.torrenta.engine.SwarmPreview> until)
+            throws Exception {
+        long deadline = System.currentTimeMillis() + LOOPBACK_SECONDS * 1000;
+        com.torrenta.engine.SwarmPreview last = null;
+        while (System.currentTimeMillis() < deadline) {
+            last = fetch.swarm(wanted).orElse(null);
+            if (last != null && until.test(last)) return last;
+            Thread.sleep(250);
+        }
+        throw new AssertionError("timed out looking at the swarm; last seen " + last);
+    }
+
+    /**
+     * The harness's own guarantee: a downloader whose first three
+     * dials of an address failed still reaches the seeder that comes up there, through {@link
+     * #awaitDownload}. Without the forgetting, libtorrent never dials that address again.
+     */
+    @Test
+    void aSeederRefusedThreeTimesIsStillReachedByTheHarness(@TempDir Path dir) throws Exception {
+        byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
+        int port = freePort();
+        try (LibtorrentEngine engine = downloader(dir)) {
+            engine.start();
+            engine.reconnectQuicklyForTest();
+            String id = engine.add(downloadsTorrent(dir, torrent)).id();
+            // Nothing listens on the port yet: every dial fails until libtorrent gives up on it.
+            long deadline = System.currentTimeMillis() + LOOPBACK_SECONDS * 1000;
+            while (engine.peerLogForTest().stream()
+                            .filter(line -> line.contains(" CONNECT: "))
+                            .count()
+                    < 3) {
+                if (System.currentTimeMillis() > deadline)
+                    throw new AssertionError("three failed dials: " + engine.peerLogForTest());
+                engine.connectPeerForTest(id, port);
+                Thread.sleep(1000);
+            }
+            try (LibtorrentEngine seed = new LibtorrentEngine(
+                    () -> dir.resolve("seed"), new TorrentStore(dir.resolve("seedstore")), isolated(port))) {
+                seed.recordPeersForTest();
+                seed.start();
+                org.junit.jupiter.api.Assumptions.assumeTrue(
+                        awaitListening("the seeder", seed) == port, "the port was taken meanwhile: nothing to prove");
+                seed.add(new AddRequest(
+                        new AddRequest.TorrentFile(torrent, "pair.torrent"),
+                        dir.resolve("seed"),
+                        false,
+                        false,
+                        false,
+                        AddRequest.StopCondition.NONE,
+                        Map.of(),
+                        TorrentLabels.NONE));
+                await("seeder seeding", () -> seed.torrents().get(0).state() == TorrentState.SEEDING);
+                awaitDownload(
+                        "downloaded after three refusals",
+                        engine,
+                        id,
+                        seed,
+                        () -> engine.torrents().get(0).progress() >= 1.0);
+            }
         }
     }
 
@@ -2317,7 +2594,7 @@ class LibtorrentEngineTest {
         long size;
         try (LibtorrentEngine seed = seeder(dir, torrent);
                 LibtorrentEngine engine =
-                        new LibtorrentEngine(() -> dir.resolve("downloads"), store, isolated(freePort()), statsStore)) {
+                        new LibtorrentEngine(() -> dir.resolve("downloads"), store, isolated(ANY_PORT), statsStore)) {
             engine.start();
             SessionStats fresh = engine.stats();
             assertEquals(0, fresh.sessionDownload());
@@ -2335,6 +2612,11 @@ class LibtorrentEngineTest {
             await("the download counter caught up", () -> engine.stats().sessionDownload() >= size);
             await("the seeder's upload counter caught up", () -> seed.stats().sessionUpload() >= size);
             await("the seeder counts its seed", () -> seed.stats().torrents().seeding() == 1);
+            // Disk writes trail the payload: a block received may still be in the write cache
+            // (CI caught 6 of 10 blocks written, 5 in use, with the download counter complete).
+            await(
+                    "the files were written",
+                    () -> engine.stats().diskBlocksWritten() * SessionStats.BLOCK_BYTES >= size);
             SessionStats s = engine.stats();
             assertEquals(s.sessionDownload(), s.allTimeDownload(), "the first run's all-time is the session");
             assertEquals(s.sessionUpload(), s.allTimeUpload());

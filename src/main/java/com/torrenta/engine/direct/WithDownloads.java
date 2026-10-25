@@ -146,6 +146,18 @@ public final class WithDownloads implements Engine {
     }
 
     @Override
+    public Detached detach(String id) throws EngineException {
+        torrentOnly(id);
+        return torrents.detach(id);
+    }
+
+    @Override
+    public void reattach(Detached torrent) throws EngineException {
+        torrentOnly(torrent.id());
+        torrents.reattach(torrent);
+    }
+
+    @Override
     public void remove(String id, boolean deleteFiles) throws EngineException {
         if (DirectDownload.isId(id)) links.remove(id, deleteFiles);
         else torrents.remove(id, deleteFiles);

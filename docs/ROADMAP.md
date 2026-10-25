@@ -438,6 +438,8 @@ every match is where a mistake is largest.
    names the target first ("Pause: 14 matching torrents"); destructive ones and anything over 20
    confirm through `RemoveConfirm`; `Actions.torrentsOnly` still applies and the skipped are
    counted; each is one undo entry. Up recalls the last ten (`ui.omnibox.history`, never synced).
+   The first PR is in: the verbs, their arguments, the targets, the confirm and the undo. Still to
+   come: completion of names and paths, a ratio verb, the count of what was skipped, and history.
 7. **Swarm preview** (2 PRs): every add gets a hidden upload-mode probe (`MetadataFetch` becomes
    `SwarmProbe`; a `.torrent` gets one as a magnet does), off by default for a private torrent,
    where a probe's announce counts. `SwarmPreview` (the scrape counts, the highest per tracker
@@ -446,6 +448,11 @@ every match is where a mistake is largest.
    beside the free-space line. **No time estimate** (decided): the probe downloads nothing, so
    there is no rate to measure, and a guess shown as a number reads as a measurement. Transmission
    has no hidden torrents: `Capability.SWARM_PREVIEW`.
+   The first PR is in, for magnets: the fetch stays in the swarm past its metadata
+   (`MetadataFetch.swarm`), `SwarmPreview`, `ui.SwarmVerdict`, the Add dialog's Swarm line; a
+   private torrent's fetch leaves at its metadata. Still to come: a `.torrent`'s own probe (and
+   with it the rename to `SwarmProbe` and `Capability.SWARM_PREVIEW`), and the setting that lets a
+   private torrent be probed.
 8. **Leak check** (2 PRs): `net.InterfaceWatch` reads the bound interface every 5 s on the poll
    thread (present, up, addresses; a change re-applies the settings), `Connectivity` keeps the
    swarm's view of this machine from `ExternalIpAlert`. Then an opt-in exit check, since it asks a

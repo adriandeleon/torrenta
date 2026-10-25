@@ -153,6 +153,7 @@ final class Icons {
             case "view-previous" -> viewPrevious();
             case "transfers" -> transfers();
             case "filter" -> find();
+            case "undo" -> history();
             case "save-view" -> eye();
             case "select-all" -> selectAll();
             case "event-log" -> history();

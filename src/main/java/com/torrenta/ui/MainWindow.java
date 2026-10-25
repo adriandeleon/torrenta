@@ -23,6 +23,7 @@ import java.util.logging.Logger;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.BooleanBinding;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.beans.value.ObservableBooleanValue;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
@@ -79,6 +80,7 @@ import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.Inputs;
 import com.torrenta.engine.LinkRequest;
 import com.torrenta.engine.ShareLimit;
+import com.torrenta.engine.SwarmPreview;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentLabels;
@@ -450,6 +452,7 @@ public final class MainWindow {
         detail.setMoreMenu(buildContextMenu());
         detail.setEvents(log.events());
         palette = new CommandPalette(host, this::focusList, paletteChord.getDisplayText());
+        palette.setResolver(this::typedCommand);
         logWindow = new LogWindow(stage, log);
         statsWindow = new StatisticsWindow(stage, settings.statsWindowSeconds(), this::rememberStatsWindow);
         statsWindow.showingProperty().addListener((o, was, now) -> statsWanted = now);
@@ -506,6 +509,12 @@ public final class MainWindow {
             Clipboard.getSystemClipboard().setContent(content);
             setStatus(tr("status.copied.address", address));
         });
+        detail.setOnCopyCommand(command -> {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(command);
+            Clipboard.getSystemClipboard().setContent(content);
+            setStatus(tr("status.copied.command"));
+        });
         log.installLogBridge(Platform::runLater);
         reportDefinitionProblems();
         host.getChildren().add(root);
@@ -542,6 +551,15 @@ public final class MainWindow {
                     e.consume();
                     return;
                 }
+            }
+        });
+        // Shortcut+Z takes back the newest undoable action, unless a text field has the focus: there
+        // it is the field's own undo, which a scene accelerator would steal.
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+            if (scene.getFocusOwner() instanceof javafx.scene.control.TextInputControl) return;
+            if (Chords.of("undo").match(e)) {
+                undoNewest();
+                e.consume();
             }
         });
         scene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
@@ -1380,6 +1398,19 @@ public final class MainWindow {
             // pick-view:<n>: the n-th saved view chosen, as Shortcut+Alt+n does from the list.
             chooseSavedView(
                     Integer.parseInt(action.substring("pick-view:".length()).trim()));
+        } else if (action.equals("remove-confirmed")) {
+            // Remove (the files kept) on the selection, its question answered yes.
+            RemoveConfirm.answerForCapture = true;
+            remove(false);
+        } else if (action.startsWith("undo-after:")) {
+            // Shortcut+Z, that many milliseconds later: after the worker an undoable action ran on.
+            javafx.animation.PauseTransition later = new javafx.animation.PauseTransition(javafx.util.Duration.millis(
+                    Long.parseLong(action.substring("undo-after:".length()).trim())));
+            later.setOnFinished(e -> {
+                System.out.println("capture: undo=offered " + undoOffer.isVisible() + ", kept " + undoStack.size());
+                undoNewest();
+            });
+            later.play();
         } else if (action.startsWith("export-to:")) {
             // The selection exported into a folder, as Export does past its (native) chooser.
             export(exportTargets(selectedTorrents(), Path.of(action.substring("export-to:".length()))));
@@ -2749,8 +2780,14 @@ public final class MainWindow {
         FetchWatch watch = fetchWatch;
         Engine.MetadataFetch fetch = watch == null ? null : watch.slot().get();
         if (fetch != null) {
-            int peers = fetch.peers();
-            Platform.runLater(() -> watch.dialog().showFetching(peers));
+            if (!fetch.torrent().isDone()) {
+                int peers = fetch.peers();
+                Platform.runLater(() -> watch.dialog().showFetching(peers));
+            } else {
+                // The files are in and the fetch stays to look at the swarm, over the ticked files.
+                Optional<SwarmPreview> swarm = fetch.swarm(watch.dialog().wantedFiles());
+                Platform.runLater(() -> watch.dialog().showSwarm(swarm));
+            }
         }
         List<Torrent> snapshot = engine.torrents();
         Engine.Rates current = engine.rates();
@@ -3003,6 +3040,241 @@ public final class MainWindow {
         void apply(Engine engine, Torrent torrent) throws EngineException;
     }
 
+    /** An action on one torrent that hands back how to take it back; null when there is nothing to. */
+    private interface UndoableAction {
+        UndoStack.Undo apply(Engine engine, Torrent torrent) throws EngineException;
+    }
+
+    /** What can be taken back; Shortcut+Z, Torrent → Undo, and the status bar's Undo. */
+    private final UndoStack undoStack = new UndoStack();
+
+    /** The status bar's Undo, shown for {@link UndoStack#OFFER_MS} after something undoable. */
+    private final Label undoOffer = new Label();
+
+    private final javafx.animation.PauseTransition undoOfferTimeout =
+            new javafx.animation.PauseTransition(javafx.util.Duration.millis(UndoStack.OFFER_MS));
+
+    /** Something to undo is kept: Torrent → Undo is live. */
+    private final javafx.beans.property.BooleanProperty canUndo = new javafx.beans.property.SimpleBooleanProperty();
+
+    /**
+     * {@link #onTorrents}, keeping how to take each back: once the worker is done, the inverses
+     * become one undo entry under the outcome's words, taken back newest first.
+     */
+    private void onTorrentsUndoable(String verb, List<Torrent> targets, UndoableAction action) {
+        if (targets.isEmpty() || engine == null) return;
+        Engine e = engine;
+        Thread.ofVirtual().name("engine-action").start(() -> {
+            int done = 0;
+            List<String> failures = new ArrayList<>();
+            List<UndoStack.Undo> inverses = new ArrayList<>();
+            for (Torrent t : targets) {
+                try {
+                    UndoStack.Undo inverse = action.apply(e, t);
+                    if (inverse != null) inverses.add(inverse);
+                    done++;
+                } catch (EngineException ex) {
+                    failures.add(ex.getMessage());
+                }
+            }
+            String text = Actions.outcome(verb, done, failures);
+            Platform.runLater(() -> {
+                setStatus(text);
+                if (!inverses.isEmpty())
+                    remember(text, engine -> {
+                        List<String> refused = new ArrayList<>();
+                        for (UndoStack.Undo inverse : inverses.reversed()) {
+                            try {
+                                inverse.run(engine);
+                            } catch (EngineException ex) {
+                                refused.add(ex.getMessage());
+                            }
+                        }
+                        if (!refused.isEmpty()) throw new EngineException(String.join("; ", refused));
+                    });
+            });
+        });
+    }
+
+    /** A typed command's row is always live: what it can act on is said in its words, not by greying. */
+    private static final ObservableBooleanValue TYPED_ENABLED = new ReadOnlyBooleanWrapper(true);
+
+    /**
+     * The palette's row for a command typed with what it takes ({@code set-category Films}): what it
+     * does and what it acts on, or what does not read; empty when the text names no such command.
+     */
+    private Optional<Command> typedCommand(String text) {
+        return OmniCommand.parse(text).map(parsed -> switch (parsed) {
+            case OmniCommand.Problem problem ->
+                new Command(
+                        "omni",
+                        problem.message(),
+                        null,
+                        "",
+                        TYPED_ENABLED,
+                        () -> setStatus(problem.message(), EngineEvent.Level.WARNING));
+            case OmniCommand.Ready ready -> {
+                boolean filtering = !omnibox.chips().isEmpty();
+                List<Torrent> targets = Actions.targets(
+                        selectedTorrents(),
+                        filtered.stream().map(TorrentRow::torrent).toList(),
+                        filtering);
+                String what = filtering
+                        ? tr("omni.targets.matching", targets.size())
+                        : tr("omni.targets.selected", targets.size());
+                yield new Command(
+                        "omni",
+                        tr("omni.row", ready.command().describe(), what),
+                        null,
+                        "",
+                        TYPED_ENABLED,
+                        () -> runTyped(ready.command(), targets));
+            }
+        });
+    }
+
+    /**
+     * FX thread. A typed command on its targets: asked about first when it removes or acts on
+     * more than {@link OmniCommand#ASK_ABOVE}; undoable where the menu's own command is.
+     */
+    private void runTyped(OmniCommand command, List<Torrent> all) {
+        boolean torrentsOnly =
+                switch (command.verb()) {
+                    case RECHECK, REANNOUNCE, SEQUENTIAL, QUEUE, LIMIT_UP -> true;
+                    default -> false;
+                };
+        List<Torrent> targets = torrentsOnly ? Actions.torrentsOnly(all) : all;
+        if (targets.isEmpty()) {
+            setStatus(tr("omni.nothing"));
+            return;
+        }
+        Engine.Capability needs =
+                switch (command.verb()) {
+                    case SEQUENTIAL -> Engine.Capability.SEQUENTIAL_DOWNLOAD;
+                    case QUEUE -> Engine.Capability.QUEUE_ORDER;
+                    case SET_LOCATION -> Engine.Capability.MOVE_STORAGE;
+                    default -> null;
+                };
+        if (needs != null && capabilities.lacks(needs)) {
+            setStatus(tr("omni.unsupported", command.verb().word()), EngineEvent.Level.WARNING);
+            return;
+        }
+        if (command.verb() == OmniCommand.Verb.REMOVE) {
+            if (!RemoveConfirm.ask(
+                    stage, tr("common.remove"), Actions.removeQuestion(targets.size(), false), tr("common.remove")))
+                return;
+            removeTorrents(targets, false);
+            return;
+        }
+        if (command.asks(targets.size())
+                && !RemoveConfirm.ask(
+                        stage,
+                        tr("omni.confirm.header"),
+                        tr("omni.confirm", command.describe(), targets.size()),
+                        tr("omni.confirm.button"))) return;
+        String text = command.text();
+        switch (command.verb()) {
+            case SET_CATEGORY -> {
+                rememberLabels(new TorrentLabels(text, List.of()));
+                onTorrentsUndoable(tr("actions.verb.filedUnder", text), targets, (e, t) -> {
+                    String was = e.category(t.id());
+                    e.setCategory(t.id(), text);
+                    return engine -> engine.setCategory(t.id(), was);
+                });
+            }
+            case ADD_TAG, REMOVE_TAG -> {
+                boolean add = command.verb() == OmniCommand.Verb.ADD_TAG;
+                if (add) rememberLabels(new TorrentLabels("", List.of(text)));
+                onTorrentsUndoable(tr("actions.verb.tagsSet"), targets, (e, t) -> {
+                    List<String> was = List.copyOf(e.tags(t.id()));
+                    List<String> tags = new ArrayList<>(was);
+                    if (add && !tags.contains(text)) tags.add(text);
+                    if (!add) tags.remove(text);
+                    e.setTags(t.id(), tags);
+                    return engine -> engine.setTags(t.id(), was);
+                });
+            }
+            case SET_LOCATION ->
+                onTorrentsUndoable(tr("actions.verb.moving", text), targets, (e, t) -> {
+                    String was = t.savePath();
+                    e.moveStorage(t.id(), text, true);
+                    return engine -> engine.moveStorage(t.id(), was, true);
+                });
+            case LIMIT_DOWN, LIMIT_UP -> {
+                boolean down = command.verb() == OmniCommand.Verb.LIMIT_DOWN;
+                int rate = (int) command.bytes();
+                onTorrentsUndoable(tr("actions.verb.limitsSet"), targets, (e, t) -> {
+                    TorrentLimits was = e.limits(t.id());
+                    e.setLimits(
+                            t.id(),
+                            new TorrentLimits(
+                                    down ? rate : was.downloadLimit(),
+                                    down ? was.uploadLimit() : rate,
+                                    was.maxConnections(),
+                                    was.maxUploads(),
+                                    was.firstAndLastFirst()));
+                    return engine -> engine.setLimits(t.id(), was);
+                });
+            }
+            case SEQUENTIAL ->
+                onTorrents(
+                        command.on() ? tr("actions.verb.sequentialOn") : tr("actions.verb.sequentialOff"),
+                        targets,
+                        (e, t) -> e.setSequential(t.id(), command.on()));
+            case QUEUE ->
+                onTorrents(
+                        switch (command.move()) {
+                            case TOP -> tr("actions.verb.queueTop");
+                            case UP -> tr("actions.verb.queueUp");
+                            case DOWN -> tr("actions.verb.queueDown");
+                            case BOTTOM -> tr("actions.verb.queueBottom");
+                        },
+                        targets,
+                        (e, t) -> e.queueMove(t.id(), command.move()));
+            case PAUSE -> onTorrents(tr("actions.verb.paused"), targets, (e, t) -> e.pause(t.id()));
+            case RESUME -> onTorrents(tr("actions.verb.resumed"), targets, (e, t) -> e.resume(t.id()));
+            case RECHECK -> onTorrents(tr("actions.verb.rechecking"), targets, (e, t) -> e.recheck(t.id()));
+            case REANNOUNCE -> onTorrents(tr("actions.verb.reannounced"), targets, (e, t) -> e.reannounce(t.id()));
+            case REMOVE -> {
+                // Asked and done above.
+            }
+        }
+    }
+
+    /** FX thread. Keeps an undo, and offers it in the status bar for ten seconds. */
+    private void remember(String label, UndoStack.Undo undo) {
+        undoStack.push(label, System.currentTimeMillis(), undo);
+        canUndo.set(true);
+        undoOffer.setVisible(true);
+        undoOfferTimeout.playFromStart();
+    }
+
+    /** Shortcut+Z: the newest undo, taken back on a worker; the status bar says how it went. */
+    private void undoNewest() {
+        Engine e = engine;
+        java.util.Optional<UndoStack.Entry> entry = undoStack.take(System.currentTimeMillis());
+        canUndo.set(undoStack.newest(System.currentTimeMillis()).isPresent());
+        undoOffer.setVisible(false);
+        if (entry.isEmpty()) {
+            setStatus(tr("status.undo.nothing"));
+            return;
+        }
+        if (e == null) {
+            setStatus(tr("status.engineStarting"));
+            return;
+        }
+        String label = entry.get().label();
+        Thread.ofVirtual().name("engine-undo").start(() -> {
+            try {
+                entry.get().undo().run(e);
+                Platform.runLater(() -> setStatus(tr("status.undo.done", label)));
+            } catch (EngineException ex) {
+                Platform.runLater(
+                        () -> setStatus(tr("status.undo.failed", label, ex.getMessage()), EngineEvent.Level.ERROR));
+            }
+        });
+    }
+
     private List<Torrent> selectedTorrents() {
         return table.getSelectionModel().getSelectedItems().stream()
                 .map(TorrentRow::torrent)
@@ -3080,6 +3352,27 @@ public final class MainWindow {
                 Actions.removeQuestion(selected.size(), deleteFiles),
                 deleteFiles ? tr("window.remove.button.delete") : tr("common.remove"));
         if (!yes) return;
+        removeTorrents(selected, deleteFiles);
+    }
+
+    /** The removal itself, the question asked already: undoable where the engine can take it back. */
+    private void removeTorrents(List<Torrent> selected, boolean deleteFiles) {
+        if (!deleteFiles && capabilities.has(Engine.Capability.UNDO_REMOVE)) {
+            // Taken out whole, so Shortcut+Z can put each back as it was; its own share limit too.
+            onTorrentsUndoable(tr("actions.verb.removed"), selected, (e, t) -> {
+                java.util.Optional<ShareLimit> override = settings.shareOverride(t.id());
+                Engine.Detached detached = e.detach(t.id());
+                Platform.runLater(() -> forgetOverride(t.id()));
+                return engine -> {
+                    engine.reattach(detached);
+                    override.ifPresent(limit -> Platform.runLater(() -> {
+                        settings.setShareOverride(detached.id(), limit);
+                        settings.saveQuietly();
+                    }));
+                };
+            });
+            return;
+        }
         onSelection(tr("actions.verb.removed"), (e, t) -> {
             e.remove(t.id(), deleteFiles);
             Platform.runLater(() -> forgetOverride(t.id()));
@@ -3168,7 +3461,12 @@ public final class MainWindow {
         if (result.isEmpty()) return;
         String path = result.get().path();
         boolean moveFiles = result.get().moveFiles();
-        onTorrents(tr("actions.verb.moving", path), selected, (e, t) -> e.moveStorage(t.id(), path, moveFiles));
+        onTorrentsUndoable(tr("actions.verb.moving", path), selected, (e, t) -> {
+            String was = t.savePath();
+            e.moveStorage(t.id(), path, moveFiles);
+            // Back where it was, the same way: the files moved back, or the torrent pointed back.
+            return engine -> engine.moveStorage(t.id(), was, moveFiles);
+        });
     }
 
     // ---- categories and tags --------------------------------------------------------------------
@@ -3189,7 +3487,11 @@ public final class MainWindow {
     private void setCategory(String name) {
         rememberLabels(new TorrentLabels(name, List.of()));
         String verb = name.isEmpty() ? tr("actions.verb.categoryCleared") : tr("actions.verb.filedUnder", name);
-        onSelection(verb, (e, t) -> e.setCategory(t.id(), name));
+        onTorrentsUndoable(verb, selectedTorrents(), (e, t) -> {
+            String was = e.category(t.id());
+            e.setCategory(t.id(), name);
+            return engine -> engine.setCategory(t.id(), was);
+        });
     }
 
     /**
@@ -3284,11 +3586,13 @@ public final class MainWindow {
         table.requestFocus();
         if (result.isEmpty()) return;
         rememberLabels(new TorrentLabels("", result.get().add()));
-        onTorrents(tr("actions.verb.tagsSet"), selected, (e, t) -> {
-            List<String> tags = new ArrayList<>(e.tags(t.id()));
+        onTorrentsUndoable(tr("actions.verb.tagsSet"), selected, (e, t) -> {
+            List<String> was = List.copyOf(e.tags(t.id()));
+            List<String> tags = new ArrayList<>(was);
             tags.removeAll(result.get().remove());
             tags.addAll(result.get().add());
             e.setTags(t.id(), tags);
+            return engine -> engine.setTags(t.id(), was);
         });
     }
 
@@ -3847,6 +4151,13 @@ public final class MainWindow {
                 // F2 is handled on the table, like Space and Delete: a text field takes it too.
                 new Command("rename", tr("command.rename"), null, "F2", gate("rename", selection), this::renameTorrent),
                 new Command(
+                        "undo",
+                        tr("command.undo"),
+                        null,
+                        Chords.of("undo").getDisplayText(),
+                        canUndo,
+                        this::undoNewest),
+                new Command(
                         "export-torrent",
                         tr("command.exportTorrent"),
                         Chords.of("export-torrent"),
@@ -4178,6 +4489,7 @@ public final class MainWindow {
                         quit);
 
         Menu torrent = new Menu(tr("menu.torrent"));
+        torrent.getItems().addAll(menuItem("undo"), new SeparatorMenuItem());
         torrent.getItems().addAll(torrentItems());
 
         paletteItem = new MenuItem(tr("menu.view.commandPalette"));
@@ -5454,11 +5766,20 @@ public final class MainWindow {
         status.setMinWidth(0);
         status.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(status, Priority.SOMETIMES);
+        // Undo, after the message that said what was done; for ten seconds, then Shortcut+Z alone.
+        undoOffer.setText(tr("status.undo.offer", Chords.of("undo").getDisplayText()));
+        undoOffer.getStyleClass().add("status-undo");
+        undoOffer.setMinWidth(Region.USE_PREF_SIZE);
+        undoOffer.managedProperty().bind(undoOffer.visibleProperty());
+        undoOffer.setVisible(false);
+        undoOffer.setOnMouseClicked(e -> undoNewest());
+        undoOfferTimeout.setOnFinished(e -> undoOffer.setVisible(false));
         HBox bar = new HBox(
                 12,
                 portStatus,
                 dhtStatus,
                 status,
+                undoOffer,
                 spacer,
                 down,
                 up,
