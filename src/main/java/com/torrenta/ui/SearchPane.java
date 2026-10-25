@@ -55,12 +55,13 @@ import static com.torrenta.i18n.Messages.tr;
  * per provider, and the results table. Enter in the query runs the search on a worker, each
  * provider's answer landing in the table as it arrives; a new search cancels the running one.
  * Enter or a double-click on a result hands it to the host, which opens the Add dialog. Clear
- * (the button beside the query, the results' menu, the palette) empties the results, the status
- * line and the query, and drops a search still running.
+ * (Escape in the query, the button beside it, the results' menu, the palette) empties the
+ * results, the status line and the query, and drops a search still running.
  *
  * <p>Driveable without the mouse: Tab walks the query, the chips and the table; Space toggles a
- * chip; Escape in the query or on a chip leaves the tab, Escape in the table returns to the
- * query, Down from the query enters the table. The pane is hidden while Transfers shows, so its
+ * chip; Escape in the query clears the tab when there is anything to clear and leaves it when
+ * there is not, Escape on a chip leaves it, Escape in the table returns to the query, Down from
+ * the query enters the table. The pane is hidden while Transfers shows, so its
  * traversable controls never take the first keystroke of a fresh launch.
  */
 final class SearchPane extends VBox {
@@ -129,10 +130,14 @@ final class SearchPane extends VBox {
             } else if (e.getCode() == KeyCode.DOWN && !table.getItems().isEmpty()) {
                 focusResults();
                 e.consume();
+            } else if (e.getCode() == KeyCode.ESCAPE && clearable.get()) {
+                // The first Escape clears; the next one, with nothing left, leaves the tab.
+                clear();
+                e.consume();
             }
         });
         HBox.setHgrow(query, Priority.ALWAYS);
-        // Off the Tab walk, like the window's chrome: the palette's command is the keyboard's way.
+        // Off the Tab walk, like the window's chrome: Escape in the query is the keyboard's way.
         Button clear = new Button(tr("search.clear"));
         clear.getStyleClass().addAll("flat", "search-clear");
         clear.setFocusTraversable(false);

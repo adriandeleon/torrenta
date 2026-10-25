@@ -4,12 +4,14 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -98,16 +100,33 @@ class SettingsTest {
     }
 
     @Test
-    void thePaletteChordIsKeptAsWritten(@TempDir Path dir) throws IOException {
+    void keyBindingsRoundTripOneLinePerCommand(@TempDir Path dir) throws IOException {
         Path file = dir.resolve(Settings.FILE_NAME);
         Settings settings = new Settings(file);
         settings.load();
-        assertEquals("", settings.paletteKey(), "unset: the UI picks the default");
-        settings.setPaletteKey("shortcut-shift-p");
+        assertEquals(Map.of(), settings.keyBindings(), "unset: every command keeps its default");
+        settings.replaceKeyBindings(Map.of("recheck", "Shortcut+Shift+K", "quit", Settings.UNBOUND, "blank", " "));
         settings.save();
         Settings read = new Settings(file);
         read.load();
-        assertEquals("shortcut-shift-p", read.paletteKey());
+        assertEquals(Map.of("recheck", "Shortcut+Shift+K", "quit", "none"), read.keyBindings());
+        assertEquals("Shortcut+Shift+K", read.get("keys.recheck", null));
+        read.replaceKeyBindings(Map.of());
+        assertEquals(Map.of(), read.keyBindings(), "a replace drops the lines it does not carry");
+    }
+
+    @Test
+    void theFirstReleasesPaletteChoiceReadsAsThePalettesBinding(@TempDir Path dir) {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        settings.load();
+        settings.set(Settings.UI_PALETTE_KEY, "shortcut-shift-p");
+        assertEquals(Map.of("palette", "Shortcut+Shift+P"), settings.keyBindings());
+        settings.set("keys.palette", "Alt+P");
+        assertEquals(Map.of("palette", "Alt+P"), settings.keyBindings(), "the table's own line wins");
+        settings.replaceKeyBindings(Map.of());
+        assertNull(settings.get(Settings.UI_PALETTE_KEY, null), "the old choice goes with the first edit");
+        settings.set(Settings.UI_PALETTE_KEY, "alt-x");
+        assertEquals(Map.of(), settings.keyBindings(), "Alt+X was the default all along");
     }
 
     @Test

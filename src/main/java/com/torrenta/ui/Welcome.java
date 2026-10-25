@@ -48,6 +48,10 @@ final class Welcome extends ScrollPane {
 
     private final VBox dropZone;
     private final List<Key> keys;
+    /** The key table's chord labels, in the keys' order, and the clipboard card's. */
+    private final List<Label> chordLabels = new java.util.ArrayList<>();
+
+    private Label addChordLabel;
     private final HBox offerCard = new HBox(12);
     private final HBox offerText = new HBox();
     private final HBox footer = new HBox();
@@ -97,6 +101,7 @@ final class Welcome extends ScrollPane {
         HBox.setHgrow(offerText, Priority.ALWAYS);
         Label chord = new Label(addChord);
         chord.getStyleClass().add("welcome-button-chord");
+        addChordLabel = chord;
         Button add = new Button(tr("welcome.clipboard.add"), chord);
         add.setContentDisplay(ContentDisplay.RIGHT);
         add.getStyleClass().add("welcome-add");
@@ -186,7 +191,7 @@ final class Welcome extends ScrollPane {
     /** One line for the development capture. */
     String describeForCapture() {
         String clip = offer.map(o -> o.kind() + ":" + o.name()).orElse("none");
-        String chords = keys.stream().map(Key::chord).collect(Collectors.joining(","));
+        String chords = chordLabels.stream().map(Label::getText).collect(Collectors.joining(","));
         return "shown=" + isVisible() + " keys=" + chords + " clipboard=" + clip + " folder=" + folder;
     }
 
@@ -205,6 +210,18 @@ final class Welcome extends ScrollPane {
         return out;
     }
 
+    /**
+     * The keys' chords again, after a rebind: in the keys' order, then the clipboard card's. A key
+     * the user left with none keeps its row (a click still does it) with no chord to show.
+     */
+    void showChords(List<String> chords, String addChord) {
+        for (int i = 0; i < chordLabels.size() && i < chords.size(); i++)
+            chordLabels.get(i).setText(chords.get(i));
+        addChordLabel.setText(addChord);
+        addChordLabel.setVisible(!addChord.isEmpty());
+        addChordLabel.setManaged(!addChord.isEmpty());
+    }
+
     private GridPane keyTable() {
         GridPane grid = new GridPane();
         grid.setHgap(14);
@@ -217,6 +234,7 @@ final class Welcome extends ScrollPane {
         for (Key key : keys) {
             Label chord = new Label(key.chord());
             chord.getStyleClass().addAll("welcome-key", "welcome-action");
+            chordLabels.add(chord);
             Label text = new Label(key.text());
             text.getStyleClass().addAll("welcome-key-text", "welcome-action");
             chord.setOnMouseClicked(e -> key.run().run());
