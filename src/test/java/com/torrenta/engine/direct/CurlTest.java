@@ -65,10 +65,11 @@ class CurlTest {
                 "Torrenta/1.0",
                 Curl.Proxy.NONE,
                 Curl.Shell.POSIX);
+        // The path as this platform prints it: backslashes on Windows.
         assertEquals(
                 "curl --location --fail --globoff --remote-time --proto '=http,https,ftp,ftps,sftp'"
                         + " --proto-redir '=http,https,ftp,ftps' --retry 5 --retry-connrefused"
-                        + " --user-agent Torrenta/1.0 --output '/dl/My File.iso'"
+                        + " --user-agent Torrenta/1.0 --output '" + Path.of("/dl/My File.iso") + "'"
                         + " 'https://x.org/a b?t=it'\\''s&x=[1]'",
                 posix);
         String windows = Curl.shellCommand(
