@@ -75,6 +75,15 @@ public final class WatchFolders implements AutoCloseable {
         default void statusChanged() {}
 
         /**
+         * A source as the add takes it: the application looks an updatable address up for its
+         * current version ({@code Session.resolve}); anything else, and by default, as it is.
+         * Blocks; a failure is an {@link EngineException}, reported like a failed add.
+         */
+        default AddRequest.Source resolve(AddRequest.Source source) throws EngineException {
+            return source;
+        }
+
+        /**
          * The add itself: the engine's, unless the application screens it first (the content
          * check). A refusal is an {@link EngineException}, reported like any failed add.
          */
@@ -329,13 +338,18 @@ public final class WatchFolders implements AutoCloseable {
         for (Torrent t : engine.torrents()) present.add(t.id());
         boolean trouble = false;
         for (Candidate candidate : candidates) {
-            if (candidate.id().isPresent() && present.contains(candidate.id().get())) {
-                host.report(EngineEvent.info(candidate.id().get(), "", tr("engine.watch.already", name, where)));
-                continue;
-            }
-            Path destination = entry.destination(host.defaultDownloadDir(), host.category(entry.category()));
-            AddRequest request = entry.request(candidate.source(), destination, host.storage(destination));
             try {
+                // An updatable address names no torrent until it is looked up.
+                AddRequest.Source source = host.resolve(candidate.source());
+                Optional<String> id = candidate.id().isPresent() || !(source instanceof AddRequest.Magnet m)
+                        ? candidate.id()
+                        : WatchFolder.magnetId(m.uri());
+                if (id.isPresent() && present.contains(id.get())) {
+                    host.report(EngineEvent.info(id.get(), "", tr("engine.watch.already", name, where)));
+                    continue;
+                }
+                Path destination = entry.destination(host.defaultDownloadDir(), host.category(entry.category()));
+                AddRequest request = entry.request(source, destination, host.storage(destination));
                 Torrent added = host.add(engine, request);
                 present.add(added.id());
                 host.report(EngineEvent.info(added.id(), added.name(), tr("engine.watch.added", added.name(), where)));

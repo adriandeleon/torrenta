@@ -251,6 +251,11 @@ public final class SessionBackend implements WebApi.Backend {
     }
 
     @Override
+    public void removeWithFiles(Engine engine, Torrent t) throws EngineException {
+        session.removeWithFiles(engine, t);
+    }
+
+    @Override
     public void setShareOverride(String id, @Nullable ShareLimit limit) {
         settings.setShareOverride(id, limit);
         settings.saveQuietly();

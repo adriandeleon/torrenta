@@ -219,6 +219,12 @@ final class DetailPane extends VBox {
     private @Nullable String peerTarget;
     /** The files are on this machine (not a remote daemon's): Open File and the folder actions show. */
     private boolean localFiles = true;
+    /** Whether a torrent waits for its files to be chosen: a mark in the settings, the window's. */
+    private java.util.function.Predicate<String> filesToChoose = id -> false;
+
+    void setFilesToChoose(java.util.function.Predicate<String> marked) {
+        filesToChoose = marked;
+    }
     /** The engine can serve a file while it downloads ({@code Capability.STREAMING}). */
     private boolean streaming = true;
 
@@ -491,7 +497,12 @@ final class DetailPane extends VBox {
         showDiagnosis(
                 torrent == null
                         ? Optional.empty()
-                        : Diagnosis.of(torrent, RowState.of(torrent, quietSeconds), detail, quietSeconds));
+                        : Diagnosis.of(
+                                torrent,
+                                RowState.of(torrent, quietSeconds),
+                                detail,
+                                quietSeconds,
+                                filesToChoose.test(torrent.id())));
 
         piecesValue.setText(g.pieceCount() == 0 ? "—" : OverviewText.pieces(g.piecesHave(), g.pieceCount()));
         pieceStrip.show(detail.pieces(), detail.availability(), PieceStrip.skipped(detail), streamWindow);
@@ -846,7 +857,12 @@ final class DetailPane extends VBox {
         if (java.util.Objects.equals(d, shownDiagnosis)) return;
         shownDiagnosis = d;
         card.getStyleClass()
-                .removeAll("diagnosis-stalled", "diagnosis-error", "diagnosis-queued", "diagnosis-encrypted");
+                .removeAll(
+                        "diagnosis-stalled",
+                        "diagnosis-error",
+                        "diagnosis-queued",
+                        "diagnosis-encrypted",
+                        "diagnosis-choose");
         if (d == null) return;
         card.getStyleClass().add("diagnosis-" + d.title().name().toLowerCase(java.util.Locale.ROOT));
         pressPending(d);

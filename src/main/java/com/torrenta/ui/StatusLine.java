@@ -33,7 +33,21 @@ public record StatusLine(RowState state, String lead, String rest) implements Co
      * @param limit the share limit in force for it (its own, else the global one); never null
      */
     public static StatusLine of(Torrent t, long quietSeconds, ShareLimit limit) {
+        return of(t, quietSeconds, limit, false);
+    }
+
+    /**
+     * @param filesToChoose added with "Add now, pick files when ready" and not chosen yet: once its
+     *     file list is in, it waits for the person, which "paused by you" would not say
+     */
+    public static StatusLine of(Torrent t, long quietSeconds, ShareLimit limit, boolean filesToChoose) {
         RowState state = RowState.of(t, quietSeconds);
+        if (filesToChoose && !t.direct()) {
+            if (state == RowState.METADATA)
+                return new StatusLine(state, tr("statusLine.fetchingMetadata"), SEP + tr("statusLine.thenChooseFiles"));
+            if (state != RowState.ERROR && state != RowState.MOVING && state != RowState.CHECKING)
+                return new StatusLine(state, tr("statusLine.chooseFiles"), SEP + tr("statusLine.chooseFilesHow"));
+        }
         String percent = Format.wholePercent(t.progress());
         if (t.direct()
                 && state != RowState.ERROR

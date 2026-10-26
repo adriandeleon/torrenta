@@ -1183,6 +1183,24 @@ class LibtorrentEngineTest {
         assertEquals("IW", PeerFlags.text(0, 0, org.libtorrent4j.PeerInfo.ConnectionType.WEB_SEED));
     }
 
+    /** Where a torrent's files are, read before a remove that trashes them: every file, its part file aside. */
+    @Test
+    void onDiskNamesEveryFileWhereItIs(@TempDir Path dir) throws Exception {
+        byte[] pair = twoFileTorrent(dir.resolve("downloads"), "pair");
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            String id = engine.add(downloadsTorrent(dir, pair)).id();
+            Path downloads = dir.resolve("downloads").toAbsolutePath().normalize();
+            com.torrenta.engine.Engine.OnDisk onDisk = engine.onDisk(id).orElseThrow();
+            assertEquals(downloads, onDisk.savePath());
+            assertEquals(
+                    java.util.Set.of(downloads.resolve("pair/a.bin"), downloads.resolve("pair/sub/b.bin")),
+                    java.util.Set.copyOf(onDisk.files()));
+            assertEquals(List.of(downloads.resolve("." + id + ".parts")), onDisk.scratch());
+            assertEquals(List.of(downloads.resolve("pair")), com.torrenta.session.TrashPlan.entries(onDisk));
+        }
+    }
+
     private static AddRequest downloadsTorrent(Path dir, byte[] torrent) {
         return new AddRequest(
                 new AddRequest.TorrentFile(torrent, "pair.torrent"),
@@ -1596,6 +1614,70 @@ class LibtorrentEngineTest {
                     TorrentLabels.NONE));
             assertFalse(t.paused(), "runs until the metadata arrives");
             assertEquals(TorrentState.FETCHING_METADATA, t.state());
+        }
+    }
+
+    /**
+     * "Add now, pick files when ready" and a restart before the file list came: the stop is kept
+     * in the storage sidecar, so the torrent still stops when the list arrives rather than
+     * downloading every file, and the record lets go of it once it has.
+     */
+    @Test
+    void stopAfterMetadataSurvivesARestartBeforeTheMetadata(@TempDir Path dir) throws Exception {
+        Path root = Files.createDirectories(dir.resolve("seed").resolve("pick"));
+        Files.write(root.resolve("one.bin"), new byte[200 * 1024]);
+        Files.write(root.resolve("two.bin"), new byte[100 * 1024]);
+        NativeLibrary.ensureAvailable();
+        byte[] torrent = new TorrentBuilder()
+                .path(root.toFile())
+                .flags(TorrentBuilder.V1_ONLY)
+                .generate()
+                .entry()
+                .bencode();
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        String id;
+        try (LibtorrentEngine first = downloader(dir, store)) {
+            first.start();
+            id = first.inspect(torrent).id();
+            first.add(new AddRequest(
+                    new AddRequest.Magnet("magnet:?xt=urn:btih:" + id),
+                    dir.resolve("downloads"),
+                    false,
+                    false,
+                    false,
+                    AddRequest.StopCondition.METADATA_RECEIVED,
+                    Map.of(),
+                    TorrentLabels.NONE));
+            String added = id;
+            await("its blob written", () -> store.contains(added));
+            assertTrue(
+                    TorrentStorage.decode(store.loadStorage(id).orElseThrow()).stopOnMetadata(),
+                    "the stop is on record");
+        }
+        try (LibtorrentEngine seed = seeder(dir, torrent);
+                LibtorrentEngine again = downloader(dir, store)) {
+            again.start();
+            String back = id;
+            // Paused is the stop: nothing else pauses it. How much came first is a race on loopback,
+            // where the whole payload can land between the metadata and the pause taking hold.
+            awaitDownload(
+                    "the file list in and the torrent stopped",
+                    again,
+                    back,
+                    seed,
+                    () -> again.torrents().getFirst().size() > 0
+                            && again.torrents().getFirst().paused());
+            await(
+                    "the record lets go of the stop",
+                    () -> store.loadStorage(back)
+                            .map(b -> {
+                                try {
+                                    return !TorrentStorage.decode(b).stopOnMetadata();
+                                } catch (java.io.IOException e) {
+                                    return false;
+                                }
+                            })
+                            .orElse(true));
         }
     }
 
@@ -2328,6 +2410,73 @@ class LibtorrentEngineTest {
                 assertTrue(Files.isRegularFile(dropped), "the file stays");
                 assertTrue(
                         events.stream().anyMatch(e -> e.message().contains("refused by the host")), events.toString());
+            }
+        }
+    }
+
+    /** An updatable address in a {@code .magnet} file names no torrent until the host looks it up. */
+    @Test
+    void watchFoldersLookAnUpdatableAddressUpBeforeTheAdd(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        Path inbox = Files.createDirectories(dir.resolve("inbox"));
+        String address = "magnet:?xs=urn:btpk:" + "ab".repeat(32) + "&s=v";
+        String hash = "0123456789abcdef0123456789abcdef01234567";
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        List<String> looked = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            com.torrenta.engine.WatchFolders.Host host = new com.torrenta.engine.WatchFolders.Host() {
+                @Override
+                public Path defaultDownloadDir() {
+                    return downloads;
+                }
+
+                @Override
+                public java.util.Optional<com.torrenta.engine.Category> category(String name) {
+                    return java.util.Optional.empty();
+                }
+
+                @Override
+                public AddRequest.Storage storage(Path destination) {
+                    return AddRequest.Storage.DEFAULT;
+                }
+
+                @Override
+                public void report(EngineEvent event) {
+                    events.add(event);
+                }
+
+                @Override
+                public AddRequest.Source resolve(AddRequest.Source source) {
+                    if (!(source instanceof AddRequest.Magnet m) || !m.uri().equals(address)) return source;
+                    looked.add(m.uri());
+                    return new AddRequest.Magnet("magnet:?xt=urn:btih:" + hash);
+                }
+            };
+            try (com.torrenta.engine.WatchFolders watcher = new com.torrenta.engine.WatchFolders(engine, host)) {
+                watcher.configure(List.of(new com.torrenta.engine.WatchFolder(
+                        inbox.toString(),
+                        com.torrenta.engine.WatchFolder.AfterAdd.DELETE,
+                        com.torrenta.engine.WatchFolder.SaveTo.DEFAULT,
+                        "",
+                        "",
+                        true)));
+                Files.writeString(inbox.resolve("follow.magnet"), address + "\n");
+                watcher.poll();
+                watcher.poll();
+                assertEquals(List.of(address), looked, "the address went to the host");
+                await("the current version added", () -> engine.torrents().size() == 1);
+                assertEquals(hash, engine.torrents().get(0).id());
+
+                // The same address again: recognised by the hash it resolves to, not added twice.
+                Files.writeString(inbox.resolve("again.magnet"), address + "\n");
+                watcher.poll();
+                watcher.poll();
+                assertEquals(2, looked.size());
+                assertEquals(1, engine.torrents().size());
+                assertTrue(
+                        events.stream().anyMatch(e -> e.message().startsWith("Already in the session")),
+                        events.toString());
             }
         }
     }

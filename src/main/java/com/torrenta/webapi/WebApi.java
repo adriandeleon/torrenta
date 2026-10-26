@@ -125,6 +125,11 @@ public final class WebApi {
         /** A torrent's own share limit; null drops it, so the global one applies. */
         void setShareOverride(String id, @Nullable ShareLimit limit);
 
+        /** Removes a torrent with its files, into the trash where the person chose that. */
+        default void removeWithFiles(Engine engine, Torrent t) throws EngineException {
+            engine.remove(t.id(), true);
+        }
+
         /** A {@code .torrent} from a URL, bounded in time and size. */
         byte[] fetch(URI url) throws IOException;
 

@@ -429,8 +429,12 @@ every match is where a mistake is largest.
    remove without data (held in memory, so a quit ends it rather than a crash bringing the torrent
    back), Set Location (a move back once `storage_moved_alert` came; a copy across volumes, and
    said so), category, tags, rename, file priorities, queue moves, a bulk pause. Remove with data
-   stays final until it can go to the OS trash (`Desktop.moveToTrash` needs headful AWT, which
-   `AwtUse` forbids on Linux; the freedesktop trash spec is a later item).
+   is not undone, but its files go to the desktop's trash (`remove.toTrash`, on by default) and
+   come back from the file manager: `os.Trash` without AWT, since `Desktop.moveToTrash` needs it
+   headful — the freedesktop.org spec in Java on Linux (the home trash, a volume's `.Trash/$uid` or
+   `.Trash-$uid`, never a copy), `~/.Trash` or `.Trashes/<uid>` on macOS, the Recycle Bin through
+   a PowerShell script on Windows. `Engine.onDisk` says where the files are before the remove,
+   `session.TrashPlan` makes the torrent's folder one item.
 6. **Bulk commands from the omnibox** (1–2 PRs): `ui.OmniCommand.parse` gives a command and typed
    arguments: a category or tag (completed from `LabelStore`), a path, a rate (`500k`, as
    `FilterQuery` reads sizes), a ratio, `on|off`, a queue move. `Actions.targets`: typed while the
@@ -604,8 +608,12 @@ remote caller's behalf.
    --reflink=auto`, `clonefile`), else a copy with its size shown first (`link | copy | ask`). The
    files are in place before `add_torrent`, whose own check verifies them: v2 pieces are per file,
    and a hybrid's padding keeps its v1 pieces file-aligned. Watch folders and rules dedup without
-   asking; the Files tab marks a linked file. v1-only torrents have no roots: matching by size and
-   whole v1 pieces is a later item. `Capability.DEDUP`.
+   asking; the Files tab marks a linked file. `Capability.DEDUP`. v1 files (done after: a
+   `ContentKeys.v1` key from the metadata, SHA-256 over the piece length, the size and the file's
+   piece SHA-1s, so no file is read to match; only for a file whose pieces are its own, a single
+   file or one padding aligns, since a piece shared with a neighbour says nothing of this file
+   alone and a re-download of it would write into a linked file; two torrents cut in different
+   piece lengths do not match).
 
 ### 1.4 — Protocol extras
 
@@ -651,7 +659,8 @@ remote caller's behalf.
    Copy stream URL beside it; the Overview's strip marks the window.
 4. **BEP 46, following** (done: `engine.MutableSource` is the address, read in `Session.resolve`
    before `Inputs.classify`, so the dialog, the command line, a second instance and headless all
-   take it; a watch folder's `.magnet` lines and RSS do not yet. `Engine.lookupMutable` is
+   take it, and so do a watch folder's `.magnet` lines, RSS (rules, Download, Add) and search
+   results, through `Session.resolve(AddRequest.Source)` before the add. `Engine.lookupMutable` is
    libtorrent's `dht_get_item`, the highest `seq` kept until the authoritative answer or 30 s;
    `Following` (address, `seq`, the id it `replaces`) rides in the `.labels` sidecar. The follower
    is the session's, not a class of its own: every ten minutes it looks up whatever has not been

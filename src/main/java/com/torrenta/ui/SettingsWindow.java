@@ -160,6 +160,7 @@ final class SettingsWindow {
                 Settings.ADD_SEQUENTIAL,
                 Settings.ADD_CONTENT_LAYOUT,
                 Settings.ADD_WITHOUT_ASKING,
+                Settings.REMOVE_TO_TRASH,
                 Settings.ADD_UNSAFE_CONTENT,
                 Settings.ADD_DEDUP,
                 Settings.ADD_PROBE_PRIVATE,
@@ -536,6 +537,7 @@ final class SettingsWindow {
     private CheckBox closeToTray;
     private CheckBox osHandler;
     private CheckBox osBadge;
+    private CheckBox removeToTrash;
     private CheckBox addStartPaused;
     private CheckBox addSequential;
     private ChoiceBox<com.torrenta.engine.FileRenames.Layout> addLayout;
@@ -2123,6 +2125,20 @@ final class SettingsWindow {
                 tr("settings.general.downloadDir.desc"),
                 new HBox(6, downloadDir, browse),
                 tr("settings.general.downloadDir.keywords"),
+                Engine.Capability.LOCAL_FILES);
+        removeToTrash = new CheckBox();
+        removeToTrash.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setRemoveToTrash(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.GENERAL,
+                downloads,
+                tr("settings.general.removeToTrash"),
+                tr("settings.general.removeToTrash.desc"),
+                removeToTrash,
+                tr("settings.general.removeToTrash.keywords"),
                 Engine.Capability.LOCAL_FILES);
 
         incompleteEnabled = new CheckBox();
@@ -4439,6 +4455,7 @@ final class SettingsWindow {
             closeToTray.setSelected(settings.closeToTray());
             osHandler.setSelected(settings.osHandler());
             osBadge.setSelected(settings.osBadge());
+            removeToTrash.setSelected(settings.removeToTrash());
             syncEnabled.setSelected(settings.syncEnabled());
             WebApiConfig remote = settings.webApi();
             remoteEnabled.setSelected(remote.enabled());

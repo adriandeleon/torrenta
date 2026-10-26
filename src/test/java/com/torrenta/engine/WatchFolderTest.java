@@ -90,6 +90,8 @@ class WatchFolderTest {
                         "MAGNET:?xt=urn:btih:0123456789abcdef0123456789abcdef01234568"),
                 WatchFolder.magnetLines(text),
                 "blank lines, comments, an empty magnet and a URL are skipped");
+        String updatable = "magnet:?xs=urn:btpk:" + "ab".repeat(32) + "&s=v";
+        assertEquals(List.of(updatable), WatchFolder.magnetLines(updatable), "an updatable address is a line too");
         assertEquals(List.of(), WatchFolder.magnetLines(""));
         assertEquals(List.of(), WatchFolder.magnetLines(null));
     }

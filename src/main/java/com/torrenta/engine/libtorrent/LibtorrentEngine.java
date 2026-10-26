@@ -28,6 +28,7 @@ import com.torrenta.cli.CommandLine;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Connectivity;
 import com.torrenta.engine.ContentIndex;
+import com.torrenta.engine.ContentKeys;
 import com.torrenta.engine.CreateRequest;
 import com.torrenta.engine.CreatedTorrent;
 import com.torrenta.engine.Engine;
@@ -446,6 +447,8 @@ public final class LibtorrentEngine implements Engine {
                 try {
                     TorrentStorage owed = TorrentStorage.decode(bytes);
                     if (!owed.isEmpty()) storage.put(id, owed);
+                    // Added to stop once its file list is in, and restarted before it came.
+                    if (owed.stopOnMetadata()) stopAfterMetadata.add(id);
                 } catch (IOException e) {
                     LOG.warning("Storage record for " + id + " is unreadable (" + e.getMessage() + "); skipped");
                 }
@@ -629,7 +632,8 @@ public final class LibtorrentEngine implements Engine {
         TorrentStorage owed = new TorrentStorage(
                         start.equals(destination) ? "" : destination.toString(), choices.partSuffix(), Set.of())
                 .withRenamed(laidOut, originals)
-                .withFound(info == null ? Map.of() : choices.found());
+                .withFound(info == null ? Map.of() : choices.found())
+                .withStopOnMetadata(stopAfterMetadata.contains(id));
         if (!owed.isEmpty()) writeStorage(id, owed);
 
         return snapshot(handle);
@@ -736,12 +740,12 @@ public final class LibtorrentEngine implements Engine {
     /**
      * Puts the torrent's complete files into the content index under the names they have on disk
      * (a person's or the layout's rename included), replacing what it had of the torrent. Alert
-     * thread. A v1-only torrent has no roots and is left out; a file still carrying the {@code
+     * thread. A file with neither a v2 root nor a v1 key is left out; a file still carrying the {@code
      * .part} suffix is about to be renamed back, and that rename indexes it again.
      */
     private void indexContent(String id, TorrentHandle h) {
         TorrentInfo info = h.status(StatusQuery.FLAGS).hasMetadata() ? h.torrentFile() : null;
-        if (info == null || !info.isValid() || !info.swig().v2()) {
+        if (info == null || !info.isValid()) {
             contentIndex.remove(id);
             return;
         }
@@ -750,17 +754,21 @@ public final class LibtorrentEngine implements Engine {
             long[] progress = h.fileProgress();
             Path save = Path.of(h.savePath());
             TorrentStorage owed = storage.getOrDefault(id, TorrentStorage.NONE);
+            boolean v2 = info.swig().v2();
+            boolean v1 = info.swig().v1();
             List<ContentIndex.Entry> complete = new ArrayList<>();
             for (int i = 0; i < files.numFiles(); i++) {
                 long size = files.fileSize(i);
                 if (files.padFileAt(i) || size <= 0 || i >= progress.length || progress[i] < size) continue;
                 if (owed.suffixed().contains(i)) continue;
-                String root = root(files, i);
-                if (root.isEmpty()) continue;
+                String root = v2 ? root(files, i) : "";
+                String v1Key = v1 ? v1Key(info, files, i) : "";
+                if (root.isEmpty() && v1Key.isEmpty()) continue;
                 Path onDisk = save.resolve(owed.name(i, slashes(files.filePath(i))))
                         .toAbsolutePath()
                         .normalize();
-                complete.add(new ContentIndex.Entry(root, id, i, onDisk, size));
+                if (!root.isEmpty()) complete.add(new ContentIndex.Entry(root, id, i, onDisk, size));
+                if (!v1Key.isEmpty()) complete.add(new ContentIndex.Entry(v1Key, id, i, onDisk, size));
             }
             // Under the store's lock, against remove(): an alert that came in just before the
             // torrent went must not put it back.
@@ -776,6 +784,21 @@ public final class LibtorrentEngine implements Engine {
     }
 
     /** A file's v2 Merkle root, hex; empty for a v1-only torrent's file or an empty one. */
+    /** The file's {@link ContentKeys#v1 v1 key}, or empty when its pieces are not its own. */
+    private static String v1Key(TorrentInfo info, FileStorage files, int index) {
+        long offset = files.fileOffset(index);
+        long size = files.fileSize(index);
+        long pieceLength = info.pieceLength();
+        // The padding after a file (a hybrid's, BEP 47's) is zeros that finish its last piece.
+        long padded = size;
+        if (index + 1 < files.numFiles() && files.padFileAt(index + 1)) padded += files.fileSize(index + 1);
+        if (!ContentKeys.ownPieces(offset, padded, pieceLength, files.totalSize())) return "";
+        int[] span = ContentKeys.pieces(offset, padded, pieceLength);
+        List<String> hashes = new ArrayList<>(span[1] - span[0] + 1);
+        for (int p = span[0]; p <= span[1]; p++) hashes.add(info.hashForPiece(p).toHex());
+        return ContentKeys.v1(pieceLength, size, hashes);
+    }
+
     private static String root(FileStorage files, int index) {
         org.libtorrent4j.swig.sha256_hash root = files.swig().root(index);
         return root.is_all_zeros() ? "" : root.to_hex();
@@ -1125,10 +1148,15 @@ public final class LibtorrentEngine implements Engine {
             FileStorage files = info.files();
             List<TorrentPreview.FileEntry> entries = new ArrayList<>(files.numFiles());
             boolean v2 = info.swig().v2();
+            boolean v1 = info.swig().v1();
             for (int i = 0; i < files.numFiles(); i++) {
                 if (files.padFileAt(i)) continue;
                 entries.add(new TorrentPreview.FileEntry(
-                        i, files.filePath(i).replace('\\', '/'), files.fileSize(i), v2 ? root(files, i) : ""));
+                        i,
+                        files.filePath(i).replace('\\', '/'),
+                        files.fileSize(i),
+                        v2 ? root(files, i) : "",
+                        v1 ? v1Key(info, files, i) : ""));
             }
             // The real files' bytes, not totalSize(): a hybrid torrent's padding files are not content.
             long size =
@@ -1692,6 +1720,29 @@ public final class LibtorrentEngine implements Engine {
                 throw new EngineException(tr("engine.error.resumeStayed", e.getMessage()), e);
             }
         }
+    }
+
+    @Override
+    public synchronized java.util.Optional<OnDisk> onDisk(String id) throws EngineException {
+        TorrentHandle h = handle(id);
+        Path save = Path.of(h.savePath()).toAbsolutePath().normalize();
+        List<Path> files = new ArrayList<>();
+        TorrentInfo info = h.status(StatusQuery.FLAGS).hasMetadata() ? h.torrentFile() : null;
+        try {
+            if (info != null && info.isValid()) {
+                FileStorage fs = info.files();
+                TorrentStorage owed = storage.getOrDefault(id, TorrentStorage.NONE);
+                for (int i = 0; i < fs.numFiles(); i++) {
+                    if (fs.padFileAt(i)) continue;
+                    files.add(save.resolve(owed.onDisk(i, slashes(fs.filePath(i))))
+                            .normalize());
+                }
+            }
+        } finally {
+            Reference.reachabilityFence(info);
+        }
+        // Where the pieces of skipped files wait: named by the same hash the id is.
+        return java.util.Optional.of(new OnDisk(save, files, List.of(save.resolve("." + id + ".parts"))));
     }
 
     /**
@@ -3376,6 +3427,10 @@ public final class LibtorrentEngine implements Engine {
                         if (t.handle().isValid() && stopAfterMetadata.remove(id(t.handle()))) {
                             t.handle().unsetFlags(Flags.AUTO_MANAGED);
                             t.handle().pause();
+                            String stopped = id(t.handle());
+                            TorrentStorage owed = storage.get(stopped);
+                            if (owed != null && owed.stopOnMetadata())
+                                writeStorageQuietly(stopped, owed.withStopOnMetadata(false));
                             torrentEvent(t, EngineEvent.Level.INFO, "engine.event.metadataStopped");
                         } else {
                             torrentEvent(t, EngineEvent.Level.INFO, "engine.event.metadata");

@@ -348,6 +348,8 @@ public final class Settings {
 
     /** Inputs are added with the defaults above and the Add dialog does not open. Off by default. */
     public static final String ADD_WITHOUT_ASKING = "add.withoutAsking";
+    /** Remove with files moves them to the desktop's trash (the default) rather than deleting them. */
+    public static final String REMOVE_TO_TRASH = "remove.toTrash";
 
     /**
      * What an add without a dialog does with files the content check flags: {@code ADD},
@@ -936,6 +938,14 @@ public final class Settings {
 
     public void setCreateDefaultTrackers(String text) {
         properties.setProperty(CREATE_DEFAULT_TRACKERS, text == null ? "" : text);
+    }
+
+    public boolean removeToTrash() {
+        return readBoolean(REMOVE_TO_TRASH, true);
+    }
+
+    public void setRemoveToTrash(boolean on) {
+        properties.setProperty(REMOVE_TO_TRASH, String.valueOf(on));
     }
 
     public boolean addWithoutAsking() {

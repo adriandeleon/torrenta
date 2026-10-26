@@ -7,6 +7,22 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **A torrent waiting for you to pick its files says so.** One added with "Add now, pick files
+  when ready" reads "Files to choose" in the list once its file list is in, instead of "Paused by
+  you", and its Overview offers Choose files… .
+
+- **Files already on disk are found for v1 torrents too.** The Add dialog's "Already on disk"
+  used to know only v2 and hybrid torrents' files. Now a file of a v1-only torrent is found as
+  well when its pieces hold nothing else (a single-file torrent, or a padded one) and the other
+  torrent was made with the same piece size: the common case of the same film or image under
+  another name.
+
+- **Removed files go to the trash.** Remove with files now moves a torrent's files to the
+  desktop's trash (the Recycle Bin on Windows) instead of deleting them, so a mistake can be
+  undone from the file manager; a whole torrent folder goes as one item. Settings → General →
+  Move removed files to the trash turns it off. A drive without a trash keeps the files and says
+  so. The share limit's "remove with files" and the web API's delete do the same.
+
 - **Filter search results.** Once a search has results, a Filter box above them narrows the table
   by its columns in the omnibox's language: `provider:jack`, `cat:movies`, `size>1g`, `seeds>=10`,
   `leechers<5`, `date<7d` or `date>=2026-01-01` (a range is two terms), words for the name, `-`
@@ -15,8 +31,9 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   provider and Show Only for a category; `/` in the results or `Ctrl+K` goes to the box. Results
   from a Torznab server now carry their category, in a new Category column.
 
-- **Updatable torrents.** A `magnet:?xs=urn:btpk:…` link (BEP 46) is looked up in the DHT and
-  its current version added; from then on Torrenta looks for a newer version every six hours
+- **Updatable torrents.** A `magnet:?xs=urn:btpk:…` link (BEP 46), typed, opened, dropped into a
+  watch folder's `.magnet` file or found in an RSS feed, is looked up in the DHT and its current
+  version added; from then on Torrenta looks for a newer version every six hours
   (Settings → Adding torrents → Updatable torrents) and adds it into the same folder, filed the
   same way, with the files that did not change linked rather than downloaded again. Once the new
   version is complete the old one is no longer followed, and leaves the list (its files kept)
@@ -197,6 +214,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   first sync after updating only adds, so nothing that exists on just one computer is lost.
 
 ### Fixed
+
+- **"Add now, pick files when ready" holds across a restart.** A magnet added that way and
+  closed before its file list arrived used to download every file once it came back; it now
+  stops for you to choose, as it would have without the restart.
+
+- **Quitting with a dialog open is clean.** Quit from the tray menu (or the system's) while a
+  dialog such as Add Torrent was asking now cancels the dialog first and quits once it has gone,
+  rather than ending the program from inside it.
 
 - **Fewer ways to fail on a missing value.** The code is now checked for nulls as it is built,
   which turned up a few: the Add dialog no longer waits forever for a magnet's files when the

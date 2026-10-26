@@ -88,4 +88,19 @@ class TorrentStorageTest {
                         .getBytes(StandardCharsets.UTF_8));
         assertEquals(java.util.Map.of(2, new FoundFile(FoundFile.How.COPY, "A")), read.found());
     }
+
+    @Test
+    void theStopOnMetadataRoundTripsAndIsWorthARecordAlone() throws java.io.IOException {
+        TorrentStorage stop = TorrentStorage.NONE.withStopOnMetadata(true);
+        assertTrue(stop.stopOnMetadata());
+        assertTrue(!stop.isEmpty(), "a stop alone keeps the sidecar");
+        assertEquals(stop, TorrentStorage.decode(stop.encode()));
+        assertTrue(
+                stop.withDestination("/d").withSuffixed(java.util.Set.of(1)).stopOnMetadata(), "kept by the withers");
+        assertTrue(stop.withStopOnMetadata(false).isEmpty());
+        assertTrue(
+                !new String(TorrentStorage.NONE.withDestination("/d").encode(), java.nio.charset.StandardCharsets.UTF_8)
+                        .contains("stopOnMetadata"),
+                "no stop, no field: older records read the same");
+    }
 }

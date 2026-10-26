@@ -14,7 +14,8 @@ import java.util.Set;
  * Which of a new torrent's files are already on disk, complete, in a torrent the list has, and
  * how each would be put where the new torrent will look for it: a hard link when the two places
  * share a volume, else a copy (a reflink where the file system has one). Found by v2 Merkle root,
- * so names and torrents do not matter, only bytes; a v1-only torrent has no roots and no plan.
+ * or by v1 key for a file whose pieces are its own ({@link ContentKeys}), so names and torrents
+ * do not matter, only bytes; a v1 file that shares pieces with its neighbours has no key.
  *
  * <p>The target is exactly where libtorrent will look at the add: the incomplete folder when there
  * is one (the move to the destination comes after, with every other file), the path the content
@@ -108,7 +109,11 @@ public record DedupPlan(List<Match> matches) {
         Path folder = start.toAbsolutePath().normalize();
         List<Match> out = new ArrayList<>();
         for (TorrentPreview.FileEntry f : preview.files()) {
-            if (f.size() <= 0 || skipped.contains(f.index()) || !ContentIndex.isRoot(f.root())) continue;
+            if (f.size() <= 0 || skipped.contains(f.index())) continue;
+            List<ContentIndex.Entry> candidates = new ArrayList<>();
+            if (ContentIndex.isRoot(f.root())) candidates.addAll(index.find(f.root()));
+            if (ContentKeys.isV1(f.v1Key())) candidates.addAll(index.find(f.v1Key()));
+            if (candidates.isEmpty()) continue;
             Path target =
                     folder.resolve(laidOut.getOrDefault(f.index(), f.path())).normalize();
             // A path that leaves the folder is not one libtorrent would write to.
@@ -117,7 +122,7 @@ public record DedupPlan(List<Match> matches) {
             if (disk.size(target) >= 0) continue;
             ContentIndex.Entry best = null;
             boolean bestLinks = false;
-            for (ContentIndex.Entry e : index.find(f.root())) {
+            for (ContentIndex.Entry e : candidates) {
                 if (e.size() != f.size() || e.torrentId().equals(preview.id())) continue;
                 if (e.path().equals(target) || disk.size(e.path()) != f.size()) continue;
                 boolean links = disk.sameVolume(e.path(), target);

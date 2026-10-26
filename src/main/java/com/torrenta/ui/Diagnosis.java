@@ -43,7 +43,9 @@ public record Diagnosis(Title title, String body, String file, int fileIndex, Li
         ERROR("diagnosis.title.error"),
         QUEUED("diagnosis.title.queued"),
         /** An archive it wants asks for a password (engine.ArchiveProbe): red, like an error. */
-        ENCRYPTED("diagnosis.title.encrypted");
+        ENCRYPTED("diagnosis.title.encrypted"),
+        /** Added to pick its files once its list is in, and the list is in: it waits for the person. */
+        CHOOSE("diagnosis.title.choose");
 
         private final String key;
 
@@ -59,6 +61,7 @@ public record Diagnosis(Title title, String body, String file, int fileIndex, Li
     /** One thing to do. {@link #command()} names the window's command it runs, when it is one. */
     public enum Remedy {
         SKIP_FILE("diagnosis.remedy.skipFile", null),
+        CHOOSE_FILES("diagnosis.remedy.chooseFiles", "choose-files"),
         ADD_TRACKERS("diagnosis.remedy.addTrackers", null),
         REANNOUNCE("diagnosis.remedy.reannounce", "reannounce"),
         FORCE_RESUME("diagnosis.remedy.forceResume", "force-resume"),
@@ -94,8 +97,20 @@ public record Diagnosis(Title title, String body, String file, int fileIndex, Li
      * @param quietSeconds how long it has received nothing; what the last-resort sentence says
      */
     public static Optional<Diagnosis> of(Torrent t, RowState state, TorrentDetail d, long quietSeconds) {
+        return of(t, state, d, quietSeconds, false);
+    }
+
+    /**
+     * @param filesToChoose added with "Add now, pick files when ready" and not chosen yet: with its
+     *     file list in, that is the whole story short of an error
+     */
+    public static Optional<Diagnosis> of(
+            Torrent t, RowState state, TorrentDetail d, long quietSeconds, boolean filesToChoose) {
         // A download from a link has no swarm to reason about: its error is the whole story.
         if (t.direct()) return state == RowState.ERROR ? Optional.of(error(t)) : Optional.empty();
+        if (filesToChoose && state != RowState.ERROR && d != null && !d.files().isEmpty())
+            return Optional.of(new Diagnosis(
+                    Title.CHOOSE, tr("diagnosis.choose", d.files().size()), "", -1, List.of(Remedy.CHOOSE_FILES)));
         // A locked archive matters whether or not the torrent moves: before the stall rules, after
         // an error (which stops everything). Skipping the archive is what makes it go away.
         if (state != RowState.ERROR && d != null) {

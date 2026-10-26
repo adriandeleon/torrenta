@@ -22,6 +22,7 @@ import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Priority;
@@ -333,6 +334,16 @@ public final class DirectDownloads {
         synchronized (this) {
             schedule();
         }
+    }
+
+    /** The download's one file: the part while it runs, the finished file after. */
+    public synchronized java.util.Optional<Engine.OnDisk> onDisk(String id) throws EngineException {
+        DirectDownload d = require(id);
+        Path save = Path.of(d.savePath()).toAbsolutePath().normalize();
+        Path file = d.finished()
+                ? save.resolve(d.file())
+                : partOf(d).toAbsolutePath().normalize();
+        return java.util.Optional.of(new Engine.OnDisk(save, List.of(file), List.of()));
     }
 
     public void pause(String id) throws EngineException {

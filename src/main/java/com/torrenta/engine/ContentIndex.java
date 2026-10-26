@@ -9,11 +9,12 @@ import java.util.Map;
 
 /**
  * The complete files the torrents in the list have on disk, by their BitTorrent v2 Merkle root
- * ({@code pieces root}, SHA-256 over the file's own 16 KiB blocks): two files with the same root
- * have the same bytes, whatever torrent and name they came with. What a new torrent's dedup is
- * looked up in.
+ * ({@code pieces root}, SHA-256 over the file's own 16 KiB blocks), and by their {@link
+ * ContentKeys#v1 v1 key} where their pieces are their own: two files with the same key have the
+ * same bytes, whatever torrent and name they came with. What a new torrent's dedup is looked up
+ * in. A hybrid's file is there under both.
  *
- * <p>Only v2 (and hybrid) torrents have roots, and only complete files are indexed: the torrent's
+ * <p>Only complete files are indexed: the torrent's
  * whole entry is replaced when a file of it completes, when it finishes, is checked (a recheck
  * that finds a file damaged takes it out), renamed or moved, and dropped when it is removed. It
  * is never written down: the roots are in the torrents' own metadata, and libtorrent says each
@@ -28,7 +29,7 @@ public final class ContentIndex {
     /**
      * One complete file.
      *
-     * @param root its v2 Merkle root, 64 hex digits, lower case
+     * @param root its key: a v2 Merkle root, 64 hex digits, or a {@link ContentKeys#v1 v1 key}
      * @param torrentId the torrent it belongs to
      * @param index its index in that torrent
      * @param path where it is on disk now, absolute
@@ -58,7 +59,7 @@ public final class ContentIndex {
         forget(torrentId);
         List<Entry> kept = new ArrayList<>();
         for (Entry e : files) {
-            if (!isRoot(e.root()) || !e.torrentId().equals(torrentId) || e.size() <= 0) continue;
+            if (!isKey(e.root()) || !e.torrentId().equals(torrentId) || e.size() <= 0) continue;
             kept.add(e);
             byRoot.computeIfAbsent(e.root(), k -> new ArrayList<>()).add(e);
         }
@@ -87,16 +88,18 @@ public final class ContentIndex {
         return same == null ? List.of() : List.copyOf(same);
     }
 
-    /** What is known of one torrent. */
+    /** What is known of one torrent: one entry per file, a hybrid's by its v2 root. */
     public synchronized List<Entry> of(String torrentId) {
         List<Entry> files = byTorrent.get(torrentId);
-        return files == null ? List.of() : List.copyOf(files);
+        if (files == null) return List.of();
+        java.util.Set<Integer> seen = new java.util.HashSet<>();
+        return files.stream().filter(e -> seen.add(e.index())).toList();
     }
 
-    /** How many files are indexed, over every torrent. */
+    /** How many files are indexed, over every torrent; a file under two keys counts once. */
     public synchronized int size() {
         int n = 0;
-        for (List<Entry> files : byTorrent.values()) n += files.size();
+        for (String id : byTorrent.keySet()) n += of(id).size();
         return n;
     }
 
@@ -104,6 +107,11 @@ public final class ContentIndex {
     public static boolean isRoot(String root) {
         String r = normal(root);
         return r.length() == 64 && r.chars().allMatch(c -> Character.digit(c, 16) >= 0) && !r.matches("0+");
+    }
+
+    /** A key this index takes: a v2 root, or a v1 key. */
+    public static boolean isKey(String key) {
+        return isRoot(key) || ContentKeys.isV1(key);
     }
 
     private static String normal(String root) {

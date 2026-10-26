@@ -99,6 +99,13 @@ class ActionsTest {
         assertEquals(
                 "Remove these 2 torrents and delete the downloaded files? This cannot be undone.",
                 Actions.removeQuestion(2, true));
+        assertEquals(
+                "Remove this torrent and move the downloaded files to the trash?",
+                Actions.removeQuestion(1, true, true));
+        assertEquals(
+                "Remove this torrent? The downloaded files stay on disk.",
+                Actions.removeQuestion(1, false, true),
+                "no files, no trash");
     }
 
     @Test

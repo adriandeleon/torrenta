@@ -485,6 +485,9 @@ public final class MainWindow {
                 id -> commands.stream().filter(c -> c.id().equals(id)).findFirst());
         detail.setMoreMenu(buildContextMenu());
         detail.setEvents(log.events());
+        detail.setFilesToChoose(settings::filesToPick);
+        // The rows' sentence reads the mark; equal snapshots redraw nothing, so a change of it does.
+        pickFilesMarks.addListener(o -> table.refresh());
         palette = new CommandPalette(host, this::focusList, Chords.of("palette").getDisplayText());
         palette.setResolver(this::typedCommand);
         logWindow = new LogWindow(stage, log);
@@ -941,13 +944,36 @@ public final class MainWindow {
         table.requestFocus();
     }
 
+    /** How long a quit waits for the dialogs it closed (or a file chooser) to give their loops back. */
+    private static final int QUIT_WAIT_MS = 100;
+
+    private static final int QUIT_WAITS = 100;
+
     /**
-     * Ends the program: from the File menu, the tray menu, or a close with no tray to close to.
-     * Platform.exit is needed outright once implicit exit is off; before that it is harmless.
+     * Ends the program: from the File menu, the tray menu, the system's Quit, or a close with no
+     * tray to close to. Platform.exit is needed outright once implicit exit is off; before that it
+     * is harmless. A modal dialog open at the time (the tray's Quit while the Add dialog asks)
+     * runs a nested event loop, and leaving from inside one is how the toolkit aborted the JVM:
+     * so the dialogs are cancelled first and the quit carries on once their loops have unwound,
+     * a native file chooser's included, which only the person can close.
      */
     private void quit() {
+        quit(0);
+    }
+
+    private void quit(int waited) {
         quitting = true;
         hiddenToTray = false;
+        if (Platform.isNestedLoopRunning() && waited < QUIT_WAITS) {
+            closeDialogs();
+            javafx.animation.PauseTransition again =
+                    new javafx.animation.PauseTransition(javafx.util.Duration.millis(QUIT_WAIT_MS));
+            again.setOnFinished(e -> quit(waited + 1));
+            again.play();
+            return;
+        }
+        if (System.getProperty("torrenta.capture") != null)
+            System.out.println("capture: quit=after " + waited + " waits, nested=" + Platform.isNestedLoopRunning());
         if (stage.isShowing()) stage.close(); // onHidden tears down
         else shutdown();
         Platform.exit();
@@ -1141,6 +1167,14 @@ public final class MainWindow {
 
     /** Dismisses an open Add dialog, so the capture hook can exit outside its nested event loop. */
     public void closeDialogsForCapture() {
+        closeDialogs();
+    }
+
+    /**
+     * Every modal window cancelled, each through its own cancel where it has one (so an Add
+     * dialog's metadata fetch ends with it), the rest hidden, which returns their showAndWait.
+     */
+    private void closeDialogs() {
         if (currentDialog != null && currentDialog.isShowing()) currentDialog.cancel();
         if (createDialog != null && createDialog.isShowing()) createDialog.close();
         if (limitsDialog != null && limitsDialog.isShowing()) limitsDialog.cancel();
@@ -1153,6 +1187,10 @@ public final class MainWindow {
         if (aboutDialog != null && aboutDialog.isShowing()) aboutDialog.close();
         if (rssPane != null) rssPane.closeDialog();
         settingsWindow.closeDialogsForCapture();
+        for (javafx.stage.Window w : List.copyOf(javafx.stage.Window.getWindows())) {
+            if (w != stage && w.isShowing() && w instanceof Stage s && s.getModality() != javafx.stage.Modality.NONE)
+                s.hide();
+        }
     }
 
     /**
@@ -1501,10 +1539,18 @@ public final class MainWindow {
             // pick-view:<n>: the n-th saved view chosen, as Shortcut+Alt+n does from the list.
             chooseSavedView(
                     Integer.parseInt(action.substring("pick-view:".length()).trim()));
+        } else if (action.equals("quit")) {
+            // File → Quit as the tray's and the system's Quit reach it: whatever dialog is open.
+            System.out.println("capture: quit-nested=" + Platform.isNestedLoopRunning());
+            quit();
         } else if (action.equals("remove-confirmed")) {
             // Remove (the files kept) on the selection, its question answered yes.
             RemoveConfirm.answerForCapture = true;
             remove(false);
+        } else if (action.equals("remove-data-confirmed")) {
+            // Remove with files on the selection, its question answered yes: to the trash by default.
+            RemoveConfirm.answerForCapture = true;
+            remove(true);
         } else if (action.startsWith("undo-after:")) {
             // Shortcut+Z, that many milliseconds later: after the worker an undoable action ran on.
             javafx.animation.PauseTransition later = new javafx.animation.PauseTransition(javafx.util.Duration.millis(
@@ -1646,7 +1692,7 @@ public final class MainWindow {
         System.out.println("capture: focus-sidebar=" + sidebar.hasFocus() + " cursor=" + sidebar.cursorForCapture());
         for (TorrentRow row : table.getItems()) {
             Torrent t = row.torrent();
-            StatusLine line = StatusLine.of(t, row.quietSeconds(), shareLimitFor(t));
+            StatusLine line = StatusLine.of(t, row.quietSeconds(), shareLimitFor(t), settings.filesToPick(t.id()));
             System.out.println("capture: row=" + line.state().glyph() + " " + t.name() + " | " + line.text());
         }
         System.out.println("capture: layout=sidebar:"
@@ -2370,7 +2416,7 @@ public final class MainWindow {
         AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("search-add").start(() -> {
             try {
-                AddRequest.Source source = SearchAdd.sourceOf(result, new TorrentFetch()::fetch);
+                AddRequest.Source source = session.resolve(SearchAdd.sourceOf(result, new TorrentFetch()::fetch));
                 if (!fetching.isEmpty()) Platform.runLater(() -> setStatus(tr("status.fetched", result.name())));
                 addSource(e, source, AddDialog.Via.SEARCH, withoutAsking, defaults);
             } catch (EngineException | IOException | RuntimeException ex) {
@@ -2396,7 +2442,7 @@ public final class MainWindow {
         AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("rss-add").start(() -> {
             try {
-                AddRequest.Source source = RuleAdd.sourceOf(article, new TorrentFetch()::fetch);
+                AddRequest.Source source = session.resolve(RuleAdd.sourceOf(article, new TorrentFetch()::fetch));
                 if (!fetching.isEmpty())
                     Platform.runLater(() -> setStatus(tr("status.fetched", article.displayTitle())));
                 addSource(e, source, AddDialog.Via.RSS, withoutAsking, defaults);
@@ -3377,11 +3423,17 @@ public final class MainWindow {
     private void remove(boolean deleteFiles) {
         List<Torrent> selected = selectedTorrents();
         if (selected.isEmpty()) return;
+        Engine e = engine;
+        boolean toTrash = deleteFiles && e != null && session.removesToTrash(e);
         boolean yes = RemoveConfirm.ask(
                 stage,
-                deleteFiles ? tr("window.remove.header.delete") : tr("common.remove"),
-                Actions.removeQuestion(selected.size(), deleteFiles),
-                deleteFiles ? tr("window.remove.button.delete") : tr("common.remove"));
+                !deleteFiles
+                        ? tr("common.remove")
+                        : toTrash ? tr("window.remove.header.trash") : tr("window.remove.header.delete"),
+                Actions.removeQuestion(selected.size(), deleteFiles, toTrash),
+                !deleteFiles
+                        ? tr("common.remove")
+                        : toTrash ? tr("window.remove.button.trash") : tr("window.remove.button.delete"));
         if (!yes) return;
         removeTorrents(selected, deleteFiles);
     }
@@ -3405,7 +3457,8 @@ public final class MainWindow {
             return;
         }
         onSelection(tr("actions.verb.removed"), (e, t) -> {
-            e.remove(t.id(), deleteFiles);
+            if (deleteFiles) session.removeWithFiles(e, t);
+            else e.remove(t.id(), false);
             Platform.runLater(() -> forgetOverride(t.id()));
         });
     }
@@ -4908,7 +4961,7 @@ public final class MainWindow {
         AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("rss-download").start(() -> {
             try {
-                AddRequest.Source source = RuleAdd.sourceOf(article, new TorrentFetch()::fetch);
+                AddRequest.Source source = session.resolve(RuleAdd.sourceOf(article, new TorrentFetch()::fetch));
                 Torrent added = session.add(e, defaults.withoutAsking(source));
                 rss.markDownloaded(article.feedId(), article.identity());
                 Platform.runLater(() -> setStatus(tr("status.added", added.name())));
@@ -5603,7 +5656,7 @@ public final class MainWindow {
             return row.torrentProperty()
                     .map(t -> new RowView(
                             t.name(),
-                            StatusLine.of(t, row.quietSeconds(), shareLimitFor(t)),
+                            StatusLine.of(t, row.quietSeconds(), shareLimitFor(t), settings.filesToPick(t.id())),
                             t.progress(),
                             t.direct()));
         });
@@ -5716,7 +5769,8 @@ public final class MainWindow {
         column.setPrefWidth(300);
         column.setCellValueFactory(cell -> {
             TorrentRow row = cell.getValue();
-            return row.torrentProperty().map(t -> StatusLine.of(t, row.quietSeconds(), shareLimitFor(t)));
+            return row.torrentProperty()
+                    .map(t -> StatusLine.of(t, row.quietSeconds(), shareLimitFor(t), settings.filesToPick(t.id())));
         });
         column.setCellFactory(c -> new StatusCell());
         return column;
