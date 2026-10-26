@@ -1,8 +1,6 @@
 package com.torrenta.webapi;
 
 import java.io.IOException;
-import java.io.StringWriter;
-import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -14,13 +12,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.LongSupplier;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonGenerator;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineException;
-import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
@@ -30,6 +25,8 @@ import com.torrenta.http.Request;
 import com.torrenta.http.Response;
 import com.torrenta.http.Router;
 import com.torrenta.session.AddDefaults;
+import com.torrenta.session.SessionLog;
+import com.torrenta.store.Settings;
 
 /**
  * qBittorrent's WebUI API at {@code /api/v2}, as far as Torrenta speaks it (roadmap 1.2, item 4:
@@ -54,9 +51,6 @@ public final class WebApi {
 
     /** What the routes read and do; the running session's, or a test's. */
     public interface Backend {
-        /** The engine's settings as this machine has them: the preferences come from here. */
-        EngineSettings engineSettings();
-
         /** Where a torrent added without a save path goes. */
         Path defaultSavePath();
 
@@ -123,6 +117,15 @@ public final class WebApi {
 
         /** {@code webapi.rootFolder}: a web UI to serve at {@code /}; empty for none. */
         Optional<Path> rootFolder();
+
+        /** This machine's settings, which {@code app/setPreferences} and the speed endpoints write. */
+        Settings settings();
+
+        /** The settings were written: saved, applied to the engine, and the owner told. */
+        void settingsChanged() throws EngineException;
+
+        /** The session's events numbered above {@code id}. */
+        List<SessionLog.Entry> log(long id);
     }
 
     /**
@@ -183,8 +186,6 @@ public final class WebApi {
     static final String PREFIX = "/api/v2/";
     static final String COOKIE = "SID";
 
-    private static final JsonFactory JSON = new JsonFactory();
-
     private final Backend backend;
     private final LongSupplier clock;
     private final Sessions sessions;
@@ -217,10 +218,17 @@ public final class WebApi {
                 router,
                 "app/defaultSavePath",
                 r -> Response.text(200, backend.defaultSavePath().toString()));
-        read(
-                router,
-                "app/preferences",
-                r -> Response.json(preferences(backend.engineSettings(), backend.defaultSavePath())));
+        SessionEdits session = new SessionEdits(backend);
+        read(router, "app/preferences", session::preferences);
+        router.route("POST", PREFIX + "app/setPreferences", session::setPreferences);
+        read(router, "transfer/speedLimitsMode", session::speedLimitsMode);
+        router.route("POST", PREFIX + "transfer/toggleSpeedLimitsMode", session::toggleSpeedLimitsMode);
+        router.route("POST", PREFIX + "transfer/setSpeedLimitsMode", session::setSpeedLimitsMode);
+        read(router, "transfer/downloadLimit", session::downloadLimit);
+        read(router, "transfer/uploadLimit", session::uploadLimit);
+        router.route("POST", PREFIX + "transfer/setDownloadLimit", session::setDownloadLimit);
+        router.route("POST", PREFIX + "transfer/setUploadLimit", session::setUploadLimit);
+        read(router, "log/main", session::log);
         FactsCache facts = new FactsCache(backend);
         Reads reads = new Reads(backend, clock, facts);
         Writes writes = new Writes(backend, clock, reads);
@@ -336,46 +344,6 @@ public final class WebApi {
     private Response logout(Request request) {
         sessions.close(request.cookies().get(COOKIE));
         return Response.empty(200).withCookie(Cookies.set(COOKIE, "", 0, request.secure()));
-    }
-
-    /**
-     * {@code app/preferences}: the keys the *arr apps read, from the engine's settings. A limit
-     * that is not set is qBittorrent's {@code -1} with its {@code _enabled} false; queueing is on
-     * when any active count is limited.
-     */
-    static String preferences(EngineSettings settings, Path savePath) {
-        EngineSettings.Queue queue = settings.queue();
-        ShareLimit share = queue.share();
-        StringWriter out = new StringWriter();
-        try (JsonGenerator g = JSON.createGenerator(out)) {
-            g.writeStartObject();
-            g.writeStringField("save_path", savePath.toString());
-            g.writeBooleanField(
-                    "queueing_enabled",
-                    queue.activeDownloads() > 0 || queue.activeSeeds() > 0 || queue.activeLimit() > 0);
-            g.writeNumberField("max_active_downloads", orUnlimited(queue.activeDownloads()));
-            g.writeNumberField("max_active_uploads", orUnlimited(queue.activeSeeds()));
-            g.writeNumberField("max_active_torrents", orUnlimited(queue.activeLimit()));
-            g.writeBooleanField("max_ratio_enabled", share.ratio() > 0);
-            g.writeNumberField("max_ratio", share.ratio() > 0 ? share.ratio() : -1);
-            g.writeBooleanField("max_seeding_time_enabled", share.seedingMinutes() > 0);
-            g.writeNumberField("max_seeding_time", share.seedingMinutes() > 0 ? share.seedingMinutes() : -1);
-            g.writeBooleanField("max_inactive_seeding_time_enabled", false);
-            g.writeNumberField("max_inactive_seeding_time", -1);
-            g.writeNumberField("max_ratio_act", ratioAction(share.action()));
-            g.writeBooleanField("dht", settings.protocol().dht());
-            g.writeBooleanField("pex", settings.protocol().pex());
-            g.writeBooleanField("lsd", settings.protocol().lsd());
-            g.writeNumberField("listen_port", settings.listenPort());
-            g.writeEndObject();
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-        return out.toString();
-    }
-
-    private static int orUnlimited(int count) {
-        return count > 0 ? count : -1;
     }
 
     /** qBittorrent's numbers: 0 stop, 1 remove, 2 super seeding, 3 remove with the files. */

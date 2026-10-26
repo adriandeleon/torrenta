@@ -16,7 +16,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   `sync/torrentPeers`. And what their detail screens edit: file priorities, the location (inside
   the allowed folders), a torrent's name, a file's or folder's name, trackers, per-torrent limits,
   sequential and first-and-last-piece, super seeding, the queue, and the categories and tags
-  themselves; with the trackers, web seeds and piece states to read.
+  themselves; with the trackers, web seeds and piece states to read. And the session's: the
+  alternative speed limits switched and the limits in force set, the preferences Torrenta has read
+  and written (live, as from the Settings page; the save path inside the allowed folders, and
+  Remote access's own password, address and port never changed through it), and the event log.
 
 - **Remote access, the door for Sonarr, Radarr and the phone apps.** Settings → Remote access
   speaks qBittorrent's WebUI API at `/api/v2`, off until switched on and on `127.0.0.1:8080` until

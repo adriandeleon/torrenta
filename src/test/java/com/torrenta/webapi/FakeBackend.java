@@ -16,19 +16,36 @@ import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineException;
-import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.session.AddDefaults;
+import com.torrenta.store.Settings;
 
 /** A backend the tests fill in by hand, counting the detail reads the cache is meant to save. */
 @SuppressWarnings("unchecked")
 final class FakeBackend implements WebApi.Backend {
 
-    EngineSettings settings = EngineSettings.defaults();
+    /** A real settings store on a file of its own, never loaded from or saved to anything shared. */
+    final Settings store = newStore();
+
+    private static Settings newStore() {
+        try {
+            Path file = java.nio.file.Files.createTempFile("torrenta-webapi", ".properties");
+            file.toFile().deleteOnExit();
+            return new Settings(file);
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
+
+    final com.torrenta.session.SessionLog log = new com.torrenta.session.SessionLog(100);
+    /** How many times the settings were saved and applied. */
+    final AtomicInteger applied = new AtomicInteger();
+    /** What the engine says when the settings are applied; null for nothing. */
+    EngineException refuseSettings;
     /**
      * An absolute path on every platform: {@code /srv} is relative to the current drive on
      * Windows, and the API answers with the absolute path it resolved.
@@ -134,11 +151,6 @@ final class FakeBackend implements WebApi.Backend {
         TorrentDetail.General g = new TorrentDetail.General(
                 id, "/srv/downloads", false, 4, 16384, 2, 1.0, 800, 400, 0, 3600, 120, 30, 3, "", v1, v2);
         return new TorrentDetail(g, files, List.of(), List.of(), new boolean[4]);
-    }
-
-    @Override
-    public EngineSettings engineSettings() {
-        return settings;
     }
 
     @Override
@@ -253,6 +265,22 @@ final class FakeBackend implements WebApi.Backend {
     }
 
     Path rootFolder;
+
+    @Override
+    public Settings settings() {
+        return store;
+    }
+
+    @Override
+    public void settingsChanged() throws EngineException {
+        applied.incrementAndGet();
+        if (refuseSettings != null) throw refuseSettings;
+    }
+
+    @Override
+    public List<com.torrenta.session.SessionLog.Entry> log(long id) {
+        return log.after(id);
+    }
 
     @Override
     public Optional<Path> rootFolder() {

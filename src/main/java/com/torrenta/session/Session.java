@@ -174,6 +174,9 @@ public final class Session {
     /** A content-check mark set and saved as one: marks come from the adds' threads and the poll's. */
     private final Object marks = new Object();
 
+    /** What the owner heard, numbered, the last thousand: Remote access reads it. */
+    private final SessionLog log = new SessionLog(1000);
+
     private final List<Consumer<Poll>> listeners = new CopyOnWriteArrayList<>();
     private volatile Engine engine;
     private volatile ScheduledExecutorService poller;
@@ -206,8 +209,28 @@ public final class Session {
         rss.setDownloader(
                 this::downloadForRule,
                 settings::rssAutoDownload,
-                (message, failed) -> host.report(
+                (message, failed) -> tellReport(
                         EngineEvent.session(failed ? EngineEvent.Level.WARNING : EngineEvent.Level.INFO, message)));
+    }
+
+    /** The session's recent events, for Remote access's {@code log/main}. */
+    public SessionLog log() {
+        return log;
+    }
+
+    private void tellEvent(EngineEvent event) {
+        log.add(event);
+        host.event(event);
+    }
+
+    private void tellReport(EngineEvent event) {
+        log.add(event);
+        host.report(event);
+    }
+
+    private void tellProblem(EngineEvent event) {
+        log.add(event);
+        host.problem(event);
     }
 
     /** The feeds, their articles and rules: the window's RSS tab reads and changes them. */
@@ -257,12 +280,12 @@ public final class Session {
             host.engineFailed(new EngineException(e.getMessage() == null ? e.toString() : e.getMessage(), e));
             return;
         }
-        Automation a = new Automation(fresh, settings::automation, Notifiers.forPlatform(), host::report);
+        Automation a = new Automation(fresh, settings::automation, Notifiers.forPlatform(), this::tellReport);
         automation = a;
         fresh.addListener(event -> {
             // The automation decides on the alert thread and does its work on threads of its own.
             a.handle(event);
-            host.event(event);
+            tellEvent(event);
         });
         host.engineCreated(fresh);
         Thread starter = new Thread(
@@ -412,6 +435,20 @@ public final class Session {
         globalShareLimit = current.queue().share();
     }
 
+    /**
+     * Any thread but a toolkit's. The settings as they now stand, applied to the engine in use and
+     * the speed pair re-decided: what a change from outside the window (Remote access) needs. The
+     * owner hears the pair through {@code limitsRefreshed}.
+     */
+    public void applySettings() throws EngineException {
+        EngineSettings current = settings.engineSettings();
+        settingsChanged(current);
+        Engine e = engine;
+        if (e == null) return;
+        e.applySettings(current);
+        refreshLimits();
+    }
+
     /** The share limit in force for a torrent: its own, else the global one. */
     public ShareLimit shareLimitFor(Torrent t) {
         ShareLimit own = shareOverrides.get(t.id());
@@ -428,7 +465,7 @@ public final class Session {
         try {
             host.limitsRefreshed(e.refreshLimits(LocalDateTime.now()));
         } catch (EngineException ex) {
-            host.problem(EngineEvent.session(EngineEvent.Level.ERROR, ex.getMessage()));
+            tellProblem(EngineEvent.session(EngineEvent.Level.ERROR, ex.getMessage()));
         }
     }
 
@@ -511,6 +548,7 @@ public final class Session {
             // The snapshot goes along: a removed torrent cannot be looked up for the placeholders.
             Automation a = automation;
             if (a != null) a.handle(event, t);
+            log.add(event);
             host.seedingDone(event, t, removed);
         }
     }
@@ -548,7 +586,7 @@ public final class Session {
 
         @Override
         public void report(EngineEvent event) {
-            host.report(event);
+            tellReport(event);
         }
 
         @Override
@@ -680,7 +718,7 @@ public final class Session {
                             ? UnsafeContent.withSkipped(request, check.indices())
                             : request);
             String line = UnsafeContent.logLine(decision, added.name(), check, false);
-            if (!line.isEmpty()) host.report(EngineEvent.warning(added.id(), added.name(), line));
+            if (!line.isEmpty()) tellReport(EngineEvent.warning(added.id(), added.name(), line));
             return added;
         }
         // A magnet: stopped once its files are known, unless a person chose otherwise or the
@@ -744,9 +782,9 @@ public final class Session {
                     if (p.resume()) engine.resume(id);
                 }
                 String line = UnsafeContent.logLine(decision, t.name(), check, true);
-                if (!line.isEmpty()) host.report(EngineEvent.warning(id, t.name(), line));
+                if (!line.isEmpty()) tellReport(EngineEvent.warning(id, t.name(), line));
             } catch (EngineException ex) {
-                host.report(EngineEvent.warning(id, t.name(), ex.getMessage()));
+                tellReport(EngineEvent.warning(id, t.name(), ex.getMessage()));
             }
             clearPending(id);
         }

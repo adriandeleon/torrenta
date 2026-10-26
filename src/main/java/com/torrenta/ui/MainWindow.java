@@ -429,7 +429,10 @@ public final class MainWindow {
         // What arrived before an engine was up, once one is; after engineReady on the FX thread.
         session.setInputHandler(text -> Platform.runLater(() -> addInput(text)));
         this.rss = session.rss();
-        this.webApi = new WebApiService(new SessionBackend(session, settings, labels), System::currentTimeMillis);
+        SessionBackend remote = new SessionBackend(session, settings, labels);
+        // A client changed the settings (setPreferences, the speed mode): the pages show what is now true.
+        remote.setOnSettingsChanged(() -> Platform.runLater(this::showRemoteSettings));
+        this.webApi = new WebApiService(remote, System::currentTimeMillis);
         stage.setTitle(AppInfo.NAME);
         // Before anything else touches the stage: initStyle throws once a stage has been shown, and
         // the setting is read here, once, which is why it applies on restart.
@@ -941,6 +944,11 @@ public final class MainWindow {
         webApi.close();
         updates.shutdown();
         sync.shutdown();
+    }
+
+    /** FX thread: a remote client changed the settings; an open Settings window shows them. */
+    private void showRemoteSettings() {
+        if (settingsWindow.isShowing()) settingsWindow.reloadFromSettings();
     }
 
     /**

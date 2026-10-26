@@ -26,6 +26,7 @@ import com.torrenta.engine.TorrentLimits;
 import com.torrenta.net.TorrentFetch;
 import com.torrenta.session.AddDefaults;
 import com.torrenta.session.Session;
+import com.torrenta.session.SessionLog;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.Settings;
 
@@ -59,11 +60,6 @@ public final class SessionBackend implements WebApi.Backend {
                 lastActive.keySet().retainAll(ids);
             }
         });
-    }
-
-    @Override
-    public EngineSettings engineSettings() {
-        return settings.engineSettings();
     }
 
     @Override
@@ -250,6 +246,33 @@ public final class SessionBackend implements WebApi.Backend {
     public void setShareOverride(String id, ShareLimit limit) {
         settings.setShareOverride(id, limit);
         settings.saveQuietly();
+    }
+
+    @Override
+    public Settings settings() {
+        return settings;
+    }
+
+    /** What the owner does once the settings changed from outside it: the window reloads its pages. */
+    private volatile Runnable onSettingsChanged = () -> {};
+
+    public void setOnSettingsChanged(Runnable listener) {
+        onSettingsChanged = listener == null ? () -> {} : listener;
+    }
+
+    @Override
+    public void settingsChanged() throws EngineException {
+        settings.saveQuietly();
+        try {
+            session.applySettings();
+        } finally {
+            onSettingsChanged.run();
+        }
+    }
+
+    @Override
+    public List<SessionLog.Entry> log(long id) {
+        return session.log().after(id);
     }
 
     @Override

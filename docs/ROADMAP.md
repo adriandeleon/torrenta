@@ -520,7 +520,9 @@ so the order is extract, then serve.
    `sync/torrentPeers`, `StaticFiles` (`webapi.rootFolder`), unknown API paths 404 for every
    method. So is the second: `Edits` (the torrent, file, tracker, limit, queue, category and tag
    edits; `torrents/trackers`, `webseeds` and `pieceStates` beside them), `QueueOrder` moved to
-   `engine` so the API orders a selection's moves as the window does.
+   `engine` so the API orders a selection's moves as the window does. And the third: `SessionEdits`
+   (the speed mode and global limits, `app/setPreferences` through `Preferences`, `log/main` from
+   `session.SessionLog`), `Session.applySettings`. Item 5 is done.
 6. **Compatibility**: contract tests from a real qBittorrent 5.0's recorded answers;
    `QbittorrentContractTest`, `@EnabledIf` `qbittorrent-nox` is on the PATH as
    `TransmissionDaemonTest` is, sends the same requests to both and compares the shapes; a manual
