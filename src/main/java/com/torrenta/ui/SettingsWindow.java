@@ -271,6 +271,8 @@ final class SettingsWindow {
     private TextField onAdded;
     private TextField onFinished;
     private TextField onSeedingDone;
+    private TextField onUpdated;
+    private CheckBox notifyUpdated;
     private CheckBox notifyAdded;
     private CheckBox notifyFinished;
     private CheckBox notifySeedingDone;
@@ -540,6 +542,8 @@ final class SettingsWindow {
     private ChoiceBox<com.torrenta.engine.DedupMode> addDedup;
     private TextField directCurl;
     private TextField streamPlayer;
+    private Spinner<Integer> followHours;
+    private CheckBox followRemoveOld;
     private Spinner<Integer> directActive;
     private Spinner<Integer> port;
     private CheckBox randomPort;
@@ -3445,6 +3449,15 @@ final class SettingsWindow {
                 tr("settings.automation.onSeedingDone.desc"),
                 onSeedingDone,
                 tr("settings.automation.onSeedingDone.keywords"));
+        onUpdated = commandField(EngineEvent.Kind.UPDATED);
+        row(
+                Category.AUTOMATION,
+                run,
+                tr("settings.automation.onUpdated"),
+                tr("settings.automation.onUpdated.desc"),
+                onUpdated,
+                tr("settings.automation.onUpdated.keywords"),
+                Engine.Capability.MUTABLE);
         Label legend = new Label(tr("settings.automation.placeholders.legend"));
         legend.setWrapText(true);
         legend.getStyleClass().add("settings-row-description");
@@ -3480,6 +3493,15 @@ final class SettingsWindow {
                 "",
                 notifySeedingDone,
                 tr("settings.automation.notifySeedingDone.keywords"));
+        notifyUpdated = notifyBox(EngineEvent.Kind.UPDATED);
+        row(
+                Category.AUTOMATION,
+                notify,
+                tr("settings.automation.notifyUpdated"),
+                "",
+                notifyUpdated,
+                tr("settings.automation.notifyUpdated.keywords"),
+                Engine.Capability.MUTABLE);
         notifyError = notifyBox(EngineEvent.Kind.ERROR);
         row(
                 Category.AUTOMATION,
@@ -3656,6 +3678,32 @@ final class SettingsWindow {
                 streamPlayer,
                 tr("settings.adding.player.keywords"),
                 Engine.Capability.STREAMING);
+
+        // Updatable torrents (BEP 46): how often a newer version is looked for, and the old one's fate.
+        VBox updatable = section(page, tr("settings.adding.updatable"));
+        followHours = intSpinner(0, 168, Settings.FOLLOW_HOURS);
+        row(
+                Category.ADDING,
+                updatable,
+                tr("settings.adding.followHours"),
+                tr("settings.adding.followHours.desc"),
+                followHours,
+                tr("settings.adding.followHours.keywords"),
+                Engine.Capability.MUTABLE);
+        followRemoveOld = new CheckBox();
+        followRemoveOld.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setFollowRemoveOld(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.ADDING,
+                updatable,
+                tr("settings.adding.followRemoveOld"),
+                tr("settings.adding.followRemoveOld.desc"),
+                followRemoveOld,
+                tr("settings.adding.followRemoveOld.keywords"),
+                Engine.Capability.MUTABLE);
     }
 
     private void buildConnection(VBox page) {
@@ -4375,6 +4423,8 @@ final class SettingsWindow {
             addProbePrivate.setSelected(settings.addProbePrivate());
             directCurl.setText(settings.directOptions().curl());
             streamPlayer.setText(settings.get(Settings.STREAM_PLAYER, ""));
+            followHours.getValueFactory().setValue(settings.followHours());
+            followRemoveOld.setSelected(settings.followRemoveOld());
             directActive.getValueFactory().setValue(settings.directOptions().active());
             AutomationSettings a = settings.automation();
             onAdded.setText(a.onAdded());
@@ -4384,6 +4434,8 @@ final class SettingsWindow {
             notifyFinished.setSelected(a.notifyFinished());
             notifySeedingDone.setSelected(a.notifySeedingDone());
             notifyError.setSelected(a.notifyError());
+            onUpdated.setText(a.onUpdated());
+            notifyUpdated.setSelected(a.notifyUpdated());
             EngineSettings e = settings.engineSettings();
             port.getValueFactory().setValue(e.listenPort());
             randomPort.setSelected(e.randomPort());

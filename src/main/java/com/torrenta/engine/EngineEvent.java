@@ -25,13 +25,15 @@ public record EngineEvent(Instant at, Level level, String torrentId, String torr
     /**
      * The events a person can act on automatically. {@code ADDED} is a torrent new to the session,
      * never one restored at start; {@code FINISHED} is the download complete; {@code SEEDING_DONE}
-     * is the share limit acting; {@code ERROR} is a torrent, file or tracker error.
+     * is the share limit acting; {@code ERROR} is a torrent, file or tracker error; {@code UPDATED}
+     * is a newer version of an updatable torrent added (BEP 46), the event naming the new one.
      */
     public enum Kind {
         ADDED,
         FINISHED,
         SEEDING_DONE,
         ERROR,
+        UPDATED,
         OTHER
     }
 

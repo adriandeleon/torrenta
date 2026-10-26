@@ -13,15 +13,40 @@ public record AutomationSettings(
         boolean notifyAdded,
         boolean notifyFinished,
         boolean notifySeedingDone,
-        boolean notifyError) {
+        boolean notifyError,
+        String onUpdated,
+        boolean notifyUpdated) {
 
     /** Nothing runs; only a finished download notifies. */
-    public static final AutomationSettings DEFAULTS = new AutomationSettings("", "", "", false, true, false, false);
+    public static final AutomationSettings DEFAULTS =
+            new AutomationSettings("", "", "", false, true, false, false, "", false);
 
     public AutomationSettings {
         onAdded = onAdded == null ? "" : onAdded.strip();
         onFinished = onFinished == null ? "" : onFinished.strip();
         onSeedingDone = onSeedingDone == null ? "" : onSeedingDone.strip();
+        onUpdated = onUpdated == null ? "" : onUpdated.strip();
+    }
+
+    /** Nothing on an updatable torrent's new version. */
+    public AutomationSettings(
+            String onAdded,
+            String onFinished,
+            String onSeedingDone,
+            boolean notifyAdded,
+            boolean notifyFinished,
+            boolean notifySeedingDone,
+            boolean notifyError) {
+        this(
+                onAdded,
+                onFinished,
+                onSeedingDone,
+                notifyAdded,
+                notifyFinished,
+                notifySeedingDone,
+                notifyError,
+                "",
+                false);
     }
 
     /** The command line for an event, or empty: errors and the rest never run anything. */
@@ -30,6 +55,7 @@ public record AutomationSettings(
             case ADDED -> onAdded;
             case FINISHED -> onFinished;
             case SEEDING_DONE -> onSeedingDone;
+            case UPDATED -> onUpdated;
             case ERROR, OTHER -> "";
         };
     }
@@ -41,6 +67,7 @@ public record AutomationSettings(
             case FINISHED -> notifyFinished;
             case SEEDING_DONE -> notifySeedingDone;
             case ERROR -> notifyError;
+            case UPDATED -> notifyUpdated;
             case OTHER -> false;
         };
     }
@@ -50,9 +77,11 @@ public record AutomationSettings(
         return !onAdded.isEmpty()
                 || !onFinished.isEmpty()
                 || !onSeedingDone.isEmpty()
+                || !onUpdated.isEmpty()
                 || notifyAdded
                 || notifyFinished
                 || notifySeedingDone
-                || notifyError;
+                || notifyError
+                || notifyUpdated;
     }
 }

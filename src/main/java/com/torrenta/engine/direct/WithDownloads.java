@@ -352,6 +352,24 @@ public final class WithDownloads implements Engine {
         return torrents.stream(id, fileIndex);
     }
 
+    @Override
+    public java.util.Optional<MutableItem> lookupMutable(
+            com.torrenta.engine.MutableSource source, java.time.Duration timeout)
+            throws EngineException, InterruptedException {
+        return torrents.lookupMutable(source, timeout);
+    }
+
+    @Override
+    public java.util.Map<String, com.torrenta.engine.Following> followings() {
+        return torrents.followings();
+    }
+
+    @Override
+    public void setFollowing(String id, com.torrenta.engine.Following following) throws EngineException {
+        if (DirectDownload.isId(id)) throw new EngineException(tr("engine.error.noMutable"));
+        torrents.setFollowing(id, following);
+    }
+
     /** The torrents' files: a download from a link has no v2 root to be found by. */
     @Override
     public com.torrenta.engine.ContentIndex contentIndex() {

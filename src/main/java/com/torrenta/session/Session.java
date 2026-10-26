@@ -38,13 +38,16 @@ import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.EngineSettings;
+import com.torrenta.engine.Following;
 import com.torrenta.engine.FoundFile;
 import com.torrenta.engine.Inputs;
 import com.torrenta.engine.LinkRequest;
+import com.torrenta.engine.MutableSource;
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
+import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.engine.WatchFolders;
@@ -412,6 +415,14 @@ public final class Session {
         poller = p;
         p.scheduleAtFixedRate(this::poll, 0, POLL_MS, TimeUnit.MILLISECONDS);
         p.scheduleAtFixedRate(this::refreshLimits, 0, 60, TimeUnit.SECONDS);
+        // Updatable torrents: a look for newer versions when due (the lookups block, so not on the
+        // poll thread), and the old versions let go of once the new ones are complete.
+        p.scheduleAtFixedRate(
+                () -> Thread.ofVirtual().name("follow").start(this::lookForVersions),
+                FOLLOW_FIRST_MINUTES,
+                FOLLOW_TICK_MINUTES,
+                TimeUnit.MINUTES);
+        p.scheduleAtFixedRate(this::letGoOfOldVersions, 30, 30, TimeUnit.SECONDS);
         engineUp.countDown();
         startIpFilter(engine);
         watcher = new WatchFolders(engine, new Watching());
@@ -903,6 +914,12 @@ public final class Session {
      * engine hands it back, and its files are not this add's to change.
      */
     public Torrent add(Engine e, AddRequest request) throws EngineException {
+        Torrent added = screenedAdd(e, request);
+        attachFollowing(e, added);
+        return added;
+    }
+
+    private Torrent screenedAdd(Engine e, AddRequest request) throws EngineException {
         UnsafeContent mode = UnsafeContent.byName(settings.addUnsafeContent());
         Set<String> before = new HashSet<>();
         for (Torrent t : e.torrents()) before.add(t.id());
@@ -1130,10 +1147,13 @@ public final class Session {
 
     /**
      * An input as an add's source: a magnet as it is, a {@code .torrent} read from disk or fetched
-     * from its URL. A link that is not a torrent is {@link Inputs#isDirectLink}'s, not this.
+     * from its URL, an updatable address looked up in the DHT for its current version (a magnet,
+     * followed once added). A link that is not a torrent is {@link Inputs#isDirectLink}'s, not this.
      */
     public AddRequest.Source resolve(String input) throws EngineException, IOException {
         String text = input.trim();
+        java.util.Optional<MutableSource> updatable = MutableSource.parse(text);
+        if (updatable.isPresent()) return resolveUpdatable(updatable.get());
         return switch (Inputs.classify(text)) {
             case MAGNET -> new AddRequest.Magnet(text);
             case FILE -> {
@@ -1143,6 +1163,209 @@ public final class Session {
             }
             case URL -> new AddRequest.TorrentFile(new TorrentFetch().fetch(URI.create(text)), text);
         };
+    }
+
+    // ---- updatable torrents (BEP 46) -------------------------------------------------------------
+
+    /** How long a DHT lookup of an updatable address is given. */
+    static final java.time.Duration LOOKUP = java.time.Duration.ofSeconds(30);
+
+    /** The follower's first look after a start, and how often it looks whether one is due. */
+    static final long FOLLOW_FIRST_MINUTES = 2;
+
+    static final long FOLLOW_TICK_MINUTES = 10;
+
+    /** Torrents being added from an updatable address, by the info-hash named: followed once added. */
+    private final Map<String, Following> pendingFollowing = new ConcurrentHashMap<>();
+
+    /** When each followed torrent was last looked up, this run; due again after {@code follow.hours}. */
+    private final Map<String, Long> lastLooked = new ConcurrentHashMap<>();
+
+    /** One look at a time: a slow DHT must not pile them up. */
+    private final java.util.concurrent.atomic.AtomicBoolean looking = new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** The address looked up: its current version as a magnet, to be followed once it is added. */
+    private AddRequest.Source resolveUpdatable(MutableSource source) throws EngineException, IOException {
+        Engine e = running;
+        if (e == null) throw new EngineException(tr("status.engineNotRunning"));
+        if (!e.capabilities().has(Engine.Capability.MUTABLE)) throw new EngineException(tr("engine.error.noMutable"));
+        java.util.Optional<Engine.MutableItem> found;
+        try {
+            found = e.lookupMutable(source, LOOKUP);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IOException(ex.getMessage(), ex);
+        }
+        java.util.Optional<String> infoHash = found.flatMap(i -> MutableSource.infoHash(i.value()));
+        if (infoHash.isEmpty()) throw new EngineException(tr("follow.notFound"));
+        pendingFollowing.put(
+                infoHash.get(), new Following(source.uri(), found.get().seq(), ""));
+        return new AddRequest.Magnet(MutableSource.magnetOf(infoHash.get()));
+    }
+
+    /**
+     * Any thread. A torrent just added that came from an updatable address is followed from it
+     * from now on; any other is left alone. Every add calls it: the dialog's, the screened one.
+     */
+    public void attachFollowing(Engine e, Torrent added) {
+        if (pendingFollowing.isEmpty()) return;
+        String named = pendingFollowing.keySet().stream()
+                .filter(h -> names(e, added.id(), h))
+                .findFirst()
+                .orElse(null);
+        Following f = named == null ? null : pendingFollowing.remove(named);
+        if (f == null) return;
+        try {
+            e.setFollowing(added.id(), f);
+            tellEvent(EngineEvent.info(added.id(), added.name(), tr("follow.event.following", added.name())));
+        } catch (EngineException ex) {
+            tellProblem(EngineEvent.error(added.id(), added.name(), ex.getMessage()));
+        }
+    }
+
+    /**
+     * Whether torrent {@code id} is the one {@code infoHash} names: by its id, else by either of
+     * its full hashes (a hybrid named by its v1 hash has the v2 one's id once its metadata is in).
+     */
+    private static boolean names(Engine e, String id, String infoHash) {
+        if (FollowRules.idOf(infoHash).equals(id)) return true;
+        try {
+            com.torrenta.engine.TorrentDetail.General g = e.detail(id).general();
+            return infoHash.equalsIgnoreCase(g.infoHashV1()) || infoHash.equalsIgnoreCase(g.infoHashV2());
+        } catch (EngineException | RuntimeException ex) {
+            return false;
+        }
+    }
+
+    /**
+     * A virtual thread, every ten minutes: each followed torrent not looked up for {@code
+     * follow.hours} is, and a newer version is added ({@link FollowRules}); 0 hours looks never.
+     */
+    void lookForVersions() {
+        Engine e = engine;
+        int hours = settings.followHours();
+        if (e == null || hours <= 0 || !e.capabilities().has(Engine.Capability.MUTABLE)) return;
+        if (!looking.compareAndSet(false, true)) return;
+        try {
+            long now = System.currentTimeMillis();
+            for (Map.Entry<String, Following> entry : e.followings().entrySet()) {
+                String id = entry.getKey();
+                Long last = lastLooked.get(id);
+                if (last != null && now - last < TimeUnit.HOURS.toMillis(hours)) continue;
+                lastLooked.put(id, now);
+                lookFor(e, id, entry.getValue());
+            }
+        } finally {
+            looking.set(false);
+        }
+    }
+
+    /** One followed torrent looked up now, its newer version added if there is one. */
+    void lookFor(Engine e, String id, Following f) {
+        java.util.Optional<MutableSource> source = MutableSource.parse(f.source());
+        if (source.isEmpty()) return;
+        try {
+            java.util.Optional<FollowRules.Step> step = FollowRules.step(id, f, e.lookupMutable(source.get(), LOOKUP));
+            if (step.isEmpty()) return;
+            if (!step.get().adds() || names(e, id, step.get().infoHash())) {
+                e.setFollowing(id, new Following(f.source(), step.get().seq(), f.replaces()));
+                return;
+            }
+            addVersion(e, id, f, step.get());
+        } catch (EngineException ex) {
+            LOG.log(Level.INFO, "Looking for a newer version of " + id + ": " + ex.getMessage());
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * The newer version added where the old one is, filed as it is, following the address in its
+     * place. Its file list is fetched first when the engine can, so the add goes through the
+     * dedup: the files that did not change are found on disk and linked, not downloaded.
+     */
+    private void addVersion(Engine e, String oldId, Following f, FollowRules.Step step)
+            throws EngineException, InterruptedException {
+        Torrent old = e.torrents().stream()
+                .filter(t -> t.id().equals(oldId))
+                .findFirst()
+                .orElse(null);
+        if (old == null) return;
+        AddRequest.Source source = new AddRequest.Magnet(MutableSource.magnetOf(step.infoHash()));
+        Engine.SwarmProbe probe = null;
+        if (e.capabilities().has(Engine.Capability.METADATA_FETCH)) {
+            try {
+                probe = e.probe(source, false);
+                byte[] torrent = probe.torrent().get(10, TimeUnit.MINUTES);
+                source = new AddRequest.TorrentFile(torrent, MutableSource.magnetOf(step.infoHash()));
+            } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException ex) {
+                // No file list in time: added as the magnet, its files fetched as any magnet's.
+            }
+        }
+        AddRequest request = new AddRequest(
+                source,
+                Path.of(old.savePath()),
+                false,
+                false,
+                false,
+                AddRequest.StopCondition.NONE,
+                Map.of(),
+                new TorrentLabels(old.category(), old.tags(), "", new Following(f.source(), step.seq(), oldId)));
+        Torrent added;
+        try {
+            added = add(e, request);
+        } finally {
+            if (probe != null) probe.cancel();
+        }
+        e.setFollowing(oldId, null);
+        lastLooked.put(added.id(), System.currentTimeMillis());
+        EngineEvent event = EngineEvent.of(
+                EngineEvent.Kind.UPDATED,
+                EngineEvent.Level.INFO,
+                added.id(),
+                added.name(),
+                tr("follow.event.updated", old.name(), step.seq()));
+        Automation a = automation;
+        if (a != null) a.handle(event, added);
+        tellEvent(event);
+    }
+
+    /**
+     * Poll thread, every thirty seconds: a new version complete lets go of the one it replaces,
+     * removed from the list (its files kept: the new one may share them) when {@code
+     * follow.removeOld} says so, else kept, no longer followed either way.
+     */
+    void letGoOfOldVersions() {
+        Engine e = engine;
+        if (e == null) return;
+        try {
+            Map<String, Following> followed = e.followings();
+            if (followed.values().stream().allMatch(f -> f.replaces().isEmpty())) return;
+            List<Torrent> torrents = e.torrents();
+            for (Map.Entry<String, Following> entry : followed.entrySet()) {
+                Following f = entry.getValue();
+                if (f.replaces().isEmpty()) continue;
+                Torrent newer = torrents.stream()
+                        .filter(t -> t.id().equals(entry.getKey()))
+                        .findFirst()
+                        .orElse(null);
+                if (newer == null || !FollowRules.replaced(newer)) continue;
+                Torrent old = torrents.stream()
+                        .filter(t -> t.id().equals(f.replaces()))
+                        .findFirst()
+                        .orElse(null);
+                e.setFollowing(newer.id(), f.withReplaces(""));
+                if (old == null) continue;
+                if (settings.followRemoveOld()) {
+                    e.remove(old.id(), false);
+                    tellEvent(EngineEvent.info(newer.id(), newer.name(), tr("follow.event.removedOld", old.name())));
+                } else {
+                    tellEvent(EngineEvent.info(newer.id(), newer.name(), tr("follow.event.keptOld", old.name())));
+                }
+            }
+        } catch (EngineException | RuntimeException ex) {
+            LOG.log(Level.WARNING, "Letting go of an older version", ex);
+        }
     }
 
     /**

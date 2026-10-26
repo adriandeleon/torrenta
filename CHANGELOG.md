@@ -7,6 +7,13 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Updatable torrents.** A `magnet:?xs=urn:btpk:…` link (BEP 46) is looked up in the DHT and
+  its current version added; from then on Torrenta looks for a newer version every six hours
+  (Settings → Adding torrents → Updatable torrents) and adds it into the same folder, filed the
+  same way, with the files that did not change linked rather than downloaded again. Once the new
+  version is complete the old one is no longer followed, and leaves the list (its files kept)
+  if you choose. Settings → Automation can run a program or notify on a new version.
+
 - **Play a file while it downloads.** The Files tab's Stream in Player opens a file in mpv or VLC
   (wherever they are installed, or the player chosen in Settings → Adding torrents) as it
   downloads; Copy Stream URL gives the address for any other player on this computer. The pieces

@@ -87,6 +87,7 @@ public final class Automation {
             case ADDED -> tr("automation.notify.added", name);
             case FINISHED -> tr("automation.notify.finished", name);
             case SEEDING_DONE -> tr("automation.notify.seedingDone", name);
+            case UPDATED -> tr("automation.notify.updated", name);
             case ERROR, OTHER ->
                 event.message().startsWith(name)
                         ? event.message()
@@ -100,6 +101,7 @@ public final class Automation {
             case ADDED -> tr("settings.automation.onAdded");
             case FINISHED -> tr("settings.automation.onFinished");
             case SEEDING_DONE -> tr("settings.automation.onSeedingDone");
+            case UPDATED -> tr("settings.automation.onUpdated");
             case ERROR -> tr("automation.label.error");
             case OTHER -> tr("automation.label.other");
         };

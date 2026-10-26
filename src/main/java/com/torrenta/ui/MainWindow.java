@@ -2477,6 +2477,7 @@ public final class MainWindow {
                         && c.preview() != null)
                     placing = session.placeFound(e, request, c.preview(), c.dedupLinks(), c.dedupCopies());
                 Torrent added = fetch == null ? e.add(placing) : e.add(placing, fetch);
+                session.attachFollowing(e, added);
                 outcome = tr("status.added", added.name());
                 if (c.firstAndLastFirst()) {
                     TorrentLimits limits = e.limits(added.id());

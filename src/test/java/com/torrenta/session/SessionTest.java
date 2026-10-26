@@ -681,6 +681,152 @@ class SessionTest {
         }
     }
 
+    /**
+     * An updatable torrent's life: a higher number in the DHT adds the version it names where the
+     * old one is, filed as it is and following in its place, and says UPDATED; a look is not
+     * repeated before {@code follow.hours}; once the new version is complete the old one leaves
+     * the list (its files kept) when the setting says so, and is only let go of when it does not.
+     */
+    @Test
+    void aNewerVersionIsAddedBesideTheOldWhichIsLetGoOfOnceTheNewIsComplete(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        settings.setFollowRemoveOld(true);
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        String source = "magnet:?xs=urn:btpk:" + "11".repeat(32);
+        String oldId = "aa".repeat(20);
+        String newId = "bb".repeat(20);
+        byte[] ih = java.util.HexFormat.of().parseHex(newId);
+        List<Torrent> torrents = new CopyOnWriteArrayList<>(List.of(FollowRulesTest.torrent(oldId, 1.0)));
+        java.util.Map<String, com.torrenta.engine.Following> followings =
+                new java.util.concurrent.ConcurrentHashMap<>();
+        followings.put(oldId, new com.torrenta.engine.Following(source, 3, ""));
+        List<AddRequest> adds = new CopyOnWriteArrayList<>();
+        List<String> removed = new CopyOnWriteArrayList<>();
+        AtomicInteger lookups = new AtomicInteger();
+        Engine engine = (Engine) Proxy.newProxyInstance(
+                Engine.class.getClassLoader(),
+                new Class<?>[] {Engine.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "torrents" -> List.copyOf(torrents);
+                    case "rates" -> Engine.Rates.ZERO;
+                    case "capabilities" -> new Engine.Capabilities(java.util.EnumSet.of(Engine.Capability.MUTABLE));
+                    case "refreshLimits" -> false;
+                    case "followings" -> java.util.Map.copyOf(followings);
+                    case "setFollowing" -> {
+                        if (args[1] == null) followings.remove((String) args[0]);
+                        else followings.put((String) args[0], (com.torrenta.engine.Following) args[1]);
+                        yield null;
+                    }
+                    case "lookupMutable" -> {
+                        lookups.incrementAndGet();
+                        yield java.util.Optional.of(new Engine.MutableItem(4, java.util.Map.of("ih", ih)));
+                    }
+                    case "add" -> {
+                        AddRequest r = (AddRequest) args[0];
+                        adds.add(r);
+                        followings.put(newId, r.labels().following());
+                        Torrent t = FollowRulesTest.torrent(newId, 0.5);
+                        torrents.add(t);
+                        yield t;
+                    }
+                    case "remove" -> {
+                        removed.add(args[0] + " " + args[1]);
+                        torrents.removeIf(t -> t.id().equals(args[0]));
+                        yield null;
+                    }
+                    case "setIpFilter", "start", "stop", "addListener" -> null;
+                    case "toString" -> "following engine";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        session.start(engine);
+        try {
+            session.lookForVersions();
+            assertEquals(1, adds.size(), "the newer version added");
+            AddRequest r = adds.getFirst();
+            assertEquals(new AddRequest.Magnet("magnet:?xt=urn:btih:" + newId), r.source());
+            assertEquals(Path.of("/data/films"), r.savePath(), "where the old one is");
+            assertEquals("Films", r.labels().category());
+            assertEquals(List.of("hd"), r.labels().tags());
+            assertEquals(new com.torrenta.engine.Following(source, 4, oldId), followings.get(newId));
+            assertFalse(followings.containsKey(oldId), "the old one is no longer followed");
+            assertTrue(
+                    host.events.stream()
+                            .anyMatch(e -> e.kind() == EngineEvent.Kind.UPDATED && newId.equals(e.torrentId())),
+                    "UPDATED, for the automation");
+
+            session.lookForVersions();
+            assertEquals(1, lookups.get(), "not looked up again before follow.hours");
+
+            session.letGoOfOldVersions();
+            assertEquals(List.of(), removed, "the new version is not complete yet");
+            torrents.replaceAll(t -> t.id().equals(newId) ? FollowRulesTest.torrent(newId, 1.0) : t);
+            session.letGoOfOldVersions();
+            assertEquals(List.of(oldId + " false"), removed, "removed, its files kept");
+            assertEquals(new com.torrenta.engine.Following(source, 4, ""), followings.get(newId));
+
+            settings.setFollowRemoveOld(false);
+            torrents.add(FollowRulesTest.torrent(oldId, 1.0));
+            followings.put(newId, new com.torrenta.engine.Following(source, 4, oldId));
+            session.letGoOfOldVersions();
+            assertEquals(List.of(oldId + " false"), removed, "kept when the setting says so");
+            assertEquals("", followings.get(newId).replaces(), "but let go of");
+        } finally {
+            session.stop();
+        }
+    }
+
+    /** A republish naming the same torrent moves the number, and 0 hours never looks. */
+    @Test
+    void aRepublishMovesTheNumberAndZeroHoursNeverLooks(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        Session session = session(dir, settings, new RecordingHost());
+        String id = "aa".repeat(20);
+        java.util.Map<String, com.torrenta.engine.Following> followings =
+                new java.util.concurrent.ConcurrentHashMap<>();
+        followings.put(id, new com.torrenta.engine.Following("magnet:?xs=urn:btpk:" + "11".repeat(32), 3, ""));
+        AtomicInteger lookups = new AtomicInteger();
+        Engine engine = (Engine) Proxy.newProxyInstance(
+                Engine.class.getClassLoader(),
+                new Class<?>[] {Engine.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "torrents" -> List.of(FollowRulesTest.torrent(id, 1.0));
+                    case "rates" -> Engine.Rates.ZERO;
+                    case "capabilities" -> new Engine.Capabilities(java.util.EnumSet.of(Engine.Capability.MUTABLE));
+                    case "refreshLimits" -> false;
+                    case "followings" -> java.util.Map.copyOf(followings);
+                    case "setFollowing" -> {
+                        followings.put((String) args[0], (com.torrenta.engine.Following) args[1]);
+                        yield null;
+                    }
+                    case "lookupMutable" -> {
+                        lookups.incrementAndGet();
+                        yield java.util.Optional.of(new Engine.MutableItem(
+                                9,
+                                java.util.Map.of("ih", java.util.HexFormat.of().parseHex(id))));
+                    }
+                    case "setIpFilter", "start", "stop", "addListener" -> null;
+                    case "toString" -> "republish engine";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        session.start(engine);
+        try {
+            settings.set(Settings.FOLLOW_HOURS, "0");
+            session.lookForVersions();
+            assertEquals(0, lookups.get(), "0 hours: never");
+            settings.set(Settings.FOLLOW_HOURS, "6");
+            session.lookForVersions();
+            assertEquals(1, lookups.get());
+            assertEquals(9, followings.get(id).seq(), "the number moved, nothing added");
+        } finally {
+            session.stop();
+        }
+    }
+
     /** The few calls a session makes, answered; anything else is a test that needs more. */
     private static Engine engine(java.util.function.Supplier<List<Torrent>> torrents, Pauser pauser) {
         return engine(torrents, pauser, () -> {}, new AtomicInteger());
