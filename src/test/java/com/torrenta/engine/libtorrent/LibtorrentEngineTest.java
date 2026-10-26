@@ -1658,14 +1658,15 @@ class LibtorrentEngineTest {
                 LibtorrentEngine again = downloader(dir, store)) {
             again.start();
             String back = id;
+            // Paused is the stop: nothing else pauses it. How much came first is a race on loopback,
+            // where the whole payload can land between the metadata and the pause taking hold.
             awaitDownload(
-                    "the file list in",
+                    "the file list in and the torrent stopped",
                     again,
                     back,
                     seed,
                     () -> again.torrents().getFirst().size() > 0
                             && again.torrents().getFirst().paused());
-            assertTrue(again.torrents().getFirst().progress() < 1.0, "stopped, not downloaded");
             await(
                     "the record lets go of the stop",
                     () -> store.loadStorage(back)
