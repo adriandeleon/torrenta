@@ -46,8 +46,18 @@ public final class Settings {
     /** Downloads from links running at once; the rest wait their turn. */
     public static final String DIRECT_ACTIVE = "download.linksAtOnce";
 
+    /** The media player a stream is handed to; empty for mpv or VLC wherever they are. This machine's. */
+    public static final String STREAM_PLAYER = "stream.player";
+
     public static final String[] DOWNLOAD_KEYS = {
-        DOWNLOAD_DIR, INCOMPLETE_ENABLED, INCOMPLETE_DIR, PART_SUFFIX, PREALLOCATE, DIRECT_CURL, DIRECT_ACTIVE
+        DOWNLOAD_DIR,
+        INCOMPLETE_ENABLED,
+        INCOMPLETE_DIR,
+        PART_SUFFIX,
+        PREALLOCATE,
+        DIRECT_CURL,
+        DIRECT_ACTIVE,
+        STREAM_PLAYER
     };
     /** The transfer list's columns: order, widths, visibility. See {@code ui.ColumnLayout}. */
     public static final String TABLE_COLUMNS = "table.columns";

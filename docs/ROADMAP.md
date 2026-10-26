@@ -638,7 +638,12 @@ remote caller's behalf.
    gets a deadline and a wait on `PieceFinishedAlert` first. Reading beside libtorrent's writes is
    fine on POSIX; Windows' share mode is measured, with `readPiece` as the fallback. An engine test
    reads a range from a loopback torrent that has to wait for its piece. `Capability.STREAMING`.
-3. **Streaming, the player**: `Readahead.plan(playhead, have, rate, bitrate)`, pure: deadlines
+3. **Streaming, the player** (done: `Readahead.plan(playhead, geometry, have, bitrate, starting)`,
+   the download rate left out, since the deadlines already say what comes first; the playhead is
+   the server's, each range's first byte and then each piece written, planned again once a second
+   or at once on a seek, by a `Playback` per file that counts its connections; the bitrate is a
+   megabyte a second until 30 s of serving measure it; `stream.Player`, `stream.player` this
+   machine's, on the Adding page): `Readahead.plan(playhead, have, rate, bitrate)`, pure: deadlines
    tightening towards the playhead over about 30 s of playback, the file's first and last pieces at
    start (container indexes sit at the end), sequential over the file's range alone, all cleared
    when the last connection closes. Files tab → Stream in player runs `stream.player` (mpv or VLC

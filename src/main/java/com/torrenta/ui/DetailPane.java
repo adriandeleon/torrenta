@@ -126,6 +126,9 @@ final class DetailPane extends VBox {
     private boolean remedyPendingAny;
     private final Label piecesValue = new Label();
     private final PieceStrip pieceStrip = new PieceStrip();
+    /** The pieces a player's read-ahead covers in the torrent shown; null while none plays it. */
+    private com.torrenta.engine.PieceMath.Span streamWindow;
+
     private final VBox piecesBox = new VBox(8);
     private final Sparkline overviewSpark = new Sparkline(Sparkline.Series.BOTH, 200, 56);
     private final Label speedCaption = new Label();
@@ -185,6 +188,10 @@ final class DetailPane extends VBox {
     private BiConsumer<Integer, com.torrenta.engine.Priority> onFilePriority = (i, p) -> {};
     private Consumer<FileRows.Row> onOpenFile = r -> {};
     private Consumer<FileRows.Row> onOpenFolder = r -> {};
+    /** Stream in Player and Copy Stream URL, for a file row. */
+    private Consumer<FileRows.Row> onStream = r -> {};
+
+    private Consumer<FileRows.Row> onCopyStream = r -> {};
     private BiConsumer<FileRows.Row, String> onRename = (r, name) -> {};
     /** What the capture hook types into the next file Rename dialog before pressing OK. */
     private String renameForCapture;
@@ -211,6 +218,8 @@ final class DetailPane extends VBox {
     private String peerTarget;
     /** The files are on this machine (not a remote daemon's): Open File and the folder actions show. */
     private boolean localFiles = true;
+    /** The engine can serve a file while it downloads ({@code Capability.STREAMING}). */
+    private boolean streaming = true;
 
     DetailPane() {
         getStyleClass().add("detail-pane");
@@ -269,8 +278,21 @@ final class DetailPane extends VBox {
         onFilePriority = handler;
     }
 
+    /** The read-ahead's pieces, marked on the strip from the next show; null for none. */
+    void showStreamWindow(com.torrenta.engine.PieceMath.Span window) {
+        streamWindow = window;
+    }
+
     void setOnOpenFile(Consumer<FileRows.Row> handler) {
         onOpenFile = handler;
+    }
+
+    void setOnStream(Consumer<FileRows.Row> handler) {
+        onStream = handler;
+    }
+
+    void setOnCopyStream(Consumer<FileRows.Row> handler) {
+        onCopyStream = handler;
     }
 
     /** A folder row, or a file row whose containing folder is meant; see {@link FileRows#folderOf}. */
@@ -322,6 +344,7 @@ final class DetailPane extends VBox {
      */
     void applyCapabilities(com.torrenta.engine.Engine.Capabilities caps) {
         localFiles = caps.has(com.torrenta.engine.Engine.Capability.LOCAL_FILES);
+        streaming = caps.has(com.torrenta.engine.Engine.Capability.STREAMING);
         openButton.setVisible(localFiles);
         openButton.setManaged(localFiles);
         if (banItem != null) banItem.setVisible(caps.has(com.torrenta.engine.Engine.Capability.IP_FILTER));
@@ -470,7 +493,7 @@ final class DetailPane extends VBox {
                         : Diagnosis.of(torrent, RowState.of(torrent, quietSeconds), detail, quietSeconds));
 
         piecesValue.setText(g.pieceCount() == 0 ? "—" : OverviewText.pieces(g.piecesHave(), g.pieceCount()));
-        pieceStrip.show(detail.pieces(), detail.availability(), PieceStrip.skipped(detail));
+        pieceStrip.show(detail.pieces(), detail.availability(), PieceStrip.skipped(detail), streamWindow);
         if (torrent != null) {
             overviewDown.setText("↓ " + Bytes.rate(torrent.downloadRate()));
             overviewUp.setText("↑ " + Bytes.rate(torrent.uploadRate()));
@@ -536,7 +559,7 @@ final class DetailPane extends VBox {
         trackerItems.clear();
         webSeedItems.clear();
         lastPieces = new boolean[0];
-        pieceStrip.show(lastPieces, new int[0], new boolean[0]);
+        pieceStrip.show(lastPieces, new int[0], new boolean[0], streamWindow);
         if (logItems != null) logItems.setPredicate(e -> false);
         speedHistory = null;
         speed.clear();
@@ -1056,13 +1079,25 @@ final class DetailPane extends VBox {
         MenuItem rename = new MenuItem(tr("detail.files.rename"));
         rename.setGraphic(Icons.rename().at(Icons.MENU_SIZE));
         rename.setOnAction(e -> selectedFileRow().ifPresent(this::askRename));
+        // A file played while it downloads: in a player, or its URL for one of the person's choosing.
+        MenuItem stream = new MenuItem(tr("detail.files.stream"));
+        stream.setGraphic(Icons.forKind(com.torrenta.content.FileKind.VIDEO).at(Icons.MENU_SIZE));
+        stream.setOnAction(e -> selectedFileRow().filter(FileRows.Row::isFile).ifPresent(onStream));
+        MenuItem copyStream = new MenuItem(tr("detail.files.copyStream"));
+        copyStream.setGraphic(Icons.copy().at(Icons.MENU_SIZE));
+        copyStream.setOnAction(
+                e -> selectedFileRow().filter(FileRows.Row::isFile).ifPresent(onCopyStream));
         javafx.scene.control.SeparatorMenuItem gap = new javafx.scene.control.SeparatorMenuItem();
-        ContextMenu menu = new ContextMenu(open, folder, gap, rename);
+        javafx.scene.control.SeparatorMenuItem streamGap = new javafx.scene.control.SeparatorMenuItem();
+        ContextMenu menu = new ContextMenu(open, folder, gap, stream, copyStream, streamGap, rename);
         menu.setOnShowing(e -> {
             boolean file = selectedFileRow().map(FileRows.Row::isFile).orElse(false);
             open.setVisible(file && localFiles);
             folder.setVisible(localFiles);
             gap.setVisible(localFiles);
+            stream.setVisible(file && streaming);
+            copyStream.setVisible(file && streaming);
+            streamGap.setVisible(file && streaming);
             folder.setText(tr(file ? "detail.files.openContainingFolder" : "detail.files.openFolder"));
         });
         return menu;
@@ -1132,6 +1167,35 @@ final class DetailPane extends VBox {
      * menu. The hook's actions run before the first detail poll, so with no rows yet it waits for
      * the tree to be rooted and acts then.
      */
+    /**
+     * Capture only: Stream in Player on visible row {@code n}, once the rows are in; then back to
+     * the tab that showed before, so a capture can look at the Overview's strip meanwhile.
+     */
+    void streamFileForCapture(int n) {
+        streamFileForCapture(n, activeTab());
+    }
+
+    private void streamFileForCapture(int n, String back) {
+        selectTab("files");
+        if (files.getRoot() == null) {
+            files.rootProperty().addListener(new javafx.beans.value.ChangeListener<>() {
+                @Override
+                public void changed(
+                        javafx.beans.value.ObservableValue<? extends TreeItem<FileRows.Row>> o,
+                        TreeItem<FileRows.Row> was,
+                        TreeItem<FileRows.Row> now) {
+                    if (now == null) return;
+                    files.rootProperty().removeListener(this);
+                    streamFileForCapture(n, back);
+                }
+            });
+            return;
+        }
+        files.getSelectionModel().clearAndSelect(n);
+        selectedFileRow().filter(FileRows.Row::isFile).ifPresent(onStream);
+        selectTab(back);
+    }
+
     void showFilesMenuForCapture(int n) {
         selectTab("files");
         if (files.getRoot() == null) {

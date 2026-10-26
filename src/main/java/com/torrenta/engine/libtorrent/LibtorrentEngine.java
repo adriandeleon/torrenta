@@ -2270,6 +2270,31 @@ public final class LibtorrentEngine implements Engine {
             if (at < 0 || at + length > bytes.length) throw new EngineException(tr("engine.error.streamGone", name));
             return java.util.Arrays.copyOfRange(bytes, (int) at, (int) at + length);
         }
+
+        @Override
+        public long offset() {
+            return offset;
+        }
+
+        @Override
+        public long pieceLength() {
+            return pieceLength;
+        }
+
+        @Override
+        public java.util.BitSet have(int first, int last) throws EngineException {
+            return streamHave(id, first, last);
+        }
+
+        @Override
+        public void deadlines(Map<Integer, Integer> millisByPiece) throws EngineException {
+            streamDeadlines(id, millisByPiece);
+        }
+
+        @Override
+        public void clearDeadlines(int first, int last) throws EngineException {
+            streamClear(id, first, last);
+        }
     }
 
     /**
@@ -2305,6 +2330,25 @@ public final class LibtorrentEngine implements Engine {
         } catch (java.util.concurrent.ExecutionException e) {
             throw e.getCause() instanceof EngineException ee ? ee : new EngineException(e.getMessage(), e);
         }
+    }
+
+    private synchronized java.util.BitSet streamHave(String id, int first, int last) throws EngineException {
+        TorrentHandle h = handle(id);
+        java.util.BitSet out = new java.util.BitSet();
+        for (int p = Math.max(0, first); p <= last; p++) if (h.havePiece(p)) out.set(p);
+        return out;
+    }
+
+    private synchronized void streamDeadlines(String id, Map<Integer, Integer> millisByPiece) throws EngineException {
+        TorrentHandle h = handle(id);
+        millisByPiece.forEach((piece, millis) -> {
+            if (!h.havePiece(piece)) h.setPieceDeadline(piece, millis);
+        });
+    }
+
+    private synchronized void streamClear(String id, int first, int last) throws EngineException {
+        TorrentHandle h = handle(id);
+        for (int p = Math.max(0, first); p <= last; p++) h.resetPieceDeadline(p);
     }
 
     /**

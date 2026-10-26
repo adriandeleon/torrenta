@@ -102,7 +102,8 @@ public final class StreamServer implements AutoCloseable {
         } catch (EngineException ex) {
             return notFound();
         }
-        return Response.ranged(contentType(file.name()), new Body(file)).withHeader("Cache-Control", "no-store");
+        return Response.ranged(contentType(file.name()), new Body(target, file))
+                .withHeader("Cache-Control", "no-store");
     }
 
     private static Response notFound() {
@@ -111,9 +112,11 @@ public final class StreamServer implements AutoCloseable {
 
     /** The bytes of a range, a piece's worth at a time, each waited for before it is read. */
     private final class Body implements Response.Ranged {
+        private final Target target;
         private final StreamFile file;
 
-        Body(StreamFile file) {
+        Body(Target target, StreamFile file) {
+            this.target = target;
             this.file = file;
         }
 
@@ -126,12 +129,26 @@ public final class StreamServer implements AutoCloseable {
         public void write(long first, long length, OutputStream out) throws IOException {
             long position = first;
             long last = first + length - 1;
+            Playback playback = playbacks.computeIfAbsent(target, t -> new Playback(t, file));
+            playback.open();
+            try {
+                playback.at(first, true);
+                send(position, last, out, playback);
+            } finally {
+                playback.close();
+            }
+        }
+
+        private void send(long position, long last, OutputStream out, Playback playback) throws IOException {
             while (position <= last) {
+                playback.at(position, false);
                 long chunkEnd = Math.min(last, file.chunkEnd(position));
                 waitFor(position, chunkEnd);
                 // Through the engine, not the file: a verified piece can be in its write buffer
                 // still (measured on Windows: zeros right after the piece's alert).
-                out.write(read(position, chunkEnd));
+                byte[] bytes = read(position, chunkEnd);
+                out.write(bytes);
+                playback.served(bytes.length);
                 position = chunkEnd + 1;
             }
         }
@@ -160,6 +177,110 @@ public final class StreamServer implements AutoCloseable {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("interrupted", e);
+            }
+        }
+    }
+
+    /** The files being played now, each with its read-ahead: one per file, however many connections. */
+    private final Map<Target, Playback> playbacks = new ConcurrentHashMap<>();
+
+    /**
+     * The pieces the read-ahead covers for torrent {@code id} now, first to last over every file
+     * of it being played; empty when none is. The Overview's strip marks them.
+     */
+    public java.util.Optional<com.torrenta.engine.PieceMath.Span> window(String id) {
+        int first = Integer.MAX_VALUE;
+        int last = -1;
+        for (Playback p : playbacks.values()) {
+            if (!p.target.id().equals(id)) continue;
+            com.torrenta.engine.PieceMath.Span w = p.window();
+            if (w == null) continue;
+            first = Math.min(first, w.first());
+            last = Math.max(last, w.last());
+        }
+        return last < 0
+                ? java.util.Optional.empty()
+                : java.util.Optional.of(new com.torrenta.engine.PieceMath.Span(first, last));
+    }
+
+    /**
+     * One file being played: its connections (a player opens several), where it plays, and the
+     * read-ahead ({@link Readahead}), planned again at most once a second or at once on a seek,
+     * cleared when the last connection closes. The playback rate is a megabyte a second until 30
+     * seconds of serving say otherwise, held between 256 KiB/s and 8 MiB/s.
+     */
+    private final class Playback {
+        private final Target target;
+        private final StreamFile file;
+        private final Readahead.Geometry geometry;
+        private int connections;
+        private boolean started;
+        private long playhead = -1;
+        private long plannedAt;
+        private long servingSince;
+        private long served;
+        private volatile com.torrenta.engine.PieceMath.Span window;
+
+        Playback(Target target, StreamFile file) {
+            this.target = target;
+            this.file = file;
+            this.geometry = new Readahead.Geometry(file.offset(), file.size(), file.pieceLength());
+        }
+
+        com.torrenta.engine.PieceMath.Span window() {
+            return window;
+        }
+
+        synchronized void open() {
+            connections++;
+            if (servingSince == 0) servingSince = System.nanoTime();
+        }
+
+        synchronized void served(long n) {
+            served += n;
+        }
+
+        /** The player is at {@code position}: a new request ({@code seek}) plans at once, else once a second. */
+        synchronized void at(long position, boolean seek) {
+            boolean moved = seek && position != playhead;
+            playhead = position;
+            if (!moved && System.nanoTime() - plannedAt < java.util.concurrent.TimeUnit.SECONDS.toNanos(1)) return;
+            plannedAt = System.nanoTime();
+            long rate = bitrate();
+            try {
+                com.torrenta.engine.PieceMath.Span next = Readahead.window(position, geometry, rate);
+                java.util.BitSet have = file.have(
+                        Math.min(next.first(), geometry.firstPiece()), Math.max(next.last(), geometry.lastPiece()));
+                Map<Integer, Integer> deadlines = new java.util.LinkedHashMap<>();
+                for (Readahead.Deadline d : Readahead.plan(position, geometry, have, rate, !started))
+                    deadlines.put(d.piece(), d.millis());
+                file.deadlines(deadlines);
+                started = true;
+                window = next;
+            } catch (EngineException e) {
+                // The torrent went: the response's own wait says so.
+            }
+        }
+
+        /** Served bytes over time, once there is enough of it to say; else the default. */
+        private long bitrate() {
+            double seconds = (System.nanoTime() - servingSince) / 1e9;
+            if (seconds < Readahead.WINDOW_SECONDS) return Readahead.DEFAULT_BITRATE;
+            long measured = (long) (served / seconds);
+            return Math.max(256L * 1024, Math.min(8L * 1024 * 1024, measured));
+        }
+
+        synchronized void close() {
+            if (--connections > 0) return;
+            playbacks.remove(target, this);
+            com.torrenta.engine.PieceMath.Span w = window;
+            window = null;
+            try {
+                if (w != null)
+                    file.clearDeadlines(
+                            Math.min(w.first(), geometry.firstPiece()), Math.max(w.last(), geometry.lastPiece()));
+            } catch (EngineException e) {
+                // Gone already: nothing left to clear.
             }
         }
     }

@@ -35,6 +35,11 @@ class StreamServerTest {
 
     /** A file of {@code bytes} in pieces of {@link #PIECE}; its pieces are there once {@code ready} opens. */
     private static StreamFile file(Path path, byte[] bytes, CountDownLatch ready) {
+        return file(path, bytes, ready, new java.util.concurrent.CopyOnWriteArrayList<>());
+    }
+
+    /** The same, saying in {@code calls} what read-ahead the server set and cleared. */
+    private static StreamFile file(Path path, byte[] bytes, CountDownLatch ready, java.util.List<String> calls) {
         return new StreamFile() {
             @Override
             public String name() {
@@ -63,6 +68,31 @@ class StreamServerTest {
                 } catch (java.io.IOException e) {
                     throw new java.io.UncheckedIOException(e);
                 }
+            }
+
+            @Override
+            public long offset() {
+                return 0;
+            }
+
+            @Override
+            public long pieceLength() {
+                return PIECE;
+            }
+
+            @Override
+            public java.util.BitSet have(int first, int last) {
+                return new java.util.BitSet();
+            }
+
+            @Override
+            public void deadlines(java.util.Map<Integer, Integer> millisByPiece) {
+                calls.add("deadlines " + new java.util.TreeMap<>(millisByPiece).keySet());
+            }
+
+            @Override
+            public void clearDeadlines(int first, int last) {
+                calls.add("clear " + first + "-" + last);
             }
         };
     }
@@ -181,6 +211,41 @@ class StreamServerTest {
         assertTrue(
                 Duration.ofNanos(System.nanoTime() - closing).toSeconds() < 5, "the close does not wait out the piece");
         assertThrows(Exception.class, () -> stuck.get(10, TimeUnit.SECONDS).body(), "cut short");
+    }
+
+    /**
+     * A player's read-ahead: set when it starts reading (the file's first and last pieces among
+     * it), shown as the torrent's window while it reads, cleared when it leaves.
+     */
+    @Test
+    void aPlayersReadaheadIsSetWhileItReadsAndClearedWhenItLeaves(@TempDir Path dir) throws Exception {
+        byte[] content = bytes(30 * PIECE);
+        Path path = Files.write(dir.resolve("Film.mkv"), content);
+        CountDownLatch ready = new CountDownLatch(1);
+        java.util.List<String> calls = new java.util.concurrent.CopyOnWriteArrayList<>();
+        try (StreamServer server = new StreamServer(() -> engine(file(path, content, ready, calls)))) {
+            String url = server.url(ID, 0, "Film.mkv");
+            assertTrue(server.window(ID).isEmpty(), "nobody plays it yet");
+            CompletableFuture<HttpResponse<byte[]>> asked = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return get(url, "bytes=0-99");
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+            long until = System.currentTimeMillis() + 5000;
+            while (server.window(ID).isEmpty() && System.currentTimeMillis() < until) Thread.sleep(20);
+            assertEquals(java.util.Optional.of(new PieceMath.Span(0, 29)), server.window(ID));
+            assertTrue(calls.getFirst().startsWith("deadlines [0, 1, 2"), calls.toString());
+            assertTrue(calls.getFirst().endsWith("29]"), "the last piece too, at the start: " + calls);
+            assertTrue(server.window("b".repeat(40)).isEmpty(), "another torrent's");
+            ready.countDown();
+            assertEquals(206, asked.get(10, TimeUnit.SECONDS).statusCode());
+            until = System.currentTimeMillis() + 5000;
+            while (!calls.contains("clear 0-29") && System.currentTimeMillis() < until) Thread.sleep(20);
+            assertTrue(calls.contains("clear 0-29"), calls.toString());
+            assertTrue(server.window(ID).isEmpty(), "the player has gone");
+        }
     }
 
     @Test

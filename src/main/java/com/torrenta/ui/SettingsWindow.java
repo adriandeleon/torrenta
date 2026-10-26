@@ -539,6 +539,7 @@ final class SettingsWindow {
     private ChoiceBox<UnsafeContent> addUnsafeContent;
     private ChoiceBox<com.torrenta.engine.DedupMode> addDedup;
     private TextField directCurl;
+    private TextField streamPlayer;
     private Spinner<Integer> directActive;
     private Spinner<Integer> port;
     private CheckBox randomPort;
@@ -3641,6 +3642,20 @@ final class SettingsWindow {
                 tr("settings.adding.linksAtOnce.desc"),
                 directActive,
                 tr("settings.adding.linksAtOnce.keywords"));
+
+        // A file played while it downloads: which player gets it, on this machine.
+        VBox playing = section(page, tr("settings.adding.playing"));
+        streamPlayer = text(Settings.STREAM_PLAYER);
+        streamPlayer.setPromptText(tr("settings.adding.player.prompt"));
+        streamPlayer.setPrefColumnCount(24);
+        row(
+                Category.ADDING,
+                playing,
+                tr("settings.adding.player"),
+                tr("settings.adding.player.desc"),
+                streamPlayer,
+                tr("settings.adding.player.keywords"),
+                Engine.Capability.STREAMING);
     }
 
     private void buildConnection(VBox page) {
@@ -4359,6 +4374,7 @@ final class SettingsWindow {
             addDedup.setValue(com.torrenta.engine.DedupMode.byName(settings.addDedup()));
             addProbePrivate.setSelected(settings.addProbePrivate());
             directCurl.setText(settings.directOptions().curl());
+            streamPlayer.setText(settings.get(Settings.STREAM_PLAYER, ""));
             directActive.getValueFactory().setValue(settings.directOptions().active());
             AutomationSettings a = settings.automation();
             onAdded.setText(a.onAdded());

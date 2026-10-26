@@ -1576,6 +1576,14 @@
     -fx-background-insets: 0, 1;
 }
 
+/* A player's read-ahead: a ring in the text's ink around whatever the run is (the accent was too
+   close to the pieces' own green to tell apart). */
+.piece-cell.readahead {
+    -fx-border-color: -color-fg-default;
+    -fx-border-width: 1.5;
+    -fx-border-radius: 1.5;
+}
+
 /* Sparklines (ui.Sparkline): the status bar's minute and the Overview's half hour. */
 .spark-down {
     -fx-stroke: -torrenta-down;

@@ -32,4 +32,22 @@ public interface StreamFile {
      * {@link #await} has said is there.
      */
     byte[] read(long from, long to) throws EngineException, InterruptedException;
+
+    /** Where the file starts in the torrent, in bytes: its pieces are counted from there. */
+    long offset();
+
+    /** The torrent's piece length. */
+    long pieceLength();
+
+    /** Which of the torrent's pieces {@code first} to {@code last} are there. */
+    java.util.BitSet have(int first, int last) throws EngineException;
+
+    /**
+     * The read-ahead: each piece of the torrent wanted within so many milliseconds, ahead of what
+     * is downloading otherwise. A piece already there is left alone.
+     */
+    void deadlines(java.util.Map<Integer, Integer> millisByPiece) throws EngineException;
+
+    /** No read-ahead any more over pieces {@code first} to {@code last}: the last player has gone. */
+    void clearDeadlines(int first, int last) throws EngineException;
 }
