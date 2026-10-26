@@ -148,7 +148,14 @@ public final class WebApi {
             long peers,
             long freeSpace,
             boolean alternative,
-            boolean queueing) {
+            boolean queueing,
+            String externalAddress,
+            long queuedDiskJobs,
+            long wasted) {
+
+        public Transfer {
+            externalAddress = externalAddress == null ? "" : externalAddress;
+        }
 
         /** Without the totals and states only {@code server_state} reads. */
         public Transfer(
@@ -174,7 +181,10 @@ public final class WebApi {
                     0,
                     -1,
                     false,
-                    false);
+                    false,
+                    "",
+                    0,
+                    0);
         }
     }
 
@@ -268,8 +278,6 @@ public final class WebApi {
         posts.put("torrents/editTracker", edits::editTracker);
         posts.put("torrents/setDownloadLimit", edits::setDownloadLimit);
         posts.put("torrents/setUploadLimit", edits::setUploadLimit);
-        posts.put("torrents/downloadLimit", edits::downloadLimit);
-        posts.put("torrents/uploadLimit", edits::uploadLimit);
         posts.put("torrents/toggleSequentialDownload", edits::toggleSequentialDownload);
         posts.put("torrents/toggleFirstLastPiecePrio", edits::toggleFirstLastPiecePrio);
         posts.put("torrents/setSuperSeeding", edits::setSuperSeeding);
@@ -283,6 +291,9 @@ public final class WebApi {
         posts.put("torrents/deleteTags", edits::deleteTags);
         posts.put("torrents/removeTags", edits::removeTags);
         posts.forEach((path, handler) -> router.route("POST", PREFIX + path, handler));
+        // Reads, so GET and POST alike, as the other reading endpoints.
+        read(router, "torrents/downloadLimit", edits::downloadLimit);
+        read(router, "torrents/uploadLimit", edits::uploadLimit);
         StaticFiles files = new StaticFiles(
                 backend::rootFolder, r -> sessions.valid(r.cookies().get(COOKIE), clock.getAsLong()));
         router.prefix("GET", "/", files::serve);

@@ -54,8 +54,8 @@ public final class Preferences {
         EngineSettings.Speed speed = s.speed();
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("save_path", savePath.toString());
+        // 5.0's name; 4.x's start_paused_enabled is still accepted on a write.
         m.put("add_stopped_enabled", settings.addStartPaused());
-        m.put("start_paused_enabled", settings.addStartPaused());
         m.put("torrent_content_layout", layout(settings.addContentLayout()));
         m.put("queueing_enabled", queue.activeDownloads() > 0 || queue.activeSeeds() > 0 || queue.activeLimit() > 0);
         m.put("max_active_downloads", orNone(queue.activeDownloads()));
@@ -92,6 +92,7 @@ public final class Preferences {
         m.put("bittorrent_protocol", s.protocol().utp() ? 0 : 1);
         m.put("encryption", encryption(s.protocol().encryption()));
         m.put("anonymous_mode", s.protocol().anonymous());
+        m.put("banned_IPs", String.join("\n", settings.ipFilterBans()));
         m.put("add_trackers_enabled", !s.protocol().defaultTrackers().isEmpty());
         m.put("add_trackers", String.join("\n", s.protocol().defaultTrackers()));
         m.put("web_ui_address", settings.webApi().address());
@@ -284,6 +285,14 @@ public final class Preferences {
                                 default -> false;
                             };
                         case "anonymous_mode" -> bool(settings, Settings.PROTO_ANONYMOUS, v);
+                        case "banned_IPs" -> {
+                            settings.setIpFilterBans(
+                                    java.util.Arrays.stream(String.valueOf(v).split("\\s+"))
+                                            .filter(b -> !b.isEmpty())
+                                            .distinct()
+                                            .toList());
+                            yield true;
+                        }
                         case "add_trackers" ->
                             set(
                                     settings,

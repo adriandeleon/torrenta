@@ -253,7 +253,7 @@ final class Edits {
         });
     }
 
-    /** {@code {hash: bytes per second}}, -1 for none, as {@code torrents/info}'s {@code dl_limit}. */
+    /** {@code {hash: bytes per second}}, 0 for none, as {@code torrents/info}'s {@code dl_limit}. */
     Response downloadLimit(Request request) {
         return limits(request, true);
     }
@@ -271,7 +271,7 @@ final class Edits {
             try {
                 TorrentLimits l = engine.limits(t.id());
                 int value = download ? l.downloadLimit() : l.uploadLimit();
-                out.put(reads.hashOf(t, now), value > 0 ? value : -1);
+                out.put(reads.hashOf(t, now), value);
             } catch (EngineException | RuntimeException e) {
                 LOG.log(Level.FINE, "No limits for " + t.name(), e);
             }

@@ -247,7 +247,10 @@ class EditsTest {
         post("torrents/setUploadLimit", "hashes=aaaa&limit=0");
         assertEquals(new TorrentLimits(2048, 0, 20, 4, true), backend.engineLimits.get("aaaa"), "0: none");
         assertEquals("{\"aaaa\":2048}", text(post("torrents/downloadLimit", "hashes=aaaa")));
-        assertEquals("{\"aaaa\":-1}", text(post("torrents/uploadLimit", "hashes=aaaa")));
+        assertEquals(
+                "{\"aaaa\":0}",
+                text(post("torrents/uploadLimit", "hashes=aaaa")),
+                "0 for none, as qBittorrent writes it");
         post("torrents/toggleFirstLastPiecePrio", "hashes=aaaa");
         assertFalse(backend.engineLimits.get("aaaa").firstAndLastFirst());
         post("torrents/toggleSequentialDownload", "hashes=aaaa");

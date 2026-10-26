@@ -125,6 +125,14 @@ final class Reads {
         Detailed d = detailed(request);
         if (d.refusal() != null) return d.refusal();
         List<Map<String, Object>> out = new ArrayList<>();
+        // qBittorrent lists the three trackerless sources first, working where the protocol is on
+        // and the torrent is not private.
+        com.torrenta.engine.EngineSettings.Protocol p =
+                backend.settings().engineSettings().protocol();
+        boolean open = !d.detail().general().isPrivate();
+        out.add(pseudoTracker("** [DHT] **", open && p.dht()));
+        out.add(pseudoTracker("** [PeX] **", open && p.pex()));
+        out.add(pseudoTracker("** [LSD] **", open && p.lsd()));
         for (TorrentDetail.Tracker tr : d.detail().trackers()) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("msg", tr.message());
@@ -138,6 +146,19 @@ final class Reads {
             out.add(m);
         }
         return Response.json(JsonOut.write(out));
+    }
+
+    private static Map<String, Object> pseudoTracker(String url, boolean working) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("msg", "");
+        m.put("num_downloaded", 0);
+        m.put("num_leeches", 0);
+        m.put("num_peers", 0);
+        m.put("num_seeds", 0);
+        m.put("status", working ? 2 : 0);
+        m.put("tier", -1);
+        m.put("url", url);
+        return m;
     }
 
     static int trackerStatus(String status) {
@@ -213,7 +234,6 @@ final class Reads {
         m.put("hash", QbitTorrent.hash(t, known));
         m.put("infohash_v1", g.infoHashV1());
         m.put("infohash_v2", g.infoHashV2());
-        m.put("isPrivate", g.isPrivate());
         m.put("is_private", g.isPrivate());
         m.put("last_seen", t.completed() > 0 ? t.completed() : -1);
         m.put("name", t.name());
@@ -224,6 +244,9 @@ final class Reads {
         m.put("piece_size", g.pieceLength());
         m.put("pieces_have", g.piecesHave());
         m.put("pieces_num", g.pieceCount());
+        m.put("popularity", 0);
+        m.put("private", g.isPrivate());
+        m.put("progress", t.progress());
         m.put("reannounce", g.nextAnnounceSeconds());
         m.put("save_path", t.savePath());
         m.put("seeding_time", t.seedingTime());
@@ -232,8 +255,10 @@ final class Reads {
         m.put("share_ratio", QbitTorrent.ratio(t));
         m.put("time_elapsed", g.activeSeconds());
         m.put("total_downloaded", g.downloaded());
+        m.put("total_downloaded_session", 0);
         m.put("total_size", t.size());
         m.put("total_uploaded", g.uploaded());
+        m.put("total_uploaded_session", 0);
         m.put("total_wasted", g.wasted());
         m.put("up_limit", limits.uploadLimit() > 0 ? limits.uploadLimit() : -1);
         m.put("up_speed", t.uploadRate());
@@ -254,7 +279,8 @@ final class Reads {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("availability", -1);
             m.put("index", file.index());
-            m.put("is_seed", file.progress() >= 1);
+            // qBittorrent says it once, on the first file listed: whether the torrent is a seed.
+            if (out.isEmpty()) m.put("is_seed", detail.get().files().stream().allMatch(each -> each.progress() >= 1));
             m.put("name", file.path().replace('\\', '/'));
             m.put("piece_range", List.of(file.firstPiece(), file.lastPiece()));
             m.put("priority", priority(file.priority()));
@@ -314,10 +340,20 @@ final class Reads {
         m.put("dl_info_data", x.downloadedSession());
         m.put("dl_info_speed", x.downloadRate());
         m.put("dl_rate_limit", x.downloadLimit());
+        m.put("last_external_address_v4", externalV4(x));
+        m.put("last_external_address_v6", externalV6(x));
         m.put("up_info_data", x.uploadedSession());
         m.put("up_info_speed", x.uploadRate());
         m.put("up_rate_limit", x.uploadLimit());
         return Response.json(JsonOut.write(m));
+    }
+
+    private static String externalV4(WebApi.Transfer x) {
+        return x.externalAddress().contains(".") ? x.externalAddress() : "";
+    }
+
+    private static String externalV6(WebApi.Transfer x) {
+        return x.externalAddress().contains(":") ? x.externalAddress() : "";
     }
 
     /** {@code transfer/info}'s fields and the rest of qBittorrent's {@code server_state}. */
@@ -325,6 +361,7 @@ final class Reads {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("alltime_dl", x.allTimeDownload());
         m.put("alltime_ul", x.allTimeUpload());
+        m.put("average_time_queue", 0);
         m.put("connection_status", x.connection());
         m.put("dht_nodes", x.dhtNodes());
         m.put("dl_info_data", x.downloadedSession());
@@ -335,15 +372,24 @@ final class Reads {
                 "global_ratio",
                 x.allTimeDownload() > 0
                         ? String.format(java.util.Locale.ROOT, "%.2f", (double) x.allTimeUpload() / x.allTimeDownload())
-                        : "0.00");
+                        : "-");
+        m.put("last_external_address_v4", externalV4(x));
+        m.put("last_external_address_v6", externalV6(x));
+        m.put("queued_io_jobs", x.queuedDiskJobs());
         m.put("queueing", x.queueing());
+        m.put("read_cache_hits", "0");
+        m.put("read_cache_overload", "0");
         m.put("refresh_interval", 1500);
+        m.put("total_buffers_size", 0);
         m.put("total_peer_connections", x.peers());
+        m.put("total_queued_size", 0);
+        m.put("total_wasted_session", x.wasted());
         m.put("up_info_data", x.uploadedSession());
         m.put("up_info_speed", x.uploadRate());
         m.put("up_rate_limit", x.uploadLimit());
         m.put("use_alt_speed_limits", x.alternative());
         m.put("use_subcategories", false);
+        m.put("write_cache_overload", "0");
         return m;
     }
 
@@ -370,7 +416,10 @@ final class Reads {
         Map<String, Map<String, Object>> rows = new LinkedHashMap<>();
         for (Torrent t : torrents()) {
             TorrentQuery.Row r = row(t, now);
-            rows.put(r.hash(), r.fields());
+            // In maindata the hash is the row's key, not one of its fields.
+            Map<String, Object> fields = new LinkedHashMap<>(r.fields());
+            fields.remove("hash");
+            rows.put(r.hash(), fields);
         }
         Map<String, Map<String, Object>> categories = new LinkedHashMap<>();
         for (Category c : backend.categories()) {

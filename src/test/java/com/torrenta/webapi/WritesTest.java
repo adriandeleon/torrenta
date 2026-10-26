@@ -210,7 +210,7 @@ class WritesTest {
         byte[] deep = ("l".repeat(200) + "e".repeat(200)).getBytes(StandardCharsets.UTF_8);
         assertEquals("Fails.", text(multipart(Map.of(), Map.of("deep.torrent", deep))), "nested past the bound");
         assertTrue(backend.adds.isEmpty());
-        assertEquals(400, post("torrents/add", "category=tv").status(), "nothing to add");
+        assertEquals("Fails.", text(post("torrents/add", "category=tv")), "nothing to add: qBittorrent's 200 Fails.");
     }
 
     @Test
