@@ -234,6 +234,13 @@ final class FakeBackend implements WebApi.Backend {
         else own.put(id, limit);
     }
 
+    Path rootFolder;
+
+    @Override
+    public Optional<Path> rootFolder() {
+        return Optional.ofNullable(rootFolder);
+    }
+
     @Override
     public byte[] fetch(URI url) throws IOException {
         byte[] bytes = served.get(url.toString());

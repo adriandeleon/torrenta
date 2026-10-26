@@ -31,6 +31,8 @@ final class Reads {
     private final WebApi.Backend backend;
     private final LongSupplier clock;
     private final FactsCache facts;
+    private final MainData.Memory mainMemory = new MainData.Memory();
+    private final MainData.Memory peerMemory = new MainData.Memory();
 
     Reads(WebApi.Backend backend, LongSupplier clock, FactsCache facts) {
         this.backend = backend;
@@ -244,5 +246,130 @@ final class Reads {
         m.put("up_info_speed", x.uploadRate());
         m.put("up_rate_limit", x.uploadLimit());
         return Response.json(JsonOut.write(m));
+    }
+
+    /** {@code transfer/info}'s fields and the rest of qBittorrent's {@code server_state}. */
+    static Map<String, Object> serverState(WebApi.Transfer x) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("alltime_dl", x.allTimeDownload());
+        m.put("alltime_ul", x.allTimeUpload());
+        m.put("connection_status", x.connection());
+        m.put("dht_nodes", x.dhtNodes());
+        m.put("dl_info_data", x.downloadedSession());
+        m.put("dl_info_speed", x.downloadRate());
+        m.put("dl_rate_limit", x.downloadLimit());
+        m.put("free_space_on_disk", x.freeSpace());
+        m.put(
+                "global_ratio",
+                x.allTimeDownload() > 0
+                        ? String.format(java.util.Locale.ROOT, "%.2f", (double) x.allTimeUpload() / x.allTimeDownload())
+                        : "0.00");
+        m.put("queueing", x.queueing());
+        m.put("refresh_interval", 1500);
+        m.put("total_peer_connections", x.peers());
+        m.put("up_info_data", x.uploadedSession());
+        m.put("up_info_speed", x.uploadRate());
+        m.put("up_rate_limit", x.uploadLimit());
+        m.put("use_alt_speed_limits", x.alternative());
+        m.put("use_subcategories", false);
+        return m;
+    }
+
+    /** Whose answers {@code rid} counts in: the client's session. */
+    private static String client(Request request) {
+        return String.valueOf(request.cookies().get(WebApi.COOKIE));
+    }
+
+    private static long rid(Form params) {
+        try {
+            return Long.parseLong(params.first("rid").orElse("0").trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /**
+     * {@code sync/maindata}: the list, the categories, the tags and the server's state, whole the
+     * first time and as what changed after, against the snapshot this session was last answered
+     * with ({@link MainData}).
+     */
+    Response maindata(Request request) {
+        long now = clock.getAsLong();
+        Map<String, Map<String, Object>> rows = new LinkedHashMap<>();
+        for (Torrent t : torrents()) {
+            TorrentQuery.Row r = row(t, now);
+            rows.put(r.hash(), r.fields());
+        }
+        Map<String, Map<String, Object>> categories = new LinkedHashMap<>();
+        for (Category c : backend.categories()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("name", c.name());
+            m.put("savePath", c.savePath());
+            categories.put(c.name(), m);
+        }
+        MainData.Snapshot current =
+                new MainData.Snapshot(rows, categories, backend.tags(), serverState(backend.transfer()));
+        String key = client(request);
+        MainData.Snapshot previous = mainMemory.since(key, rid(params(request))).orElse(null);
+        long rid = mainMemory.remember(key, current);
+        return Response.json(JsonOut.write(MainData.maindata(previous, current, rid)));
+    }
+
+    /** {@code sync/torrentPeers}: one torrent's peers by {@code ip:port}, the same way. */
+    Response torrentPeers(Request request) {
+        long now = clock.getAsLong();
+        Found f = found(request, now);
+        if (f.refusal() != null) return f.refusal();
+        Optional<TorrentDetail> detail = backend.detail(f.torrent().id());
+        if (detail.isEmpty()) return Response.text(404, "Not Found");
+        Map<String, Map<String, Object>> rows = new LinkedHashMap<>();
+        for (TorrentDetail.Peer p : detail.get().peers()) {
+            String[] ipPort = ipAndPort(p.address());
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("client", p.client());
+            m.put("connection", p.flags().indexOf('P') >= 0 ? "μTP" : "BT");
+            m.put("country", "");
+            m.put("country_code", "");
+            m.put("dl_speed", p.downRate());
+            m.put("downloaded", p.downloaded());
+            m.put("files", "");
+            m.put(
+                    "flags",
+                    String.join(
+                            " ",
+                            p.flags()
+                                    .chars()
+                                    .mapToObj(c -> String.valueOf((char) c))
+                                    .toList()));
+            m.put("flags_desc", "");
+            m.put("ip", ipPort[0]);
+            m.put("port", ipPort[1].isEmpty() ? 0 : Integer.parseInt(ipPort[1]));
+            m.put("progress", p.progress());
+            m.put("relevance", p.progress());
+            m.put("up_speed", p.upRate());
+            m.put("uploaded", p.uploaded());
+            rows.put(p.address(), m);
+        }
+        MainData.Snapshot current = new MainData.Snapshot(rows, Map.of(), List.of(), Map.of());
+        String key = client(request) + "|" + f.torrent().id();
+        MainData.Snapshot previous = peerMemory.since(key, rid(params(request))).orElse(null);
+        long rid = peerMemory.remember(key, current);
+        return Response.json(JsonOut.write(MainData.peers(previous, current, rid)));
+    }
+
+    /** {@code 1.2.3.4:51413} or {@code [::1]:51413} into address and port; with no port, an empty one. */
+    static String[] ipAndPort(String address) {
+        String a = address.trim();
+        if (a.startsWith("[")) {
+            int close = a.indexOf(']');
+            if (close > 0) {
+                String port = a.length() > close + 2 && a.charAt(close + 1) == ':' ? a.substring(close + 2) : "";
+                return new String[] {a.substring(1, close), port.matches("\\d+") ? port : ""};
+            }
+        }
+        int colon = a.lastIndexOf(':');
+        if (colon > 0 && a.indexOf(':') == colon && a.substring(colon + 1).matches("\\d+"))
+            return new String[] {a.substring(0, colon), a.substring(colon + 1)};
+        return new String[] {a, ""};
     }
 }

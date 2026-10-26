@@ -154,6 +154,7 @@ public final class SessionBackend implements WebApi.Backend {
         if (e == null) return new WebApi.Transfer(0, 0, 0, 0, down, up, 0, "disconnected");
         Engine.Rates rates = e.rates();
         SessionStats stats = e.stats();
+        EngineSettings.Queue queue = settings.engineSettings().queue();
         return new WebApi.Transfer(
                 rates.download(),
                 rates.upload(),
@@ -162,7 +163,25 @@ public final class SessionBackend implements WebApi.Backend {
                 down,
                 up,
                 Math.max(0, stats.dhtNodes()),
-                connection(e.connectivity()));
+                connection(e.connectivity()),
+                Math.max(0, stats.allTimeDownload()),
+                Math.max(0, stats.allTimeUpload()),
+                Math.max(0, stats.peersConnected()),
+                e.capabilities().has(Engine.Capability.LOCAL_FILES) ? freeSpace(settings.downloadDir()) : -1,
+                speed.alternativeActive(now),
+                queue.activeDownloads() > 0 || queue.activeSeeds() > 0 || queue.activeLimit() > 0);
+    }
+
+    /** Usable bytes on the volume of {@code dir}, or of its nearest folder that exists; -1 unknown. */
+    static long freeSpace(Path dir) {
+        Path at = dir.toAbsolutePath();
+        while (at != null && !java.nio.file.Files.exists(at)) at = at.getParent();
+        if (at == null) return -1;
+        try {
+            return java.nio.file.Files.getFileStore(at).getUsableSpace();
+        } catch (IOException | RuntimeException e) {
+            return -1;
+        }
     }
 
     /**
@@ -221,6 +240,11 @@ public final class SessionBackend implements WebApi.Backend {
     public void setShareOverride(String id, ShareLimit limit) {
         settings.setShareOverride(id, limit);
         settings.saveQuietly();
+    }
+
+    @Override
+    public Optional<Path> rootFolder() {
+        return settings.webApiRootFolder();
     }
 
     @Override

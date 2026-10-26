@@ -276,7 +276,101 @@ class ReadsTest {
     @Test
     void withoutASessionNothingIsRead() throws Exception {
         sid = null;
-        for (String path : List.of("torrents/info", "torrents/categories", "transfer/info"))
+        for (String path : List.of("torrents/info", "torrents/categories", "transfer/info", "sync/maindata"))
             assertEquals(403, dispatch("GET", path, "").status(), path);
+    }
+
+    /** A web UI's poll: everything once, then only what moved, against this session's last answer. */
+    @Test
+    void maindataIsWholeOnceAndThenOnlyWhatMoved() throws Exception {
+        String first = get("sync/maindata", "rid=0");
+        assertTrue(first.contains("\"full_update\":true"), first);
+        assertTrue(first.contains("\"aaaa\":{") && first.contains("\"cccc\":{"), first);
+        assertTrue(
+                first.contains("\"server_state\":{") && first.contains("\"connection_status\":\"firewalled\""), first);
+        String rid = first.replaceAll("^\\{\"rid\":(\\d+).*$", "$1");
+
+        assertEquals(
+                "{\"rid\":" + (Long.parseLong(rid) + 1) + "}", get("sync/maindata", "rid=" + rid), "nothing moved");
+
+        Torrent film = backend.torrents.get(1);
+        backend.torrents.set(1, torrent(film.id(), film.name(), TorrentState.DOWNLOADING, 0.75, 300, 0));
+        backend.torrents.remove(0);
+        backend.tags.add("new");
+        long next = Long.parseLong(rid) + 1;
+        String diff = get("sync/maindata", "rid=" + next);
+        assertTrue(diff.contains("\"cccc\":{\"amount_left\":250,\"completed\":750,\"dlspeed\":300"), diff);
+        assertTrue(diff.contains("\"torrents_removed\":[\"aaaa\"]"), diff);
+        assertTrue(diff.contains("\"tags\":[\"new\"]"), diff);
+        assertTrue(!diff.contains("full_update") && !diff.contains("\"name\""), "only the moved fields: " + diff);
+
+        String stale = get("sync/maindata", "rid=" + rid);
+        assertTrue(stale.contains("\"full_update\":true"), "a rid this session was not last answered with");
+    }
+
+    @Test
+    void torrentPeersArePeersByAddress() throws Exception {
+        TorrentDetail d = backend.details.get("cccc");
+        backend.details.put(
+                "cccc",
+                new TorrentDetail(
+                        d.general(),
+                        d.files(),
+                        List.of(new TorrentDetail.Peer(
+                                "10.0.0.7:51413", "qBittorrent 5.0.0", "DIP", 0.25, 1000, 0, 5000, 0)),
+                        d.trackers(),
+                        d.pieces()));
+        String peers = get("sync/torrentPeers", "hash=cccc&rid=0");
+        assertTrue(
+                peers.contains("\"10.0.0.7:51413\":{\"client\":\"qBittorrent 5.0.0\",\"connection\":\"μTP\""), peers);
+        assertTrue(peers.contains("\"flags\":\"D I P\"") && peers.contains("\"port\":51413"), peers);
+        assertTrue(peers.contains("\"show_flags\":true") && peers.contains("\"full_update\":true"), peers);
+        assertEquals(
+                404, dispatch("GET", "sync/torrentPeers", "hash=ffff&rid=0").status());
+    }
+
+    /** VueTorrent's login page loads before there is a session; the API never answers with a file. */
+    @Test
+    void theRootFolderIsServedAndUnknownEndpointsAre404() throws Exception {
+        java.nio.file.Path ui = java.nio.file.Files.createTempDirectory("torrenta-ui");
+        java.nio.file.Files.createDirectories(ui.resolve("public"));
+        java.nio.file.Files.writeString(ui.resolve("public/index.html"), "<html>vue</html>");
+        backend.rootFolder = ui;
+        String signedIn = sid;
+        sid = null;
+        Response index = router.dispatch(new Request(
+                "GET",
+                "/",
+                Form.EMPTY,
+                Map.of("host", List.of("127.0.0.1:8080")),
+                new InetSocketAddress(InetAddress.getLoopbackAddress(), 40000),
+                new byte[0],
+                Limits.DEFAULT,
+                false));
+        assertEquals(200, index.status(), "no session needed for the public half");
+        assertTrue(index.file().toString().endsWith("index.html"));
+        assertTrue(index.headers().stream().anyMatch(h -> h.getKey().equals("Content-Security-Policy")));
+        assertTrue(index.headers().stream().anyMatch(h -> h.getValue().equals("nosniff")));
+        sid = signedIn;
+        assertEquals(404, dispatch("GET", "torrents/nothing", "").status());
+        assertEquals(
+                404,
+                dispatch("POST", "torrents/setLocation", "hashes=all&location=/x")
+                        .status(),
+                "not 405");
+        backend.rootFolder = null;
+        assertEquals(
+                404,
+                router.dispatch(new Request(
+                                "GET",
+                                "/",
+                                Form.EMPTY,
+                                Map.of("host", List.of("127.0.0.1:8080")),
+                                new InetSocketAddress(InetAddress.getLoopbackAddress(), 40000),
+                                new byte[0],
+                                Limits.DEFAULT,
+                                false))
+                        .status(),
+                "no folder set: nothing at /");
     }
 }
