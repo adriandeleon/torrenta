@@ -44,6 +44,19 @@ class DedupTextTest {
     }
 
     @Test
+    void aLinkedFileTakesNoSpaceACopyDoes() {
+        DedupText.Offer offer = DedupText.offer(
+                new DedupPlan(
+                        List.of(match(0, "a", 300, DedupPlan.Method.LINK), match(1, "a", 200, DedupPlan.Method.COPY))),
+                id -> id);
+        assertEquals(700, DedupText.written(1000, offer, true), "the link's 300 out, the copy's 200 still in");
+        assertEquals(1000, DedupText.written(1000, offer, false), "unticked: downloaded, so counted");
+        assertEquals(-1, DedupText.written(-1, offer, true), "nothing known yet stays so");
+        assertEquals(0, DedupText.written(100, offer, true), "never below nothing");
+        assertEquals(1000, DedupText.written(1000, DedupText.Offer.NONE, true));
+    }
+
+    @Test
     void theModeDecidesWhatIsOfferedAndMadeWithoutAsking() {
         assertFalse(DedupMode.OFF.links());
         assertTrue(DedupMode.LINK.links() && !DedupMode.LINK.offersCopies());

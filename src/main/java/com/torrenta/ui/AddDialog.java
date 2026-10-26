@@ -144,6 +144,8 @@ final class AddDialog {
 
     private com.torrenta.engine.DedupMode dedupMode = com.torrenta.engine.DedupMode.OFF;
     private java.util.function.Function<String, String> torrentNames = id -> id;
+    /** What the dedup lines offer now, for the free-space line. */
+    private DedupText.Offer lastOffer = DedupText.Offer.NONE;
     /** One label per line: the disk sentence, then where the files start if not here. */
     private final VBox diskText = new VBox(1);
 
@@ -331,7 +333,7 @@ final class AddDialog {
         layout.setValue(defaults.layout());
         layout.setMaxWidth(Double.MAX_VALUE);
         layout.disableProperty().bind(hasFiles.not());
-        layout.valueProperty().addListener((o, was, now) -> updateDedup());
+        layout.valueProperty().addListener((o, was, now) -> updateDisk());
         layoutLabel = muted(tr("dialog.add.layout"));
         GridPane.setMargin(layoutLabel, new Insets(8, 0, 0, 0));
         filing.add(layoutLabel, 0, 2, 2, 1);
@@ -360,6 +362,8 @@ final class AddDialog {
             box.setMinHeight(Region.USE_PREF_SIZE);
         }
         dedupBox.getChildren().addAll(muted(tr("dialog.add.dedup")), dedupLink, dedupCopy);
+        // Unticking the link puts its bytes back in the free-space line.
+        dedupLink.selectedProperty().addListener((o, was, now) -> updateDisk());
         dedupBox.setPadding(new Insets(12, 0, 0, 0));
         shown(dedupBox, false);
 
@@ -1009,7 +1013,12 @@ final class AddDialog {
             destination = null;
         }
         Optional<FreeSpace.Disk> disk = destination == null ? Optional.empty() : FreeSpace.disk(destination);
-        long wanted = root == null ? -1 : FileTree.wantedSize(root);
+        // Planned first: a file that will be linked takes no space, so it is not counted.
+        updateDedup();
+        long wanted = DedupText.written(
+                root == null ? -1 : FileTree.wantedSize(root),
+                lastOffer,
+                dedupLink.isVisible() && dedupLink.isSelected());
         diskBar.set(disk.map(d -> FreeSpace.bar(d, wanted)).orElse(new FreeSpace.Bar(0, 0, true)));
         String line = disk.map(d -> FreeSpace.sentence(d, wanted))
                 .orElse(text.isEmpty() ? "" : tr("dialog.add.freeSpaceUnknown"));
@@ -1029,7 +1038,6 @@ final class AddDialog {
             label.setMaxWidth(Double.MAX_VALUE);
             diskText.getChildren().add(label);
         }
-        updateDedup();
     }
 
     // ---- files already on disk -----------------------------------------------------------------
@@ -1048,12 +1056,12 @@ final class AddDialog {
         this.torrentNames = names;
         dedupLink.setSelected(true);
         dedupCopy.setSelected(mode.copiesWithoutAsking());
-        updateDedup();
+        updateDisk();
     }
 
     /** The window's poll: the index and the torrents' names may have moved since the line was drawn. */
     void refreshFromDisk() {
-        if (dedupMode.links() && result == null) updateDedup();
+        if (dedupMode.links() && result == null) updateDisk();
     }
 
     /**
@@ -1061,6 +1069,7 @@ final class AddDialog {
      * will plan it. A few file-system looks per file found, none for the others.
      */
     private void updateDedup() {
+        lastOffer = DedupText.Offer.NONE;
         if (existing || !dedupMode.links() || root == null || preview == null) {
             shown(dedupBox, false);
             return;
@@ -1088,6 +1097,7 @@ final class AddDialog {
                 layout.getValue(),
                 com.torrenta.engine.DedupPlan.Disk.SYSTEM);
         DedupText.Offer offer = DedupText.offer(plan, torrentNames);
+        lastOffer = offer;
         boolean links = offer.links() > 0;
         boolean copies = offer.copies() > 0 && dedupMode.offersCopies();
         if (links) dedupLink.setText(DedupText.linkLine(offer));

@@ -58,6 +58,17 @@ final class DedupText {
         return tr("dialog.add.dedup.copy", o.copies(), Bytes.human(o.copyBytes()), where(o.copyFrom()));
     }
 
+    /**
+     * The bytes the add will write, for the free-space line: the wanted bytes without the linked
+     * files when their box is ticked, since a link takes no space. A copy is counted: it takes its
+     * size again (a clone takes none, but whether one can be made is known only when it is tried).
+     * {@code -1} (nothing known yet) stays as it is.
+     */
+    static long written(long wanted, Offer offer, boolean linksTicked) {
+        if (wanted < 0 || !linksTicked) return wanted;
+        return Math.max(0, wanted - offer.linkBytes());
+    }
+
     /** One torrent by its name, several by their count. */
     static String where(Set<String> from) {
         return from.size() == 1
