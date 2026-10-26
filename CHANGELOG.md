@@ -14,6 +14,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   version is complete the old one is no longer followed, and leaves the list (its files kept)
   if you choose. Settings → Automation can run a program or notify on a new version.
 
+- **Publish an updatable torrent.** The Create Torrent dialog's Publish as updatable makes a key
+  under a name you choose, seeds the torrent and puts it in the DHT; the updatable link it shows
+  is what others follow. Torrent → New Version… on it creates the next version under the same key,
+  and whoever follows gets it the next time they look; Copy Updatable Link gives the link again.
+  The key is kept in `keys/<name>.key` in Torrenta's folder, on this computer only: anyone with it
+  can publish versions, and without it there will be no more, so keep a copy. While Torrenta runs
+  it puts the link back in the DHT every hour when it is no longer found there.
+
 - **Play a file while it downloads.** The Files tab's Stream in Player opens a file in mpv or VLC
   (wherever they are installed, or the player chosen in Settings → Adding torrents) as it
   downloads; Copy Stream URL gives the address for any other player on this computer. The pieces

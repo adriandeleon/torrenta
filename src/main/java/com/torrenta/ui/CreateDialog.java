@@ -197,6 +197,8 @@ final class CreateDialog {
         publishName.disableProperty().bind(publish.selectedProperty().not());
         publishNote.getStyleClass().add("dialog-hint");
         publishNote.setWrapText(true);
+        // Its lines in full: the tracker boxes give way first.
+        publishNote.setMinHeight(Region.USE_PREF_SIZE);
         publish.selectedProperty().addListener((o, was, now) -> publishChanged());
         HBox publishRow = new HBox(10, publish, publishName);
         publishRow.setAlignment(Pos.CENTER_LEFT);
@@ -263,6 +265,7 @@ final class CreateDialog {
         }
         outcome.getStyleClass().add("dialog-hint");
         outcome.setWrapText(true);
+        outcome.setMinHeight(Region.USE_PREF_SIZE);
         resultBox.add(outcome, 0, 4, 3, 1);
         resultBox.setVisible(false);
         resultBox.managedProperty().bind(resultBox.visibleProperty());
@@ -290,7 +293,8 @@ final class CreateDialog {
         content.setPadding(new Insets(18, 20, 16, 20));
         content.getStyleClass().add("add-dialog");
 
-        Scene scene = new Scene(content, 760, 640);
+        // The publish row and its note take about a hundred pixels more, the buttons kept in view.
+        Scene scene = new Scene(content, 760, publisher != null ? 740 : 640);
         scene.getStylesheets()
                 .add(CreateDialog.class
                         .getResource("/com/torrenta/styles/app.css")
@@ -626,7 +630,7 @@ final class CreateDialog {
                     : tr("dialog.create.notPublishedYet");
         }
         publishedLine = line;
-        outcome.setText(outcome.getText() + " " + line);
+        outcome.setText(outcome.getText() + " · " + line);
     }
 
     private void show(CreatedTorrent result, Path target) {
