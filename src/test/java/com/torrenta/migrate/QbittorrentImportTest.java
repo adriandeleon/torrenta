@@ -13,6 +13,7 @@ import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.engine.libtorrent.LibtorrentEngine;
+import com.torrenta.engine.transmission.Bencode;
 import com.torrenta.store.TorrentStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -143,6 +144,14 @@ class QbittorrentImportTest {
                     expected.getMessage().contains("Seed.bin"),
                     "a second import of the same torrent is refused by name");
         }
+
+        // The paused pack is never modified, so its blob is the one the add left: it must still say
+        // which pieces are there, or the restart finds files and no resume data and wants a check.
+        assertTrue(
+                Bencode.decode(store.load(pack.id()).orElseThrow()) instanceof Map<?, ?> blob
+                        && blob.get("pieces") instanceof byte[] pieces
+                        && pieces.length > 0,
+                "the stopped torrent's resume data kept its pieces");
 
         // Written as this engine's own: a restart brings them back as they were, still unchecked.
         try (LibtorrentEngine again = QuietEngine.open(downloads, store)) {

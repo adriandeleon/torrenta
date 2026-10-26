@@ -229,7 +229,11 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   `save_resume_data_alert` (or `..._failed_alert`, which is also the normal reply to an
   only-if-modified request that found nothing modified) on libtorrent4j's alert thread. That is
   where the store gets written. `stop()` counts outstanding requests and waits, bounded to 5 s, so
-  the last state lands before the session goes.
+  the last state lands before the session goes. A request answered before the torrent's resume
+  check is done comes back with no pieces at all, so a torrent added from the store (a start, an
+  import, an undo) is never asked on its add: a paused one, never modified again, kept that empty
+  blob, and the next start found files without resume data and wanted a full check, which a paused
+  torrent never runs, so it sat in Checking (one import in thirty on Linux, more on Windows).
 - **The add alert's params are enough to bring a magnet back.** `add_torrent_alert.params()` written
   as resume data holds the hashes, name, trackers and save path, so a magnet survives a crash before
   its metadata arrives; the real resume data replaces the blob later.
