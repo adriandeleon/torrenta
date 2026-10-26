@@ -1155,15 +1155,23 @@ final class DetailPane extends VBox {
     /**
      * The Name column's cell: a small folder or sheet before the name, one node of each kept per
      * cell so a reused cell swaps rather than rebuilds. Long names cut in the middle so the
-     * extension stays, as the Add dialog's tree cuts them.
+     * extension stays, as the Add dialog's tree cuts them. A file that came from disk at the add
+     * (linked, cloned or copied from another torrent) has a link glyph after its own, and says
+     * how and from where in its tooltip.
      */
     private static final class NameCell extends TreeTableCell<FileRows.Row, String> {
         /** One glyph per kind this cell has shown, so a reused cell swaps rather than rebuilds. */
         private final java.util.EnumMap<FileKind, Icons.Glyph> glyphs = new java.util.EnumMap<>(FileKind.class);
 
+        private final Icons.Glyph foundGlyph = Icons.link().at(Icons.MENU_SIZE);
+        private final javafx.scene.layout.HBox withFound = new javafx.scene.layout.HBox(3);
+        private final javafx.scene.control.Tooltip foundTip = new javafx.scene.control.Tooltip();
+
         NameCell() {
             setTextOverrun(javafx.scene.control.OverrunStyle.CENTER_ELLIPSIS);
             setGraphicTextGap(6);
+            foundGlyph.getStyleClass().add("file-found");
+            withFound.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
         }
 
         @Override
@@ -1177,12 +1185,22 @@ final class DetailPane extends VBox {
                 return;
             }
             setText(item);
-            setGraphic(glyphs.computeIfAbsent(FileKind.of(row.name(), !row.isFile()), kind -> {
-                Icons.Glyph glyph = Icons.forKind(kind);
+            Icons.Glyph kind = glyphs.computeIfAbsent(FileKind.of(row.name(), !row.isFile()), k -> {
+                Icons.Glyph glyph = Icons.forKind(k);
                 glyph.getStyleClass().add("file-glyph");
-                if (kind == FileKind.FOLDER) glyph.getStyleClass().add("file-glyph-folder");
+                if (k == FileKind.FOLDER) glyph.getStyleClass().add("file-glyph-folder");
                 return glyph;
-            }));
+            });
+            if (row.found() == null) {
+                withFound.getChildren().clear();
+                setGraphic(kind);
+                setTooltip(null);
+            } else {
+                withFound.getChildren().setAll(kind, foundGlyph);
+                setGraphic(withFound);
+                foundTip.setText(row.found().sentence());
+                setTooltip(foundTip);
+            }
         }
     }
 
@@ -1193,7 +1211,8 @@ final class DetailPane extends VBox {
             var item = files.getTreeItem(i);
             FileRows.Row row = item.getValue();
             lines.add("  ".repeat(Math.max(0, files.getTreeItemLevel(item) - 1)) + row.name() + " ["
-                    + FileKind.of(row.name(), !row.isFile()).name().toLowerCase(java.util.Locale.ROOT) + "]");
+                    + FileKind.of(row.name(), !row.isFile()).name().toLowerCase(java.util.Locale.ROOT) + "]"
+                    + (row.found() == null ? "" : " found=" + row.found().sentence()));
         }
         return lines;
     }

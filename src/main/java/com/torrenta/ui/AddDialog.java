@@ -92,7 +92,25 @@ final class AddDialog {
      * @param filesLater added before its file list; its files are to be chosen when it arrives
      * @param withoutAsking from now on, add with these settings and do not open the dialog
      */
-    record Choice(AddRequest request, boolean firstAndLastFirst, boolean filesLater, boolean withoutAsking) {}
+    /**
+     * @param preview the files the request adds, for the dedup to be planned from again at the add;
+     *     null when they are not known
+     * @param dedupLinks link the files found on disk on the same volume
+     * @param dedupCopies copy the files found on disk on another volume
+     */
+    record Choice(
+            AddRequest request,
+            boolean firstAndLastFirst,
+            boolean filesLater,
+            boolean withoutAsking,
+            TorrentPreview preview,
+            boolean dedupLinks,
+            boolean dedupCopies) {
+
+        Choice(AddRequest request, boolean firstAndLastFirst, boolean filesLater, boolean withoutAsking) {
+            this(request, firstAndLastFirst, filesLater, withoutAsking, null, false, false);
+        }
+    }
 
     /** Where the input came from, for the header's small caps. */
     enum Via {
@@ -116,6 +134,16 @@ final class AddDialog {
     }
 
     private final DiskBar diskBar = new DiskBar();
+    /** The files already on disk: link them, and copy those on another volume. */
+    private final VBox dedupBox = new VBox(4);
+
+    private final CheckBox dedupLink = new CheckBox();
+    private final CheckBox dedupCopy = new CheckBox();
+    /** What the engine has on disk, how the setting says to use it, and its torrents' names. */
+    private com.torrenta.engine.ContentIndex fromDisk = com.torrenta.engine.ContentIndex.EMPTY;
+
+    private com.torrenta.engine.DedupMode dedupMode = com.torrenta.engine.DedupMode.OFF;
+    private java.util.function.Function<String, String> torrentNames = id -> id;
     /** One label per line: the disk sentence, then where the files start if not here. */
     private final VBox diskText = new VBox(1);
 
@@ -303,6 +331,7 @@ final class AddDialog {
         layout.setValue(defaults.layout());
         layout.setMaxWidth(Double.MAX_VALUE);
         layout.disableProperty().bind(hasFiles.not());
+        layout.valueProperty().addListener((o, was, now) -> updateDedup());
         layoutLabel = muted(tr("dialog.add.layout"));
         GridPane.setMargin(layoutLabel, new Insets(8, 0, 0, 0));
         filing.add(layoutLabel, 0, 2, 2, 1);
@@ -326,12 +355,21 @@ final class AddDialog {
         firstLast.disableProperty().bind(hasFiles.not());
         VBox options = new VBox(6, sequential, firstLast, skipCheck);
 
+        for (CheckBox box : List.of(dedupLink, dedupCopy)) {
+            box.setWrapText(true);
+            box.setMinHeight(Region.USE_PREF_SIZE);
+        }
+        dedupBox.getChildren().addAll(muted(tr("dialog.add.dedup")), dedupLink, dedupCopy);
+        dedupBox.setPadding(new Insets(12, 0, 0, 0));
+        shown(dedupBox, false);
+
         VBox right = new VBox(
                 4,
                 muted(tr("dialog.common.saveTo")),
                 pathRow,
                 spaced(diskBar, 8),
                 diskText,
+                dedupBox,
                 swarmBox,
                 spaced(filing, 12),
                 spaced(muted(tr("dialog.common.tags")), 12),
@@ -618,7 +656,7 @@ final class AddDialog {
                 ? " | swarm=" + swarmDot.getStyleClass().getLast() + " " + swarmText.getText()
                 : "";
         return kicker.getText() + " | " + title.getText() + " | " + summary.getText() + " | " + hint() + " | " + files
-                + swarm + " | buttons=" + buttons;
+                + swarm + " | dedup=" + dedupForCapture() + " | buttons=" + buttons;
     }
 
     /** Picks a category as a person would, for the capture hook. */
@@ -654,7 +692,10 @@ final class AddDialog {
                                 : defaults.storage(destination).withLayout(layout.getValue())),
                 firstLast.isSelected(),
                 false,
-                withoutAsking.isSelected());
+                withoutAsking.isSelected(),
+                preview,
+                dedupLink.isVisible() && dedupLink.isSelected(),
+                dedupCopy.isVisible() && dedupCopy.isSelected());
         stage.hide();
     }
 
@@ -988,6 +1029,81 @@ final class AddDialog {
             label.setMaxWidth(Double.MAX_VALUE);
             diskText.getChildren().add(label);
         }
+        updateDedup();
+    }
+
+    // ---- files already on disk -----------------------------------------------------------------
+
+    /**
+     * What the engine has on disk, as the setting says to use it. Called once, before the dialog
+     * shows, and only for an engine with {@link com.torrenta.engine.Engine.Capability#DEDUP}; the
+     * copies start ticked only when the setting says to make them without asking.
+     */
+    void offerFromDisk(
+            com.torrenta.engine.ContentIndex index,
+            com.torrenta.engine.DedupMode mode,
+            java.util.function.Function<String, String> names) {
+        this.fromDisk = index;
+        this.dedupMode = mode;
+        this.torrentNames = names;
+        dedupLink.setSelected(true);
+        dedupCopy.setSelected(mode.copiesWithoutAsking());
+        updateDedup();
+    }
+
+    /** The window's poll: the index and the torrents' names may have moved since the line was drawn. */
+    void refreshFromDisk() {
+        if (dedupMode.links() && result == null) updateDedup();
+    }
+
+    /**
+     * The lines follow the ticks, the folder and the layout: planned again each time, as the add
+     * will plan it. A few file-system looks per file found, none for the others.
+     */
+    private void updateDedup() {
+        if (existing || !dedupMode.links() || root == null || preview == null) {
+            shown(dedupBox, false);
+            return;
+        }
+        Path destination;
+        try {
+            String text = savePath.getText().trim();
+            destination = text.isEmpty() ? null : Path.of(text);
+        } catch (RuntimeException e) {
+            destination = null;
+        }
+        if (destination == null) {
+            shown(dedupBox, false);
+            return;
+        }
+        java.util.Set<Integer> skipped = new java.util.HashSet<>();
+        FileTree.priorities(root).forEach((index, priority) -> {
+            if (priority == com.torrenta.engine.Priority.IGNORE) skipped.add(index);
+        });
+        com.torrenta.engine.DedupPlan plan = com.torrenta.engine.DedupPlan.of(
+                preview,
+                fromDisk,
+                skipped,
+                defaults.storage(destination).start(destination),
+                layout.getValue(),
+                com.torrenta.engine.DedupPlan.Disk.SYSTEM);
+        DedupText.Offer offer = DedupText.offer(plan, torrentNames);
+        boolean links = offer.links() > 0;
+        boolean copies = offer.copies() > 0 && dedupMode.offersCopies();
+        if (links) dedupLink.setText(DedupText.linkLine(offer));
+        if (copies) dedupCopy.setText(DedupText.copyLine(offer));
+        shown(dedupLink, links);
+        shown(dedupCopy, copies);
+        shown(dedupBox, links || copies);
+    }
+
+    /** The dedup lines as the capture prints them: "none", or each with its tick. */
+    String dedupForCapture() {
+        if (!dedupBox.isVisible()) return "none";
+        List<String> lines = new ArrayList<>();
+        for (CheckBox box : List.of(dedupLink, dedupCopy))
+            if (box.isVisible()) lines.add((box.isSelected() ? "[x] " : "[ ] ") + box.getText());
+        return String.join(" / ", lines);
     }
 
     /** The lines under the save path, for the capture hook; joined with " / ". */

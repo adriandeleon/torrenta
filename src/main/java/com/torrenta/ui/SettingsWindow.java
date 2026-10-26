@@ -159,6 +159,7 @@ final class SettingsWindow {
                 Settings.ADD_CONTENT_LAYOUT,
                 Settings.ADD_WITHOUT_ASKING,
                 Settings.ADD_UNSAFE_CONTENT,
+                Settings.ADD_DEDUP,
                 Settings.ADD_PROBE_PRIVATE,
                 Settings.UI_STATE_COLORS,
                 Settings.UI_DENSITY,
@@ -536,6 +537,7 @@ final class SettingsWindow {
     private CheckBox addWithoutAsking;
     private CheckBox addProbePrivate;
     private ChoiceBox<UnsafeContent> addUnsafeContent;
+    private ChoiceBox<com.torrenta.engine.DedupMode> addDedup;
     private TextField directCurl;
     private Spinner<Integer> directActive;
     private Spinner<Integer> port;
@@ -3587,6 +3589,21 @@ final class SettingsWindow {
                 tr("settings.adding.unsafe.desc"),
                 addUnsafeContent,
                 tr("settings.adding.unsafe.keywords"));
+        addDedup = new ChoiceBox<>();
+        addDedup.getItems().addAll(com.torrenta.engine.DedupMode.values());
+        addDedup.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setAddDedup(now.name());
+            settings.saveQuietly();
+        });
+        row(
+                Category.ADDING,
+                defaults,
+                tr("settings.adding.dedup"),
+                tr("settings.adding.dedup.desc"),
+                addDedup,
+                tr("settings.adding.dedup.keywords"),
+                Engine.Capability.DEDUP);
         addProbePrivate = new CheckBox();
         addProbePrivate.selectedProperty().addListener((o, was, now) -> {
             if (loading) return;
@@ -4302,6 +4319,7 @@ final class SettingsWindow {
             addLayout.setValue(settings.addContentLayout());
             addWithoutAsking.setSelected(settings.addWithoutAsking());
             addUnsafeContent.setValue(UnsafeContent.byName(settings.addUnsafeContent()));
+            addDedup.setValue(com.torrenta.engine.DedupMode.byName(settings.addDedup()));
             addProbePrivate.setSelected(settings.addProbePrivate());
             directCurl.setText(settings.directOptions().curl());
             directActive.getValueFactory().setValue(settings.directOptions().active());

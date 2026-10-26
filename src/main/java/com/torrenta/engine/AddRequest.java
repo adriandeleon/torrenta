@@ -83,12 +83,26 @@ public record AddRequest(
      *     growing as pieces arrive
      * @param layout how the files sit under the save path; needs the file list, so a magnet
      *     added before its metadata keeps the torrent's own
+     * @param found the files already put where the add will look for them, found on disk in
+     *     another torrent ({@link DedupPlan}), by index: the add's own check verifies them, and
+     *     the engine keeps the record for the Files tab
      */
-    public record Storage(Path incompletePath, boolean partSuffix, boolean preallocate, FileRenames.Layout layout) {
+    public record Storage(
+            Path incompletePath,
+            boolean partSuffix,
+            boolean preallocate,
+            FileRenames.Layout layout,
+            Map<Integer, FoundFile> found) {
         public static final Storage DEFAULT = new Storage(null, false, false);
 
         public Storage {
             if (layout == null) layout = FileRenames.Layout.ORIGINAL;
+            found = found == null ? Map.of() : Map.copyOf(found);
+        }
+
+        /** Nothing found on disk. */
+        public Storage(Path incompletePath, boolean partSuffix, boolean preallocate, FileRenames.Layout layout) {
+            this(incompletePath, partSuffix, preallocate, layout, Map.of());
         }
 
         /** The torrent's own layout. */
@@ -97,7 +111,16 @@ public record AddRequest(
         }
 
         public Storage withLayout(FileRenames.Layout l) {
-            return new Storage(incompletePath, partSuffix, preallocate, l);
+            return new Storage(incompletePath, partSuffix, preallocate, l, found);
+        }
+
+        public Storage withFound(Map<Integer, FoundFile> files) {
+            return new Storage(incompletePath, partSuffix, preallocate, layout, files);
+        }
+
+        /** Where the add puts the files first: the incomplete folder, else {@code savePath}. */
+        public Path start(Path savePath) {
+            return incompletePath == null ? savePath : incompletePath;
         }
 
         /** The storage for a plan: its incomplete folder if it has one. */

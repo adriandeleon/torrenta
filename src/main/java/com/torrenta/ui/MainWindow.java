@@ -2419,6 +2419,19 @@ public final class MainWindow {
         }
         AddDialog dialog = new AddDialog(stage, source, preview, via, addDefaults(), labels.categories());
         dialog.applyCapabilities(capabilities);
+        Engine current = engine;
+        if (current != null && capabilities.has(Engine.Capability.DEDUP)) {
+            // The names from the latest poll, read when the line is drawn: an input that opens
+            // the dialog at start arrives before the first poll, and each poll redraws the line.
+            dialog.offerFromDisk(
+                    current.contentIndex(),
+                    com.torrenta.engine.DedupMode.byName(settings.addDedup()),
+                    id -> lastSnapshot.stream()
+                            .filter(t -> t.id().equals(id))
+                            .map(Torrent::name)
+                            .findFirst()
+                            .orElse(id));
+        }
         FetchSlot slot = new FetchSlot();
         if (preview == null && source instanceof AddRequest.Magnet magnet) startFetch(magnet, slot, dialog);
         else if (source instanceof AddRequest.TorrentFile file && preview != null)
@@ -2442,7 +2455,13 @@ public final class MainWindow {
             Engine.SwarmProbe fetch = slot.take();
             String outcome;
             try {
-                Torrent added = fetch == null ? e.add(request) : e.add(request, fetch);
+                // The files the dialog offered from disk, placed first: a copy can take a while.
+                AddRequest placing = request;
+                if ((c.dedupLinks() || c.dedupCopies())
+                        && request.source() instanceof AddRequest.TorrentFile
+                        && c.preview() != null)
+                    placing = session.placeFound(e, request, c.preview(), c.dedupLinks(), c.dedupCopies());
+                Torrent added = fetch == null ? e.add(placing) : e.add(placing, fetch);
                 outcome = tr("status.added", added.name());
                 if (c.firstAndLastFirst()) {
                     TorrentLimits limits = e.limits(added.id());
@@ -3512,6 +3531,9 @@ public final class MainWindow {
     /** FX thread. The sidebar's entries and counts from the store and this snapshot. */
     private void refreshSidebar(List<Torrent> snapshot) {
         lastSnapshot = snapshot;
+        // An open Add dialog's files-on-disk line follows the index and the names, which the
+        // first polls after a start are still filling in.
+        if (currentDialog != null) currentDialog.refreshFromDisk();
         sidebar.update(
                 sidebarViews(java.time.Instant.now().getEpochSecond()),
                 labels.categories().stream().map(Category::name).toList(),

@@ -110,7 +110,19 @@ public record TorrentDetail(
      * it touches, first and last inclusive ({@code -1} for an empty file or when unknown).
      */
     public record FileStatus(
-            int index, String path, long size, long done, Priority priority, int firstPiece, int lastPiece) {
+            int index,
+            String path,
+            long size,
+            long done,
+            Priority priority,
+            int firstPiece,
+            int lastPiece,
+            FoundFile found) {
+
+        public FileStatus(
+                int index, String path, long size, long done, Priority priority, int firstPiece, int lastPiece) {
+            this(index, path, size, done, priority, firstPiece, lastPiece, null);
+        }
 
         public FileStatus(int index, String path, long size, long done, Priority priority) {
             this(index, path, size, done, priority, -1, -1);

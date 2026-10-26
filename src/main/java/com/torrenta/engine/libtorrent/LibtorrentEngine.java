@@ -619,7 +619,8 @@ public final class LibtorrentEngine implements Engine {
         if (!request.labels().isEmpty()) writeLabels(id, request.labels());
         TorrentStorage owed = new TorrentStorage(
                         start.equals(destination) ? "" : destination.toString(), choices.partSuffix(), Set.of())
-                .withRenamed(laidOut, originals);
+                .withRenamed(laidOut, originals)
+                .withFound(info == null ? Map.of() : choices.found());
         if (!owed.isEmpty()) writeStorage(id, owed);
 
         return snapshot(handle);
@@ -1914,7 +1915,14 @@ public final class LibtorrentEngine implements Engine {
                 int first = size == 0 ? -1 : storage.pieceIndexAtFile(i);
                 int last = size == 0 ? -1 : storage.lastPieceIndexAtFile(i);
                 files.add(new TorrentDetail.FileStatus(
-                        i, owed.name(i, slashes(storage.filePath(i))), size, done, priority, first, last));
+                        i,
+                        owed.name(i, slashes(storage.filePath(i))),
+                        size,
+                        done,
+                        priority,
+                        first,
+                        last,
+                        owed.found().get(i)));
             }
         }
 

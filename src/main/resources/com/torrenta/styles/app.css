@@ -919,6 +919,12 @@
     -fx-stroke: -color-accent-fg;
 }
 
+/* A file that came from disk at the add rather than from the swarm: the link, in the success ink. */
+.detail-pane .file-found .icon-line {
+    -fx-stroke: -color-success-fg;
+    -fx-stroke-width: 1.4;
+}
+
 .sidebar .tree-cell:filled:selected,
 .sidebar .tree-view:focused .tree-cell:filled:selected {
     -fx-background-color: transparent;
