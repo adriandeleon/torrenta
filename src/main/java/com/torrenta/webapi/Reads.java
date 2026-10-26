@@ -18,6 +18,7 @@ import com.torrenta.engine.TorrentLimits;
 import com.torrenta.http.Form;
 import com.torrenta.http.Request;
 import com.torrenta.http.Response;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The reading endpoints of Tier 1: {@code torrents/info}, {@code properties}, {@code files},
@@ -50,6 +51,7 @@ final class Reads {
         List<Torrent> all = torrents();
         if (hashes.trim().equalsIgnoreCase("all")) return all;
         Set<String> wanted = TorrentQuery.hashes(hashes);
+        if (wanted == null) return all;
         List<Torrent> out = new ArrayList<>();
         for (Torrent t : all) {
             String id = t.id().toLowerCase(java.util.Locale.ROOT);
@@ -105,15 +107,21 @@ final class Reads {
     }
 
     /** One torrent's detail by the request's {@code hash}, or the answer qBittorrent gives instead. */
-    private record Detailed(Torrent torrent, TorrentDetail detail, Response refusal) {}
+    private record Detailed(
+            @Nullable TorrentDetail found, @Nullable Response refusal) {
+        /** After {@link #refusal} was found null. */
+        TorrentDetail detail() {
+            return java.util.Objects.requireNonNull(found, "a refused request has no detail");
+        }
+    }
 
     private Detailed detailed(Request request) {
         long now = clock.getAsLong();
         Found f = found(request, now);
-        if (f.refusal() != null) return new Detailed(null, null, f.refusal());
+        if (f.refusal() != null) return new Detailed(null, f.refusal());
         Optional<TorrentDetail> d = backend.detail(f.torrent().id());
-        return d.map(detail -> new Detailed(f.torrent(), detail, null))
-                .orElseGet(() -> new Detailed(null, null, Response.text(404, "Not Found")));
+        return d.map(detail -> new Detailed(detail, null))
+                .orElseGet(() -> new Detailed(null, Response.text(404, "Not Found")));
     }
 
     /**
@@ -198,7 +206,12 @@ final class Reads {
     }
 
     /** The torrent named by the request's {@code hash}, or the answer qBittorrent gives instead. */
-    private record Found(Torrent torrent, Response refusal) {}
+    private record Found(@Nullable Torrent hit, @Nullable Response refusal) {
+        /** After {@link #refusal} was found null. */
+        Torrent torrent() {
+            return java.util.Objects.requireNonNull(hit, "a refused request has no torrent");
+        }
+    }
 
     private Found found(Request request, long now) {
         Optional<String> hash = params(request).first("hash");
@@ -292,7 +305,7 @@ final class Reads {
     }
 
     /** {@code 1|3}; null for every file. */
-    static Set<Integer> indexes(String text) {
+    static @Nullable Set<Integer> indexes(String text) {
         if (text.isBlank()) return null;
         try {
             return Arrays.stream(text.split("\\|"))

@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Predicate;
 
 import javafx.beans.property.LongProperty;
@@ -15,6 +16,7 @@ import javafx.scene.control.TreeItem;
 
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.TorrentDetail;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The Files tab's rows: one stable object per file, updated in place each tick, in a tree of
@@ -35,7 +37,7 @@ public final class FileRows {
         private final ObjectProperty<Priority> priority = new SimpleObjectProperty<>(this, "priority", Priority.NORMAL);
         private final List<Row> children = new ArrayList<>();
         /** Found on disk in another torrent and put in place at the add; null when downloaded. */
-        private com.torrenta.engine.FoundFile found;
+        private com.torrenta.engine.@Nullable FoundFile found;
 
         Row(int index, String name, String path) {
             this.index = index;
@@ -77,7 +79,7 @@ public final class FileRows {
         }
 
         /** How the file came from disk rather than the swarm, and from which torrent; null for neither. */
-        public com.torrenta.engine.FoundFile found() {
+        public com.torrenta.engine.@Nullable FoundFile found() {
             return found;
         }
 
@@ -98,14 +100,14 @@ public final class FileRows {
     }
 
     private final Map<Integer, Row> byIndex = new LinkedHashMap<>();
-    private Row root;
-    private TreeItem<Row> rootItem;
+    private @Nullable Row root;
+    private @Nullable TreeItem<Row> rootItem;
 
-    public TreeItem<Row> rootItem() {
+    public @Nullable TreeItem<Row> rootItem() {
         return rootItem;
     }
 
-    public Row get(int index) {
+    public @Nullable Row get(int index) {
         return byIndex.get(index);
     }
 
@@ -121,7 +123,7 @@ public final class FileRows {
             return true;
         }
         for (TorrentDetail.FileStatus f : files) {
-            Row row = byIndex.get(f.index());
+            Row row = Objects.requireNonNull(byIndex.get(f.index()), "sameSet");
             row.size.set(f.size());
             row.done.set(f.done());
             row.priority.set(f.priority());
@@ -140,8 +142,8 @@ public final class FileRows {
         Path folder = wanted.normalize();
         // A path that climbs out of the save path (it should never, libtorrent sanitises) opens the floor.
         if (!folder.startsWith(floor)) return floor;
-        while (!folder.equals(floor) && !isDirectory.test(folder)) folder = folder.getParent();
-        return folder;
+        while (folder != null && !folder.equals(floor) && !isDirectory.test(folder)) folder = folder.getParent();
+        return folder != null ? folder : floor;
     }
 
     public void clear() {
@@ -182,7 +184,7 @@ public final class FileRows {
         for (TreeItem<Row> child : rootItem.getChildren()) child.setExpanded(true);
     }
 
-    private static void refreshFolders(Row row) {
+    private static void refreshFolders(@Nullable Row row) {
         if (row == null || row.isFile()) return;
         long size = 0;
         long done = 0;

@@ -59,6 +59,7 @@ import com.torrenta.engine.SwarmPreview;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.session.AddDefaults;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -103,7 +104,7 @@ final class AddDialog {
             boolean firstAndLastFirst,
             boolean filesLater,
             boolean withoutAsking,
-            TorrentPreview preview,
+            @Nullable TorrentPreview preview,
             boolean dedupLinks,
             boolean dedupCopies) {
 
@@ -178,7 +179,7 @@ final class AddDialog {
     private final CheckBox allFiles = new CheckBox();
     private final Label fetching = new Label();
     private final VBox placeholder;
-    private FileTree.Node root;
+    private FileTree.@Nullable Node root;
 
     /** What in the wanted files deserves a look (ContentCheck), above the tree; hidden when nothing. */
     private final VBox contentCard = new VBox(6);
@@ -212,8 +213,8 @@ final class AddDialog {
     private Map<Integer, com.torrenta.engine.Priority> initial = Map.of();
 
     private AddRequest.Source source;
-    private TorrentPreview preview;
-    private Choice result;
+    private @Nullable TorrentPreview preview;
+    private @Nullable Choice result;
 
     /**
      * @param preview the torrent's contents, or null for a magnet
@@ -225,7 +226,7 @@ final class AddDialog {
     AddDialog(
             Window owner,
             AddRequest.Source source,
-            TorrentPreview preview,
+            @Nullable TorrentPreview preview,
             Via via,
             AddDefaults defaults,
             List<Category> categories) {
@@ -255,7 +256,7 @@ final class AddDialog {
     private AddDialog(
             Window owner,
             AddRequest.Source source,
-            TorrentPreview preview,
+            @Nullable TorrentPreview preview,
             Via via,
             AddDefaults defaults,
             List<Category> categories,
@@ -654,8 +655,9 @@ final class AddDialog {
             if (b.isVisible())
                 buttons.add(b.getText() + (b.isDefaultButton() ? "*" : "") + (b.isDisabled() ? "(off)" : ""));
         }
-        String files = hasFiles.get()
-                ? FileTree.files(root).size() + " files, " + Bytes.human(FileTree.wantedSize(root)) + " wanted"
+        FileTree.Node tree = root;
+        String files = hasFiles.get() && tree != null
+                ? FileTree.files(tree).size() + " files, " + Bytes.human(FileTree.wantedSize(tree)) + " wanted"
                 : "placeholder: " + fetching.getText();
         String swarm = swarmBox.isVisible()
                 ? " | swarm=" + swarmDot.getStyleClass().getLast() + " " + swarmText.getText()
@@ -764,7 +766,10 @@ final class AddDialog {
         name.setSortable(false);
         name.setPrefWidth(300);
         allFiles.setFocusTraversable(false);
-        allFiles.setOnAction(e -> setWanted(root, allFiles.isSelected()));
+        allFiles.setOnAction(e -> {
+            FileTree.Node tree = root;
+            if (tree != null) setWanted(tree, allFiles.isSelected());
+        });
         name.setCellValueFactory(p -> new ReadOnlyObjectWrapper<>(p.getValue().getValue()));
         name.setCellFactory(column -> new NameCell());
 
@@ -873,7 +878,7 @@ final class AddDialog {
     private static final class NameCell extends TreeTableCell<FileTree.Node, FileTree.Node> {
         private final CheckBox box = new CheckBox();
         private final javafx.beans.value.ChangeListener<Boolean> mixed = (o, was, now) -> box.setIndeterminate(now);
-        private CheckBoxTreeItem<FileTree.Node> bound;
+        private @Nullable CheckBoxTreeItem<FileTree.Node> bound;
 
         NameCell() {
             box.setFocusTraversable(false);
@@ -1239,7 +1244,7 @@ final class AddDialog {
         return Optional.of(chosen);
     }
 
-    static String nameOf(AddRequest.Source source, TorrentPreview preview) {
+    static String nameOf(AddRequest.Source source, @Nullable TorrentPreview preview) {
         if (preview != null) return preview.name();
         if (source instanceof AddRequest.Magnet magnet) {
             String dn = MagnetNames.displayName(magnet.uri());
@@ -1285,7 +1290,7 @@ final class AddDialog {
             }
 
             @Override
-            public T fromString(String s) {
+            public @Nullable T fromString(String s) {
                 return null;
             }
         };

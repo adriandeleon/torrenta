@@ -44,7 +44,15 @@ public record AddDefaults(
             Path incompleteDir,
             boolean partSuffix,
             boolean preallocate) {
-        this(savePath, startPaused, sequential, incompleteEnabled, incompleteDir, partSuffix, preallocate, null);
+        this(
+                savePath,
+                startPaused,
+                sequential,
+                incompleteEnabled,
+                incompleteDir,
+                partSuffix,
+                preallocate,
+                FileRenames.Layout.ORIGINAL);
     }
 
     public static AddDefaults from(com.torrenta.store.Settings settings) {

@@ -6,6 +6,8 @@ import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -47,7 +49,7 @@ public record Rule(
         AddPaused addPaused,
         String category,
         String savePath,
-        Instant lastMatch,
+        @Nullable Instant lastMatch,
         List<String> previouslyMatched) {
 
     public static final int MAX_PREVIOUSLY_MATCHED = 1000;

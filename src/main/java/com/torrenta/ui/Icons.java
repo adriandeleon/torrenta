@@ -8,6 +8,7 @@ import javafx.scene.control.Tooltip;
 import javafx.scene.shape.SVGPath;
 
 import com.torrenta.content.FileKind;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Toolbar icons, the glyphs Editora draws, returned wrapped in a {@link Group} and scaled down. The
@@ -114,7 +115,7 @@ final class Icons {
      * (the Show: filters, the toggles the palette alone lists). The toolbar's commands show the
      * toolbar's glyph, so the two cannot disagree.
      */
-    static Glyph forCommand(String id) {
+    static @Nullable Glyph forCommand(String id) {
         return switch (id) {
             case "add-file" -> open();
             case "add-magnet" -> magnet();
@@ -179,7 +180,7 @@ final class Icons {
      * what a command does, it shows that command's glyph (Search, RSS, Speed, Queue, Categories and
      * tags), so the menus and the sidebar agree.
      */
-    static Glyph forSettingsPage(String id) {
+    static @Nullable Glyph forSettingsPage(String id) {
         return switch (id) {
             case "general" -> sliders();
             case "keyboard" -> palette();

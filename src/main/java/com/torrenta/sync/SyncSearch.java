@@ -16,6 +16,7 @@ import com.fasterxml.jackson.core.JsonGenerator;
 import com.torrenta.search.Definition;
 import com.torrenta.search.TorznabEndpoint;
 import com.torrenta.store.SearchProviderStore;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The search providers that travel, as entries {@link SyncMerge} merges one at a time. Pure.
@@ -188,7 +189,7 @@ public final class SyncSearch {
     }
 
     /** The repository's endpoints file for {@code entries}: one endpoint per line, by URL; null when there are none. */
-    static String torznabFile(Map<String, String> entries) {
+    static @Nullable String torznabFile(Map<String, String> entries) {
         StringBuilder sb = new StringBuilder("[");
         int i = 0;
         for (var entry : new TreeMap<>(entries).entrySet()) {

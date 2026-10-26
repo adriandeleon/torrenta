@@ -12,6 +12,7 @@ import java.util.function.Consumer;
 import javafx.application.Platform;
 
 import com.torrenta.AppInfo;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Asks GitHub whether there is a newer release.
@@ -22,7 +23,10 @@ import com.torrenta.AppInfo;
 public final class UpdateService {
 
     /** What came back. {@code latest} is null unless there is something newer. */
-    public record Outcome(boolean available, ReleaseInfo latest, String error) {
+    public record Outcome(
+            boolean available,
+            @Nullable ReleaseInfo latest,
+            @Nullable String error) {
         public static Outcome none() {
             return new Outcome(false, null, null);
         }

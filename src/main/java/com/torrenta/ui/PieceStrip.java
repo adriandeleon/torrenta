@@ -5,6 +5,8 @@ import java.util.List;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Region;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * The Overview's pieces map: a few rows of squares, each standing for a run of pieces, coloured
  * as the run is: all there, some missing, or some missing that no connected peer has (the amber
@@ -41,7 +43,7 @@ final class PieceStrip extends Pane {
     private boolean[] skipped = new boolean[0];
     private Cell[] shown = new Cell[0];
     /** The pieces a player's read-ahead covers, first to last; null for none. */
-    private com.torrenta.engine.PieceMath.Span window;
+    private com.torrenta.engine.PieceMath.@Nullable Span window;
 
     private boolean[] marked = new boolean[0];
 
@@ -126,7 +128,11 @@ final class PieceStrip extends Pane {
         return Math.max(1, (int) ((width + GAP) / (CELL + GAP)));
     }
 
-    void show(boolean[] pieces, int[] counts, boolean[] unwanted, com.torrenta.engine.PieceMath.Span readahead) {
+    void show(
+            boolean[] pieces,
+            int[] counts,
+            boolean[] unwanted,
+            com.torrenta.engine.PieceMath.@Nullable Span readahead) {
         have = pieces;
         availability = counts;
         skipped = unwanted;
@@ -138,7 +144,7 @@ final class PieceStrip extends Pane {
      * Which of {@code count} cells over {@code n} pieces hold a piece of the read-ahead window,
      * by the same runs as {@link #cells}. Pure.
      */
-    static boolean[] marks(com.torrenta.engine.PieceMath.Span window, int n, int count) {
+    static boolean[] marks(com.torrenta.engine.PieceMath.@Nullable Span window, int n, int count) {
         if (n == 0 || count <= 0) return new boolean[0];
         int cells = Math.min(count, n);
         boolean[] out = new boolean[cells];

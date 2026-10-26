@@ -22,6 +22,7 @@ import com.torrenta.http.Request;
 import com.torrenta.http.Response;
 import com.torrenta.http.Router;
 import com.torrenta.http.WebServer;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A torrent's file served to a player on this machine while it downloads: on loopback only, on a
@@ -47,7 +48,7 @@ public final class StreamServer implements AutoCloseable {
     private final Supplier<Engine> engine;
     private final Map<String, Target> tokens = new ConcurrentHashMap<>();
     private final SecureRandom random = new SecureRandom();
-    private WebServer server;
+    private @Nullable WebServer server;
     private volatile boolean closed;
 
     /** @param engine the engine in use now; null while there is none */
@@ -219,7 +220,7 @@ public final class StreamServer implements AutoCloseable {
         private long plannedAt;
         private long servingSince;
         private long served;
-        private volatile com.torrenta.engine.PieceMath.Span window;
+        private volatile com.torrenta.engine.PieceMath.@Nullable Span window;
 
         Playback(Target target, StreamFile file) {
             this.target = target;
@@ -227,7 +228,7 @@ public final class StreamServer implements AutoCloseable {
             this.geometry = new Readahead.Geometry(file.offset(), file.size(), file.pieceLength());
         }
 
-        com.torrenta.engine.PieceMath.Span window() {
+        com.torrenta.engine.PieceMath.@Nullable Span window() {
             return window;
         }
 

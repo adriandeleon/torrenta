@@ -6,6 +6,8 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * The logged-in clients, by the {@code SID} cookie a login hands out: 32 random bytes, kept in
  * memory only (a restart logs everyone out, as qBittorrent's does), each forgotten after an hour
@@ -33,7 +35,7 @@ public final class Sessions {
     }
 
     /** Whether {@code id} is a live session; a live one is touched, an idle one forgotten. */
-    public synchronized boolean valid(String id, long now) {
+    public synchronized boolean valid(@Nullable String id, long now) {
         if (id == null) return false;
         Long seen = lastSeen.get(id);
         if (seen == null) return false;
@@ -47,7 +49,7 @@ public final class Sessions {
         return true;
     }
 
-    public synchronized void close(String id) {
+    public synchronized void close(@Nullable String id) {
         if (id != null) lastSeen.remove(id);
     }
 

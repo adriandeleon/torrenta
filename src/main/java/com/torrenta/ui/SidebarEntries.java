@@ -9,6 +9,7 @@ import javafx.beans.property.SimpleIntegerProperty;
 
 import com.torrenta.engine.Torrent;
 import com.torrenta.ui.SidebarFilter.Axis;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -22,11 +23,12 @@ import static com.torrenta.i18n.Messages.tr;
 final class SidebarEntries {
 
     /**
-     * One line: a filter with its count, or a section's heading (no filter, no count). The
+     * One line: a filter with its count, or a section's heading (no count; its filter is All). The
      * section's own All carries the section's axis, so choosing it clears that axis alone.
      */
     static final class Entry {
         final SidebarFilter filter;
+        final boolean heading;
         final Axis axis;
         final String title;
         /** For a view whose query no longer reads: what is wrong, for the tooltip; empty otherwise. */
@@ -39,19 +41,24 @@ final class SidebarEntries {
         }
 
         private Entry(SidebarFilter filter, Axis axis, String title, String problem) {
+            this(filter, false, axis, title, problem);
+        }
+
+        private Entry(SidebarFilter filter, boolean heading, Axis axis, String title, String problem) {
             this.filter = filter;
+            this.heading = heading;
             this.axis = axis;
             this.title = title;
             this.problem = problem;
         }
 
         boolean isHeading() {
-            return filter == null;
+            return heading;
         }
 
         /** The entry is one of the selection's choices, or the All of an axis with none. */
         boolean chosenIn(SidebarSelection selection) {
-            if (filter == null) return false;
+            if (heading) return false;
             if (filter.kind() != SidebarFilter.Kind.ALL) return selection.has(filter);
             return axis == Axis.ALL ? selection.isAll() : selection.on(axis).kind() == SidebarFilter.Kind.ALL;
         }
@@ -63,12 +70,12 @@ final class SidebarEntries {
         final String title;
         final Entry heading;
         private List<Entry> entries = List.of();
-        private List<String> names = null;
+        private @Nullable List<String> names = null;
 
         Section(Axis axis, String title) {
             this.axis = axis;
             this.title = title;
-            this.heading = new Entry(null, axis, title, "");
+            this.heading = new Entry(SidebarFilter.ALL, true, axis, title, "");
         }
 
         List<Entry> entries() {

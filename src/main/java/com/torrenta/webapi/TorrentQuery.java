@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 
 import com.torrenta.engine.Torrent;
 import com.torrenta.http.Form;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code torrents/info}'s parameters applied to the rows, as qBittorrent applies them: {@code
@@ -64,12 +65,12 @@ public final class TorrentQuery {
     }
 
     /** Lower case; null for every torrent (absent, or {@code all}). */
-    static Set<String> hashes(Form params) {
+    static @Nullable Set<String> hashes(Form params) {
         return hashes(params.first("hashes").orElse(""));
     }
 
     /** {@code a|b} in lower case; null for every torrent (blank, or {@code all}). */
-    static Set<String> hashes(String value) {
+    static @Nullable Set<String> hashes(String value) {
         if (value.isBlank() || value.equalsIgnoreCase("all")) return null;
         return Arrays.stream(value.split("\\|"))
                 .map(h -> h.trim().toLowerCase(Locale.ROOT))

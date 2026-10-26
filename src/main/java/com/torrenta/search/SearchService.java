@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionService;
 import java.util.concurrent.ConcurrentHashMap;
@@ -15,6 +16,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -100,7 +103,7 @@ public final class SearchService {
     }
 
     /** The cached answer while it is fresh; a stale one is forgotten on the way. */
-    private List<SearchResult> cached(Key key) {
+    private @Nullable List<SearchResult> cached(Key key) {
         Answer answer = cache.get(key);
         if (answer == null) return null;
         if (fresh(answer.atNanos(), ticker.nanos(), lifetime)) return answer.results();
@@ -182,7 +185,7 @@ public final class SearchService {
                         leftover = tr("net.timedOut", timeout.toSeconds());
                         break;
                     }
-                    SearchProvider provider = pending.remove(future);
+                    SearchProvider provider = Objects.requireNonNull(pending.remove(future), "a future of ours");
                     try {
                         List<SearchResult> results = future.get();
                         cache.put(new Key(provider.name(), lower, cat), new Answer(results, ticker.nanos()));
@@ -235,7 +238,7 @@ public final class SearchService {
         }
     }
 
-    private static String reason(Throwable cause) {
+    private static String reason(@Nullable Throwable cause) {
         if (cause == null) return tr("search.error.failed");
         if (cause instanceof InterruptedException) return tr("net.interrupted");
         String message = cause.getMessage();

@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -23,6 +24,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.transmission.Bencode;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Transmission's torrents, from its config folder: {@code torrents/<hash>.torrent} (3.x: {@code
@@ -149,7 +151,8 @@ public final class TransmissionReader {
 
     /** One torrent from its resume file and its {@code .torrent} or magnet. Pure. */
     @SuppressWarnings("unchecked")
-    static ImportCandidate candidate(byte[] resumeBytes, byte[] torrent, String magnet) throws IOException {
+    static ImportCandidate candidate(byte[] resumeBytes, byte @Nullable [] torrent, @Nullable String magnet)
+            throws IOException {
         if (!(Bencode.decode(resumeBytes) instanceof Map<?, ?> raw)) throw new IOException("not a resume file");
         Map<String, Object> r = (Map<String, Object>) raw;
         String name = text(r.get("name"), "");
@@ -170,10 +173,11 @@ public final class TransmissionReader {
             for (Object f : list) onDisk.add(f instanceof byte[] b ? new String(b, StandardCharsets.UTF_8) : "");
 
         if (torrent == null) {
-            Matcher m = BTIH.matcher(magnet);
+            String link = magnet == null ? "" : magnet;
+            Matcher m = BTIH.matcher(link);
             if (!m.find()) throw new IOException("neither a .torrent nor a magnet with a v1 hash");
             String id = m.group(1).toLowerCase(Locale.ROOT);
-            byte[] resume = libtorrentResume(r, HexFormat.of().parseHex(id), name, null, null, trackersOf(magnet));
+            byte[] resume = libtorrentResume(r, HexFormat.of().parseHex(id), name, null, null, trackersOf(link));
             return new ImportCandidate(
                     CLIENT,
                     id,
@@ -194,8 +198,9 @@ public final class TransmissionReader {
         }
 
         TorrentPreview preview = Bencode.preview(torrent);
+        // preview has refused a file without these
         Map<String, Object> top = (Map<String, Object>) Bencode.decode(torrent);
-        Map<String, Object> info = (Map<String, Object>) top.get("info");
+        Map<String, Object> info = (Map<String, Object>) Objects.requireNonNull(top.get("info"));
         long pieceLength = info.get("piece length") instanceof Long l ? l : 0;
         long total = 0;
         List<Long> lengths = new ArrayList<>();
@@ -251,7 +256,7 @@ public final class TransmissionReader {
      * 16 KiB blocks, or {@code all}/{@code none}), else 3.x's {@code have: all}, else a {@code
      * pieces} bitfield. A piece is there only when all its blocks are. Pure.
      */
-    static boolean[] have(Object progress, long total, long pieceLength, int pieces) {
+    static boolean[] have(@Nullable Object progress, long total, long pieceLength, int pieces) {
         boolean[] out = new boolean[pieces];
         if (!(progress instanceof Map<?, ?> p) || pieceLength <= 0) return out;
         Object blocks = p.get("blocks");
@@ -281,7 +286,7 @@ public final class TransmissionReader {
         return byteIndex < bits.length && (bits[byteIndex] & (0x80 >>> (index % 8))) != 0;
     }
 
-    private static boolean isText(Object v, String text) {
+    private static boolean isText(@Nullable Object v, String text) {
         return v instanceof byte[] b && new String(b, StandardCharsets.UTF_8).equals(text);
     }
 
@@ -294,8 +299,8 @@ public final class TransmissionReader {
             Map<String, Object> r,
             byte[] infoHash,
             String name,
-            byte[] pieces,
-            List<Long> lengths,
+            byte @Nullable [] pieces,
+            @Nullable List<Long> lengths,
             List<List<String>> trackers) {
         Map<String, Object> out = new HashMap<>();
         out.put("file-format", "libtorrent resume file");
@@ -332,7 +337,7 @@ public final class TransmissionReader {
     }
 
     /** Transmission's {@code ratio-mode}: 0 the global limit (-2), 1 its own, 2 none (-1). */
-    private static double ratioLimit(Object v) {
+    private static double ratioLimit(@Nullable Object v) {
         if (!(v instanceof Map<?, ?> m)) return -2;
         long mode = m.get("ratio-mode") instanceof Long l ? l : 0;
         if (mode == 2) return -1;
@@ -417,11 +422,11 @@ public final class TransmissionReader {
         return tiers;
     }
 
-    private static String text(Object v, String fallback) {
+    private static String text(@Nullable Object v, String fallback) {
         return v instanceof byte[] b && b.length > 0 ? new String(b, StandardCharsets.UTF_8) : fallback;
     }
 
-    private static double number(Object v, double fallback) {
+    private static double number(@Nullable Object v, double fallback) {
         return v instanceof Long l ? l : fallback;
     }
 }

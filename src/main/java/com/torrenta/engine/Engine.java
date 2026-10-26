@@ -6,6 +6,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -160,7 +162,7 @@ public interface Engine extends AutoCloseable {
      */
     record Adoption(
             byte[] resume,
-            byte[] metainfo,
+            byte @Nullable [] metainfo,
             String savePath,
             TorrentLabels labels,
             String name,
@@ -366,7 +368,7 @@ public interface Engine extends AutoCloseable {
     }
 
     /** Follows torrent {@code id} from an updatable address; null stops following. */
-    default void setFollowing(String id, Following following) throws EngineException {
+    default void setFollowing(String id, @Nullable Following following) throws EngineException {
         throw new EngineException(com.torrenta.i18n.Messages.tr("engine.error.noMutable"));
     }
 

@@ -9,6 +9,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -101,17 +103,17 @@ public final class InterfaceWatch {
      * changed. A binding changed in the settings says something only when the new one reaches no
      * one; nothing is said of being unbound, or of nothing having changed.
      */
-    public static Optional<Change> change(State before, State after) {
+    public static Optional<Change> change(@Nullable State before, State after) {
         if (after.presence() == Presence.UNBOUND || after.equals(before)) return Optional.empty();
         boolean same = before != null && before.bound().equals(after.bound());
         if (after.reachesNoOne()) {
-            if (same && before.presence() == after.presence()) return Optional.empty();
+            if (same && before != null && before.presence() == after.presence()) return Optional.empty();
             String key = after.presence() == Presence.DOWN
                     ? "net.interface.down"
                     : literal(after.bound()).isPresent() ? "net.interface.noAddress" : "net.interface.missing";
             return Optional.of(new Change(true, tr(key, after.label())));
         }
-        if (!same) return Optional.empty();
+        if (!same || before == null) return Optional.empty();
         String addresses = String.join(", ", after.addresses());
         if (before.reachesNoOne())
             return Optional.of(new Change(false, tr("net.interface.back", after.label(), addresses)));

@@ -22,6 +22,7 @@ import com.torrenta.engine.TorrentLimits;
 import com.torrenta.http.Form;
 import com.torrenta.http.Request;
 import com.torrenta.http.Response;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Tier 2's torrent edits, the ones a remote app's detail screens make: file priorities, the
@@ -63,7 +64,7 @@ final class Edits {
     }
 
     /** Every torrent in {@code hashes}, in the order given, a failure logged and the rest done. */
-    private Response each(Request request, Engine.Capability needs, List<Torrent> ordered, Each action) {
+    private Response each(Request request, Engine.@Nullable Capability needs, List<Torrent> ordered, Each action) {
         Engine engine = backend.engine();
         if (engine == null) return noEngine();
         if (needs != null && engine.capabilities().lacks(needs)) return unsupported();
@@ -77,7 +78,7 @@ final class Edits {
         return Response.text(200, "");
     }
 
-    private Response each(Request request, Engine.Capability needs, Each action) {
+    private Response each(Request request, Engine.@Nullable Capability needs, Each action) {
         return each(request, needs, targets(request), action);
     }
 
@@ -86,7 +87,7 @@ final class Edits {
     }
 
     /** One torrent by {@code hash}; its failure is the answer, 409 with the engine's reason. */
-    private Response one(Request request, Engine.Capability needs, One action) {
+    private Response one(Request request, Engine.@Nullable Capability needs, One action) {
         Engine engine = backend.engine();
         if (engine == null) return noEngine();
         if (needs != null && engine.capabilities().lacks(needs)) return unsupported();

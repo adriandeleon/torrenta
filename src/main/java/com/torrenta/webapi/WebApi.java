@@ -27,6 +27,7 @@ import com.torrenta.http.Router;
 import com.torrenta.session.AddDefaults;
 import com.torrenta.session.SessionLog;
 import com.torrenta.store.Settings;
+import org.jspecify.annotations.Nullable;
 
 /**
  * qBittorrent's WebUI API at {@code /api/v2}, as far as Torrenta speaks it (roadmap 1.2, item 4:
@@ -97,6 +98,7 @@ public final class WebApi {
         Transfer transfer();
 
         /** The engine up now; null while none is. The actions call it on the request's thread. */
+        @Nullable
         Engine engine();
 
         /** An add without a dialog, through the content check: the session's ({@code Session.add}). */
@@ -121,7 +123,7 @@ public final class WebApi {
         void removeTag(String name) throws IOException;
 
         /** A torrent's own share limit; null drops it, so the global one applies. */
-        void setShareOverride(String id, ShareLimit limit);
+        void setShareOverride(String id, @Nullable ShareLimit limit);
 
         /** A {@code .torrent} from a URL, bounded in time and size. */
         byte[] fetch(URI url) throws IOException;

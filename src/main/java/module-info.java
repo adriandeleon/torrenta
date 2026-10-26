@@ -1,4 +1,6 @@
 module com.torrenta {
+    // The null annotations NullAway reads; compile-time only (pom.xml).
+    requires static org.jspecify;
     requires javafx.controls;
     requires javafx.graphics;
     // The Nord and Cupertino control themes; the module opens its theme package, so the

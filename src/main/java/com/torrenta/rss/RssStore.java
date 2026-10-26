@@ -18,6 +18,7 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The reader's files under {@code rss/} in the config folder: {@code feeds.json}, the feed list,
@@ -95,7 +96,7 @@ public final class RssStore {
         return List.copyOf(feeds);
     }
 
-    public synchronized Feed feed(String id) {
+    public synchronized @Nullable Feed feed(String id) {
         for (Feed f : feeds) if (f.id().equals(id)) return f;
         return null;
     }
@@ -306,7 +307,7 @@ public final class RssStore {
     }
 
     /** Positioned after an article's {@code {}; returns past its {@code }}. */
-    private static Article parseArticle(JsonParser p, String feedId) throws IOException {
+    private static @Nullable Article parseArticle(JsonParser p, String feedId) throws IOException {
         String guid = "";
         String title = "";
         String link = "";

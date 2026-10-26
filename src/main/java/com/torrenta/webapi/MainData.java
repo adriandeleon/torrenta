@@ -7,6 +7,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * {@code sync/maindata} and {@code sync/torrentPeers}: what changed since the answer a client last
  * had, as qBittorrent sends it. A client polls with the {@code rid} of its last answer; when that
@@ -42,7 +44,7 @@ public final class MainData {
      * {@code sync/maindata}'s answer: {@code current} whole when {@code previous} is null, else
      * what changed since it. Keys in qBittorrent's names; an empty change is left out.
      */
-    public static Map<String, Object> maindata(Snapshot previous, Snapshot current, long rid) {
+    public static Map<String, Object> maindata(@Nullable Snapshot previous, Snapshot current, long rid) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("rid", rid);
         if (previous == null) {
@@ -64,7 +66,7 @@ public final class MainData {
     }
 
     /** {@code sync/torrentPeers}'s answer, peers by {@code ip:port}. */
-    public static Map<String, Object> peers(Snapshot previous, Snapshot current, long rid) {
+    public static Map<String, Object> peers(@Nullable Snapshot previous, Snapshot current, long rid) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("rid", rid);
         if (previous == null) {

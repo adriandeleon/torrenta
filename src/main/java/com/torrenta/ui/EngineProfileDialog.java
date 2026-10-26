@@ -27,6 +27,7 @@ import javafx.stage.Window;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.transmission.TransmissionEngine;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -59,10 +60,10 @@ final class EngineProfileDialog {
     private final Button save = new Button(tr("common.save"));
     private final Tester tester;
     private final String id;
-    private EngineProfile result;
+    private @Nullable EngineProfile result;
 
     /** @param existing the profile being edited, or null for a new one */
-    EngineProfileDialog(Window owner, EngineProfile existing, Tester tester) {
+    EngineProfileDialog(Window owner, @Nullable EngineProfile existing, Tester tester) {
         this.tester = tester;
         this.id = existing == null ? EngineProfile.newId() : existing.id();
         stage.initOwner(owner);

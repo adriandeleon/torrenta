@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * The rates a graph is drawn from: one sample a second for the last ten minutes, then one average
  * a minute up to a day. Two ring buffers, indexed by the time itself, so adding is O(1) and
@@ -43,7 +45,7 @@ public final class SpeedHistory {
     private final long[] coarseUp;
     private final int[] coarseCount;
     private long lastAt = Long.MIN_VALUE;
-    private Sample latest;
+    private @Nullable Sample latest;
 
     /** The full history: ten minutes a second, a day a minute. */
     public SpeedHistory() {

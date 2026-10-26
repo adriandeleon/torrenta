@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -185,7 +187,7 @@ public record WatchFolder(
     }
 
     /** RFC 4648 base32 (what magnets use for a v1 hash) to lowercase hex; null when not base32. */
-    private static String base32ToHex(String s) {
+    private static @Nullable String base32ToHex(String s) {
         String alphabet = "abcdefghijklmnopqrstuvwxyz234567";
         StringBuilder hex = new StringBuilder();
         int buffer = 0;

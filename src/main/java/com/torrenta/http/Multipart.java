@@ -6,6 +6,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * A {@code multipart/form-data} body (RFC 7578), as the *arr apps post a {@code .torrent} file:
  * parts split on the boundary, each with its name, its file name if it has one, its type, and its
@@ -36,7 +38,7 @@ public final class Multipart {
     }
 
     /** The boundary of a {@code multipart/form-data} content type; empty for any other type. */
-    public static Optional<String> boundary(String contentType) {
+    public static Optional<String> boundary(@Nullable String contentType) {
         if (contentType == null) return Optional.empty();
         String[] pieces = contentType.split(";");
         if (!pieces[0].trim().equalsIgnoreCase("multipart/form-data")) return Optional.empty();

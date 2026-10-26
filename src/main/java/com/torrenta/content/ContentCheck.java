@@ -13,6 +13,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.torrenta.engine.TorrentPreview;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -182,7 +183,7 @@ public record ContentCheck(List<Finding> findings) {
     }
 
     /** The finding for one file, or null; the first kind that fits wins. */
-    private static Kind kindOf(String path, boolean media, boolean promisesMedia, Pattern bait) {
+    private static @Nullable Kind kindOf(String path, boolean media, boolean promisesMedia, @Nullable Pattern bait) {
         String name = name(path);
         if (BIDI.matcher(path).find()) return Kind.HIDDEN_EXTENSION;
         String extension = FileKind.extension(name);
@@ -274,7 +275,7 @@ public record ContentCheck(List<Finding> findings) {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
     }
 
-    private static Pattern baitPattern(Set<String> words) {
+    private static @Nullable Pattern baitPattern(Set<String> words) {
         if (words.isEmpty()) return null;
         String alternatives = words.stream().map(Pattern::quote).collect(Collectors.joining("|"));
         return Pattern.compile("(?:^| )(?:" + alternatives + ")(?: |$)");

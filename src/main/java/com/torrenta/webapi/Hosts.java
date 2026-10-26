@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import com.torrenta.net.InterfaceWatch;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Two checks a request passes before anything else. The {@code Host} header must name this server
@@ -24,7 +25,7 @@ public final class Hosts {
      *
      * @param domains extra names it answers to, lower case; {@code *} for any
      */
-    public static boolean hostAllowed(String hostHeader, Set<String> domains) {
+    public static boolean hostAllowed(@Nullable String hostHeader, Set<String> domains) {
         if (hostHeader == null || hostHeader.isBlank()) return false;
         String host = hostOf(hostHeader.trim()).toLowerCase(Locale.ROOT);
         if (host.isEmpty()) return false;
@@ -33,7 +34,7 @@ public final class Hosts {
     }
 
     /** Whether the browser's page, when it says, is this server itself. */
-    public static boolean sameOrigin(Optional<String> origin, Optional<String> referer, String hostHeader) {
+    public static boolean sameOrigin(Optional<String> origin, Optional<String> referer, @Nullable String hostHeader) {
         Optional<String> from = origin.isPresent() ? origin : referer;
         if (from.isEmpty()) return true;
         if (hostHeader == null) return false;

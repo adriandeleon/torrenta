@@ -104,7 +104,7 @@ public final class EpisodeFilter {
             parse(text);
             return Optional.empty();
         } catch (IllegalArgumentException e) {
-            return Optional.of(e.getMessage());
+            return Optional.of(String.valueOf(e.getMessage()));
         }
     }
 

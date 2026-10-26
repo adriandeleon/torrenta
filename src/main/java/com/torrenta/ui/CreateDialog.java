@@ -49,6 +49,7 @@ import com.torrenta.engine.EngineException;
 import com.torrenta.engine.PieceSize;
 import com.torrenta.session.Session;
 import com.torrenta.store.Settings;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -105,9 +106,9 @@ final class CreateDialog {
     private final CheckBox publish = new CheckBox(tr("dialog.create.publish"));
     private final TextField publishName = new TextField();
     private final Label publishNote = new Label();
-    private final Publisher publisher;
+    private final @Nullable Publisher publisher;
     /** The publication this creates the next version of, or null for a torrent of its own. */
-    private String newVersionOf;
+    private @Nullable String newVersionOf;
 
     private final VBox form;
 
@@ -138,14 +139,14 @@ final class CreateDialog {
     /** Bumped by Cancel and by a new run: a worker whose generation is stale is ignored. */
     private volatile int hashGeneration;
 
-    private CreatedTorrent made;
+    private @Nullable CreatedTorrent made;
     /** What publishing said, for the capture: empty before, else a line. */
     private String publishedLine = "";
 
-    private Path savedTo;
+    private @Nullable Path savedTo;
     private boolean seedAsked;
 
-    CreateDialog(Window owner, Engine engine, Settings settings, Publisher publisher) {
+    CreateDialog(Window owner, Engine engine, Settings settings, @Nullable Publisher publisher) {
         this.engine = engine;
         this.settings = settings;
         this.publisher = publisher;
@@ -602,9 +603,10 @@ final class CreateDialog {
             // The torrent is made and saved whatever publishing says: the key is kept either way.
             Session.Published published = null;
             String publishProblem = "";
-            if (publishing) {
+            Publisher p = publisher;
+            if (publishing && p != null) {
                 try {
-                    published = nextOf != null ? publisher.newVersion(nextOf, result) : publisher.publish(name, result);
+                    published = nextOf != null ? p.newVersion(nextOf, result) : p.publish(name, result);
                 } catch (EngineException | IOException | RuntimeException e) {
                     publishProblem = e.getMessage() == null ? e.toString() : e.getMessage();
                 }
@@ -620,7 +622,7 @@ final class CreateDialog {
         });
     }
 
-    private void showPublished(Session.Published done, String why) {
+    private void showPublished(Session.@Nullable Published done, @Nullable String why) {
         String line;
         if (done == null) {
             line = tr("dialog.create.notPublished", why);
@@ -764,7 +766,7 @@ final class CreateDialog {
             }
 
             @Override
-            public T fromString(String s) {
+            public @Nullable T fromString(String s) {
                 return null;
             }
         };

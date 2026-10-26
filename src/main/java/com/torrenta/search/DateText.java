@@ -16,6 +16,8 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * A date as an indexer writes it, into an instant: ISO ("2026-10-03T12:35:22Z", with an offset,
  * or a local date-time taken as UTC), RFC 1123 ("Sat, 18 Oct 2026 09:12:00 +0000"),
@@ -43,7 +45,7 @@ public final class DateText {
     private DateText() {}
 
     /** The shapes above, in that order; {@code now} anchors the relative ones. */
-    public static Instant parse(String text, Instant now) {
+    public static @Nullable Instant parse(@Nullable String text, Instant now) {
         if (text == null) return null;
         String t = text.trim();
         if (t.isEmpty()) return null;
@@ -67,7 +69,7 @@ public final class DateText {
      * midnight and a zone of UTC filled in where the text has none; {@code format} being empty
      * means {@link #parse}.
      */
-    public static Instant parse(String text, String format, Instant now) {
+    public static @Nullable Instant parse(@Nullable String text, String format, Instant now) {
         if (format == null || format.isBlank()) return parse(text, now);
         if (text == null || text.isBlank()) return null;
         try {
@@ -77,7 +79,7 @@ public final class DateText {
         }
     }
 
-    private static Instant local(DateTimeFormatter f, String t) {
+    private static @Nullable Instant local(DateTimeFormatter f, String t) {
         try {
             TemporalAccessor parsed = f.parse(t);
             LocalDate date = parsed.query(TemporalQueries.localDate());
@@ -91,7 +93,7 @@ public final class DateText {
         }
     }
 
-    private static Instant relative(String t, Instant now) {
+    private static @Nullable Instant relative(String t, Instant now) {
         String lower = t.toLowerCase(Locale.ROOT);
         if (lower.equals("just now") || lower.equals("now") || lower.equals("today")) return now;
         if (lower.equals("yesterday")) return now.minus(1, ChronoUnit.DAYS);

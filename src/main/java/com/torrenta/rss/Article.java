@@ -3,6 +3,8 @@ package com.torrenta.rss;
 import java.time.Instant;
 import java.util.Locale;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * One item of a feed, as the reader keeps it: which feed, the item's id (its {@code guid} or Atom
  * {@code id}; a feed that gives none is keyed by title and link), the title, the page it links
@@ -17,7 +19,7 @@ public record Article(
         String title,
         String link,
         String torrentLink,
-        Instant published,
+        @Nullable Instant published,
         String description,
         boolean read,
         boolean downloaded) {
@@ -29,7 +31,7 @@ public record Article(
             String title,
             String link,
             String torrentLink,
-            Instant published,
+            @Nullable Instant published,
             String description,
             boolean read) {
         this(feedId, guid, title, link, torrentLink, published, description, read, false);

@@ -3,6 +3,8 @@ package com.torrenta.cli;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * The command line: {@code --help}, {@code --version}, {@code --config-dir}, {@code --headless},
  * {@code --set-remote-password} (a headless server has no Settings window to set it in), and
@@ -15,9 +17,9 @@ public record CommandLine(
         boolean version,
         boolean headless,
         boolean setRemotePassword,
-        String configDir,
+        @Nullable String configDir,
         List<String> inputs,
-        String error) {
+        @Nullable String error) {
 
     public static CommandLine parse(String... args) {
         boolean help = false;

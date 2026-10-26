@@ -7,6 +7,8 @@ import java.util.Objects;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * A three-way merge of settings, one key at a time: an entry added, changed or removed on one side
  * carries over; one changed differently on both sides keeps this machine's value and is reported.
@@ -27,7 +29,8 @@ public final class SyncMerge {
     private SyncMerge() {}
 
     /** @param base the last synced state, or null on a first sync */
-    public static Result merge(Map<String, String> base, Map<String, String> mine, Map<String, String> theirs) {
+    public static Result merge(
+            @Nullable Map<String, String> base, Map<String, String> mine, Map<String, String> theirs) {
         Map<String, String> merged = new TreeMap<>();
         List<String> received = new ArrayList<>();
         List<String> sent = new ArrayList<>();

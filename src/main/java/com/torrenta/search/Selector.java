@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * A deliberately small CSS-shaped selector: {@code tag}, {@code .class}, {@code #id},
  * {@code [attr]}, {@code [attr=value]} (also {@code ^=}, {@code $=}, {@code *=}, {@code ~=}),
@@ -19,9 +21,14 @@ import java.util.Optional;
  */
 public final class Selector {
 
-    private record Condition(char kind, String name, String op, String value, int n) {}
+    private record Condition(
+            char kind,
+            String name,
+            @Nullable String op,
+            @Nullable String value,
+            int n) {}
 
-    private record Compound(String tag, List<Condition> conditions) {
+    private record Compound(@Nullable String tag, List<Condition> conditions) {
         boolean matches(HtmlNode node) {
             if (tag != null && !tag.equals("*") && !tag.equals(node.tag())) return false;
             for (Condition c : conditions) if (!Selector.matches(node, c)) return false;
@@ -126,7 +133,7 @@ public final class Selector {
                 return siblings.indexOf(node) + 1 == c.n();
             case "first-of-type", "last-of-type", "nth-of-type": {
                 List<HtmlNode> ofType = new ArrayList<>();
-                for (HtmlNode s : siblings) if (s.tag().equals(node.tag())) ofType.add(s);
+                for (HtmlNode s : siblings) if (java.util.Objects.equals(s.tag(), node.tag())) ofType.add(s);
                 return switch (c.name()) {
                     case "first-of-type" -> ofType.get(0) == node;
                     case "last-of-type" -> ofType.get(ofType.size() - 1) == node;
@@ -134,7 +141,10 @@ public final class Selector {
                 };
             }
             case "contains":
-                return node.text().toLowerCase(Locale.ROOT).contains(c.value().toLowerCase(Locale.ROOT));
+                return node.text()
+                        .toLowerCase(Locale.ROOT)
+                        .contains(java.util.Objects.requireNonNullElse(c.value(), "")
+                                .toLowerCase(Locale.ROOT));
             default:
                 return false;
         }

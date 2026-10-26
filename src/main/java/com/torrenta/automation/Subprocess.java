@@ -11,6 +11,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Runs one program to completion with a ceiling, keeping the first part of what it printed. No
  * shell: the arguments reach the program as they are given. Blocking; the caller picks the thread,
@@ -23,7 +25,11 @@ final class Subprocess {
      * installed, not executable); {@code output} is standard output and error interleaved, cut at
      * the limit asked for.
      */
-    record Result(int code, String output, boolean timedOut, String failure) {
+    record Result(
+            int code,
+            String output,
+            boolean timedOut,
+            @Nullable String failure) {
         boolean started() {
             return failure == null;
         }

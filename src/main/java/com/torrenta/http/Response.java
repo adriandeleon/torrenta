@@ -6,6 +6,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * What a handler answers: a status, headers, and a body that is bytes in memory, a file on disk,
  * or bytes a {@link Ranged} writes as they become ready (the last two sent in part for a {@code
@@ -15,7 +17,12 @@ import java.util.Map;
  * @param file a file to send instead of {@code body}; null for none
  * @param ranged a body written range by range instead of {@code body}; null for none
  */
-public record Response(int status, List<Map.Entry<String, String>> headers, byte[] body, Path file, Ranged ranged) {
+public record Response(
+        int status,
+        List<Map.Entry<String, String>> headers,
+        byte[] body,
+        @Nullable Path file,
+        @Nullable Ranged ranged) {
 
     /**
      * A body of a known size whose bytes are written on demand, range by range: a torrent's file
@@ -33,7 +40,7 @@ public record Response(int status, List<Map.Entry<String, String>> headers, byte
         headers = List.copyOf(headers);
     }
 
-    public Response(int status, List<Map.Entry<String, String>> headers, byte[] body, Path file) {
+    public Response(int status, List<Map.Entry<String, String>> headers, byte[] body, @Nullable Path file) {
         this(status, headers, body, file, null);
     }
 

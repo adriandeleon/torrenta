@@ -28,6 +28,7 @@ import com.torrenta.session.Session;
 import com.torrenta.session.SessionLog;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.Settings;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -199,7 +200,7 @@ public final class SessionBackend implements WebApi.Backend {
     }
 
     @Override
-    public Engine engine() {
+    public @Nullable Engine engine() {
         return session.engine();
     }
 
@@ -250,7 +251,7 @@ public final class SessionBackend implements WebApi.Backend {
     }
 
     @Override
-    public void setShareOverride(String id, ShareLimit limit) {
+    public void setShareOverride(String id, @Nullable ShareLimit limit) {
         settings.setShareOverride(id, limit);
         settings.saveQuietly();
     }

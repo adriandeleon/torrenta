@@ -12,6 +12,8 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Registering Torrenta as the program for {@code .torrent} files and {@code magnet:} links.
  *
@@ -167,7 +169,7 @@ public final class Handlers {
                 List.of("reg", "delete", CLASSES + "\\.torrent", "/ve", "/f"));
     }
 
-    private static List<String> regAdd(String key, String valueName, String data) {
+    private static List<String> regAdd(String key, @Nullable String valueName, String data) {
         List<String> argv = new ArrayList<>(List.of("reg", "add", key));
         if (valueName == null) argv.add("/ve");
         else argv.addAll(List.of("/v", valueName));

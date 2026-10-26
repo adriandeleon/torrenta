@@ -40,6 +40,7 @@ import com.torrenta.sync.SyncLabels;
 import com.torrenta.sync.SyncReport;
 import com.torrenta.sync.SyncSearch;
 import com.torrenta.sync.SyncTarget;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -77,7 +78,11 @@ final class SettingsSync {
      * @param at when it finished, or null
      * @param account the GitHub CLI account the last round signed in as; blank for git's own way
      */
-    record State(Phase phase, SyncReport report, LocalDateTime at, String account) {}
+    record State(
+            Phase phase,
+            @Nullable SyncReport report,
+            @Nullable LocalDateTime at,
+            String account) {}
 
     /** What the window does for the service. */
     interface Host {
@@ -112,7 +117,7 @@ final class SettingsSync {
     private final PauseTransition dirty = new PauseTransition(Duration.seconds(DIRTY_DELAY_SECONDS));
     private final PauseTransition startup = new PauseTransition(Duration.seconds(STARTUP_DELAY_SECONDS));
     private final List<Runnable> listeners = new ArrayList<>();
-    private Timeline timer;
+    private @Nullable Timeline timer;
     private int timerMinutes;
     private State state = new State(Phase.OFF, null, null, "");
     private boolean running;
@@ -122,7 +127,7 @@ final class SettingsSync {
     /** Torznab servers the round brought that wait for their key here; said with the round's line. */
     private int keysNeeded;
     /** The failure already reported, so an automatic round that fails the same way every interval says it once. */
-    private SyncReport.Status reportedFailure;
+    private SyncReport.@Nullable Status reportedFailure;
 
     private String account = "";
     private boolean accountSearched;
@@ -491,7 +496,7 @@ final class SettingsSync {
         }
     }
 
-    private static <T> T onFx(java.util.function.Supplier<T> work) {
+    private static <T> @Nullable T onFx(java.util.function.Supplier<T> work) {
         if (Platform.isFxApplicationThread()) return work.get();
         AtomicReference<T> out = new AtomicReference<>();
         CountDownLatch done = new CountDownLatch(1);

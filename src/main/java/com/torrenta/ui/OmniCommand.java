@@ -1,9 +1,11 @@
 package com.torrenta.ui;
 
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Optional;
 
 import com.torrenta.engine.Engine;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -22,7 +24,7 @@ import static com.torrenta.i18n.Messages.tr;
  * @param on for {@code sequential}
  * @param move for {@code queue}
  */
-public record OmniCommand(Verb verb, String text, long bytes, boolean on, Engine.QueueMove move) {
+public record OmniCommand(Verb verb, String text, long bytes, boolean on, Engine.@Nullable QueueMove move) {
 
     /** What a verb takes. */
     enum Takes {
@@ -155,7 +157,11 @@ public record OmniCommand(Verb verb, String text, long bytes, boolean on, Engine
             case LIMIT_DOWN -> bytes == 0 ? tr("omni.do.limitDownNone") : tr("omni.do.limitDown", Bytes.rate(bytes));
             case LIMIT_UP -> bytes == 0 ? tr("omni.do.limitUpNone") : tr("omni.do.limitUp", Bytes.rate(bytes));
             case SEQUENTIAL -> on ? tr("omni.do.sequentialOn") : tr("omni.do.sequentialOff");
-            case QUEUE -> tr("omni.do.queue." + move.name().toLowerCase(Locale.ROOT));
+            case QUEUE ->
+                tr("omni.do.queue."
+                        + Objects.requireNonNull(move, "a queue command has its move")
+                                .name()
+                                .toLowerCase(Locale.ROOT));
             case PAUSE -> tr("omni.do.pause");
             case RESUME -> tr("omni.do.resume");
             case RECHECK -> tr("omni.do.recheck");

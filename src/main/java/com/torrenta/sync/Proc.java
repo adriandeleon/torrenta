@@ -12,6 +12,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import org.jspecify.annotations.Nullable;
+
 /** Runs one child process to completion, with a ceiling; blocking, the caller picks the thread. */
 final class Proc {
 
@@ -30,7 +32,7 @@ final class Proc {
 
     private Proc() {}
 
-    static Result run(Path dir, Duration timeout, List<String> argv, Map<String, String> env) {
+    static Result run(@Nullable Path dir, Duration timeout, List<String> argv, Map<String, String> env) {
         ProcessBuilder pb = new ProcessBuilder(argv);
         if (dir != null) pb.directory(dir.toFile());
         pb.environment().putAll(env);

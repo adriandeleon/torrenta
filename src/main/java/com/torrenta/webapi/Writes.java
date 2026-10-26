@@ -27,6 +27,7 @@ import com.torrenta.http.Multipart;
 import com.torrenta.http.Request;
 import com.torrenta.http.Response;
 import com.torrenta.session.AddDefaults;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The acting endpoints of Tier 1: {@code torrents/add} and {@code delete}, {@code stop}/{@code
@@ -352,7 +353,7 @@ final class Writes {
      * when neither is given or both are -2 (the global one). {@code global} fills a -2 half, and is
      * null when nothing is known yet (an add: a -2 half is then no limit of that kind).
      */
-    static Optional<ShareLimit> share(Form p, ShareLimit global) {
+    static Optional<ShareLimit> share(Form p, @Nullable ShareLimit global) {
         if (!p.has("ratioLimit") && !p.has("seedingTimeLimit")) return Optional.empty();
         double ratio = number(p, "ratioLimit", -2);
         double minutes = number(p, "seedingTimeLimit", -2);

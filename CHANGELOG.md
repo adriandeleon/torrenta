@@ -198,6 +198,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Fixed
 
+- **Fewer ways to fail on a missing value.** The code is now checked for nulls as it is built,
+  which turned up a few: the Add dialog no longer waits forever for a magnet's files when the
+  engine went away as it opened, the Event Log's Copy no longer writes "null" for two of the
+  window's own lines, importing from Transmission says "neither a .torrent nor a magnet" for a
+  torrent that has neither, and a message from the engine with no text of its own shows its cause.
+
 - **Every dialog shows its buttons.** A dialog now grows to fit what it holds, when it opens and
   whenever something appears in it, up to the screen's height, and cannot be dragged shorter than
   that. The torrent Limits dialog cut its Cancel and Apply buttons off the bottom of the window.

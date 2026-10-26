@@ -26,6 +26,7 @@ import javafx.util.StringConverter;
 
 import com.torrenta.engine.Category;
 import com.torrenta.engine.WatchFolder;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -47,13 +48,13 @@ final class WatchFolderDialog {
     private final ChoiceBox<String> category = new ChoiceBox<>();
     private final CheckBox startPaused = new CheckBox(tr("dialog.watchFolder.startPaused"));
     private final Button save = new Button(tr("common.save"));
-    private WatchFolder result;
+    private @Nullable WatchFolder result;
 
     /**
      * @param existing the entry being edited, or null for a new one
      * @param categories the categories that exist, offered for the torrents
      */
-    WatchFolderDialog(Window owner, WatchFolder existing, List<Category> categories) {
+    WatchFolderDialog(Window owner, @Nullable WatchFolder existing, List<Category> categories) {
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);
         stage.setTitle(existing == null ? tr("dialog.watchFolder.title.add") : tr("dialog.watchFolder.title.edit"));
@@ -82,7 +83,7 @@ final class WatchFolderDialog {
             }
 
             @Override
-            public WatchFolder.SaveTo fromString(String s) {
+            public WatchFolder.@Nullable SaveTo fromString(String s) {
                 return null;
             }
         });
@@ -103,7 +104,7 @@ final class WatchFolderDialog {
             }
 
             @Override
-            public WatchFolder.AfterAdd fromString(String s) {
+            public WatchFolder.@Nullable AfterAdd fromString(String s) {
                 return null;
             }
         });
@@ -118,7 +119,7 @@ final class WatchFolderDialog {
             }
 
             @Override
-            public String fromString(String s) {
+            public @Nullable String fromString(String s) {
                 return null;
             }
         });

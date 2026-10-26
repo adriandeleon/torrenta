@@ -11,6 +11,8 @@ import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * One settings sync between this machine and the user's repository; Editora's engine, for the
  * settings file, the labels file ({@link SyncLabels}) and the search providers ({@link SyncSearch}).
@@ -70,6 +72,11 @@ public final class SyncEngine {
         GitFailure(String message) {
             super(message);
         }
+
+        @Override
+        public String getMessage() {
+            return java.util.Objects.requireNonNullElse(super.getMessage(), "");
+        }
     }
 
     /**
@@ -84,7 +91,8 @@ public final class SyncEngine {
      * @param labels the category names and tags as {@link SyncLabels#entries}, or null to leave the
      *     repository's labels file as it is
      */
-    public SyncEngine(QuietGit git, String url, String branch, SyncTarget target, SyncTarget labels, String machine) {
+    public SyncEngine(
+            QuietGit git, String url, String branch, SyncTarget target, @Nullable SyncTarget labels, String machine) {
         this(git, url, branch, target, labels, null, machine);
     }
 
@@ -97,8 +105,8 @@ public final class SyncEngine {
             String url,
             String branch,
             SyncTarget target,
-            SyncTarget labels,
-            SyncTarget search,
+            @Nullable SyncTarget labels,
+            @Nullable SyncTarget search,
             String machine) {
         this.git = git;
         this.clone = git.dir();
@@ -184,7 +192,8 @@ public final class SyncEngine {
     }
 
     /** One fetch-merge-push round; null when the push lost a race and the round must be repeated. */
-    private SyncReport cycle(boolean previewOnly) throws IOException, GitFailure {
+    /** Null when another machine pushed first: the caller goes round again. */
+    private @Nullable SyncReport cycle(boolean previewOnly) throws IOException, GitFailure {
         Proc.Result fetch = git.network("fetch", "--prune", "--quiet", "origin");
         if (!fetch.ok()) return SyncReport.failure(SyncReport.Status.FETCH_FAILED, fetch.transcript());
         String remoteRef = "refs/remotes/origin/" + branch;
@@ -336,7 +345,7 @@ public final class SyncEngine {
     private RepoTree workTree() {
         return new RepoTree() {
             @Override
-            public String file(String path) throws IOException {
+            public @Nullable String file(String path) throws IOException {
                 Path file = clone.resolve(path);
                 return Files.isRegularFile(file) ? Files.readString(file) : null;
             }
@@ -352,7 +361,7 @@ public final class SyncEngine {
     private RepoTree commitTree(String ref) {
         return new RepoTree() {
             @Override
-            public String file(String path) {
+            public @Nullable String file(String path) {
                 Proc.Result shown = git.run("show", ref + ":" + path);
                 return shown.ok() ? shown.out() : null;
             }

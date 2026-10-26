@@ -12,6 +12,7 @@ import org.freedesktop.dbus.interfaces.DBus;
 import org.freedesktop.dbus.interfaces.Properties;
 import org.freedesktop.dbus.types.UInt32;
 import org.freedesktop.dbus.types.Variant;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The Linux tray backend: a StatusNotifierItem exported on the session bus. Works wherever an
@@ -150,7 +151,7 @@ public final class SniTray implements TorrentaTray {
 
         @SuppressWarnings("unchecked")
         @Override
-        public <A> A Get(String interfaceName, String propertyName) {
+        public <A> @Nullable A Get(String interfaceName, String propertyName) {
             // Return the Variant itself: it carries an explicit signature, which dbus-java
             // needs for struct lists (a raw List can't be wrapped — generics are erased).
             return (A) GetAll(interfaceName).get(propertyName);

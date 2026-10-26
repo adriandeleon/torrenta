@@ -3,6 +3,8 @@ package com.torrenta.store;
 import java.nio.file.Path;
 import java.util.Map;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Where Torrenta keeps its files: settings, resume data, the unpacked engine.
  *
@@ -18,12 +20,12 @@ public final class ConfigDir {
 
     private ConfigDir() {}
 
-    public static Path resolve(String commandLineOverride) {
+    public static Path resolve(@Nullable String commandLineOverride) {
         return resolve(commandLineOverride, System.getenv(), System.getProperty("user.home"));
     }
 
     /** Pure, so the precedence is testable. */
-    static Path resolve(String commandLineOverride, Map<String, String> env, String userHome) {
+    static Path resolve(@Nullable String commandLineOverride, Map<String, String> env, String userHome) {
         if (commandLineOverride != null && !commandLineOverride.isBlank()) {
             return Path.of(commandLineOverride).toAbsolutePath();
         }
