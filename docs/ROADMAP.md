@@ -651,7 +651,8 @@ remote caller's behalf.
    Copy stream URL beside it; the Overview's strip marks the window.
 4. **BEP 46, following** (done: `engine.MutableSource` is the address, read in `Session.resolve`
    before `Inputs.classify`, so the dialog, the command line, a second instance and headless all
-   take it; a watch folder's `.magnet` lines and RSS do not yet. `Engine.lookupMutable` is
+   take it, and so do a watch folder's `.magnet` lines, RSS (rules, Download, Add) and search
+   results, through `Session.resolve(AddRequest.Source)` before the add. `Engine.lookupMutable` is
    libtorrent's `dht_get_item`, the highest `seq` kept until the authoritative answer or 30 s;
    `Following` (address, `seq`, the id it `replaces`) rides in the `.labels` sidecar. The follower
    is the session's, not a class of its own: every ten minutes it looks up whatever has not been

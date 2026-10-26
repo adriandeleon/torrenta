@@ -2332,6 +2332,73 @@ class LibtorrentEngineTest {
         }
     }
 
+    /** An updatable address in a {@code .magnet} file names no torrent until the host looks it up. */
+    @Test
+    void watchFoldersLookAnUpdatableAddressUpBeforeTheAdd(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        Path inbox = Files.createDirectories(dir.resolve("inbox"));
+        String address = "magnet:?xs=urn:btpk:" + "ab".repeat(32) + "&s=v";
+        String hash = "0123456789abcdef0123456789abcdef01234567";
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        List<String> looked = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            com.torrenta.engine.WatchFolders.Host host = new com.torrenta.engine.WatchFolders.Host() {
+                @Override
+                public Path defaultDownloadDir() {
+                    return downloads;
+                }
+
+                @Override
+                public java.util.Optional<com.torrenta.engine.Category> category(String name) {
+                    return java.util.Optional.empty();
+                }
+
+                @Override
+                public AddRequest.Storage storage(Path destination) {
+                    return AddRequest.Storage.DEFAULT;
+                }
+
+                @Override
+                public void report(EngineEvent event) {
+                    events.add(event);
+                }
+
+                @Override
+                public AddRequest.Source resolve(AddRequest.Source source) {
+                    if (!(source instanceof AddRequest.Magnet m) || !m.uri().equals(address)) return source;
+                    looked.add(m.uri());
+                    return new AddRequest.Magnet("magnet:?xt=urn:btih:" + hash);
+                }
+            };
+            try (com.torrenta.engine.WatchFolders watcher = new com.torrenta.engine.WatchFolders(engine, host)) {
+                watcher.configure(List.of(new com.torrenta.engine.WatchFolder(
+                        inbox.toString(),
+                        com.torrenta.engine.WatchFolder.AfterAdd.DELETE,
+                        com.torrenta.engine.WatchFolder.SaveTo.DEFAULT,
+                        "",
+                        "",
+                        true)));
+                Files.writeString(inbox.resolve("follow.magnet"), address + "\n");
+                watcher.poll();
+                watcher.poll();
+                assertEquals(List.of(address), looked, "the address went to the host");
+                await("the current version added", () -> engine.torrents().size() == 1);
+                assertEquals(hash, engine.torrents().get(0).id());
+
+                // The same address again: recognised by the hash it resolves to, not added twice.
+                Files.writeString(inbox.resolve("again.magnet"), address + "\n");
+                watcher.poll();
+                watcher.poll();
+                assertEquals(2, looked.size());
+                assertEquals(1, engine.torrents().size());
+                assertTrue(
+                        events.stream().anyMatch(e -> e.message().startsWith("Already in the session")),
+                        events.toString());
+            }
+        }
+    }
+
     @Test
     void watchFoldersAddWhatIsDroppedIn(@TempDir Path dir) throws Exception {
         Path downloads = dir.resolve("downloads");

@@ -2366,7 +2366,7 @@ public final class MainWindow {
         AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("search-add").start(() -> {
             try {
-                AddRequest.Source source = SearchAdd.sourceOf(result, new TorrentFetch()::fetch);
+                AddRequest.Source source = session.resolve(SearchAdd.sourceOf(result, new TorrentFetch()::fetch));
                 if (!fetching.isEmpty()) Platform.runLater(() -> setStatus(tr("status.fetched", result.name())));
                 addSource(e, source, AddDialog.Via.SEARCH, withoutAsking, defaults);
             } catch (EngineException | IOException | RuntimeException ex) {
@@ -2392,7 +2392,7 @@ public final class MainWindow {
         AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("rss-add").start(() -> {
             try {
-                AddRequest.Source source = RuleAdd.sourceOf(article, new TorrentFetch()::fetch);
+                AddRequest.Source source = session.resolve(RuleAdd.sourceOf(article, new TorrentFetch()::fetch));
                 if (!fetching.isEmpty())
                     Platform.runLater(() -> setStatus(tr("status.fetched", article.displayTitle())));
                 addSource(e, source, AddDialog.Via.RSS, withoutAsking, defaults);
@@ -4936,7 +4936,7 @@ public final class MainWindow {
         AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("rss-download").start(() -> {
             try {
-                AddRequest.Source source = RuleAdd.sourceOf(article, new TorrentFetch()::fetch);
+                AddRequest.Source source = session.resolve(RuleAdd.sourceOf(article, new TorrentFetch()::fetch));
                 Torrent added = session.add(e, defaults.withoutAsking(source));
                 rss.markDownloaded(article.feedId(), article.identity());
                 Platform.runLater(() -> setStatus(tr("status.added", added.name())));

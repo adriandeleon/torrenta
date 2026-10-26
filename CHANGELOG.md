@@ -15,8 +15,9 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   provider and Show Only for a category; `/` in the results or `Ctrl+K` goes to the box. Results
   from a Torznab server now carry their category, in a new Category column.
 
-- **Updatable torrents.** A `magnet:?xs=urn:btpk:…` link (BEP 46) is looked up in the DHT and
-  its current version added; from then on Torrenta looks for a newer version every six hours
+- **Updatable torrents.** A `magnet:?xs=urn:btpk:…` link (BEP 46), typed, opened, dropped into a
+  watch folder's `.magnet` file or found in an RSS feed, is looked up in the DHT and its current
+  version added; from then on Torrenta looks for a newer version every six hours
   (Settings → Adding torrents → Updatable torrents) and adds it into the same folder, filed the
   same way, with the files that did not change linked rather than downloaded again. Once the new
   version is complete the old one is no longer followed, and leaves the list (its files kept)

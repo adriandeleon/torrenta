@@ -753,6 +753,15 @@ public final class Session {
         }
 
         @Override
+        public AddRequest.Source resolve(AddRequest.Source source) throws EngineException {
+            try {
+                return Session.this.resolve(source);
+            } catch (IOException e) {
+                throw new EngineException(e.getMessage() == null ? e.toString() : e.getMessage(), e);
+            }
+        }
+
+        @Override
         public Torrent add(Engine engine, AddRequest request) throws EngineException {
             return Session.this.add(engine, request);
         }
@@ -772,9 +781,9 @@ public final class Session {
         }
         Engine e = engine;
         if (e == null) throw new IOException(tr("status.engineNotRunning"));
-        AddRequest.Source source = RuleAdd.sourceOf(article, new TorrentFetch()::fetch);
         Optional<Path> categoryFolder = labels.category(rule.category()).flatMap(Category::path);
         try {
+            AddRequest.Source source = resolve(RuleAdd.sourceOf(article, new TorrentFetch()::fetch));
             add(e, RuleAdd.request(rule, source, addDefaults(), categoryFolder));
         } catch (EngineException ex) {
             throw new IOException(ex.getMessage() == null ? ex.toString() : ex.getMessage(), ex);
@@ -1175,6 +1184,20 @@ public final class Session {
             }
             case URL -> new AddRequest.TorrentFile(new TorrentFetch().fetch(URI.create(text)), text);
         };
+    }
+
+    /**
+     * A source as an add takes it: an updatable address that came as a magnet (a watch folder's
+     * {@code .magnet} line, an RSS article's link) looked up for its current version, as {@link
+     * #resolve(String)} does for typed input; any other source as it is. Blocks for the lookup.
+     */
+    public AddRequest.Source resolve(AddRequest.Source source) throws EngineException, IOException {
+        if (source instanceof AddRequest.Magnet m) {
+            java.util.Optional<MutableSource> updatable =
+                    MutableSource.parse(m.uri().trim());
+            if (updatable.isPresent()) return resolveUpdatable(updatable.get());
+        }
+        return source;
     }
 
     // ---- updatable torrents (BEP 46) -------------------------------------------------------------
