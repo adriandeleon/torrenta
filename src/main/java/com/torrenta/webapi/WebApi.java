@@ -54,6 +54,17 @@ public final class WebApi {
         /** Where a torrent added without a save path goes. */
         Path defaultSavePath();
 
+        /**
+         * The alternative speed pair is in force now: the session's decision (the switch, the
+         * schedule, the battery, the network's cost). A backend without a session answers from the
+         * settings: the switch, or the schedule.
+         */
+        default boolean alternativeInForce() {
+            com.torrenta.engine.EngineSettings.Speed speed =
+                    settings().engineSettings().speed();
+            return speed.alternativeOn() || speed.scheduleActive(java.time.LocalDateTime.now());
+        }
+
         /** The torrents now, the last poll's; empty while no engine is up. */
         List<Torrent> torrents();
 

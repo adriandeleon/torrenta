@@ -58,6 +58,10 @@ final class Headless {
                 settings, configDir, labels, watchStore, rssStore, Runnable::run, new Host(settings, out, failed));
         session.setEngineFactory(profile -> Startup.createEngine(profile, settings, configDir));
         session.setInputHandler(text -> Thread.ofVirtual().name("headless-add").start(() -> add(session, text, out)));
+        // The battery and the network's cost: a server on a laptop slows down or pauses as told.
+        Thread.ofVirtual()
+                .name("conditions")
+                .start(() -> session.setConditions(com.torrenta.os.SystemConditions.create()));
         // Remote access, as Settings → Remote access left it: a server is where the *arr apps live.
         WebApiService webApi =
                 new WebApiService(new SessionBackend(session, settings, labels), System::currentTimeMillis);
@@ -152,7 +156,10 @@ final class Headless {
         }
 
         @Override
-        public void limitsRefreshed(boolean on) {
+        public void limitsRefreshed(
+                boolean on,
+                com.torrenta.session.SpeedMode.Reason reason,
+                com.torrenta.session.SpeedMode.Reason paused) {
             Boolean was = alternative.getAndSet(on);
             if (was != null && was != on)
                 out.say(EngineEvent.Level.INFO, on ? tr("status.altSpeedLimitsOn") : tr("status.altSpeedLimitsOff"));

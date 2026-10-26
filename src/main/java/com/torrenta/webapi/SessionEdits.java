@@ -1,7 +1,6 @@
 package com.torrenta.webapi;
 
 import java.io.IOException;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -63,10 +62,10 @@ final class SessionEdits {
     }
 
     private boolean alternative() {
-        return backend.settings().engineSettings().speed().alternativeActive(LocalDateTime.now());
+        return backend.alternativeInForce();
     }
 
-    /** {@code 1} while the alternative pair is in force, by hand or by schedule; {@code 0} else. */
+    /** {@code 1} while the alternative pair is in force, by hand, schedule or condition; {@code 0} else. */
     Response speedLimitsMode(Request request) {
         return Response.text(200, alternative() ? "1" : "0");
     }
@@ -88,12 +87,12 @@ final class SessionEdits {
     /** The limit in force, bytes per second, 0 for none. */
     Response downloadLimit(Request request) {
         EngineSettings.Speed s = backend.settings().engineSettings().speed();
-        return Response.text(200, String.valueOf(s.effectiveDownloadBytes(LocalDateTime.now())));
+        return Response.text(200, String.valueOf(s.downloadBytes(alternative())));
     }
 
     Response uploadLimit(Request request) {
         EngineSettings.Speed s = backend.settings().engineSettings().speed();
-        return Response.text(200, String.valueOf(s.effectiveUploadBytes(LocalDateTime.now())));
+        return Response.text(200, String.valueOf(s.uploadBytes(alternative())));
     }
 
     /** Sets the limit of the pair in force, as qBittorrent does; bytes onto KiB, rounded up. */

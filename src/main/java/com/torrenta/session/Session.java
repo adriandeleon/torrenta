@@ -49,6 +49,7 @@ import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.engine.WatchFolders;
 import com.torrenta.net.TorrentFetch;
+import com.torrenta.os.Conditions;
 import com.torrenta.rss.Article;
 import com.torrenta.rss.FeedFetcher;
 import com.torrenta.rss.RssService;
@@ -116,8 +117,12 @@ public final class Session {
          */
         void seedingDone(EngineEvent event, Torrent torrent, boolean removed);
 
-        /** The speed schedule was looked at: whether the alternative pair is in force now. */
-        void limitsRefreshed(boolean alternative);
+        /**
+         * The speed pair was decided: whether the alternative one is in force, why ({@link
+         * SpeedMode.Reason#NONE} when it is not), and why the torrents are held paused ({@code
+         * NONE} when they are not).
+         */
+        void limitsRefreshed(boolean alternative, SpeedMode.Reason reason, SpeedMode.Reason paused);
 
         /** Something failed that a person should hear of. */
         void problem(EngineEvent event);
@@ -183,6 +188,9 @@ public final class Session {
 
     private final List<Consumer<Poll>> listeners = new CopyOnWriteArrayList<>();
     private volatile Engine engine;
+    /** The battery and the network's cost; none until the owner gives the machine's. */
+    private volatile Conditions.Source conditions = Conditions.Source.NONE;
+
     private volatile ScheduledExecutorService poller;
     private volatile ShareLimit globalShareLimit = ShareLimit.NONE;
     private volatile Map<String, ShareLimit> shareOverrides = Map.of();
@@ -354,6 +362,7 @@ public final class Session {
     public void close() {
         stop();
         rss.stop();
+        closeConditions();
     }
 
     /** Hears every poll, on the poll thread, after the share limits have been applied. */
@@ -460,17 +469,118 @@ public final class Session {
     }
 
     /**
-     * Any thread (the poll's, once a minute, and after a settings change): the schedule decides
-     * which pair of speed limits is in force, and the owner hears which.
+     * Where the battery and the network's cost are read from (the machine's, from the owner; a
+     * fixed one in a test). A change it reports is looked at at once, on the poll thread, rather
+     * than at the next minute.
+     */
+    public void setConditions(Conditions.Source source) {
+        Conditions.Source old = conditions;
+        conditions = source;
+        source.onChange(() -> execute(this::refreshLimits));
+        if (old != source) old.close();
+        execute(this::refreshLimits);
+    }
+
+    /** Closes the conditions' source (the system bus, on Linux). */
+    private void closeConditions() {
+        conditions.close();
+        conditions = Conditions.Source.NONE;
+    }
+
+    /**
+     * Any thread (the poll's, once a minute, after a settings change and when a condition
+     * changes): which pair of speed limits is in force ({@link SpeedMode}: the person's switch,
+     * flipped to the schedule's, the battery's or the network's decision when that changes), and
+     * whether a condition holds the torrents paused ({@link ConditionPause}); the engine is told
+     * and the owner hears. An engine whose daemon keeps its own schedule decides the pair itself.
      */
     public void refreshLimits() {
         Engine e = engine;
         if (e == null) return;
+        // A lock of its own: start() and stop() hold the session's, and stop() waits for the poll
+        // thread, which may be in here.
+        synchronized (limitsLock) {
+            decideLimits(e);
+        }
+    }
+
+    /** One decision at a time: the minute's, a setting's and a condition's can come together. */
+    private final Object limitsLock = new Object();
+
+    private volatile boolean alternativeInForce;
+
+    /** The alternative speed pair is in force, as last decided; the web API's answer. */
+    public boolean alternativeInForce() {
+        return alternativeInForce;
+    }
+
+    private void decideLimits(Engine e) {
         try {
-            host.limitsRefreshed(e.refreshLimits(LocalDateTime.now()));
+            EngineSettings.Speed speed = settings.engineSettings().speed();
+            boolean altOn = speed.alternativeOn();
+            SpeedMode.Auto auto = SpeedMode.Auto.NOTHING;
+            if (e.capabilities().has(Engine.Capability.SPEED_CONDITIONS)) {
+                auto = SpeedMode.auto(
+                        speed,
+                        LocalDateTime.now(),
+                        conditions.read(),
+                        SpeedMode.Rule.byName(settings.get(Settings.SPEED_ON_BATTERY, "")),
+                        SpeedMode.Rule.byName(settings.get(Settings.SPEED_ON_METERED, "")));
+                SpeedMode.Step step = SpeedMode.next(altOn, settings.get(Settings.SPEED_AUTO_WAS, ""), auto);
+                if (!step.autoWas().equals(settings.get(Settings.SPEED_AUTO_WAS, "")) || step.altOn() != altOn) {
+                    settings.set(Settings.SPEED_AUTO_WAS, step.autoWas());
+                    settings.set(Settings.SPEED_ALT_ON, String.valueOf(step.altOn()));
+                    settings.saveQuietly();
+                }
+                if (step.changed()) {
+                    tellEvent(EngineEvent.session(
+                            EngineEvent.Level.INFO,
+                            step.altOn()
+                                    ? tr(
+                                            "speed.event.alternative",
+                                            auto.reason().pill())
+                                    : tr("speed.event.normal")));
+                }
+                altOn = step.altOn();
+                holdPaused(e, auto);
+            }
+            boolean inForce = e.refreshLimits(altOn);
+            alternativeInForce = inForce;
+            host.limitsRefreshed(inForce, SpeedMode.shown(inForce, auto), auto.pauseReason());
         } catch (EngineException ex) {
             tellProblem(EngineEvent.session(EngineEvent.Level.ERROR, ex.getMessage()));
         }
+    }
+
+    /**
+     * A condition's pause: the running torrents paused when it starts, exactly those resumed when
+     * it ends. What is held, and that it is, are kept in the settings (this machine's only), so a
+     * restart in between resumes them still.
+     */
+    private void holdPaused(Engine e, SpeedMode.Auto auto) throws EngineException {
+        boolean before = Boolean.parseBoolean(settings.get(Settings.SPEED_CONDITION_PAUSING, "false"));
+        Set<String> held = new java.util.LinkedHashSet<>();
+        for (String id : settings.get(Settings.SPEED_CONDITION_HELD, "").split(","))
+            if (!id.isBlank()) held.add(id.trim());
+        ConditionPause.Step step = ConditionPause.next(auto.pause(), before, e.torrents(), held);
+        for (String id : step.pause()) e.pause(id);
+        for (String id : step.resume()) e.resume(id);
+        if (before != auto.pause() || !step.held().equals(held)) {
+            settings.set(Settings.SPEED_CONDITION_PAUSING, String.valueOf(auto.pause()));
+            settings.set(Settings.SPEED_CONDITION_HELD, String.join(",", step.held()));
+            settings.saveQuietly();
+        }
+        if (!step.pause().isEmpty())
+            tellEvent(EngineEvent.session(
+                    EngineEvent.Level.INFO,
+                    tr(
+                            "speed.event.paused",
+                            step.pause().size(),
+                            auto.pauseReason().pill())));
+        if (!step.resume().isEmpty())
+            tellEvent(EngineEvent.session(
+                    EngineEvent.Level.INFO,
+                    tr("speed.event.resumed", step.resume().size())));
     }
 
     /**

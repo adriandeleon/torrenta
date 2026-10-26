@@ -578,6 +578,8 @@ class SessionTest {
 
         final List<EngineEvent> seedingDone = new CopyOnWriteArrayList<>();
         final List<Boolean> limits = new CopyOnWriteArrayList<>();
+        final List<SpeedMode.Reason> reasons = new CopyOnWriteArrayList<>();
+        final List<SpeedMode.Reason> pauses = new CopyOnWriteArrayList<>();
 
         @Override
         public void seedingDone(EngineEvent event, Torrent torrent, boolean removed) {
@@ -585,8 +587,10 @@ class SessionTest {
         }
 
         @Override
-        public void limitsRefreshed(boolean alternative) {
+        public void limitsRefreshed(boolean alternative, SpeedMode.Reason reason, SpeedMode.Reason paused) {
             limits.add(alternative);
+            reasons.add(reason);
+            pauses.add(paused);
         }
 
         @Override
@@ -597,6 +601,84 @@ class SessionTest {
 
     private interface Pauser {
         void pause(String id);
+    }
+
+    /**
+     * The whole loop on a fake machine: unplugged, the alternative pair and the pill's reason; a
+     * person's flip holds while it stays unplugged; plugged in, normal; on a metered network with
+     * the pause rule, the running torrent is paused and held, and resumed when it is no longer.
+     */
+    @Test
+    void theBatteryAndTheNetworksCostDecideThePairAndThePause(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        settings.set(Settings.SPEED_ON_BATTERY, "ALTERNATIVE");
+        settings.set(Settings.SPEED_ON_METERED, "PAUSE");
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        List<Boolean> asked = new CopyOnWriteArrayList<>();
+        List<String> calls = new CopyOnWriteArrayList<>();
+        java.util.concurrent.atomic.AtomicBoolean runPaused = new java.util.concurrent.atomic.AtomicBoolean();
+        Engine engine = (Engine) Proxy.newProxyInstance(
+                Engine.class.getClassLoader(),
+                new Class<?>[] {Engine.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "torrents" -> List.of(seed("run", 0, runPaused.get()));
+                    case "rates" -> Engine.Rates.ZERO;
+                    case "capabilities" -> Engine.Capabilities.ALL;
+                    case "refreshLimits" -> {
+                        asked.add((Boolean) args[0]);
+                        yield args[0];
+                    }
+                    case "pause", "resume" -> {
+                        calls.add(method.getName() + " " + args[0]);
+                        runPaused.set(method.getName().equals("pause"));
+                        yield null;
+                    }
+                    case "setIpFilter", "start", "stop", "addListener" -> null;
+                    case "toString" -> "conditions engine";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        java.util.concurrent.atomic.AtomicReference<com.torrenta.os.Conditions> now =
+                new java.util.concurrent.atomic.AtomicReference<>(com.torrenta.os.Conditions.NORMAL);
+        session.setConditions(now::get);
+        session.start(engine);
+        try {
+            now.set(new com.torrenta.os.Conditions(true, false));
+            session.refreshLimits();
+            assertEquals(true, asked.getLast(), "unplugged: the alternative pair");
+            assertEquals(SpeedMode.Reason.ON_BATTERY, host.reasons.getLast());
+            assertTrue(settings.engineSettings().speed().alternativeOn(), "the one switch, flipped");
+
+            settings.set(Settings.SPEED_ALT_ON, "false");
+            session.refreshLimits();
+            assertEquals(false, asked.getLast(), "a person's flip holds while it stays unplugged");
+            assertEquals(SpeedMode.Reason.NONE, host.reasons.getLast());
+
+            now.set(com.torrenta.os.Conditions.NORMAL);
+            session.refreshLimits();
+            now.set(new com.torrenta.os.Conditions(true, false));
+            session.refreshLimits();
+            assertEquals(true, asked.getLast(), "unplugged again: a change, so the pair again");
+
+            now.set(new com.torrenta.os.Conditions(false, true));
+            session.refreshLimits();
+            assertEquals(false, asked.getLast(), "plugged in");
+            assertEquals(List.of("pause run"), calls, "metered, with the pause rule");
+            assertEquals(SpeedMode.Reason.METERED, host.pauses.getLast());
+            assertEquals("run", settings.get(Settings.SPEED_CONDITION_HELD, ""), "held, and kept so");
+            session.refreshLimits();
+            assertEquals(List.of("pause run"), calls, "paused once, not again");
+
+            now.set(com.torrenta.os.Conditions.NORMAL);
+            session.refreshLimits();
+            assertEquals(List.of("pause run", "resume run"), calls);
+            assertEquals(SpeedMode.Reason.NONE, host.pauses.getLast());
+            assertEquals("", settings.get(Settings.SPEED_CONDITION_HELD, ""));
+        } finally {
+            session.stop();
+        }
     }
 
     /** The few calls a session makes, answered; anything else is a test that needs more. */

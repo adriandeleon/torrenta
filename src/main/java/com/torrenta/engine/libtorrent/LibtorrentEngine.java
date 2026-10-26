@@ -213,6 +213,11 @@ public final class LibtorrentEngine implements Engine {
 
     /** The connection settings in force; the session starts with them and takes changes live. */
     private volatile EngineSettings engineSettings;
+    /**
+     * The pair the session last said is in force ({@link #refreshLimits}), which the pack is built
+     * with; the person's switch until the session first says.
+     */
+    private volatile boolean alternativeInForce;
     /** Kept by the alert thread from listen, port-map, incoming-connection and DHT alerts. */
     private final AtomicReference<Connectivity> connectivity = new AtomicReference<>(Connectivity.NONE);
     /**
@@ -328,6 +333,7 @@ public final class LibtorrentEngine implements Engine {
         this.downloadDir = downloadDir;
         this.store = store;
         this.engineSettings = settings;
+        this.alternativeInForce = settings.speed().alternativeOn();
         this.statsStore = stats;
     }
 
@@ -349,7 +355,7 @@ public final class LibtorrentEngine implements Engine {
             // listen_failed posted then was lost to a listener added afterwards (a seeder that
             // never listened, with neither answer recorded).
             s.addListener(new Listener());
-            s.start(new SessionParams(toPack(engineSettings)));
+            s.start(new SessionParams(toPack(engineSettings, alternativeInForce)));
         } catch (LinkageError e) {
             // The JNI static initialiser wraps a failed System.load in a LinkageError whose own
             // message is a pointer to the project page; the cause says what actually went wrong.
@@ -2280,7 +2286,7 @@ public final class LibtorrentEngine implements Engine {
         connectivity.updateAndGet(c -> c.dht(settings.protocol().dht()));
         SessionManager s = session;
         if (s == null || !s.isRunning()) return;
-        s.applySettings(toPack(settings));
+        s.applySettings(toPack(settings, alternativeInForce));
         // PEX is a per-torrent flag and default trackers are per-torrent lists: carried to what is
         // already in the session, so a change does not wait for the next add.
         for (TorrentHandle handle : handles(s)) {
@@ -2307,7 +2313,7 @@ public final class LibtorrentEngine implements Engine {
     public synchronized void rebind() throws EngineException {
         SessionManager s = session;
         if (s == null || !s.isRunning()) return;
-        s.applySettings(toPack(engineSettings));
+        s.applySettings(toPack(engineSettings, alternativeInForce));
         s.swig().reopen_network_sockets();
     }
 
@@ -2316,8 +2322,11 @@ public final class LibtorrentEngine implements Engine {
         return running().settings().connectionsLimit();
     }
 
-    /** {@link EngineSettings} onto libtorrent's pack. Enum constants are SWIG objects: after load only. */
-    private static SettingsPack toPack(EngineSettings s) {
+    /**
+     * {@link EngineSettings} onto libtorrent's pack, with the speed pair the session last said is in
+     * force. Enum constants are SWIG objects: after load only.
+     */
+    private static SettingsPack toPack(EngineSettings s, boolean alternativeInForce) {
         SettingsPack pack = new SettingsPack();
         pack.listenInterfaces(s.listenInterfaces());
         // Dialled peers too, not only the listening sockets: empty, they follow the system's route.
@@ -2382,9 +2391,8 @@ public final class LibtorrentEngine implements Engine {
         pack.setInteger(settings_pack.int_types.allowed_enc_level.swigValue(), level.swigValue());
 
         EngineSettings.Speed speed = s.speed();
-        java.time.LocalDateTime now = java.time.LocalDateTime.now();
-        pack.downloadRateLimit(speed.effectiveDownloadBytes(now));
-        pack.uploadRateLimit(speed.effectiveUploadBytes(now));
+        pack.downloadRateLimit(speed.downloadBytes(alternativeInForce));
+        pack.uploadRateLimit(speed.uploadBytes(alternativeInForce));
         pack.setBoolean(settings_pack.bool_types.rate_limit_ip_overhead.swigValue(), speed.countOverhead());
 
         // The queue: 0 is "no limit" to a person and -1 to libtorrent, where 0 would park everything.
@@ -2416,13 +2424,13 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public synchronized boolean refreshLimits(java.time.LocalDateTime now) throws EngineException {
+    public synchronized boolean refreshLimits(boolean alternative) throws EngineException {
+        alternativeInForce = alternative;
         SessionManager s = session;
         EngineSettings.Speed speed = engineSettings.speed();
-        boolean alternative = speed.alternativeActive(now);
         if (s == null || !s.isRunning()) return alternative;
-        int down = speed.effectiveDownloadBytes(now);
-        int up = speed.effectiveUploadBytes(now);
+        int down = speed.downloadBytes(alternative);
+        int up = speed.uploadBytes(alternative);
         SettingsPack current = s.settings();
         if (current.downloadRateLimit() != down || current.uploadRateLimit() != up) {
             SettingsPack pack = new SettingsPack();

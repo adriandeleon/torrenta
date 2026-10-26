@@ -1302,7 +1302,7 @@ public final class TransmissionEngine implements Engine {
     }
 
     @Override
-    public boolean refreshLimits(java.time.LocalDateTime now) throws EngineException {
+    public boolean refreshLimits(boolean alternative) throws EngineException {
         checkRunning();
         // The schedule is the daemon's own once pushed; it flips alt-speed-enabled itself.
         Map<String, Object> session = rpc.call("session-get", Map.of("fields", List.of("alt-speed-enabled")));

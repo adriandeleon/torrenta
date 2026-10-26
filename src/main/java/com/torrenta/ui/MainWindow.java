@@ -434,6 +434,10 @@ public final class MainWindow {
         session.addListener(this::polled);
         // What arrived before an engine was up, once one is; after engineReady on the FX thread.
         session.setInputHandler(text -> Platform.runLater(() -> addInput(text)));
+        // The battery and the network's cost, off the FX thread: on Linux it is the system bus.
+        Thread.ofVirtual()
+                .name("conditions")
+                .start(() -> session.setConditions(com.torrenta.os.SystemConditions.create()));
         this.rss = session.rss();
         SessionBackend remote = new SessionBackend(session, settings, labels);
         // A client changed the settings (setPreferences, the speed mode): the pages show what is now true.
@@ -1721,9 +1725,16 @@ public final class MainWindow {
         }
 
         @Override
-        public void limitsRefreshed(boolean alternative) {
+        public void limitsRefreshed(
+                boolean alternative,
+                com.torrenta.session.SpeedMode.Reason reason,
+                com.torrenta.session.SpeedMode.Reason paused) {
             Platform.runLater(() -> {
-                altSpeedToggle.setText(alternative ? tr("status.altSpeed.on") : tr("status.altSpeed.off"));
+                // Why, in the pill: "Alt speed: on battery"; a condition's pause says so first.
+                altSpeedToggle.setText(
+                        paused != com.torrenta.session.SpeedMode.Reason.NONE
+                                ? tr("status.heldPaused", paused.pill())
+                                : tr("status.altSpeed", reason.pill()));
                 altSpeedToggle.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("active"), alternative);
                 altSpeedOn = alternative;
                 if (altSpeedItem != null) altSpeedItem.setSelected(alternative);
@@ -5799,7 +5810,7 @@ public final class MainWindow {
         });
         // The alternative-speed toggle: a click flips the manual switch; the schedule shows too.
         altSpeedToggle.getStyleClass().add("alt-speed");
-        altSpeedToggle.setText(tr("status.altSpeed.off"));
+        altSpeedToggle.setText(tr("status.altSpeed", com.torrenta.session.SpeedMode.Reason.NONE.pill()));
         altSpeedToggle.setOnMouseClicked(e -> toggleAlternativeSpeed());
         // The status text is the door to its own history: a click shows what scrolled past.
         status.getStyleClass().add("status-message");

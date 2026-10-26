@@ -1,6 +1,5 @@
 package com.torrenta.engine.direct;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -77,7 +76,7 @@ public final class WithDownloads implements Engine {
     public void start() throws EngineException {
         torrents.start();
         links.onTorrentFile(this::handOver);
-        shareLimit(LocalDateTime.now());
+        shareLimit();
         links.start();
     }
 
@@ -366,7 +365,7 @@ public final class WithDownloads implements Engine {
     public void applySettings(EngineSettings settings) throws EngineException {
         this.settings = settings;
         links.setProxy(proxyOf(settings));
-        shareLimit(LocalDateTime.now());
+        shareLimit();
         torrents.applySettings(settings);
     }
 
@@ -375,14 +374,18 @@ public final class WithDownloads implements Engine {
      * shared among them: the normal pair's, or the alternative one's while it is in force.
      */
     @Override
-    public boolean refreshLimits(LocalDateTime now) throws EngineException {
-        shareLimit(now);
-        return torrents.refreshLimits(now);
+    public boolean refreshLimits(boolean alternative) throws EngineException {
+        this.alternative = alternative;
+        shareLimit();
+        return torrents.refreshLimits(alternative);
     }
 
-    private void shareLimit(LocalDateTime now) {
+    /** The pair the session last said is in force, for the links' share of it. */
+    private volatile boolean alternative;
+
+    private void shareLimit() {
         EngineSettings s = settings;
-        links.setGlobalLimit(s == null ? 0 : s.speed().effectiveDownloadBytes(now));
+        links.setGlobalLimit(s == null ? 0 : s.speed().downloadBytes(alternative));
     }
 
     @Override
