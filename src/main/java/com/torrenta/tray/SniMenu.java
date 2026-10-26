@@ -11,6 +11,7 @@ import org.freedesktop.dbus.interfaces.Properties;
 import org.freedesktop.dbus.messages.DBusSignal;
 import org.freedesktop.dbus.types.UInt32;
 import org.freedesktop.dbus.types.Variant;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -133,7 +134,7 @@ public interface SniMenu extends DBusInterface {
 
         @SuppressWarnings("unchecked")
         @Override
-        public <A> A Get(String interfaceName, String propertyName) {
+        public <A> @Nullable A Get(String interfaceName, String propertyName) {
             return (A) GetAll(interfaceName).get(propertyName);
         }
 

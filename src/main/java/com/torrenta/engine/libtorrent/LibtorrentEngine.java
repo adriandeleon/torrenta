@@ -9,6 +9,7 @@ import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -51,6 +52,7 @@ import com.torrenta.engine.TrackerHost;
 import com.torrenta.engine.WebSeeds;
 import com.torrenta.store.StatsStore;
 import com.torrenta.store.TorrentStore;
+import org.jspecify.annotations.Nullable;
 import org.libtorrent4j.AddTorrentParams;
 import org.libtorrent4j.Address;
 import org.libtorrent4j.AlertListener;
@@ -206,12 +208,12 @@ public final class LibtorrentEngine implements Engine {
 
     private volatile long startedAtMs;
     /** The {@link Counter}s' indices into a stats alert, resolved once the native is loaded; null before start. */
-    private volatile int[] counterIndex;
+    private volatile int @Nullable [] counterIndex;
     /** The last stats alert's values, one per {@link Counter}, in its order; written on the alert thread. */
     private volatile long[] counters = new long[Counter.values().length];
 
-    private SessionManager session;
-    private ScheduledExecutorService flusher;
+    private @Nullable SessionManager session;
+    private @Nullable ScheduledExecutorService flusher;
 
     /** The connection settings in force; the session starts with them and takes changes live. */
     private volatile EngineSettings engineSettings;
@@ -532,7 +534,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     /** {@code from}: an ended fetch whose peers the torrent starts with, if it is the same one. */
-    private Torrent add(AddRequest request, Fetch from) throws EngineException {
+    private Torrent add(AddRequest request, @Nullable Fetch from) throws EngineException {
         SessionManager s = running();
         AddTorrentParams params;
         TorrentInfo info = null;
@@ -919,7 +921,7 @@ public final class LibtorrentEngine implements Engine {
      * The session's peer connections as they start and end, for a loopback test that fails to
      * say why it never got a peer: off (null) unless a test asks, and only the last few kept.
      */
-    private volatile java.util.Deque<String> peerLog;
+    private volatile java.util.@Nullable Deque<String> peerLog;
 
     private static final int PEER_LOG_LINES = 40;
 
@@ -983,14 +985,15 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public synchronized void setFollowing(String id, com.torrenta.engine.Following following) throws EngineException {
+    public synchronized void setFollowing(String id, com.torrenta.engine.@Nullable Following following)
+            throws EngineException {
         writeLabels(id, labelsOf(id).withFollowing(following));
     }
 
     /** A DHT get of an updatable address in flight: the best answer so far, and whether it is final. */
     private static final class MutableLookup {
         volatile long seq = -1;
-        volatile byte[] value;
+        volatile byte @Nullable [] value;
         final java.util.concurrent.CompletableFuture<Void> done = new java.util.concurrent.CompletableFuture<>();
     }
 
@@ -1297,7 +1300,18 @@ public final class LibtorrentEngine implements Engine {
                 problem = e.getMessage();
             }
         }
-        return new CreatedTorrent(bytes, id, name, v1, v2, pieces, pieceLength, size, magnet, seeding, problem);
+        return new CreatedTorrent(
+                bytes,
+                id,
+                name,
+                v1,
+                v2,
+                pieces,
+                pieceLength,
+                size,
+                magnet,
+                seeding,
+                Objects.requireNonNullElse(problem, ""));
     }
 
     /** Every file under the path is in: libtorrent's listing asks about each. */
@@ -1383,7 +1397,7 @@ public final class LibtorrentEngine implements Engine {
     }
 
     /** A probe's folder: empty, since upload mode writes nothing; anything else is left alone. */
-    private static void deleteQuietly(Path dir) {
+    private static void deleteQuietly(@Nullable Path dir) {
         if (dir == null) return;
         try {
             Files.deleteIfExists(dir);
@@ -1399,9 +1413,9 @@ public final class LibtorrentEngine implements Engine {
     private final class Fetch implements SwarmProbe {
         private final String id;
         /** The link a magnet's probe fetches from; null for a {@code .torrent}'s. */
-        private final String magnet;
+        private final @Nullable String magnet;
         /** Its own empty save path; null for a probe that never joined. */
-        private final Path probeDir;
+        private final @Nullable Path probeDir;
         /** A private torrent is looked at too ({@link Engine#probe}). */
         private final boolean privateToo;
 
@@ -1440,7 +1454,7 @@ public final class LibtorrentEngine implements Engine {
             if (dialled.size() < MAX_HANDED_OVER) dialled.add(peer);
         }
 
-        Fetch(String id, String magnet, Path probeDir, boolean privateToo) {
+        Fetch(String id, @Nullable String magnet, @Nullable Path probeDir, boolean privateToo) {
             this.id = id;
             this.magnet = magnet;
             this.probeDir = probeDir;
@@ -1572,7 +1586,9 @@ public final class LibtorrentEngine implements Engine {
             try {
                 TorrentInfo info = handle.torrentFile();
                 isPrivate = info.isPrivate();
-                AddTorrentParams params = AddTorrentParams.parseMagnetUri(magnet);
+                // Only a magnet's probe waits for its file list; a .torrent's has it.
+                AddTorrentParams params =
+                        AddTorrentParams.parseMagnetUri(Objects.requireNonNull(magnet, "a probe without a link"));
                 params.setTorrentInfo(info);
                 // A v2 torrent's piece layers come from peers as it downloads; the file would
                 // otherwise not be written at all.
@@ -1592,7 +1608,7 @@ public final class LibtorrentEngine implements Engine {
         }
 
         /** This fetch's torrent in the session, as a handle Java owns; null once it has left. */
-        private TorrentHandle handle(SessionManager s) {
+        private @Nullable TorrentHandle handle(SessionManager s) {
             session_handle sh = s.swig();
             torrent_handle_vector vector = sh.get_torrents();
             try {
@@ -1611,7 +1627,7 @@ public final class LibtorrentEngine implements Engine {
          * Out of the session first, then out of the map, so no snapshot sees it in between. The
          * future completes here unless the metadata completed it already.
          */
-        synchronized void end(byte[] bytes, Throwable failure) {
+        synchronized void end(byte @Nullable [] bytes, @Nullable Throwable failure) {
             if (ended) return;
             ended = true;
             SessionManager s = session;
@@ -1627,7 +1643,7 @@ public final class LibtorrentEngine implements Engine {
             fetches.remove(id, this);
             found = List.copyOf(dialled);
             if (bytes != null) torrent.complete(bytes);
-            else torrent.completeExceptionally(failure);
+            else torrent.completeExceptionally(Objects.requireNonNull(failure, "ended with neither"));
             deleteQuietly(probeDir);
         }
     }
@@ -1764,8 +1780,8 @@ public final class LibtorrentEngine implements Engine {
         byte[] storageBytes;
         try {
             resume = store.load(id).orElseThrow(() -> new EngineException(tr("engine.error.noUndoData", name)));
-            labelBytes = store.loadLabels(id).orElse(null);
-            storageBytes = store.loadStorage(id).orElse(null);
+            labelBytes = store.loadLabels(id).orElse(new byte[0]);
+            storageBytes = store.loadStorage(id).orElse(new byte[0]);
         } catch (IOException e) {
             throw new EngineException(tr("engine.error.noUndoData", name), e);
         }
@@ -1906,7 +1922,8 @@ public final class LibtorrentEngine implements Engine {
             TorrentStorage next = owed.withRenamed(changes, originals);
             // Recorded first: the rename alerts, and a restart, read the names from the record.
             writeStorage(id, next);
-            changes.forEach((index, renamed) -> h.renameFile(index, next.onDisk(index, originals.get(index))));
+            changes.forEach((index, renamed) -> h.renameFile(
+                    index, next.onDisk(index, Objects.requireNonNull(originals.get(index), "a file the plan named"))));
             String shown = displayName(id, status.name());
             emit(EngineEvent.info(id, shown, tr("engine.event.pathRenamed", shown, path, name.strip())));
         } finally {
@@ -2956,14 +2973,15 @@ public final class LibtorrentEngine implements Engine {
 
     @Override
     public synchronized void stop() {
-        if (session == null) return;
+        SessionManager s = session;
+        if (s == null) return;
         if (flusher != null) flusher.shutdownNow();
         saveStats();
         for (Fetch fetch : List.copyOf(fetches.values()))
             fetch.end(null, new EngineException(tr("engine.error.stopped")));
         // Flush with the disk cache, then wait for the alerts, bounded: libtorrent answers every
         // request (success or "not modified"), but a wedged disk must not hold the quit.
-        for (TorrentHandle handle : handles(session)) requestSave(handle, true, true);
+        for (TorrentHandle handle : handles(s)) requestSave(handle, true, true);
         long deadline = System.currentTimeMillis() + STOP_FLUSH_TIMEOUT_MS;
         while (pendingSaves.get() > 0 && System.currentTimeMillis() < deadline) {
             try {
@@ -2979,7 +2997,7 @@ public final class LibtorrentEngine implements Engine {
         java.util.Set<String> streamed = new java.util.HashSet<>(pieceWaits.keySet());
         streamed.addAll(pieceReads.keySet());
         for (String id : streamed) failWaits(id, tr("engine.error.stopped"));
-        session.stop();
+        s.stop();
         session = null;
         connectivity.set(Connectivity.NONE);
         emit(EngineEvent.session(EngineEvent.Level.INFO, tr("engine.event.stopped")));
@@ -3025,7 +3043,7 @@ public final class LibtorrentEngine implements Engine {
         }
     }
 
-    private static TorrentHandle find(SessionManager s, String id) {
+    private static @Nullable TorrentHandle find(SessionManager s, String id) {
         session_handle session = s.swig();
         torrent_handle_vector vector = session.get_torrents();
         try {
@@ -3045,7 +3063,7 @@ public final class LibtorrentEngine implements Engine {
      * The fetch a handle belongs to, if any, by either hash: a v1 magnet of a hybrid torrent has a
      * new best hash (the v2 one) once its metadata is in, and is still the same fetch.
      */
-    private Fetch fetchOf(torrent_handle raw) {
+    private @Nullable Fetch fetchOf(torrent_handle raw) {
         if (fetches.isEmpty()) return null;
         info_hash_t hashes = raw.info_hashes();
         try {

@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import com.torrenta.net.InterfaceWatch;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -28,7 +29,7 @@ public record WebApiConfig(
         int port,
         String username,
         String passwordHash,
-        Path httpsFile,
+        @Nullable Path httpsFile,
         String httpsPassword,
         Set<String> domains) {
 
@@ -77,7 +78,7 @@ public record WebApiConfig(
     }
 
     /** Whether going from {@code before} to this needs a new listening socket. */
-    boolean rebinds(WebApiConfig before) {
+    boolean rebinds(@Nullable WebApiConfig before) {
         return before == null
                 || !address.equals(before.address)
                 || port != before.port
@@ -86,7 +87,7 @@ public record WebApiConfig(
     }
 
     /** Whether the people who may log in changed, so those logged in are logged out. */
-    boolean credentialsChanged(WebApiConfig before) {
+    boolean credentialsChanged(@Nullable WebApiConfig before) {
         return before == null || !username.equals(before.username) || !passwordHash.equals(before.passwordHash);
     }
 

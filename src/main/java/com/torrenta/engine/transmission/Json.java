@@ -12,6 +12,7 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A small JSON tree over jackson-core's streaming API, which is the only JSON library here.
@@ -28,7 +29,7 @@ final class Json {
     private Json() {}
 
     /** Parses one document; anything that is not JSON is an {@link IOException}. */
-    static Object parse(InputStream in) throws IOException {
+    static @Nullable Object parse(InputStream in) throws IOException {
         try (JsonParser p = FACTORY.createParser(in)) {
             if (p.nextToken() == null) throw new IOException("empty answer");
             Object value = read(p);
@@ -38,7 +39,7 @@ final class Json {
         }
     }
 
-    static Object parse(String text) throws IOException {
+    static @Nullable Object parse(@Nullable String text) throws IOException {
         try (JsonParser p = FACTORY.createParser(text == null ? "" : text)) {
             if (p.nextToken() == null) throw new IOException("empty answer");
             return read(p);
@@ -47,7 +48,7 @@ final class Json {
         }
     }
 
-    private static Object read(JsonParser p) throws IOException {
+    private static @Nullable Object read(JsonParser p) throws IOException {
         JsonToken t = p.currentToken();
         if (t == null) throw new IOException("the document is cut short");
         switch (t) {
@@ -135,7 +136,7 @@ final class Json {
 
     /** The value as an object, or an empty one. */
     @SuppressWarnings("unchecked")
-    static Map<String, Object> obj(Object value) {
+    static Map<String, Object> obj(@Nullable Object value) {
         return value instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
     }
 
@@ -145,7 +146,7 @@ final class Json {
 
     /** The value as a list, or an empty one. */
     @SuppressWarnings("unchecked")
-    static List<Object> list(Object value) {
+    static List<Object> list(@Nullable Object value) {
         return value instanceof List<?> l ? (List<Object>) l : List.of();
     }
 

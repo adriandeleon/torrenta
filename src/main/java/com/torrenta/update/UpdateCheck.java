@@ -5,6 +5,7 @@ import java.io.IOException;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The decisions behind an update check, separated from the network so they can be tested.
@@ -32,7 +33,7 @@ public final class UpdateCheck {
      * own {@code name} and {@code url} keys, so depth is tracked rather than scanning for the first
      * match.
      */
-    public static ReleaseInfo parseLatest(String json) {
+    public static @Nullable ReleaseInfo parseLatest(@Nullable String json) {
         if (json == null || json.isBlank()) return null;
         String tag = null;
         String url = null;
@@ -155,7 +156,7 @@ public final class UpdateCheck {
         return a.compareTo(b);
     }
 
-    private static Integer numeric(String segment) {
+    private static @Nullable Integer numeric(String segment) {
         try {
             return Integer.valueOf(segment.trim());
         } catch (NumberFormatException e) {

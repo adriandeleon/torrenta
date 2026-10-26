@@ -10,6 +10,7 @@ import java.util.TreeSet;
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -69,9 +70,9 @@ public record Diagnosis(Title title, String body, String file, int fileIndex, Li
         REMOVE("diagnosis.remedy.remove", "remove");
 
         private final String key;
-        private final String command;
+        private final @Nullable String command;
 
-        Remedy(String key, String command) {
+        Remedy(String key, @Nullable String command) {
             this.key = key;
             this.command = command;
         }

@@ -14,6 +14,12 @@ public final class HttpProblem extends RuntimeException {
         this.status = status;
     }
 
+    /** The message given, never null: it is the answer's body. */
+    @Override
+    public String getMessage() {
+        return java.util.Objects.requireNonNullElse(super.getMessage(), "");
+    }
+
     public int status() {
         return status;
     }

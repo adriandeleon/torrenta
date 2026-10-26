@@ -2,6 +2,8 @@ package com.torrenta.engine;
 
 import java.util.List;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Everything the detail pane shows about one torrent, read in one go.
  *
@@ -117,7 +119,7 @@ public record TorrentDetail(
             Priority priority,
             int firstPiece,
             int lastPiece,
-            FoundFile found) {
+            @Nullable FoundFile found) {
 
         public FileStatus(
                 int index, String path, long size, long done, Priority priority, int firstPiece, int lastPiece) {

@@ -5,6 +5,7 @@ import java.util.Locale;
 import java.util.TreeSet;
 
 import com.torrenta.engine.Torrent;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -165,7 +166,7 @@ public record SidebarFilter(Kind kind, String value) {
     }
 
     /** The inverse of {@link #format}; anything unreadable is {@link #ALL}. */
-    public static SidebarFilter parse(String text) {
+    public static SidebarFilter parse(@Nullable String text) {
         if (text == null) return ALL;
         String t = text.trim();
         String lower = t.toLowerCase(Locale.ROOT);
@@ -200,7 +201,7 @@ public record SidebarFilter(Kind kind, String value) {
      * {@link #parse}, kept only if it is on the axis asked for: a remembered {@code ui.sidebar.tag}
      * that reads {@code category:x} is nothing. {@link Axis#ALL} takes anything.
      */
-    public static SidebarFilter parse(String text, Axis axis) {
+    public static SidebarFilter parse(@Nullable String text, Axis axis) {
         SidebarFilter f = parse(text);
         return axis == Axis.ALL || f.axis() == axis ? f : ALL;
     }

@@ -31,6 +31,7 @@ import javafx.stage.Window;
 
 import com.torrenta.AppInfo;
 import com.torrenta.update.ReleaseInfo;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -55,7 +56,11 @@ public final class AboutDialog {
      * or skipped), the last check's failure this session (null when it answered), and when a check
      * last started (epoch ms, 0 for never).
      */
-    public record UpdateStatus(boolean checking, ReleaseInfo update, String error, long lastCheck) {}
+    public record UpdateStatus(
+            boolean checking,
+            @Nullable ReleaseInfo update,
+            @Nullable String error,
+            long lastCheck) {}
 
     /** Which sentence the update block leads with. */
     enum UpdateState {
@@ -92,7 +97,7 @@ public final class AboutDialog {
     }
 
     /** The last check as a local date and time, or null when there was none. */
-    static String lastChecked(long epochMs, ZoneId zone, Locale locale) {
+    static @Nullable String lastChecked(long epochMs, ZoneId zone, Locale locale) {
         if (epochMs <= 0) return null;
         return DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM)
                 .withLocale(locale)
@@ -156,7 +161,8 @@ public final class AboutDialog {
         links.getChildren().add(link(tr("dialog.about.releases"), () -> openUrl.accept(AppInfo.RELEASES_PAGE)));
         Hyperlink settingsLink = link(tr("dialog.about.settingsFile", settingsFile.toString()), () -> {
             alert.close();
-            openUrl.accept(settingsFile.getParent().toUri().toString());
+            Path folder = settingsFile.toAbsolutePath().getParent();
+            openUrl.accept((folder != null ? folder : settingsFile).toUri().toString());
         });
         settingsLink.setTooltip(new Tooltip(tr("dialog.about.settingsFile.tooltip")));
         links.getChildren().add(settingsLink);
@@ -229,11 +235,11 @@ public final class AboutDialog {
             VBox block, UpdateStatus status, Alert alert, Consumer<String> openUrl, Runnable checkNow) {
         block.getChildren().clear();
         UpdateState state = state(status);
+        ReleaseInfo update = status.update(); // there is one when state is AVAILABLE
         Label headline = new Label(
                 switch (state) {
                     case CHECKING -> tr("status.checkingUpdates");
-                    case AVAILABLE ->
-                        tr("dialog.about.updateHeadline", status.update().version());
+                    case AVAILABLE -> tr("dialog.about.updateHeadline", update == null ? "" : update.version());
                     case FAILED -> tr("status.updateFailed", status.error());
                     case UP_TO_DATE -> tr("dialog.about.upToDate");
                     case NOT_CHECKED -> tr("dialog.about.notChecked");
@@ -247,8 +253,7 @@ public final class AboutDialog {
                             default -> "about-update-muted";
                         });
         block.getChildren().add(headline);
-        if (state == UpdateState.AVAILABLE) {
-            ReleaseInfo update = status.update();
+        if (state == UpdateState.AVAILABLE && update != null) {
             String url = update.url() == null || update.url().isBlank() ? AppInfo.RELEASES_PAGE : update.url();
             block.getChildren().add(link(tr("dialog.about.openReleasePage"), () -> {
                 alert.close();

@@ -6,6 +6,7 @@ import atlantafx.base.theme.CupertinoDark;
 import atlantafx.base.theme.CupertinoLight;
 import atlantafx.base.theme.NordDark;
 import atlantafx.base.theme.NordLight;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -31,9 +32,9 @@ public enum Theme {
 
     private final String id;
     private final boolean dark;
-    private final Supplier<atlantafx.base.theme.Theme> atlantafx;
+    private final @Nullable Supplier<atlantafx.base.theme.Theme> atlantafx;
 
-    Theme(String id, boolean dark, Supplier<atlantafx.base.theme.Theme> atlantafx) {
+    Theme(String id, boolean dark, @Nullable Supplier<atlantafx.base.theme.Theme> atlantafx) {
         this.id = id;
         this.dark = dark;
         this.atlantafx = atlantafx;

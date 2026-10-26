@@ -11,6 +11,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.StreamReadConstraints;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A JSON answer as a tree a definition's paths walk: objects as {@link Map}s, arrays as
@@ -88,7 +89,7 @@ public final class JsonExtractor {
      * The value at {@code path} under {@code root}: a member by name in an object, by index in a
      * list; null when any step is missing (a JSON null is {@link #NULL}).
      */
-    public static Object at(Object root, String path) {
+    public static @Nullable Object at(@Nullable Object root, String path) {
         Object current = root;
         for (String step : steps(path)) {
             if (current instanceof Map<?, ?> map) {
@@ -111,12 +112,12 @@ public final class JsonExtractor {
     }
 
     /** The value at {@code path} as text: a string as it is, a number plainly, a boolean as a word; null for a container, a null or nothing. */
-    public static String text(Object root, String path) {
+    public static @Nullable String text(Object root, String path) {
         return text(at(root, path));
     }
 
     /** A scalar's text; null for a container, a JSON null or no value. */
-    public static String text(Object value) {
+    public static @Nullable String text(@Nullable Object value) {
         if (value == null || value == NULL || value instanceof Map || value instanceof List) return null;
         if (value instanceof Double d) {
             return d == Math.rint(d) && !Double.isInfinite(d) ? Long.toString(d.longValue()) : d.toString();

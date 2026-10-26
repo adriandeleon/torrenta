@@ -11,6 +11,7 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 
 import com.torrenta.rss.Article;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The article table's rows, reconciled in place from each list the service hands over: an article
@@ -30,7 +31,7 @@ public final class ArticleRows {
         return rows;
     }
 
-    public ArticleRow get(String key) {
+    public @Nullable ArticleRow get(String key) {
         return byKey.get(key);
     }
 

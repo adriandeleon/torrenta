@@ -10,6 +10,8 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.TreeMap;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * The category names and tags that travel, as the entries of the repository's labels file. Pure.
  *
@@ -110,7 +112,7 @@ public final class SyncLabels {
     }
 
     /** The entries of a repository file, labels only; an unreadable text is empty. */
-    public static Map<String, String> parse(String text) {
+    public static Map<String, String> parse(@Nullable String text) {
         Properties p = new Properties();
         try {
             p.load(new StringReader(text == null ? "" : text));

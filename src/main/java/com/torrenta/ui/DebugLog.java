@@ -16,6 +16,8 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * What went wrong, kept somewhere a user can reach it. Termina's.
  *
@@ -44,7 +46,7 @@ public final class DebugLog {
 
     private static final Deque<String> ENTRIES = new ArrayDeque<>();
 
-    private static Path file;
+    private static @Nullable Path file;
     private static boolean installed;
 
     private DebugLog() {}
@@ -124,7 +126,7 @@ public final class DebugLog {
     }
 
     /** The file being mirrored to, or null when there is none. */
-    public static synchronized Path file() {
+    public static synchronized @Nullable Path file() {
         return file;
     }
 

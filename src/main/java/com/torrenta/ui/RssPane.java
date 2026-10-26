@@ -44,6 +44,7 @@ import com.torrenta.rss.Article;
 import com.torrenta.rss.Feed;
 import com.torrenta.rss.RssService;
 import com.torrenta.store.Settings;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -110,15 +111,15 @@ final class RssPane extends VBox {
     private final Hyperlink detailLink = new Hyperlink();
     private final Label detailText = new Label();
     private Map<String, String> names = Map.of();
-    private FeedDialog dialog;
+    private @Nullable FeedDialog dialog;
     /** The chosen article's key: it stays shown under Unread-only even once it is read. */
-    private String selectedKey;
+    private @Nullable String selectedKey;
 
     private boolean reloading;
     /** Whether the split dividers have been placed; see the constructor. */
     private boolean placed;
     /** Run once no feed is refreshing; the capture's keys wait for the articles. */
-    private Runnable whenIdle;
+    private @Nullable Runnable whenIdle;
 
     RssPane(Host host, RssService service, Settings settings) {
         this.host = host;
@@ -331,7 +332,7 @@ final class RssPane extends VBox {
     /** A row whose {@code :unread} pseudo-class follows its article, flipping in place when it is read. */
     private static final class UnreadRow extends TableRow<ArticleRow> {
         private final InvalidationListener relisten = o -> apply();
-        private ArticleRow watched;
+        private @Nullable ArticleRow watched;
 
         UnreadRow() {
             itemProperty().addListener((o, was, now) -> {
@@ -373,7 +374,7 @@ final class RssPane extends VBox {
         return box;
     }
 
-    private void showDetail(Article a) {
+    private void showDetail(@Nullable Article a) {
         if (a == null) {
             detailTitle.setText("");
             detailMeta.setText(tr("rss.detail.empty"));
@@ -478,7 +479,7 @@ final class RssPane extends VBox {
     // ---- what the service says ------------------------------------------------------------------
 
     /** FX thread: the service changed something; the lists follow. */
-    private void onChanged(String feedId) {
+    private void onChanged(@Nullable String feedId) {
         reload();
         if (whenIdle != null && idle()) {
             Runnable then = whenIdle;
@@ -760,10 +761,11 @@ final class RssPane extends VBox {
                 javafx.scene.Node owner = getScene() == null ? null : getScene().getFocusOwner();
                 javafx.scene.Node target = owner;
                 while (target != null && target != this) target = target.getParent();
-                if (target == null) {
+                if (owner == null || target == null) {
                     focusDefault();
-                    owner = getScene().getFocusOwner();
+                    owner = getScene() == null ? null : getScene().getFocusOwner();
                 }
+                if (owner == null) continue;
                 owner.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false));
             }
         };
@@ -793,7 +795,7 @@ final class RssPane extends VBox {
         Platform.runLater(() -> addFeed(url));
     }
 
-    javafx.scene.Scene dialogScene() {
+    javafx.scene.@Nullable Scene dialogScene() {
         return dialog != null && dialog.isShowing() ? dialog.scene() : null;
     }
 

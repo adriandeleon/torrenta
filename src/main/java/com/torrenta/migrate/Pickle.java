@@ -10,6 +10,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Python's pickle, read as data and nothing else: Deluge keeps its torrents' state as one ({@code
  * torrents.state}). A pickle is a program for a stack machine that may name any class and call
@@ -53,7 +55,7 @@ public final class Pickle {
     }
 
     /** The one value {@code data} pickles. */
-    public static Object read(byte[] data) throws IOException {
+    public static @Nullable Object read(byte[] data) throws IOException {
         try {
             return new Pickle(data).run();
         } catch (IndexOutOfBoundsException | ClassCastException | NumberFormatException e) {
@@ -61,7 +63,7 @@ public final class Pickle {
         }
     }
 
-    private Object run() throws IOException {
+    private @Nullable Object run() throws IOException {
         while (pos < data.length) {
             int op = data[pos++] & 0xff;
             switch (op) {
@@ -206,7 +208,7 @@ public final class Pickle {
     }
 
     /** {@code BUILD}: a dict is the object's {@code __dict__}; a pair is that and its slots. */
-    private static void build(Obj o, Object state) {
+    private static void build(Obj o, @Nullable Object state) {
         if (state instanceof Map<?, ?> m) {
             for (Map.Entry<?, ?> e : m.entrySet()) o.state().put(String.valueOf(e.getKey()), e.getValue());
         } else if (state instanceof List<?> pair && pair.size() == 2) {
@@ -238,7 +240,7 @@ public final class Pickle {
         return items;
     }
 
-    private static Object value(Object v) {
+    private static @Nullable Object value(Object v) {
         return v == NONE ? null : v;
     }
 

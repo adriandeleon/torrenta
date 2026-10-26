@@ -18,6 +18,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.transmission.Bencode;
+import org.jspecify.annotations.Nullable;
 
 /**
  * qBittorrent's torrents, from its {@code BT_backup} folder: per torrent a {@code <hash>.fastresume}
@@ -212,7 +213,7 @@ public final class QbittorrentReader {
 
     /** One torrent from its resume data and, when there is one, its {@code .torrent}. Pure. */
     @SuppressWarnings("unchecked")
-    static ImportCandidate candidate(byte[] resume, byte[] torrent, Map<String, String> categoryPaths)
+    static ImportCandidate candidate(byte[] resume, byte @Nullable [] torrent, Map<String, String> categoryPaths)
             throws IOException {
         if (!(Bencode.decode(resume) instanceof Map<?, ?> raw)) throw new IOException("not a resume file");
         Map<String, Object> r = (Map<String, Object>) raw;
@@ -239,7 +240,7 @@ public final class QbittorrentReader {
         Map<Integer, String> renamed = new java.util.LinkedHashMap<>();
         if (preview != null) {
             List<Object> mapped = r.get("mapped_files") instanceof List<?> m ? (List<Object>) m : List.of();
-            Layout layout = layout(torrent);
+            Layout layout = torrent == null ? new Layout(0, new HashMap<>()) : layout(torrent);
             for (TorrentPreview.FileEntry f : preview.files()) {
                 String path = f.path();
                 if (f.index() < mapped.size() && mapped.get(f.index()) instanceof byte[] b && b.length > 0)
@@ -315,7 +316,7 @@ public final class QbittorrentReader {
 
     /** Pieces in the torrent: the v1 piece hashes, else what the resume data lists. */
     @SuppressWarnings("unchecked")
-    private static long pieceCount(byte[] torrent, int listed) throws IOException {
+    private static long pieceCount(byte @Nullable [] torrent, int listed) throws IOException {
         if (torrent != null
                 && Bencode.decode(torrent) instanceof Map<?, ?> t
                 && t.get("info") instanceof Map<?, ?> info
@@ -335,15 +336,15 @@ public final class QbittorrentReader {
         return true;
     }
 
-    private static byte[] bytes(Object v) {
+    private static byte[] bytes(@Nullable Object v) {
         return v instanceof byte[] b ? b : new byte[0];
     }
 
-    private static String text(Object v, String fallback) {
+    private static String text(@Nullable Object v, String fallback) {
         return v instanceof byte[] b && b.length > 0 ? new String(b, StandardCharsets.UTF_8) : fallback;
     }
 
-    private static double number(Object v, double fallback) {
+    private static double number(@Nullable Object v, double fallback) {
         return v instanceof Long l ? l : fallback;
     }
 }

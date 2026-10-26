@@ -1,5 +1,7 @@
 package com.torrenta.ui;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * The list/detail divider's rules. The empty state ("No torrents yet") fills the list's half until
  * the first torrent, and the engine's first poll comes after the window is shown, so every launch
@@ -24,12 +26,12 @@ final class DetailSplit {
     private DetailSplit() {}
 
     /** The saved position as a fraction of the split, or {@link #DEFAULT} for none or a bad one. */
-    static double position(String saved) {
+    static double position(@Nullable String saved) {
         return position(saved, DEFAULT);
     }
 
     /** The same with another fallback: the pane beside the list has a default of its own. */
-    static double position(String saved, double fallback) {
+    static double position(@Nullable String saved, double fallback) {
         if (saved == null) return fallback;
         try {
             double d = Double.parseDouble(saved.trim());

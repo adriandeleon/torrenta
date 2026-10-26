@@ -13,6 +13,7 @@ import java.util.regex.Pattern;
 
 import com.torrenta.search.SearchCategory;
 import com.torrenta.search.SearchResult;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -249,7 +250,7 @@ public final class SearchFilter {
     }
 
     /** A term read: a test and its label, or no test and what is wrong. */
-    private record Term(Predicate<SearchResult> test, String label) {
+    private record Term(@Nullable Predicate<SearchResult> test, String label) {
         static Term invalid(String why) {
             return new Term(null, why);
         }

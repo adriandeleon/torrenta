@@ -24,6 +24,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -102,9 +104,9 @@ public final class WatchFolders implements AutoCloseable {
     private List<WatchFolder> entries = List.of();
     private volatile List<Path> missing = List.of();
     private volatile boolean running;
-    private ScheduledExecutorService scheduler;
-    private Thread watcher;
-    private WatchService service;
+    private @Nullable ScheduledExecutorService scheduler;
+    private @Nullable Thread watcher;
+    private @Nullable WatchService service;
 
     public WatchFolders(Engine engine, Host host) {
         this.engine = engine;

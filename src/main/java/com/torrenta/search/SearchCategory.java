@@ -3,6 +3,8 @@ package com.torrenta.search;
 import java.util.Collection;
 import java.util.Locale;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -54,7 +56,7 @@ public enum SearchCategory {
      * 5070, which is Anime and wins over TV when both are given. Indexer-specific numbers (100000
      * and up) and the blocks we have no chip for (6000) name nothing.
      */
-    public static SearchCategory ofNewznab(Collection<Integer> numbers) {
+    public static @Nullable SearchCategory ofNewznab(Collection<Integer> numbers) {
         SearchCategory found = null;
         for (int n : numbers) {
             if (n == ANIME.newznab) return ANIME;
@@ -71,7 +73,7 @@ public enum SearchCategory {
      * The category a filter names, by its English id or its label in the UI language, ignoring
      * case ({@code movies}, {@code Filme}); null for anything else, {@link #ALL} included.
      */
-    public static SearchCategory named(String name) {
+    public static @Nullable SearchCategory named(String name) {
         for (SearchCategory c : values()) {
             if (c != ALL && (c.id.equalsIgnoreCase(name) || c.label().equalsIgnoreCase(name))) return c;
         }

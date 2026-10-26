@@ -10,6 +10,7 @@ import java.util.regex.Pattern;
 
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentState;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -273,7 +274,7 @@ public final class FilterQuery {
     }
 
     /** A byte count with k/m/g/t in binary units, as {@link Bytes} prints them; null if it does not read. */
-    static Long bytes(String operand) {
+    static @Nullable Long bytes(String operand) {
         Matcher m = SIZE.matcher(operand.toLowerCase(Locale.ROOT));
         if (!m.matches()) return null;
         int shift =
@@ -335,7 +336,7 @@ public final class FilterQuery {
     record Span(long seconds, String words) {}
 
     /** {@code 30m}, {@code 6h}, {@code 2d}, {@code 3w}; null if it does not read or is too long. */
-    static Span span(String operand) {
+    static @Nullable Span span(String operand) {
         Matcher m = DURATION.matcher(operand.toLowerCase(Locale.ROOT));
         if (!m.matches()) return null;
         String unit =
@@ -405,7 +406,7 @@ public final class FilterQuery {
     }
 
     /** A term read: a test and its label, or no test and what is wrong. */
-    private record Term(Predicate<Torrent> test, String label) {
+    private record Term(@Nullable Predicate<Torrent> test, String label) {
         static Term invalid(String why) {
             return new Term(null, why);
         }

@@ -50,6 +50,7 @@ import com.torrenta.search.SearchProvider;
 import com.torrenta.search.SearchResult;
 import com.torrenta.search.SearchService;
 import com.torrenta.store.Settings;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -127,7 +128,7 @@ final class SearchPane extends VBox {
     /** The providers switched off by hand, by name; see {@link SearchChips}. */
     private Set<String> providersOff = new LinkedHashSet<>();
 
-    private Thread running;
+    private @Nullable Thread running;
     private int generation;
     /** A search ran since the tab was last fresh; the line then keeps its words. */
     private final BooleanProperty searched = new SimpleBooleanProperty();
@@ -135,7 +136,7 @@ final class SearchPane extends VBox {
     private final BooleanBinding clearable = Bindings.createBooleanBinding(
             () -> SearchStatus.canClear(query.getText(), searched.get()), query.textProperty(), searched);
     /** Run when the running search ends; the capture's keys wait for the rows. */
-    private Runnable whenDone;
+    private @Nullable Runnable whenDone;
 
     SearchPane(Host host, Settings settings) {
         this.host = host;
@@ -427,7 +428,7 @@ final class SearchPane extends VBox {
                 javafx.scene.Node owner = getScene() == null ? null : getScene().getFocusOwner();
                 javafx.scene.Node target = owner;
                 while (target != null && target != this) target = target.getParent();
-                if (target == null) owner = query;
+                if (owner == null || target == null) owner = query;
                 owner.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false));
                 // '/' is read as the character typed, as a real keyboard follows its press with one.
                 if (code == KeyCode.SLASH)
@@ -686,9 +687,10 @@ final class SearchPane extends VBox {
                 e -> selected(t).ifPresent(r -> addFilterTerm(SearchFilter.providerTerm(r.provider()))));
         hideProvider.setOnAction(e ->
                 selected(t).ifPresent(r -> addFilterTerm("-" + SearchFilter.providerTerm(r.provider()))));
-        onlyCategory.setOnAction(e -> selected(t)
-                .filter(r -> r.category() != null)
-                .ifPresent(r -> addFilterTerm(SearchFilter.categoryTerm(r.category()))));
+        onlyCategory.setOnAction(e -> selected(t).ifPresent(r -> {
+            SearchCategory category = r.category();
+            if (category != null) addFilterTerm(SearchFilter.categoryTerm(category));
+        }));
         MenuItem clear = new MenuItem(tr("command.searchClear"));
         clear.setGraphic(Icons.trash().at(Icons.MENU_SIZE));
         clear.setOnAction(e -> {

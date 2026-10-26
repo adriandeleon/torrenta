@@ -17,6 +17,7 @@ import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.webapi.WebApiConfig;
+import org.jspecify.annotations.Nullable;
 
 /**
  * User preferences, stored as a plain properties file.
@@ -417,7 +418,7 @@ public final class Settings {
 
     private final Path file;
     private final Properties properties = new Properties();
-    private Runnable onSaved;
+    private @Nullable Runnable onSaved;
 
     public Settings(Path file) {
         this.file = file;
@@ -642,6 +643,11 @@ public final class Settings {
     /** A raw value, for keys whose shape another class owns. */
     public String get(String key, String fallback) {
         return properties.getProperty(key, fallback);
+    }
+
+    /** A raw value, or null when the file has none. */
+    public @Nullable String raw(String key) {
+        return properties.getProperty(key);
     }
 
     public void set(String key, String value) {
@@ -1048,7 +1054,7 @@ public final class Settings {
     }
 
     /** Marks a torrent for its content check once its files are known; null clears the mark. */
-    public void setUnsafeContentPending(String torrentId, String value) {
+    public void setUnsafeContentPending(String torrentId, @Nullable String value) {
         String key = TORRENT_PREFIX + torrentId + UNSAFE_PENDING_SUFFIX;
         if (value != null) properties.setProperty(key, value);
         else properties.remove(key);
@@ -1221,7 +1227,7 @@ public final class Settings {
     }
 
     /** Sets, or with {@code null} forgets, a torrent's own share limit. Not saved here. */
-    public void setShareOverride(String torrentId, ShareLimit limit) {
+    public void setShareOverride(String torrentId, @Nullable ShareLimit limit) {
         String key = TORRENT_PREFIX + torrentId + SHARE_SUFFIX;
         if (limit == null) properties.remove(key);
         else properties.setProperty(key, limit.format());

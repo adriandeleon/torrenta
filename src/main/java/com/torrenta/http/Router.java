@@ -7,6 +7,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TreeSet;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Which handler answers which request: an exact path first (qBittorrent's API is all exact paths),
  * else the longest prefix (a folder of static files), each for its methods. A path that some
@@ -65,7 +67,7 @@ public final class Router {
         return handler.handle(request);
     }
 
-    private Map<String, Handler> longestPrefix(String path) {
+    private @Nullable Map<String, Handler> longestPrefix(String path) {
         String best = null;
         for (String prefix : prefixes.keySet())
             if (path.startsWith(prefix) && (best == null || prefix.length() > best.length())) best = prefix;

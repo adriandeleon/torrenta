@@ -26,6 +26,7 @@ import javafx.stage.Window;
 import com.torrenta.rss.Feed;
 import com.torrenta.rss.FeedException;
 import com.torrenta.rss.FeedSource;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -48,8 +49,8 @@ final class FeedDialog {
     private final Label status = new Label();
     private final Button save = new Button(tr("common.save"));
     private final FeedSource source;
-    private final Feed existing;
-    private Feed result;
+    private final @Nullable Feed existing;
+    private @Nullable Feed result;
     private boolean fetching;
 
     /**
@@ -57,7 +58,7 @@ final class FeedDialog {
      * @param source fetches the feed to check it; the service's, or a stub in a capture
      * @param globalMinutes the interval in force when the feed has none of its own, for the hint
      */
-    FeedDialog(Window owner, Feed existing, FeedSource source, int globalMinutes) {
+    FeedDialog(Window owner, @Nullable Feed existing, FeedSource source, int globalMinutes) {
         this.existing = existing;
         this.source = source;
         stage.initOwner(owner);

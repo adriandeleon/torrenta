@@ -44,6 +44,7 @@ import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.engine.TrackerHost;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -726,7 +727,7 @@ public final class TransmissionEngine implements Engine {
         return Json.obj(torrents.get(0));
     }
 
-    private Torrent one(String id) {
+    private @Nullable Torrent one(String id) {
         try {
             return snapshot(get(id, listFields()));
         } catch (EngineException e) {

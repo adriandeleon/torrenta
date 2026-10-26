@@ -2,6 +2,8 @@ package com.torrenta.engine;
 
 import java.nio.file.Path;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * A link to download as it is, not as a torrent, with the Add Link dialog's choices.
  *
@@ -11,7 +13,8 @@ import java.nio.file.Path;
  *     the server may then replace with the name it gives)
  * @param startPaused added stopped; the person resumes it
  */
-public record LinkRequest(String url, Path savePath, String fileName, boolean startPaused) {
+public record LinkRequest(
+        String url, @Nullable Path savePath, @Nullable String fileName, boolean startPaused) {
 
     public LinkRequest {
         if (url == null || url.isBlank()) throw new IllegalArgumentException("a link request needs a link");

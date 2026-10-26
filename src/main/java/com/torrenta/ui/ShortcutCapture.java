@@ -6,6 +6,8 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCombination;
 import javafx.scene.input.KeyEvent;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * What a key pressed into the Keyboard page's recording field becomes. Termina's.
  *
@@ -36,12 +38,13 @@ final class ShortcutCapture {
     }
 
     /** The chord a press names, with exactly the modifiers held; null for a press that is not one. */
-    static KeyCombination combination(KeyEvent e) {
+    static @Nullable KeyCombination combination(KeyEvent e) {
         return combination(e.getCode(), e.isControlDown(), e.isAltDown(), e.isMetaDown(), e.isShiftDown());
     }
 
     /** Pure form of {@link #combination(KeyEvent)}. */
-    static KeyCombination combination(KeyCode code, boolean control, boolean alt, boolean meta, boolean shift) {
+    static @Nullable KeyCombination combination(
+            KeyCode code, boolean control, boolean alt, boolean meta, boolean shift) {
         if (decide(code, control, alt, meta) != Verdict.OK) return null;
         return Keybindings.of(code, control, alt, meta, shift);
     }
@@ -51,7 +54,7 @@ final class ShortcutCapture {
      * row can move ({@link Chords#fixed}), which a row may not take either, or the two would both
      * claim it and only one would ever fire.
      */
-    static String fixedOwner(KeyCombination chord, boolean mac) {
+    static @Nullable String fixedOwner(KeyCombination chord, boolean mac) {
         for (Map.Entry<String, KeyCombination> entry : Chords.fixed().entrySet()) {
             if (Keybindings.same(entry.getValue(), chord, mac)) return entry.getKey();
         }

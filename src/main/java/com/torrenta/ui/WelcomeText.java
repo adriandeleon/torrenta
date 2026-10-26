@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.torrenta.engine.Inputs;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The first-run screen's rules ({@link Welcome}): what the clipboard offer says, how the download
@@ -57,7 +58,7 @@ final class WelcomeText {
      * The download folder as the footer writes it: under the home folder it starts with {@code ~}
      * where that is the custom (not Windows), with forward slashes; anywhere else, as it is.
      */
-    static String folder(Path dir, Path home, boolean tilde) {
+    static String folder(Path dir, @Nullable Path home, boolean tilde) {
         Path abs = dir.toAbsolutePath().normalize();
         if (tilde && home != null) {
             Path h = home.toAbsolutePath().normalize();

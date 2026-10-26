@@ -14,6 +14,7 @@ import com.torrenta.store.ConfigDir;
 import com.torrenta.store.Settings;
 import com.torrenta.ui.MainWindow;
 import com.torrenta.ui.Theme;
+import org.jspecify.annotations.Nullable;
 
 /** Torrenta — a keyboard-first BitTorrent client on JavaFX. */
 public final class App extends Application {
@@ -22,9 +23,9 @@ public final class App extends Application {
     private static final String LAUNCH_NAME = "torrenta";
 
     /** The lock on the config folder, held for the life of the process; null when none could be taken. */
-    private static SingleInstance instance;
+    private static @Nullable SingleInstance instance;
 
-    private MainWindow window;
+    private @Nullable MainWindow window;
 
     public static void main(String[] args) {
         // Parsed before anything else starts. --version is what somebody pastes into a bug report,
@@ -113,12 +114,14 @@ public final class App extends Application {
         Application.setUserAgentStylesheet(
                 Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
 
-        window = new MainWindow(
+        MainWindow window = new MainWindow(
                 stage, settings, configDir, uri -> getHostServices().showDocument(uri));
+        this.window = window;
         window.show();
         cli.inputs().forEach(window::addInput);
         // What a second instance sends from here on, and what arrived while the window was being
         // built, goes through the same add path as a dropped file; the window hops to its thread.
+        SingleInstance instance = App.instance;
         if (instance != null) {
             window.setInstanceDescription("primary, port " + instance.port());
             instance.deliverTo(inputs -> Platform.runLater(() -> window.openFromOutside(

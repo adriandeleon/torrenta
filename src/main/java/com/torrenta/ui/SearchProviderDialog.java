@@ -27,6 +27,7 @@ import javafx.stage.Window;
 import com.torrenta.search.SearchException;
 import com.torrenta.search.TorznabEndpoint;
 import com.torrenta.search.TorznabProvider;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -62,14 +63,14 @@ final class SearchProviderDialog {
     /** The edited entry waits for a key that another machine has; it keeps waiting while the field is blank. */
     private boolean keyNeeded;
 
-    private TorznabEndpoint result;
+    private @Nullable TorznabEndpoint result;
 
     /** @param existing the entry being edited, or null for a new one */
-    SearchProviderDialog(Window owner, TorznabEndpoint existing) {
+    SearchProviderDialog(Window owner, @Nullable TorznabEndpoint existing) {
         this(owner, existing, endpoint -> new TorznabProvider(endpoint).capabilities());
     }
 
-    SearchProviderDialog(Window owner, TorznabEndpoint existing, Tester tester) {
+    SearchProviderDialog(Window owner, @Nullable TorznabEndpoint existing, Tester tester) {
         this.tester = tester;
         stage.initOwner(owner);
         stage.initModality(Modality.WINDOW_MODAL);

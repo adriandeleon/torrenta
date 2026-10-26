@@ -22,6 +22,7 @@ import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -382,7 +383,7 @@ public final class WithDownloads implements Engine {
     }
 
     @Override
-    public void setFollowing(String id, com.torrenta.engine.Following following) throws EngineException {
+    public void setFollowing(String id, com.torrenta.engine.@Nullable Following following) throws EngineException {
         if (DirectDownload.isId(id)) throw new EngineException(tr("engine.error.noMutable"));
         torrents.setFollowing(id, following);
     }

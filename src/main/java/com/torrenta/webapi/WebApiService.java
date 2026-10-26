@@ -5,6 +5,7 @@ import java.net.BindException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
+import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.util.function.LongSupplier;
@@ -15,6 +16,7 @@ import javax.net.ssl.SSLContext;
 import com.torrenta.http.Limits;
 import com.torrenta.http.Tls;
 import com.torrenta.http.WebServer;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -48,9 +50,9 @@ public final class WebApiService implements AutoCloseable {
     private final WebApi.Backend backend;
     private final LongSupplier clock;
     private final Sessions sessions = new Sessions(new SecureRandom());
-    private WebApiConfig config;
-    private WebServer server;
-    private WebApi api;
+    private @Nullable WebApiConfig config;
+    private @Nullable WebServer server;
+    private @Nullable WebApi api;
     private volatile Status status = Status.off();
 
     public WebApiService(WebApi.Backend backend, LongSupplier clock) {
@@ -80,22 +82,27 @@ public final class WebApiService implements AutoCloseable {
             stopServer();
             return status = new Status(State.FAILED, problem.get(), 0);
         }
-        if (server != null && !next.rebinds(before)) {
-            api.update(next);
-            return status = running(next);
+        WebServer live = server;
+        WebApi current = api;
+        if (live != null && current != null && !next.rebinds(before)) {
+            current.update(next);
+            return status = running(live, next);
         }
         stopServer();
         InetAddress bind = next.bindAddress().orElseThrow();
         try {
-            SSLContext tls = next.https()
-                    ? Tls.fromPkcs12(next.httpsFile(), next.httpsPassword().toCharArray())
+            Path certificate = next.httpsFile();
+            SSLContext tls = certificate != null
+                    ? Tls.fromPkcs12(certificate, next.httpsPassword().toCharArray())
                     : null;
             WebApi fresh = new WebApi(backend, next, sessions, clock);
             // Whoever was logged in through the old socket stays so only if the credentials did.
             if (next.credentialsChanged(before)) sessions.closeAll();
-            server = WebServer.start(new InetSocketAddress(bind, next.port()), fresh.router(), Limits.DEFAULT, tls);
+            WebServer started =
+                    WebServer.start(new InetSocketAddress(bind, next.port()), fresh.router(), Limits.DEFAULT, tls);
+            server = started;
             api = fresh;
-            return status = running(next);
+            return status = running(started, next);
         } catch (BindException e) {
             return status = new Status(
                     State.FAILED,
@@ -108,8 +115,8 @@ public final class WebApiService implements AutoCloseable {
         }
     }
 
-    private Status running(WebApiConfig c) {
-        int port = server.address().getPort();
+    private Status running(WebServer s, WebApiConfig c) {
+        int port = s.address().getPort();
         String url = c.url().replace(":" + c.port() + "/", ":" + port + "/");
         return new Status(State.RUNNING, tr("webapi.status.running", url), 0);
     }
