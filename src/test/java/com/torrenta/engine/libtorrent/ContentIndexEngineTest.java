@@ -241,7 +241,7 @@ class ContentIndexEngineTest {
     }
 
     @Test
-    void aV1OnlyTorrentAndAnIncompleteFileAreNotIndexed(@TempDir Path dir) throws Exception {
+    void aV1OnlyTorrentIsIndexedByItsKeyAndAnIncompleteFileIsNot(@TempDir Path dir) throws Exception {
         Path downloads = Files.createDirectories(dir.resolve("downloads"));
         Path pack = Files.createDirectories(downloads.resolve("Pack"));
         Files.write(pack.resolve("whole.bin"), random(64 * 1024, 4));
@@ -275,8 +275,11 @@ class ContentIndexEngineTest {
             await(
                     "the v1 torrent seeding",
                     () -> engine.torrents().stream().anyMatch(t -> t.id().equals(v1Id) && t.progress() == 1.0));
-            Thread.sleep(300);
-            assertTrue(index.of(v1Id).isEmpty(), "no roots without v2");
+            await("the v1 file by its key", () -> index.of(v1Id).size() == 1);
+            assertTrue(
+                    com.torrenta.engine.ContentKeys.isV1(
+                            index.of(v1Id).getFirst().root()),
+                    "no root without v2: its key, a single file's pieces being its own");
         }
         // A torrent part done is not finished at a start: its complete file is indexed as it loads.
         try (LibtorrentEngine again = new LibtorrentEngine(() -> downloads, store, quiet())) {
@@ -294,5 +297,84 @@ class ContentIndexEngineTest {
             again.recheck(packId);
             await("the damaged file left out", () -> index.of(packId).isEmpty());
         }
+    }
+
+    /**
+     * A v1-only torrent's file, found by its key in another v1-only torrent of the same piece
+     * length, is linked into place and passes the add's own check; a v1 file that shares a piece
+     * with its neighbour has no key and is downloaded as before.
+     */
+    @Test
+    void aV1FileWhosePiecesAreItsOwnIsFoundAndLinked(@TempDir Path dir) throws Exception {
+        Path downloads = Files.createDirectories(dir.resolve("downloads"));
+        byte[] film = random(300 * 1024 + 11, 9);
+        Files.write(downloads.resolve("film.mkv"), film);
+        byte[] seeded = v1Only(downloads.resolve("film.mkv"));
+
+        // The same bytes under another name, single-file too, and inside a pack after an odd-sized file.
+        Path made = Files.createDirectories(dir.resolve("made"));
+        Files.write(made.resolve("Film (2024).mkv"), film);
+        byte[] renamed = v1Only(made.resolve("Film (2024).mkv"));
+        Path pack = Files.createDirectories(made.resolve("Pack"));
+        Files.write(pack.resolve("a.nfo"), random(1000, 10));
+        Files.write(pack.resolve("b.mkv"), film);
+        byte[] packed = v1Only(pack);
+
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        Path start = Files.createDirectories(dir.resolve("next"));
+        try (LibtorrentEngine engine = new LibtorrentEngine(() -> downloads, store, quiet())) {
+            engine.start();
+            String seedId = engine.add(
+                            AddRequest.defaults(new AddRequest.TorrentFile(seeded, "film.torrent"), downloads))
+                    .id();
+            await("the film indexed", () -> engine.contentIndex().of(seedId).size() == 1);
+
+            TorrentPreview inPack = engine.inspect(packed);
+            assertTrue(inPack.files().stream()
+                    .allMatch(f -> f.v1Key().isEmpty() || f.path().endsWith("a.nfo")));
+            assertTrue(
+                    DedupPlan.of(
+                                    inPack,
+                                    engine.contentIndex(),
+                                    Set.of(),
+                                    start,
+                                    FileRenames.Layout.ORIGINAL,
+                                    DedupPlan.Disk.SYSTEM)
+                            .isEmpty(),
+                    "b.mkv starts inside a.nfo's piece: no key, no match");
+
+            TorrentPreview other = engine.inspect(renamed);
+            assertTrue(com.torrenta.engine.ContentKeys.isV1(
+                    other.files().getFirst().v1Key()));
+            AddRequest request = AddRequest.defaults(new AddRequest.TorrentFile(renamed, "renamed.torrent"), start);
+            DedupPlan plan = DedupPlan.of(
+                    other,
+                    engine.contentIndex(),
+                    Set.of(),
+                    request.storage().start(request.savePath()),
+                    request.storage().layout(),
+                    DedupPlan.Disk.SYSTEM);
+            assertEquals(1, plan.matches().size());
+            DedupFiles.Placed placed = DedupFiles.place(plan, true, true, DedupFiles.Cloner.NONE, id -> "film");
+            Path target = start.resolve("Film (2024).mkv");
+            assertTrue(Files.isSameFile(downloads.resolve("film.mkv"), target), "linked, not copied");
+            String id = engine.add(request.withStorage(request.storage().withFound(placed.found())))
+                    .id();
+            await(
+                    "whole by the add's own check",
+                    () -> engine.torrents().stream().anyMatch(t -> t.id().equals(id) && t.progress() == 1.0));
+        }
+    }
+
+    /** A v1-only torrent in 16 KiB pieces, so two of them cut the same bytes the same way. */
+    private static byte[] v1Only(Path path) throws Exception {
+        NativeLibrary.ensureAvailable();
+        return new TorrentBuilder()
+                .path(path.toFile())
+                .pieceSize(16 * 1024)
+                .flags(TorrentBuilder.V1_ONLY)
+                .generate()
+                .entry()
+                .bencode();
     }
 }

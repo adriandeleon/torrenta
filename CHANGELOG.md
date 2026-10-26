@@ -7,6 +7,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Files already on disk are found for v1 torrents too.** The Add dialog's "Already on disk"
+  used to know only v2 and hybrid torrents' files. Now a file of a v1-only torrent is found as
+  well when its pieces hold nothing else (a single-file torrent, or a padded one) and the other
+  torrent was made with the same piece size: the common case of the same film or image under
+  another name.
+
 - **Removed files go to the trash.** Remove with files now moves a torrent's files to the
   desktop's trash (the Recycle Bin on Windows) instead of deleting them, so a mistake can be
   undone from the file manager; a whole torrent folder goes as one item. Settings → General →

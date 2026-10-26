@@ -608,8 +608,12 @@ remote caller's behalf.
    --reflink=auto`, `clonefile`), else a copy with its size shown first (`link | copy | ask`). The
    files are in place before `add_torrent`, whose own check verifies them: v2 pieces are per file,
    and a hybrid's padding keeps its v1 pieces file-aligned. Watch folders and rules dedup without
-   asking; the Files tab marks a linked file. v1-only torrents have no roots: matching by size and
-   whole v1 pieces is a later item. `Capability.DEDUP`.
+   asking; the Files tab marks a linked file. `Capability.DEDUP`. v1 files (done after: a
+   `ContentKeys.v1` key from the metadata, SHA-256 over the piece length, the size and the file's
+   piece SHA-1s, so no file is read to match; only for a file whose pieces are its own, a single
+   file or one padding aligns, since a piece shared with a neighbour says nothing of this file
+   alone and a re-download of it would write into a linked file; two torrents cut in different
+   piece lengths do not match).
 
 ### 1.4 — Protocol extras
 
