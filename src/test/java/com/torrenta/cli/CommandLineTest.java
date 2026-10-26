@@ -71,6 +71,16 @@ class CommandLineTest {
         assertTrue(usage.contains("--version"));
         assertTrue(usage.contains("--config-dir"));
         assertTrue(usage.contains("--headless"));
+        assertTrue(usage.contains("--set-remote-password"));
+    }
+
+    @Test
+    void theRemotePasswordIsAFlagOfItsOwn() {
+        CommandLine cli = CommandLine.parse("--set-remote-password", "--config-dir", "/srv/torrenta");
+        assertTrue(cli.setRemotePassword());
+        assertEquals("/srv/torrenta", cli.configDir());
+        assertTrue(cli.inputs().isEmpty(), "the password is never an argument, where ps would show it");
+        assertFalse(CommandLine.parse("a.torrent").setRemotePassword());
     }
 
     @Test

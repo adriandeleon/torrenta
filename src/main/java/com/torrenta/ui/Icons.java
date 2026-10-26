@@ -186,6 +186,7 @@ final class Icons {
             case "search" -> search();
             case "rss" -> rss();
             case "sync" -> sync();
+            case "remote" -> remote();
             case "labels" -> tag();
             case "engine" -> server();
             case "connection" -> globe();
@@ -591,6 +592,11 @@ final class Icons {
     }
 
     /** Two stacked units with their lights: an engine, local or remote. */
+    /** A phone, for Remote access: what most of its clients run on. */
+    static Glyph remote() {
+        return line("M5 2.5h6v11H5zM7.25 11.25h1.5");
+    }
+
     static Glyph server() {
         return line("M2.5 2.5h11V7h-11zM2.5 9h11v4.5h-11zM5 4.75h.1M5 11.25h.1M8 4.75h3M8 11.25h3");
     }

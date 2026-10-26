@@ -50,6 +50,16 @@ public final class App extends Application {
         // gone before the toolkit would have come up, with nothing printed. A file manager's
         // double-click and a browser's magnet link both arrive this way.
         Path configDir = ConfigDir.resolve(cli.configDir());
+        // Before the claim, which would hand a running one an empty batch (and bring its window
+        // up): that one saves its own settings over the file, so it is the one to be told.
+        if (cli.setRemotePassword()) {
+            if (SingleInstance.inUse(configDir)) {
+                System.err.println(AppInfo.NAME + ": another Torrenta is running on " + configDir
+                        + "; stop it first, or set the password in its Settings → Remote access");
+                System.exit(1);
+            }
+            System.exit(RemotePassword.run(configDir, System.console(), System.in, System.out, System.err));
+        }
         try {
             SingleInstance.Outcome outcome =
                     SingleInstance.claim(configDir, cli.inputs(), Path.of("").toAbsolutePath());
