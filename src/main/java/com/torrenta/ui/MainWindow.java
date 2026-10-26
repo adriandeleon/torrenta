@@ -1185,10 +1185,8 @@ public final class MainWindow {
         if (rssPane != null) rssPane.closeDialog();
         settingsWindow.closeDialogsForCapture();
         for (javafx.stage.Window w : List.copyOf(javafx.stage.Window.getWindows())) {
-            if (w != stage
-                    && w.isShowing()
-                    && w instanceof Stage s
-                    && s.getModality() != javafx.stage.Modality.NONE) s.hide();
+            if (w != stage && w.isShowing() && w instanceof Stage s && s.getModality() != javafx.stage.Modality.NONE)
+                s.hide();
         }
     }
 
