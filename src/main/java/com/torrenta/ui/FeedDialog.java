@@ -133,6 +133,7 @@ final class FeedDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
 
         if (existing != null) {
             url.setText(existing.url());

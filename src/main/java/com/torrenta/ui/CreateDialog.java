@@ -254,6 +254,7 @@ final class CreateDialog {
         scene.setOnDragOver(this::onDragOver);
         scene.setOnDragDropped(this::onDragDropped);
         stage.setScene(scene);
+        DialogFit.install(stage);
         stage.setOnHidden(e -> {
             hashGeneration++;
             sizeGeneration++;

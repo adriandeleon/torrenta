@@ -1154,6 +1154,11 @@ public final class MainWindow {
         List<String> out = new ArrayList<>();
         out.add("statusbar-fit=" + statusBarFit());
         out.add("window=" + windowLine());
+        // Every other window showing: is its footer in view?
+        for (javafx.stage.Window w : javafx.stage.Window.getWindows()) {
+            if (w == stage || !w.isShowing() || !(w instanceof Stage s) || s.getScene() == null) continue;
+            out.add("dialog-fit=" + s.getTitle() + " | " + DialogFit.describe(s.getScene()));
+        }
         if (createDialog != null && createDialog.isShowing()) {
             out.add("dialog=" + createDialog.title());
             out.addAll(createDialog.linesForCapture());

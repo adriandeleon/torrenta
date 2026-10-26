@@ -1227,6 +1227,7 @@ final class SettingsWindow {
             e.consume();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
         selectFirstVisible();
     }
 

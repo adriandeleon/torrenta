@@ -147,6 +147,7 @@ final class SearchProviderDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
 
         if (existing == null) {
             enabled.setSelected(true);

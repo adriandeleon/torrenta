@@ -189,6 +189,7 @@ final class LimitsDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
     }
 
     /** Blocks on a nested event loop, as a dialog does; empty when cancelled. */
