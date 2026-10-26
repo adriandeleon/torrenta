@@ -50,7 +50,7 @@ public final class Bencode {
     }
 
     /** Decodes one value; trailing bytes are an error. */
-    static Object decode(byte[] data) throws IOException {
+    public static Object decode(byte[] data) throws IOException {
         Bencode b = new Bencode(data);
         Object value = b.read(0);
         if (b.pos != data.length) throw new IOException("trailing bytes after the torrent");
@@ -58,7 +58,7 @@ public final class Bencode {
     }
 
     /** What a {@code .torrent} says about itself, as the Add dialog wants it. */
-    static TorrentPreview preview(byte[] torrent) throws IOException {
+    public static TorrentPreview preview(byte[] torrent) throws IOException {
         Bencode b = new Bencode(torrent);
         Object root = b.read(0);
         if (!(root instanceof Map<?, ?>)) throw new IOException("not a torrent: no dictionary");

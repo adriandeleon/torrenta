@@ -174,6 +174,9 @@ public final class Session {
     /** A content-check mark set and saved as one: marks come from the adds' threads and the poll's. */
     private final Object marks = new Object();
 
+    /** What the owner heard, numbered, the last thousand: Remote access reads it. */
+    private final SessionLog log = new SessionLog(1000);
+
     private final List<Consumer<Poll>> listeners = new CopyOnWriteArrayList<>();
     private volatile Engine engine;
     private volatile ScheduledExecutorService poller;
@@ -206,8 +209,28 @@ public final class Session {
         rss.setDownloader(
                 this::downloadForRule,
                 settings::rssAutoDownload,
-                (message, failed) -> host.report(
+                (message, failed) -> tellReport(
                         EngineEvent.session(failed ? EngineEvent.Level.WARNING : EngineEvent.Level.INFO, message)));
+    }
+
+    /** The session's recent events, for Remote access's {@code log/main}. */
+    public SessionLog log() {
+        return log;
+    }
+
+    private void tellEvent(EngineEvent event) {
+        log.add(event);
+        host.event(event);
+    }
+
+    private void tellReport(EngineEvent event) {
+        log.add(event);
+        host.report(event);
+    }
+
+    private void tellProblem(EngineEvent event) {
+        log.add(event);
+        host.problem(event);
     }
 
     /** The feeds, their articles and rules: the window's RSS tab reads and changes them. */
@@ -257,12 +280,12 @@ public final class Session {
             host.engineFailed(new EngineException(e.getMessage() == null ? e.toString() : e.getMessage(), e));
             return;
         }
-        Automation a = new Automation(fresh, settings::automation, Notifiers.forPlatform(), host::report);
+        Automation a = new Automation(fresh, settings::automation, Notifiers.forPlatform(), this::tellReport);
         automation = a;
         fresh.addListener(event -> {
             // The automation decides on the alert thread and does its work on threads of its own.
             a.handle(event);
-            host.event(event);
+            tellEvent(event);
         });
         host.engineCreated(fresh);
         Thread starter = new Thread(
@@ -412,6 +435,20 @@ public final class Session {
         globalShareLimit = current.queue().share();
     }
 
+    /**
+     * Any thread but a toolkit's. The settings as they now stand, applied to the engine in use and
+     * the speed pair re-decided: what a change from outside the window (Remote access) needs. The
+     * owner hears the pair through {@code limitsRefreshed}.
+     */
+    public void applySettings() throws EngineException {
+        EngineSettings current = settings.engineSettings();
+        settingsChanged(current);
+        Engine e = engine;
+        if (e == null) return;
+        e.applySettings(current);
+        refreshLimits();
+    }
+
     /** The share limit in force for a torrent: its own, else the global one. */
     public ShareLimit shareLimitFor(Torrent t) {
         ShareLimit own = shareOverrides.get(t.id());
@@ -428,7 +465,7 @@ public final class Session {
         try {
             host.limitsRefreshed(e.refreshLimits(LocalDateTime.now()));
         } catch (EngineException ex) {
-            host.problem(EngineEvent.session(EngineEvent.Level.ERROR, ex.getMessage()));
+            tellProblem(EngineEvent.session(EngineEvent.Level.ERROR, ex.getMessage()));
         }
     }
 
@@ -511,6 +548,7 @@ public final class Session {
             // The snapshot goes along: a removed torrent cannot be looked up for the placeholders.
             Automation a = automation;
             if (a != null) a.handle(event, t);
+            log.add(event);
             host.seedingDone(event, t, removed);
         }
     }
@@ -548,7 +586,7 @@ public final class Session {
 
         @Override
         public void report(EngineEvent event) {
-            host.report(event);
+            tellReport(event);
         }
 
         @Override
@@ -642,6 +680,69 @@ public final class Session {
 
     // ---- adds without a dialog ------------------------------------------------------------------
 
+    // ---- imports from another client --------------------------------------------------------------
+
+    /** What an import did: how many came over, and each one that did not, with why. */
+    public record ImportResult(int imported, List<String> failed) {}
+
+    /**
+     * Any thread but a toolkit's. The chosen torrents of another client brought over (roadmap 1.3,
+     * item 1): each one's category filed first, with the other client's folder for it when
+     * Torrenta has no such category, its tags kept, the torrent adopted as it was (checked on the
+     * add when the plan said its files do not match), its own share limits kept; a line in the log
+     * for the whole and one for each that failed. One that fails costs that one.
+     */
+    public ImportResult importTorrents(List<com.torrenta.migrate.ImportPlan.Item> chosen) throws EngineException {
+        Engine e = running;
+        if (e == null) throw new EngineException(tr("status.engineNotRunning"));
+        if (e.capabilities().lacks(Engine.Capability.IMPORT_RESUME))
+            throw new EngineException(tr("engine.error.noImport"));
+        int imported = 0;
+        List<String> failed = new java.util.ArrayList<>();
+        String client = "";
+        for (com.torrenta.migrate.ImportPlan.Item item : chosen) {
+            com.torrenta.migrate.ImportCandidate c = item.candidate();
+            client = c.client();
+            try {
+                if (!c.category().isEmpty() && labels.category(c.category()).isEmpty())
+                    labels.putCategory(new Category(c.category(), c.categoryPath()));
+                if (!c.tags().isEmpty()) labels.addTags(c.tags());
+                String id = e.adopt(new Engine.Adoption(
+                        c.resume(),
+                        c.metainfo(),
+                        c.savePath(),
+                        new com.torrenta.engine.TorrentLabels(c.category(), c.tags(), c.rename()),
+                        c.shownName(),
+                        item.verdict().checkedOnTheAdd()));
+                ShareLimit own = importedShare(c, settings.shareLimit());
+                if (own != null) settings.setShareOverride(id, own);
+                imported++;
+            } catch (EngineException | java.io.IOException | RuntimeException ex) {
+                String why = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                failed.add(c.shownName() + ": " + why);
+                tellReport(EngineEvent.warning(c.id(), c.shownName(), tr("import.failed", why)));
+            }
+        }
+        settings.saveQuietly();
+        if (imported > 0 || !failed.isEmpty())
+            tellReport(EngineEvent.session(
+                    failed.isEmpty() ? EngineEvent.Level.INFO : EngineEvent.Level.WARNING,
+                    tr("import.summary", imported, client, failed.size())));
+        return new ImportResult(imported, List.copyOf(failed));
+    }
+
+    /**
+     * The other client's own share limit for a torrent as Torrenta's: -2 there is the global limit
+     * (no limit of its own here), -1 none; a half at -2 takes the global value. Null when both are
+     * the global one. Pure.
+     */
+    static ShareLimit importedShare(com.torrenta.migrate.ImportCandidate c, ShareLimit global) {
+        if (c.ratioLimit() == -2 && c.seedingMinutes() == -2) return null;
+        double ratio = c.ratioLimit() == -2 ? global.ratio() : Math.max(0, c.ratioLimit());
+        int minutes = c.seedingMinutes() == -2 ? global.seedingMinutes() : (int) Math.max(0, c.seedingMinutes());
+        return new ShareLimit(ratio, minutes, global.action());
+    }
+
     /**
      * What an add without a dialog starts from: the settings' defaults, with a daemon's own
      * download folder when the files are not on this machine.
@@ -680,7 +781,7 @@ public final class Session {
                             ? UnsafeContent.withSkipped(request, check.indices())
                             : request);
             String line = UnsafeContent.logLine(decision, added.name(), check, false);
-            if (!line.isEmpty()) host.report(EngineEvent.warning(added.id(), added.name(), line));
+            if (!line.isEmpty()) tellReport(EngineEvent.warning(added.id(), added.name(), line));
             return added;
         }
         // A magnet: stopped once its files are known, unless a person chose otherwise or the
@@ -744,9 +845,9 @@ public final class Session {
                     if (p.resume()) engine.resume(id);
                 }
                 String line = UnsafeContent.logLine(decision, t.name(), check, true);
-                if (!line.isEmpty()) host.report(EngineEvent.warning(id, t.name(), line));
+                if (!line.isEmpty()) tellReport(EngineEvent.warning(id, t.name(), line));
             } catch (EngineException ex) {
-                host.report(EngineEvent.warning(id, t.name(), ex.getMessage()));
+                tellReport(EngineEvent.warning(id, t.name(), ex.getMessage()));
             }
             clearPending(id);
         }

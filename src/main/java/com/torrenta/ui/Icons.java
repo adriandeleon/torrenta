@@ -141,6 +141,7 @@ final class Icons {
             case "copy-magnet" -> magnet();
             case "rename" -> rename();
             case "export-torrent" -> exportFile();
+            case "import-from-client" -> importInto();
             case "open-folder" -> open();
             case "remove" -> trash();
             case "remove-data" -> trashData();
@@ -199,6 +200,11 @@ final class Icons {
     }
 
     // ---- glyphs; the paths are Editora's, by the same name --------------------------------------
+
+    /** An arrow into a tray, for "Import from another client": torrents coming in from elsewhere. */
+    static Glyph importInto() {
+        return line("M8 2v7.5M5 6.5l3 3 3-3M2.5 9.5v4h11v-4");
+    }
 
     /** A page with a plus, Editora's new-file glyph, for "New Torrent". */
     static Glyph newFile() {

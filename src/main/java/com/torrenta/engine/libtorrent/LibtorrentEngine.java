@@ -228,6 +228,13 @@ public final class LibtorrentEngine implements Engine {
     /** Ids re-added from the store at start, so their add alert reads "Restored", not "Added". */
     private final Set<String> restoring = ConcurrentHashMap.newKeySet();
 
+    /**
+     * Torrents brought back from the store this session (at start, by undo, by an import). Their
+     * finished alert, posted when libtorrent loads one already complete, is no download finishing:
+     * run-on-finished and the notification must not run for every seed at every start.
+     */
+    private final Set<String> broughtBack = ConcurrentHashMap.newKeySet();
+
     /** Magnets to pause once their metadata arrives: the dialog's "stop after metadata". */
     private final Set<String> stopAfterMetadata = ConcurrentHashMap.newKeySet();
 
@@ -1486,6 +1493,54 @@ public final class LibtorrentEngine implements Engine {
         }
         remove(id, false);
         return new Detached(id, name, resume, labelBytes, storageBytes, queue);
+    }
+
+    /**
+     * Another client's torrent: its resume data read by libtorrent's own reader, the metainfo put
+     * back, the save path set, then written into the store as this engine's own resume data and
+     * added from there, as at start: no check unless libtorrent finds the files do not match.
+     */
+    @Override
+    public synchronized String adopt(Adoption a) throws EngineException {
+        SessionManager s = running();
+        error_code ec = new error_code();
+        add_torrent_params read = libtorrent.read_resume_data_ex(Vectors.bytes2byte_vector(a.resume()), ec);
+        if (ec.value() != 0) throw new EngineException(tr("engine.error.importUnreadable", a.name(), ec.message()));
+        if (a.check()) {
+            // Nothing taken on trust: with no pieces recorded, the add checks the files on disk, as
+            // an add of a .torrent whose data is already there does. Not force_recheck.
+            read.set_have_pieces(new org.libtorrent4j.swig.bitfield());
+            read.set_verified_pieces(new org.libtorrent4j.swig.bitfield());
+            read.set_unfinished_pieces(new org.libtorrent4j.swig.int_bitfield_map());
+            read.setFlags(read.getFlags().and_(org.libtorrent4j.TorrentFlags.SEED_MODE.inv()));
+        }
+        AddTorrentParams params = new AddTorrentParams(read);
+        if (a.metainfo() != null) {
+            try {
+                params.setTorrentInfo(new TorrentInfo(a.metainfo()));
+            } catch (IllegalArgumentException e) {
+                throw new EngineException(tr("engine.error.importUnreadable", a.name(), e.getMessage()), e);
+            }
+        }
+        params.setSavePath(a.savePath());
+        String id = params.getInfoHashes().getBest().toHex();
+        if (find(s, id) != null) throw new EngineException(tr("engine.error.importAlreadyHere", a.name()));
+        byte[] blob = AddTorrentParams.writeResumeDataBuf(params);
+        synchronized (store) {
+            removed.remove(id);
+            try {
+                store.save(id, blob);
+                if (!a.labels().isEmpty()) store.saveLabels(id, a.labels().encode());
+            } catch (IOException e) {
+                throw new EngineException(tr("engine.error.importUnreadable", a.name(), e.getMessage()), e);
+            }
+        }
+        restoring.add(id);
+        if (!addFromStore(s, id, blob)) {
+            restoring.remove(id);
+            throw new EngineException(tr("engine.error.importUnreadable", a.name(), ""));
+        }
+        return id;
     }
 
     /** Writes the detached torrent back into the store and adds it from there, as at start. */
@@ -2827,7 +2882,13 @@ public final class LibtorrentEngine implements Engine {
                     case TORRENT_FINISHED -> {
                         TorrentAlert<?> t = (TorrentAlert<?>) alert;
                         requestSave(t.handle(), false);
-                        torrentEvent(t, EngineEvent.Level.INFO, EngineEvent.Kind.FINISHED, "engine.event.finished");
+                        // Brought back complete, not finished now: no download, so nothing to run on.
+                        // One brought back part done that finishes this session has downloaded.
+                        boolean wasComplete = t.handle().isValid()
+                                && broughtBack.contains(id(t.handle()))
+                                && t.handle().status().totalPayloadDownload() == 0;
+                        if (!wasComplete)
+                            torrentEvent(t, EngineEvent.Level.INFO, EngineEvent.Kind.FINISHED, "engine.event.finished");
                         if (t.handle().isValid()) {
                             // Names first, then the move: both are disk jobs, done in this order.
                             applySuffixes(id(t.handle()), t.handle());
@@ -3068,6 +3129,7 @@ public final class LibtorrentEngine implements Engine {
             String id = alert.params().getInfoHashes().getBest().toHex();
             // A torrent restored at start is not new to the person; nothing runs on it.
             boolean restored = restoring.remove(id);
+            if (restored) broughtBack.add(id);
             if (restored) torrentEvent(alert, EngineEvent.Level.INFO, "engine.event.restored");
             else torrentEvent(alert, EngineEvent.Level.INFO, EngineEvent.Kind.ADDED, "engine.event.added");
             probeArchives(alert.handle(), restored);

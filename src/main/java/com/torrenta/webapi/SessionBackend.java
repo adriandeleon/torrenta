@@ -26,6 +26,7 @@ import com.torrenta.engine.TorrentLimits;
 import com.torrenta.net.TorrentFetch;
 import com.torrenta.session.AddDefaults;
 import com.torrenta.session.Session;
+import com.torrenta.session.SessionLog;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.Settings;
 
@@ -59,11 +60,6 @@ public final class SessionBackend implements WebApi.Backend {
                 lastActive.keySet().retainAll(ids);
             }
         });
-    }
-
-    @Override
-    public EngineSettings engineSettings() {
-        return settings.engineSettings();
     }
 
     @Override
@@ -169,7 +165,10 @@ public final class SessionBackend implements WebApi.Backend {
                 Math.max(0, stats.peersConnected()),
                 e.capabilities().has(Engine.Capability.LOCAL_FILES) ? freeSpace(settings.downloadDir()) : -1,
                 speed.alternativeActive(now),
-                queue.activeDownloads() > 0 || queue.activeSeeds() > 0 || queue.activeLimit() > 0);
+                queue.activeDownloads() > 0 || queue.activeSeeds() > 0 || queue.activeLimit() > 0,
+                e.connectivity().externalAddress(),
+                Math.max(0, stats.queuedDiskJobs()),
+                Math.max(0, stats.wasted()));
     }
 
     /** Usable bytes on the volume of {@code dir}, or of its nearest folder that exists; -1 unknown. */
@@ -250,6 +249,35 @@ public final class SessionBackend implements WebApi.Backend {
     public void setShareOverride(String id, ShareLimit limit) {
         settings.setShareOverride(id, limit);
         settings.saveQuietly();
+    }
+
+    @Override
+    public Settings settings() {
+        return settings;
+    }
+
+    /** What the owner does once the settings changed from outside it: the window reloads its pages. */
+    private volatile Runnable onSettingsChanged = () -> {};
+
+    public void setOnSettingsChanged(Runnable listener) {
+        onSettingsChanged = listener == null ? () -> {} : listener;
+    }
+
+    @Override
+    public void settingsChanged() throws EngineException {
+        settings.saveQuietly();
+        try {
+            session.applySettings();
+            // The bans are the IP filter's: rebuilt from its cache, as the IP filter page does.
+            session.refreshIpFilter(false);
+        } finally {
+            onSettingsChanged.run();
+        }
+    }
+
+    @Override
+    public List<SessionLog.Entry> log(long id) {
+        return session.log().after(id);
     }
 
     @Override

@@ -84,7 +84,8 @@ final class Writes {
         List<Multipart.Part> files = request.parts().stream()
                 .filter(part -> part.isFile() && part.name().equals("torrents"))
                 .toList();
-        if (urls.isEmpty() && files.isEmpty()) return Response.text(400, "Bad Request");
+        // qBittorrent's answer to an add with nothing in it.
+        if (urls.isEmpty() && files.isEmpty()) return Response.text(200, "Fails.");
 
         AddDefaults defaults = backend.addDefaults();
         String category = p.first("category").orElse("").trim();
@@ -265,7 +266,7 @@ final class Writes {
         String name = p.first("category").orElse("").trim();
         if (name.isEmpty()) return Response.text(400, "Bad Request");
         if (backend.categories().stream().anyMatch(c -> c.name().equalsIgnoreCase(name)))
-            return Response.text(409, "Category already exists");
+            return Response.text(409, "Unable to create category");
         String path = p.first("savePath").orElse("").trim();
         String kept = "";
         if (!path.isEmpty()) {

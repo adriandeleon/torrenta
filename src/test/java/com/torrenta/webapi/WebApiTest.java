@@ -18,7 +18,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.http.Form;
 import com.torrenta.http.Limits;
@@ -51,8 +50,8 @@ class WebApiTest {
 
     private static FakeBackend backend() {
         FakeBackend b = new FakeBackend();
-        EngineSettings d = EngineSettings.defaults();
-        b.settings = d.withQueue(d.queue().withShare(new ShareLimit(2.0, 0, ShareLimit.Action.REMOVE)));
+        b.store.set(com.torrenta.store.Settings.SHARE_RATIO, "2.0");
+        b.store.set(com.torrenta.store.Settings.SHARE_ACTION, "REMOVE");
         return b;
     }
 
@@ -230,11 +229,14 @@ class WebApiTest {
         assertTrue(json.contains("\"max_ratio_act\":1"), json);
         assertTrue(json.contains("\"dht\":true"), json);
 
-        EngineSettings d = EngineSettings.defaults();
-        EngineSettings unqueued = d.withQueue(new EngineSettings.Queue(0, 0, 0, true, ShareLimit.NONE));
-        String none = WebApi.preferences(unqueued, Path.of("/x"));
-        assertTrue(none.contains("\"queueing_enabled\":false"), none);
-        assertTrue(none.contains("\"max_ratio_enabled\":false") && none.contains("\"max_ratio\":-1"), none);
+        com.torrenta.store.Settings unqueued = new FakeBackend().store;
+        unqueued.set(com.torrenta.store.Settings.QUEUE_ACTIVE_DOWNLOADS, "0");
+        unqueued.set(com.torrenta.store.Settings.QUEUE_ACTIVE_SEEDS, "0");
+        unqueued.set(com.torrenta.store.Settings.QUEUE_ACTIVE_LIMIT, "0");
+        Map<String, Object> none = Preferences.read(unqueued, Path.of("/x"));
+        assertEquals(false, none.get("queueing_enabled"));
+        assertEquals(false, none.get("max_ratio_enabled"));
+        assertEquals(-1.0, none.get("max_ratio"), "a ratio is a double");
     }
 
     @Test

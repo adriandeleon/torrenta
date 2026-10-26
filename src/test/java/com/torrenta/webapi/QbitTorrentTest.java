@@ -85,7 +85,8 @@ class QbitTorrentTest {
         assertEquals("a1", row.get("hash"));
         assertEquals(1.0, row.get("progress"));
         assertEquals(2048, row.get("dl_limit"));
-        assertEquals(-1, row.get("up_limit"), "no limit is -1");
+        assertEquals(
+                0, row.get("up_limit"), "no limit is 0 in the list (and -1 in properties): qBittorrent 5.1 recorded");
         assertEquals(true, row.get("f_l_piece_prio"));
         assertEquals(1.5, row.get("ratio_limit"));
         assertEquals(-1L, row.get("seeding_time_limit"), "its own limit without a time: none");

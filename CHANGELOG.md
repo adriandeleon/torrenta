@@ -7,6 +7,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Bring your torrents over from qBittorrent.** File → Import from another client… finds
+  qBittorrent on this machine (Flatpak's too) or reads a folder you choose, and lists its torrents
+  with what will happen to each: complete or part done, they come over at their progress without a
+  check, stopped ones stopped, with their categories (and qBittorrent's folders for them), tags,
+  the names you gave them and their own share limits; one whose files do not match is checked as
+  it is added and comes up short rather than wrong; one Torrenta has, or one qBittorrent is still
+  writing, is left alone. A qBittorrent that keeps its torrents in its SQLite database is told how
+  to switch it back to files. The event log has the summary.
+
 - **A phone interface through a web UI written for qBittorrent.** Settings → Remote access → Web
   interface folder serves a folder at the server's address the way qBittorrent serves an
   alternative WebUI: unpack VueTorrent there and a phone's browser runs Torrenta. Its public half
@@ -16,7 +25,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   `sync/torrentPeers`. And what their detail screens edit: file priorities, the location (inside
   the allowed folders), a torrent's name, a file's or folder's name, trackers, per-torrent limits,
   sequential and first-and-last-piece, super seeding, the queue, and the categories and tags
-  themselves; with the trackers, web seeds and piece states to read.
+  themselves; with the trackers, web seeds and piece states to read. And the session's: the
+  alternative speed limits switched and the limits in force set, the preferences Torrenta has read
+  and written (live, as from the Settings page; the save path inside the allowed folders, and
+  Remote access's own password, address and port never changed through it), and the event log.
+  Held to a real qBittorrent 5.1.0's recorded answers field by field, and tried with Sonarr and
+  Radarr through a whole grab, import and removal after seeding: `docs/webapi.md`.
 
 - **Remote access, the door for Sonarr, Radarr and the phone apps.** Settings → Remote access
   speaks qBittorrent's WebUI API at `/api/v2`, off until switched on and on `127.0.0.1:8080` until
@@ -134,6 +148,11 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   first sync after updating only adds, so nothing that exists on just one computer is lost.
 
 ### Fixed
+
+- **A finished torrent no longer "finishes" again at every start.** libtorrent reports a complete
+  torrent as finished when it loads one, so each seed ran your on-finished command and showed its
+  notification again every time Torrenta started (and an import would have done it for every
+  complete torrent brought over). Only a download that finishes now counts.
 
 - **Binding to an interface now binds the connections Torrenta makes, not only the ones it
   accepts.** With Settings → Connection → Interface set (a VPN's, say), peers Torrenta dialled

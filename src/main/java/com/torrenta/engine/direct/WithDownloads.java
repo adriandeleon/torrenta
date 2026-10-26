@@ -158,6 +158,11 @@ public final class WithDownloads implements Engine {
     }
 
     @Override
+    public String adopt(Adoption adoption) throws EngineException {
+        return torrents.adopt(adoption);
+    }
+
+    @Override
     public void remove(String id, boolean deleteFiles) throws EngineException {
         if (DirectDownload.isId(id)) links.remove(id, deleteFiles);
         else torrents.remove(id, deleteFiles);

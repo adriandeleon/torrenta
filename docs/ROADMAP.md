@@ -520,8 +520,14 @@ so the order is extract, then serve.
    `sync/torrentPeers`, `StaticFiles` (`webapi.rootFolder`), unknown API paths 404 for every
    method. So is the second: `Edits` (the torrent, file, tracker, limit, queue, category and tag
    edits; `torrents/trackers`, `webseeds` and `pieceStates` beside them), `QueueOrder` moved to
-   `engine` so the API orders a selection's moves as the window does.
-6. **Compatibility**: contract tests from a real qBittorrent 5.0's recorded answers;
+   `engine` so the API orders a selection's moves as the window does. And the third: `SessionEdits`
+   (the speed mode and global limits, `app/setPreferences` through `Preferences`, `log/main` from
+   `session.SessionLog`), `Session.applySettings`. Item 5 is done.
+6. **Compatibility** (done, `docs/webapi.md`): `QbittorrentContractTest` against a real qBittorrent
+   5.1.0's answers recorded by `scripts/webapi-record.py` (no qBittorrent needed to run it; the
+   recordings found differences, every one fixed, and `scripts/webapi-compare.py` then found none
+   against a live headless Torrenta); Sonarr 4.0 and Radarr 6.4 through grab, import and removal
+   after seeding. Planned as: contract tests from a real qBittorrent 5.0's recorded answers;
    `QbittorrentContractTest`, `@EnabledIf` `qbittorrent-nox` is on the PATH as
    `TransmissionDaemonTest` is, sends the same requests to both and compares the shapes; a manual
    pass with Sonarr and Radarr against a headless Torrenta (grab, import, remove after seeding),
@@ -544,7 +550,13 @@ remote caller's behalf.
    qBittorrent to fastresume files (Advanced → Resume data storage type) and look again, rather
    than ship a second native library for an opt-in mode. File → Import from another client…:
    the sources found on this machine or a chosen folder, a table with a verdict per torrent, a
-   summary in the event log.
+   summary in the event log. In two PRs: the import (`migrate.QbittorrentReader`, `ImportPlan`,
+   `Engine.adopt`, `Session.importTorrents`, proven on what a real qBittorrent 5.1.0 wrote), then
+   the dialog. Both are in (item 1 is done): `ui.ImportDialog` and `ImportText`, the folders found
+   or one chosen, a tick per torrent as the plan advises (what Torrenta has, or qBittorrent is
+   still writing, cannot be ticked), the SQLite and running notes. Found on the way: libtorrent 2 keeps no file sizes in resume
+   data and believes a truncated file whole, so the plan compares sizes for the files whose pieces
+   are claimed and a torrent that does not match is adopted without its pieces, checked on the add.
 2. **Import from Deluge**, also libtorrent: `state/torrents.fastresume` is one bencoded dict of
    hash to resume bytes, `state/<hash>.torrent` beside it, labels from `label.conf` (Deluge's two
    concatenated JSON objects). `torrents.state` is a Python pickle and is not read; the save path
