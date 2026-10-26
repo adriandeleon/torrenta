@@ -938,13 +938,36 @@ public final class MainWindow {
         table.requestFocus();
     }
 
+    /** How long a quit waits for the dialogs it closed (or a file chooser) to give their loops back. */
+    private static final int QUIT_WAIT_MS = 100;
+
+    private static final int QUIT_WAITS = 100;
+
     /**
-     * Ends the program: from the File menu, the tray menu, or a close with no tray to close to.
-     * Platform.exit is needed outright once implicit exit is off; before that it is harmless.
+     * Ends the program: from the File menu, the tray menu, the system's Quit, or a close with no
+     * tray to close to. Platform.exit is needed outright once implicit exit is off; before that it
+     * is harmless. A modal dialog open at the time (the tray's Quit while the Add dialog asks)
+     * runs a nested event loop, and leaving from inside one is how the toolkit aborted the JVM:
+     * so the dialogs are cancelled first and the quit carries on once their loops have unwound,
+     * a native file chooser's included, which only the person can close.
      */
     private void quit() {
+        quit(0);
+    }
+
+    private void quit(int waited) {
         quitting = true;
         hiddenToTray = false;
+        if (Platform.isNestedLoopRunning() && waited < QUIT_WAITS) {
+            closeDialogs();
+            javafx.animation.PauseTransition again =
+                    new javafx.animation.PauseTransition(javafx.util.Duration.millis(QUIT_WAIT_MS));
+            again.setOnFinished(e -> quit(waited + 1));
+            again.play();
+            return;
+        }
+        if (System.getProperty("torrenta.capture") != null)
+            System.out.println("capture: quit=after " + waited + " waits, nested=" + Platform.isNestedLoopRunning());
         if (stage.isShowing()) stage.close(); // onHidden tears down
         else shutdown();
         Platform.exit();
@@ -1138,6 +1161,14 @@ public final class MainWindow {
 
     /** Dismisses an open Add dialog, so the capture hook can exit outside its nested event loop. */
     public void closeDialogsForCapture() {
+        closeDialogs();
+    }
+
+    /**
+     * Every modal window cancelled, each through its own cancel where it has one (so an Add
+     * dialog's metadata fetch ends with it), the rest hidden, which returns their showAndWait.
+     */
+    private void closeDialogs() {
         if (currentDialog != null && currentDialog.isShowing()) currentDialog.cancel();
         if (createDialog != null && createDialog.isShowing()) createDialog.close();
         if (limitsDialog != null && limitsDialog.isShowing()) limitsDialog.cancel();
@@ -1150,6 +1181,12 @@ public final class MainWindow {
         if (aboutDialog != null && aboutDialog.isShowing()) aboutDialog.close();
         if (rssPane != null) rssPane.closeDialog();
         settingsWindow.closeDialogsForCapture();
+        for (javafx.stage.Window w : List.copyOf(javafx.stage.Window.getWindows())) {
+            if (w != stage
+                    && w.isShowing()
+                    && w instanceof Stage s
+                    && s.getModality() != javafx.stage.Modality.NONE) s.hide();
+        }
     }
 
     /**
@@ -1498,6 +1535,10 @@ public final class MainWindow {
             // pick-view:<n>: the n-th saved view chosen, as Shortcut+Alt+n does from the list.
             chooseSavedView(
                     Integer.parseInt(action.substring("pick-view:".length()).trim()));
+        } else if (action.equals("quit")) {
+            // File → Quit as the tray's and the system's Quit reach it: whatever dialog is open.
+            System.out.println("capture: quit-nested=" + Platform.isNestedLoopRunning());
+            quit();
         } else if (action.equals("remove-confirmed")) {
             // Remove (the files kept) on the selection, its question answered yes.
             RemoveConfirm.answerForCapture = true;

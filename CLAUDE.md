@@ -378,8 +378,12 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   native jars are excluded from the module path altogether.
 - **Exiting while a modal dialog's nested event loop runs aborts the JVM** (`SIGSEGV` in
   `libglassgtk3` `destroy_and_delete_ctx` during `Application.terminate`). The capture hook closes
-  any dialog and exits on the next pulse; a Quit while the Add dialog is open goes the same way and
-  is a known gap until Quit is intercepted before `Platform.exit`.
+  any dialog and exits on the next pulse. `MainWindow.quit` does the same: with a nested loop
+  running (the tray's Quit while the Add dialog asks) it cancels every modal window
+  (`closeDialogs`, each dialog's own cancel, then any modal `Stage` hidden) and tries again every
+  100 ms, up to 10 s (a native file chooser only the person can close), so `Platform.exit` runs
+  outside every nested loop. `App.stop`'s `System.exit(0)` had already hidden the abort; the
+  capture action `quit` (with an Add dialog open) prints `quit-nested=` and `quit=after N waits`.
 - **`settings_pack` enum constants are SWIG objects**, like every other libtorrent4j constant:
   `toPack` runs only after the native has loaded. Keys are set by `swigValue()` through the pack's
   generic `setBoolean`/`setInteger`/`setString`; the typed setters cover only a few.

@@ -211,6 +211,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Fixed
 
+- **Quitting with a dialog open is clean.** Quit from the tray menu (or the system's) while a
+  dialog such as Add Torrent was asking now cancels the dialog first and quits once it has gone,
+  rather than ending the program from inside it.
+
 - **Every dialog shows its buttons.** A dialog now grows to fit what it holds, when it opens and
   whenever something appears in it, up to the screen's height, and cannot be dragged shorter than
   that. The torrent Limits dialog cut its Cancel and Apply buttons off the bottom of the window.
