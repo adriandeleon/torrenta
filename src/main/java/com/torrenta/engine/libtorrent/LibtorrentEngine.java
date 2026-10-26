@@ -1531,6 +1531,9 @@ public final class LibtorrentEngine implements Engine {
             try {
                 store.save(id, blob);
                 if (!a.labels().isEmpty()) store.saveLabels(id, a.labels().encode());
+                // The other client's renames, where this engine keeps them: put back before the add.
+                if (!a.renamed().isEmpty())
+                    store.saveStorage(id, new TorrentStorage("", false, Set.of(), a.renamed()).encode());
             } catch (IOException e) {
                 throw new EngineException(tr("engine.error.importUnreadable", a.name(), e.getMessage()), e);
             }

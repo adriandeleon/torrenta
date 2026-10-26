@@ -9,6 +9,7 @@ import java.util.Map;
 import com.torrenta.migrate.ImportCandidate;
 import com.torrenta.migrate.ImportPlan;
 import com.torrenta.migrate.QbittorrentReader;
+import com.torrenta.migrate.TransmissionReader;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -24,21 +25,44 @@ final class ImportText {
     /**
      * What a folder held, for the dialog.
      *
-     * @param backup the {@code BT_backup} folder read
+     * @param backup the folder read: qBittorrent's {@code BT_backup}, Transmission's config folder
      * @param running the other client is running
+     * @param client whose folder it is, for the notes
      */
-    record Loaded(Path backup, List<ImportPlan.Item> items, boolean sqlite, boolean running, List<String> unreadable) {}
+    record Loaded(
+            Path backup,
+            List<ImportPlan.Item> items,
+            boolean sqlite,
+            boolean running,
+            List<String> unreadable,
+            String client) {
 
-    /** qBittorrent's folders that exist on this machine, Flatpak's included; none when there are none. */
+        /** qBittorrent's, the first client the dialog knew. */
+        Loaded(Path backup, List<ImportPlan.Item> items, boolean sqlite, boolean running, List<String> unreadable) {
+            this(backup, items, sqlite, running, unreadable, QbittorrentReader.CLIENT);
+        }
+    }
+
+    /**
+     * The other clients' folders that exist on this machine, Flatpak's included: qBittorrent's,
+     * then Transmission's (the daemon's, the app's); none when there are none.
+     */
     static List<Path> found(String osName, Path home, Map<String, String> env) {
-        return QbittorrentReader.knownLocations(osName, home, env).stream()
-                .filter(Files::isDirectory)
-                .toList();
+        List<Path> out = new ArrayList<>();
+        for (Path p : QbittorrentReader.knownLocations(osName, home, env)) if (Files.isDirectory(p)) out.add(p);
+        for (Path p : TransmissionReader.knownLocations(osName, home, env))
+            if (TransmissionReader.isConfigFolder(p)) out.add(p);
+        return out;
+    }
+
+    /** Whose folder this is: Transmission's has {@code resume} beside {@code torrents}; else qBittorrent's. */
+    static String clientOf(Path folder) {
+        return TransmissionReader.isConfigFolder(folder) ? TransmissionReader.CLIENT : QbittorrentReader.CLIENT;
     }
 
     /** A source in the picker: the client and where. */
-    static String source(Path backup) {
-        return tr("dialog.import.sourceLine", QbittorrentReader.CLIENT, backup.toString());
+    static String source(Path folder) {
+        return tr("dialog.import.sourceLine", clientOf(folder), folder.toString());
     }
 
     /** The row's progress: a share, stopped or not; a magnet has none. */
@@ -61,7 +85,7 @@ final class ImportText {
         else if (l.items().isEmpty() && l.unreadable().isEmpty())
             out.add(tr("dialog.import.empty", l.backup().toString()));
         if (l.running() && l.items().stream().anyMatch(i -> i.verdict() == ImportPlan.Verdict.CLIENT_RUNNING))
-            out.add(tr("dialog.import.running", QbittorrentReader.CLIENT));
+            out.add(tr("dialog.import.running", l.client()));
         if (!l.unreadable().isEmpty())
             out.add(tr("dialog.import.unreadable", l.unreadable().size()));
         return out;

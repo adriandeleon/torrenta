@@ -75,13 +75,16 @@ class QbittorrentImportTest {
                 .orElse(null);
     }
 
+    /** What the torrents looked like, said when a wait times out. */
+    private static java.util.function.Supplier<String> diagnosis;
+
     private static void await(String what, BooleanSupplier condition) throws InterruptedException {
         long until = System.currentTimeMillis() + 30_000;
         while (System.currentTimeMillis() < until) {
             if (condition.getAsBoolean()) return;
             Thread.sleep(50);
         }
-        fail("timed out waiting: " + what);
+        fail("timed out waiting: " + what + (diagnosis == null ? "" : " (" + diagnosis.get() + ")"));
     }
 
     @Test
@@ -106,7 +109,7 @@ class QbittorrentImportTest {
         flipAByte(downloads.resolve("Seed.bin"));
         flipAByte(downloads.resolve("Pack/a.bin"));
         List<com.torrenta.engine.EngineEvent> finished = new java.util.concurrent.CopyOnWriteArrayList<>();
-        try (LibtorrentEngine engine = new LibtorrentEngine(downloads, store)) {
+        try (LibtorrentEngine engine = QuietEngine.open(downloads, store)) {
             engine.addListener(e -> {
                 if (e.kind() == com.torrenta.engine.EngineEvent.Kind.FINISHED) finished.add(e);
             });
@@ -142,11 +145,15 @@ class QbittorrentImportTest {
         }
 
         // Written as this engine's own: a restart brings them back as they were, still unchecked.
-        try (LibtorrentEngine again = new LibtorrentEngine(downloads, store)) {
+        try (LibtorrentEngine again = QuietEngine.open(downloads, store)) {
             again.addListener(e -> {
                 if (e.kind() == com.torrenta.engine.EngineEvent.Kind.FINISHED) finished.add(e);
             });
             again.start();
+            diagnosis = () -> again.torrents().stream()
+                    .map(t -> t.name() + " " + t.state() + " " + t.progress() + " " + t.error())
+                    .toList()
+                    .toString();
             assertEquals(3, again.torrents().size());
             await("back as they were", () -> progress(again, seed) == 1.0 && progress(again, pack) == 0.5);
             assertEquals("Pack Renamed", byId(again, pack.id()).name());
@@ -178,7 +185,7 @@ class QbittorrentImportTest {
                 .filter(ImportCandidate::complete)
                 .findFirst()
                 .orElseThrow();
-        try (LibtorrentEngine engine = new LibtorrentEngine(downloads, new TorrentStore(dir.resolve("store")))) {
+        try (LibtorrentEngine engine = QuietEngine.open(downloads, new TorrentStore(dir.resolve("store")))) {
             engine.start();
             engine.adopt(adoption(seed, downloads));
             await("checked and short", () -> {

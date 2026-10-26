@@ -24,6 +24,8 @@ import java.util.List;
  * @param pieces pieces in the torrent; 0 without metainfo
  * @param ratioLimit its own ratio limit; -2 for the global one, -1 for none
  * @param seedingMinutes its own seeding-time limit, in minutes; -2 for the global one, -1 for none
+ * @param renamed files the other client renamed, by the torrent's own index: the path under the
+ *     save path, forward slashes, as Torrenta's {@code .storage} sidecar keeps them
  */
 public record ImportCandidate(
         String client,
@@ -41,7 +43,8 @@ public record ImportCandidate(
         long piecesHave,
         long pieces,
         double ratioLimit,
-        long seedingMinutes) {
+        long seedingMinutes,
+        java.util.Map<Integer, String> renamed) {
 
     /**
      * One file: its path under the save path, as the other client has it on disk, its size, and
@@ -56,6 +59,45 @@ public record ImportCandidate(
         categoryPath = categoryPath == null ? "" : categoryPath;
         tags = tags == null ? List.of() : List.copyOf(tags);
         files = files == null ? List.of() : List.copyOf(files);
+        renamed = renamed == null ? java.util.Map.of() : java.util.Map.copyOf(renamed);
+    }
+
+    /** No file renamed: what most clients' torrents are. */
+    public ImportCandidate(
+            String client,
+            String id,
+            String name,
+            String rename,
+            byte[] resume,
+            byte[] metainfo,
+            String savePath,
+            String category,
+            String categoryPath,
+            List<String> tags,
+            boolean stopped,
+            List<FileEntry> files,
+            long piecesHave,
+            long pieces,
+            double ratioLimit,
+            long seedingMinutes) {
+        this(
+                client,
+                id,
+                name,
+                rename,
+                resume,
+                metainfo,
+                savePath,
+                category,
+                categoryPath,
+                tags,
+                stopped,
+                files,
+                piecesHave,
+                pieces,
+                ratioLimit,
+                seedingMinutes,
+                java.util.Map.of());
     }
 
     /** The same torrent with its files looked for in another folder: a person moved them, or a test. */
@@ -76,7 +118,8 @@ public record ImportCandidate(
                 piecesHave,
                 pieces,
                 ratioLimit,
-                seedingMinutes);
+                seedingMinutes,
+                renamed);
     }
 
     /** Every piece is there. */

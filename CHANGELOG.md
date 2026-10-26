@@ -7,11 +7,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
-- **Bring your torrents over from qBittorrent.** File → Import from another client… finds
-  qBittorrent on this machine (Flatpak's too) or reads a folder you choose, and lists its torrents
+- **Bring your torrents over from qBittorrent or Transmission.** File → Import from another
+  client… finds qBittorrent and Transmission (the daemon or the app) on this machine, Flatpak's
+  too, or reads a folder you choose, and lists its torrents
   with what will happen to each: complete or part done, they come over at their progress without a
   check, stopped ones stopped, with their categories (and qBittorrent's folders for them), tags,
-  the names you gave them and their own share limits; one whose files do not match is checked as
+  the names you gave them (or their files, from Transmission) and their own share limits; one whose files do not match is checked as
   it is added and comes up short rather than wrong; one Torrenta has, or one qBittorrent is still
   writing, is left alone. A qBittorrent that keeps its torrents in its SQLite database is told how
   to switch it back to files. The event log has the summary.

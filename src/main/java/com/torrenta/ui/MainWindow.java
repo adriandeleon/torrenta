@@ -2211,16 +2211,29 @@ public final class MainWindow {
         });
     }
 
-    /** Worker. One folder read and planned against the torrents the engine has now. */
+    /** Worker. One folder read and planned against the torrents the engine has now: whichever client's it is. */
     private ImportText.Loaded loadImport(Path folder, Path home) {
         java.util.Map<String, String> env = System.getenv();
+        Engine e = engine;
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        if (e != null) for (Torrent t : e.torrents()) ids.add(t.id());
+        if (com.torrenta.migrate.TransmissionReader.isConfigFolder(folder)) {
+            com.torrenta.migrate.TransmissionReader.Found found = com.torrenta.migrate.TransmissionReader.read(folder);
+            for (String line : found.unreadable()) LOG.warning("Import: not readable in " + folder + ": " + line);
+            boolean running = com.torrenta.migrate.TransmissionReader.running(folder);
+            return new ImportText.Loaded(
+                    folder,
+                    com.torrenta.migrate.ImportPlan.of(
+                            found.candidates(), ids, com.torrenta.migrate.ImportPlan::sizeOnDisk, running),
+                    false,
+                    running,
+                    found.unreadable(),
+                    com.torrenta.migrate.TransmissionReader.CLIENT);
+        }
         com.torrenta.migrate.QbittorrentReader.Found found =
                 com.torrenta.migrate.QbittorrentReader.read(folder, home, env);
         // The dialog's note counts them; which ones is here, in the debug log.
         for (String line : found.unreadable()) LOG.warning("Import: not readable in " + found.backup() + ": " + line);
-        Engine e = engine;
-        java.util.Set<String> ids = new java.util.HashSet<>();
-        if (e != null) for (Torrent t : e.torrents()) ids.add(t.id());
         boolean running = com.torrenta.migrate.QbittorrentReader.running(found.backup(), home, env);
         return new ImportText.Loaded(
                 found.backup(),
@@ -2228,7 +2241,8 @@ public final class MainWindow {
                         found.candidates(), ids, com.torrenta.migrate.ImportPlan::sizeOnDisk, running),
                 found.sqlite(),
                 running,
-                found.unreadable());
+                found.unreadable(),
+                com.torrenta.migrate.QbittorrentReader.CLIENT);
     }
 
     /**

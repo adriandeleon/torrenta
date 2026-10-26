@@ -713,7 +713,8 @@ public final class Session {
                         c.savePath(),
                         new com.torrenta.engine.TorrentLabels(c.category(), c.tags(), c.rename()),
                         c.shownName(),
-                        item.verdict().checkedOnTheAdd()));
+                        item.verdict().checkedOnTheAdd(),
+                        c.renamed()));
                 ShareLimit own = importedShare(c, settings.shareLimit());
                 if (own != null) settings.setShareOverride(id, own);
                 imported++;

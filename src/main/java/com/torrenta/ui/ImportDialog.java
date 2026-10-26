@@ -175,7 +175,7 @@ final class ImportDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
-        status.setText(found.isEmpty() ? tr("dialog.import.none", com.torrenta.migrate.QbittorrentReader.CLIENT) : "");
+        status.setText(found.isEmpty() ? tr("dialog.import.none") : "");
         if (!found.isEmpty()) source.getSelectionModel().select(0);
     }
 
@@ -186,7 +186,7 @@ final class ImportDialog {
     /** A folder of a person's choosing, added to the picker and read. */
     private void choose() {
         DirectoryChooser chooser = new DirectoryChooser();
-        chooser.setTitle(tr("dialog.import.chooser", com.torrenta.migrate.QbittorrentReader.CLIENT));
+        chooser.setTitle(tr("dialog.import.chooser"));
         File chosen = chooser.showDialog(stage);
         if (chosen == null) {
             source.getSelectionModel().select(shown);
