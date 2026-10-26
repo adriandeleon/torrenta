@@ -667,7 +667,17 @@ remote caller's behalf.
    keeps or removes the old one when the new one is complete; `EngineEvent.Kind.UPDATED` for
    automation. The URI, the item and the follower's decision are pure and tested; the DHT round
    trip is two loopback sessions bootstrapped to each other, nightly if it proves flaky.
-5. **BEP 46, publishing**: the Create dialog's "Publish as updatable": a key pair
+5. **BEP 46, publishing** (done: `store.KeyStore` keeps `keys/<name>.key`, owner-only, never
+   synced, the warning in the file and in the dialog; the key pair is libtorrent's own Ed25519
+   (`Engine.newMutableKey`), so the secret is in the form its signing takes. libtorrent4j's put
+   signs one above the highest `seq` it finds and cannot be told a number, so `Publication.seq` is
+   the record of the highest published, and `session.PublishRules` climbs back above it with
+   repeated puts once the DHT has forgotten the item, at most 64 a round, a put no node takes
+   ending the round; an item still found as published is not put again, which keeps the number
+   from growing every hour and the climb short. Republished every hour, the first a minute after a
+   start. The item names the v1 hash when there is one. New Version… and Copy Updatable Link in
+   the Torrent menu, for the current version of a publication, `Capability.MUTABLE`): the Create
+   dialog's "Publish as updatable": a key pair
    (`Ed25519.createKeypair`) in `keys/<name>.key`, owner-only, never synced, with the warning that
    losing it ends the updates; `dhtPutItem` with the next `seq`, republished hourly while the app
    runs since items expire from the DHT in about two hours; New version… on a published torrent.

@@ -15,18 +15,15 @@ import com.torrenta.engine.MutableSource;
 import com.torrenta.store.TorrentStore;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.libtorrent4j.Ed25519;
-import org.libtorrent4j.Entry;
-import org.libtorrent4j.Pair;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /**
- * An updatable address found in the DHT: two sessions on loopback, each the other's one node, one
- * putting items signed with a key, the other looking them up and seeing the newer version's
- * higher sequence number.
+ * An updatable address published and found in the DHT: two sessions on loopback, each the other's
+ * one node, one publishing items signed with its key, the other looking them up and seeing the
+ * newer version's higher sequence number, the one the put said it signed.
  */
 class MutableDhtTest {
 
@@ -71,14 +68,8 @@ class MutableDhtTest {
         }
     }
 
-    /** {@code {"ih": <20 bytes>}}, BEP 46's value. */
-    private static Entry item(byte[] infoHash) {
-        byte[] head = "d2:ih20:".getBytes(StandardCharsets.US_ASCII);
-        byte[] bencoded = new byte[head.length + 20 + 1];
-        System.arraycopy(head, 0, bencoded, 0, head.length);
-        System.arraycopy(infoHash, 0, bencoded, head.length, 20);
-        bencoded[bencoded.length - 1] = 'e';
-        return Entry.bdecode(bencoded);
+    private static String hex(byte[] bytes) {
+        return HexFormat.of().formatHex(bytes);
     }
 
     private static Optional<Engine.MutableItem> lookUp(LibtorrentEngine engine, MutableSource source, long minSeq)
@@ -110,28 +101,30 @@ class MutableDhtTest {
                     () -> publisher.stats().dhtNodes() > 0 && follower.stats().dhtNodes() > 0,
                     60);
 
-            Pair<byte[], byte[]> keys = Ed25519.createKeypair(Ed25519.createSeed());
+            com.torrenta.engine.MutableKey key = publisher.newMutableKey();
             byte[] salt = "films".getBytes(StandardCharsets.US_ASCII);
-            MutableSource source = new MutableSource(keys.first, salt);
+            MutableSource source = new MutableSource(key.publicKey(), salt);
             byte[] first = new byte[20];
             new Random(1).nextBytes(first);
-            publisher.putMutableForTest(keys.first, keys.second, salt, item(first));
+            Engine.MutablePut put =
+                    publisher.putMutable(key, salt, MutableSource.item(hex(first)), Duration.ofSeconds(60));
+            assertTrue(put.nodes() > 0, "the other session stored it");
 
-            Optional<Engine.MutableItem> found = lookUp(follower, source, 1);
+            Optional<Engine.MutableItem> found = lookUp(follower, source, put.seq());
             assertTrue(found.isPresent(), "found in the other session's DHT");
+            assertEquals(put.seq(), found.get().seq(), "the number the put signed");
             assertEquals(
-                    Optional.of(HexFormat.of().formatHex(first)),
-                    MutableSource.infoHash(found.get().value()));
-            long seq = found.get().seq();
+                    Optional.of(hex(first)), MutableSource.infoHash(found.get().value()));
 
             byte[] second = new byte[20];
             new Random(2).nextBytes(second);
-            publisher.putMutableForTest(keys.first, keys.second, salt, item(second));
-            Optional<Engine.MutableItem> newer = lookUp(follower, source, seq + 1);
+            Engine.MutablePut next =
+                    publisher.putMutable(key, salt, MutableSource.item(hex(second)), Duration.ofSeconds(60));
+            assertEquals(put.seq() + 1, next.seq(), "one above the highest found");
+            Optional<Engine.MutableItem> newer = lookUp(follower, source, next.seq());
             assertTrue(newer.isPresent(), "the newer version, by its higher sequence number");
             assertEquals(
-                    Optional.of(HexFormat.of().formatHex(second)),
-                    MutableSource.infoHash(newer.get().value()));
+                    Optional.of(hex(second)), MutableSource.infoHash(newer.get().value()));
         }
     }
 }

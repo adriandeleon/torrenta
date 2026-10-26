@@ -886,12 +886,6 @@ public final class LibtorrentEngine implements Engine {
         if (otherPort > 0) new SessionHandle(s.swig()).addDhtNode(new org.libtorrent4j.Pair<>("127.0.0.1", otherPort));
     }
 
-    /** Puts an updatable item in the DHT, for the test of following one; publishing is roadmap 1.4.5. */
-    synchronized void putMutableForTest(byte[] publicKey, byte[] secretKey, byte[] salt, org.libtorrent4j.Entry value)
-            throws EngineException {
-        new SessionHandle(running().swig()).dhtPutItem(publicKey, secretKey, value, salt);
-    }
-
     /**
      * Retries a failed peer connection after a second instead of libtorrent's minute, for the
      * loopback tests: {@code connect_peer} only adds the address to the peer list, and an address
@@ -1024,6 +1018,57 @@ public final class LibtorrentEngine implements Engine {
         } catch (IOException e) {
             return java.util.Optional.empty();
         }
+    }
+
+    /** By key and salt in hex: a put in flight, completed by its {@code dht_put_alert}. */
+    private final Map<String, java.util.concurrent.CompletableFuture<MutablePut>> mutablePuts =
+            new ConcurrentHashMap<>();
+
+    /** Ed25519 from libtorrent's own code, so the secret is in the form its signing takes. */
+    @Override
+    public com.torrenta.engine.MutableKey newMutableKey() throws EngineException {
+        synchronized (this) {
+            running(); // the native is loaded by now
+        }
+        org.libtorrent4j.Pair<byte[], byte[]> pair =
+                org.libtorrent4j.Ed25519.createKeypair(org.libtorrent4j.Ed25519.createSeed());
+        return new com.torrenta.engine.MutableKey(pair.first, pair.second);
+    }
+
+    /**
+     * Posted under the lock, waited for outside it. libtorrent looks the address up first and
+     * signs one above the highest number it met, which the alert gives back with the nodes that
+     * stored it; there is no way to choose the number. One put per address at a time.
+     */
+    @Override
+    public MutablePut putMutable(
+            com.torrenta.engine.MutableKey key, byte[] salt, byte[] value, java.time.Duration timeout)
+            throws EngineException, InterruptedException {
+        String k = lookupKey(key.publicKey(), salt);
+        java.util.concurrent.CompletableFuture<MutablePut> put = new java.util.concurrent.CompletableFuture<>();
+        synchronized (this) {
+            SessionManager s = running();
+            if (!engineSettings.protocol().dht()) throw new EngineException(tr("engine.error.dhtOff"));
+            if (mutablePuts.putIfAbsent(k, put) != null) throw new EngineException(tr("engine.error.putInFlight"));
+            new SessionHandle(s.swig())
+                    .dhtPutItem(key.publicKey(), key.secretKey(), org.libtorrent4j.Entry.bdecode(value), salt);
+        }
+        try {
+            return put.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            throw new EngineException(tr("engine.error.putTimedOut"));
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw new EngineException(e.getMessage(), e);
+        } finally {
+            mutablePuts.remove(k, put);
+        }
+    }
+
+    /** Alert thread: a put finished; an immutable one's key is all zeros and matches nothing. */
+    private void onMutablePut(org.libtorrent4j.alerts.DhtPutAlert alert) {
+        java.util.concurrent.CompletableFuture<MutablePut> put =
+                mutablePuts.get(lookupKey(alert.publicKey(), alert.salt()));
+        if (put != null) put.complete(new MutablePut(alert.seq(), alert.swig().getNum_success()));
     }
 
     /** Alert thread: an item met under an address being looked up. */
@@ -3264,6 +3309,7 @@ public final class LibtorrentEngine implements Engine {
             AlertType.FILE_COMPLETED.swig(),
             AlertType.PIECE_FINISHED.swig(),
             AlertType.DHT_MUTABLE_ITEM.swig(),
+            AlertType.DHT_PUT.swig(),
             AlertType.FILE_ERROR.swig(),
             AlertType.FILE_RENAMED.swig(),
             AlertType.FILE_RENAME_FAILED.swig(),
@@ -3531,6 +3577,7 @@ public final class LibtorrentEngine implements Engine {
                     case SAVE_RESUME_DATA_FAILED -> onSaveFailed((SaveResumeDataFailedAlert) alert);
                     case READ_PIECE -> onPieceRead((ReadPieceAlert) alert);
                     case DHT_MUTABLE_ITEM -> onMutableItem((org.libtorrent4j.alerts.DhtMutableItemAlert) alert);
+                    case DHT_PUT -> onMutablePut((org.libtorrent4j.alerts.DhtPutAlert) alert);
                     default -> {}
                 }
             } catch (RuntimeException e) {

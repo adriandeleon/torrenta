@@ -58,6 +58,17 @@ class MutableSourceTest {
         assertEquals(Optional.empty(), MutableSource.infoHash(null));
     }
 
+    /** The value a publisher puts is what a follower reads back, for a v1 hash and a v2 one. */
+    @Test
+    void theItemNamesTheVersionAsAFollowerReadsIt() throws java.io.IOException {
+        for (String ih : java.util.List.of("ab".repeat(20), "cd".repeat(32))) {
+            byte[] item = MutableSource.item(ih);
+            assertEquals(
+                    Optional.of(ih), MutableSource.infoHash(com.torrenta.engine.transmission.Bencode.decode(item)));
+        }
+        assertThrows(IllegalArgumentException.class, () -> MutableSource.item("ab".repeat(16)));
+    }
+
     @Test
     void theVersionIsAddedAsAMagnetOfItsKind() {
         String v1 = "ab".repeat(20);

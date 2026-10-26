@@ -337,6 +337,29 @@ public interface Engine extends AutoCloseable {
      */
     record MutableItem(long seq, Object value) {}
 
+    /** A new key pair to publish an updatable torrent with ({@link Capability#MUTABLE}). */
+    default MutableKey newMutableKey() throws EngineException {
+        throw new EngineException(com.torrenta.i18n.Messages.tr("engine.error.noMutable"));
+    }
+
+    /**
+     * Signs {@code value} (bencoded) with {@code key} under {@code salt} and stores it in the DHT
+     * ({@link Capability#MUTABLE}), one above the highest number found there. Blocking; never under
+     * a lock.
+     */
+    default MutablePut putMutable(MutableKey key, byte[] salt, byte[] value, java.time.Duration timeout)
+            throws EngineException, InterruptedException {
+        throw new EngineException(com.torrenta.i18n.Messages.tr("engine.error.noMutable"));
+    }
+
+    /**
+     * What a put did.
+     *
+     * @param seq the sequence number it was signed with
+     * @param nodes how many DHT nodes stored it; 0 is a put nobody took
+     */
+    record MutablePut(long seq, int nodes) {}
+
     /** The torrents followed from an updatable address, by id. */
     default java.util.Map<String, Following> followings() {
         return java.util.Map.of();

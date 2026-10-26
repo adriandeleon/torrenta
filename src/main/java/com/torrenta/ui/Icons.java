@@ -139,6 +139,8 @@ final class Icons {
             case "copy-name" -> copy();
             case "copy-hash" -> hash();
             case "copy-magnet" -> magnet();
+            case "copy-updatable-link" -> magnet();
+            case "new-version" -> newFile();
             case "rename" -> rename();
             case "export-torrent" -> exportFile();
             case "import-from-client" -> importInto();

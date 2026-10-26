@@ -64,6 +64,18 @@ public record MutableSource(byte[] publicKey, byte[] salt) {
         return Optional.of(HexFormat.of().formatHex(ih));
     }
 
+    /** BEP 46's value naming {@code infoHash} (hex, 20 or 32 bytes), bencoded: {@code d2:ih<n>:<bytes>e}. */
+    public static byte[] item(String infoHash) {
+        byte[] ih = HexFormat.of().parseHex(infoHash);
+        if (ih.length != 20 && ih.length != 32) throw new IllegalArgumentException("an info-hash is 20 or 32 bytes");
+        byte[] head = ("d2:ih" + ih.length + ":").getBytes(StandardCharsets.US_ASCII);
+        byte[] out = new byte[head.length + ih.length + 1];
+        System.arraycopy(head, 0, out, 0, head.length);
+        System.arraycopy(ih, 0, out, head.length, ih.length);
+        out[out.length - 1] = 'e';
+        return out;
+    }
+
     /** The magnet that adds the version {@code infoHash} names: v1 or v2 by its length. */
     public static String magnetOf(String infoHash) {
         return infoHash.length() == 64 ? "magnet:?xt=urn:btmh:1220" + infoHash : "magnet:?xt=urn:btih:" + infoHash;

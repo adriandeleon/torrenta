@@ -778,6 +778,103 @@ class SessionTest {
         }
     }
 
+    private static com.torrenta.engine.CreatedTorrent made(String v1, String id) {
+        return new com.torrenta.engine.CreatedTorrent(
+                new byte[0],
+                id,
+                "films",
+                v1,
+                "",
+                1,
+                16384,
+                1000,
+                "magnet:?xt=urn:btih:" + v1,
+                java.util.Optional.empty(),
+                "");
+    }
+
+    /**
+     * Publishing on a stand-in DHT that signs one above what it holds, as libtorrent does: the first
+     * version is number 1, the next 2; a republish of what is still held puts nothing; once the
+     * DHT has forgotten, the puts climb back above the record, which followers may have seen; a
+     * put no node takes ends the round, the key and the new version kept for the next.
+     */
+    @Test
+    void aPublicationClimbsAboveWhatFollowersHaveSeen(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        java.util.concurrent.atomic.AtomicReference<Engine.MutableItem> dht =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        AtomicInteger puts = new AtomicInteger();
+        AtomicInteger takers = new AtomicInteger(8);
+        Engine engine = (Engine) Proxy.newProxyInstance(
+                Engine.class.getClassLoader(),
+                new Class<?>[] {Engine.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "torrents" -> List.of();
+                    case "rates" -> Engine.Rates.ZERO;
+                    case "capabilities" -> new Engine.Capabilities(java.util.EnumSet.of(Engine.Capability.MUTABLE));
+                    case "refreshLimits" -> false;
+                    case "newMutableKey" -> new com.torrenta.engine.MutableKey(new byte[32], new byte[64]);
+                    case "lookupMutable" -> java.util.Optional.ofNullable(dht.get());
+                    case "putMutable" -> {
+                        puts.incrementAndGet();
+                        Engine.MutableItem held = dht.get();
+                        long seq = (held == null ? 0 : held.seq()) + 1;
+                        if (takers.get() > 0)
+                            dht.set(new Engine.MutableItem(
+                                    seq, com.torrenta.engine.transmission.Bencode.decode((byte[]) args[2])));
+                        yield new Engine.MutablePut(seq, takers.get());
+                    }
+                    case "setIpFilter", "start", "stop", "addListener" -> null;
+                    case "toString" -> "publishing engine";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        String first = "aa".repeat(20);
+        String second = "bb".repeat(20);
+        session.start(engine);
+        try {
+            Session.Published one = session.publish(engine, "films", made(first, first));
+            assertTrue(one.reached());
+            assertEquals(1, one.publication().seq());
+            assertEquals(8, one.nodes());
+            assertEquals(
+                    java.util.Optional.of(first), session.publicationOf(first).map(p -> p.infoHash()));
+            assertFalse(session.publicationProblem("films").isEmpty(), "the name is taken now");
+            assertThrows(
+                    com.torrenta.engine.EngineException.class,
+                    () -> session.publish(engine, "films", made(first, first)));
+
+            Session.Published two = session.newVersion(engine, "films", made(second, second));
+            assertEquals(2, two.publication().seq());
+            assertEquals(java.util.Optional.empty(), session.publicationOf(first), "the current version moved");
+            assertEquals(2, puts.get());
+
+            session.republish();
+            assertEquals(2, puts.get(), "still held: nothing put");
+
+            dht.set(null);
+            session.republish();
+            assertEquals(5, puts.get(), "forgotten: 1, 2, then 3, above the 2 followers saw");
+            assertEquals(3, session.publications().getFirst().seq());
+
+            dht.set(null);
+            takers.set(0);
+            Session.Published nobody = session.newVersion(engine, "films", made(first, "cc".repeat(20)));
+            assertFalse(nobody.reached(), "no node took it");
+            assertEquals(6, puts.get(), "one put, not a climb into nothing");
+            assertEquals(3, nobody.publication().seq(), "the record stays");
+            assertEquals(
+                    first, session.publications().getFirst().infoHash(), "the new version kept for the next round");
+            assertTrue(host.reports.stream().anyMatch(r -> r.message().contains("films")), "said");
+        } finally {
+            session.stop();
+        }
+    }
+
     /** A republish naming the same torrent moves the number, and 0 hours never looks. */
     @Test
     void aRepublishMovesTheNumberAndZeroHoursNeverLooks(@TempDir Path dir) throws Exception {

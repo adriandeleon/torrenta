@@ -32,6 +32,8 @@ final class CapabilityRules {
             Map.entry("queue-bottom", Capability.QUEUE_ORDER),
             Map.entry("set-location", Capability.MOVE_STORAGE),
             Map.entry("export-torrent", Capability.EXPORT_TORRENT),
+            Map.entry("new-version", Capability.MUTABLE),
+            Map.entry("copy-updatable-link", Capability.MUTABLE),
             Map.entry("import-from-client", Capability.IMPORT_RESUME),
             Map.entry("rename", Capability.RENAME_TORRENT));
 

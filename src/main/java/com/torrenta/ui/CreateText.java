@@ -130,4 +130,9 @@ final class CreateText {
         }
         return "";
     }
+
+    /** "Published as number 3; 8 DHT nodes hold it." Held already (no put) leaves the count out. */
+    static String published(long seq, int nodes) {
+        return nodes < 0 ? tr("dialog.create.publishedHeld", seq) : tr("dialog.create.published", seq, nodes);
+    }
 }
