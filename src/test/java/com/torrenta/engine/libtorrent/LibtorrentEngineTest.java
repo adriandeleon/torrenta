@@ -1617,6 +1617,69 @@ class LibtorrentEngineTest {
         }
     }
 
+    /**
+     * "Add now, pick files when ready" and a restart before the file list came: the stop is kept
+     * in the storage sidecar, so the torrent still stops when the list arrives rather than
+     * downloading every file, and the record lets go of it once it has.
+     */
+    @Test
+    void stopAfterMetadataSurvivesARestartBeforeTheMetadata(@TempDir Path dir) throws Exception {
+        Path root = Files.createDirectories(dir.resolve("seed").resolve("pick"));
+        Files.write(root.resolve("one.bin"), new byte[200 * 1024]);
+        Files.write(root.resolve("two.bin"), new byte[100 * 1024]);
+        NativeLibrary.ensureAvailable();
+        byte[] torrent = new TorrentBuilder()
+                .path(root.toFile())
+                .flags(TorrentBuilder.V1_ONLY)
+                .generate()
+                .entry()
+                .bencode();
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        String id;
+        try (LibtorrentEngine first = downloader(dir, store)) {
+            first.start();
+            id = first.inspect(torrent).id();
+            first.add(new AddRequest(
+                    new AddRequest.Magnet("magnet:?xt=urn:btih:" + id),
+                    dir.resolve("downloads"),
+                    false,
+                    false,
+                    false,
+                    AddRequest.StopCondition.METADATA_RECEIVED,
+                    Map.of(),
+                    TorrentLabels.NONE));
+            String added = id;
+            await("its blob written", () -> store.contains(added));
+            assertTrue(
+                    TorrentStorage.decode(store.loadStorage(id).orElseThrow()).stopOnMetadata(),
+                    "the stop is on record");
+        }
+        try (LibtorrentEngine seed = seeder(dir, torrent);
+                LibtorrentEngine again = downloader(dir, store)) {
+            again.start();
+            String back = id;
+            awaitDownload(
+                    "the file list in",
+                    again,
+                    back,
+                    seed,
+                    () -> again.torrents().getFirst().size() > 0
+                            && again.torrents().getFirst().paused());
+            assertTrue(again.torrents().getFirst().progress() < 1.0, "stopped, not downloaded");
+            await(
+                    "the record lets go of the stop",
+                    () -> store.loadStorage(back)
+                            .map(b -> {
+                                try {
+                                    return !TorrentStorage.decode(b).stopOnMetadata();
+                                } catch (java.io.IOException e) {
+                                    return false;
+                                }
+                            })
+                            .orElse(true));
+        }
+    }
+
     @Test
     void badInputsAreErrorsNotCrashes(@TempDir Path dir) throws EngineException {
         try (LibtorrentEngine engine = engine(dir)) {

@@ -609,7 +609,13 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   `torrent.<hash>.pickFiles` in the settings; `MainWindow.chooseFiles(id)` opens the dialog's
   tree for a torrent in the list and clears the mark. Torrent → Choose Files… (`choose-files`) is
   live for one marked torrent (`Actions.canChooseFiles`); the settings are not observable, so
-  setting or clearing a mark bumps `pickFilesMarks`. Nothing shows the mark on the row yet.
+  setting or clearing a mark bumps `pickFilesMarks`, which also refreshes the table. The row says
+  it (`StatusLine.of(…, filesToChoose)`: "Files to choose · its file list is in, waiting for
+  you", or "then you choose its files" while the metadata comes) and the Overview has a card
+  (`Diagnosis.Title.CHOOSE`, `Remedy.CHOOSE_FILES` runs `choose-files`). The stop itself is
+  libtorrent's engine's: an in-memory set, so it is also `TorrentStorage.stopOnMetadata` in the
+  `.storage` sidecar, read back by `restoreStorage` — a restart before the metadata came used to
+  download every file.
 - **libtorrent's mmap disk I/O takes the JVM's SIGSEGV handler.** Once a file of
   `mmap_file_size_cutoff` pieces (40 by default) is mapped, libtorrent installs a SIGSEGV/SIGBUS
   guard of its own in place of the JVM's (`sigaction`, no chaining); a fault that is not its own,

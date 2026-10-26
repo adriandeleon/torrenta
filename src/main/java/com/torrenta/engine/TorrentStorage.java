@@ -32,13 +32,17 @@ import com.fasterxml.jackson.core.JsonToken;
  *     never shows a rename, so this is where the names are known and put back from.
  * @param found the files that were found on disk in another torrent and put in place before the
  *     add rather than downloaded, by index; kept for the Files tab while the torrent is listed
+ * @param stopOnMetadata a magnet added to stop once its file list is in ("Add now, pick files when
+ *     ready") whose list has not come yet: kept here so a restart before it comes still stops it,
+ *     rather than downloading every file
  */
 public record TorrentStorage(
         String destination,
         boolean partSuffix,
         Set<Integer> suffixed,
         Map<Integer, String> renamed,
-        Map<Integer, FoundFile> found) {
+        Map<Integer, FoundFile> found,
+        boolean stopOnMetadata) {
 
     public static final TorrentStorage NONE = new TorrentStorage("", false, Set.of());
 
@@ -52,6 +56,15 @@ public record TorrentStorage(
         suffixed = suffixed == null ? Set.of() : Set.copyOf(suffixed);
         renamed = renamed == null ? Map.of() : Map.copyOf(renamed);
         found = found == null ? Map.of() : Map.copyOf(found);
+    }
+
+    public TorrentStorage(
+            String destination,
+            boolean partSuffix,
+            Set<Integer> suffixed,
+            Map<Integer, String> renamed,
+            Map<Integer, FoundFile> found) {
+        this(destination, partSuffix, suffixed, renamed, found, false);
     }
 
     /** No file found on disk. */
@@ -69,19 +82,28 @@ public record TorrentStorage(
      * keep, no file that came from disk.
      */
     public boolean isEmpty() {
-        return destination.isEmpty() && !partSuffix && suffixed.isEmpty() && renamed.isEmpty() && found.isEmpty();
+        return destination.isEmpty()
+                && !partSuffix
+                && suffixed.isEmpty()
+                && renamed.isEmpty()
+                && found.isEmpty()
+                && !stopOnMetadata;
     }
 
     public TorrentStorage withDestination(String path) {
-        return new TorrentStorage(path, partSuffix, suffixed, renamed, found);
+        return new TorrentStorage(path, partSuffix, suffixed, renamed, found, stopOnMetadata);
     }
 
     public TorrentStorage withSuffixed(Set<Integer> indices) {
-        return new TorrentStorage(destination, partSuffix, indices, renamed, found);
+        return new TorrentStorage(destination, partSuffix, indices, renamed, found, stopOnMetadata);
     }
 
     public TorrentStorage withFound(Map<Integer, FoundFile> files) {
-        return new TorrentStorage(destination, partSuffix, suffixed, renamed, files);
+        return new TorrentStorage(destination, partSuffix, suffixed, renamed, files, stopOnMetadata);
+    }
+
+    public TorrentStorage withStopOnMetadata(boolean stop) {
+        return new TorrentStorage(destination, partSuffix, suffixed, renamed, found, stop);
     }
 
     /**
@@ -94,7 +116,7 @@ public record TorrentStorage(
             if (path.equals(originals.get(index))) next.remove(index);
             else next.put(index, path);
         });
-        return new TorrentStorage(destination, partSuffix, suffixed, next, found);
+        return new TorrentStorage(destination, partSuffix, suffixed, next, found, stopOnMetadata);
     }
 
     /** A file's name now, without the suffix: the one it was given, else its own. */
@@ -143,6 +165,7 @@ public record TorrentStorage(
                 }
                 g.writeEndObject();
             }
+            if (stopOnMetadata) g.writeBooleanField("stopOnMetadata", true);
             g.writeEndObject();
         } catch (IOException e) {
             throw new IllegalStateException(e);
@@ -157,6 +180,7 @@ public record TorrentStorage(
         Set<Integer> suffixed = new TreeSet<>();
         Map<Integer, String> renamed = new TreeMap<>();
         Map<Integer, FoundFile> found = new TreeMap<>();
+        boolean stopOnMetadata = false;
         try (JsonParser p = JSON.createParser(new String(bytes, StandardCharsets.UTF_8))) {
             if (p.nextToken() != JsonToken.START_OBJECT) throw new IOException("not a storage object");
             while (p.nextToken() == JsonToken.FIELD_NAME) {
@@ -166,6 +190,8 @@ public record TorrentStorage(
                     destination = p.getText();
                 } else if (field.equals("partSuffix") && value.isBoolean()) {
                     partSuffix = p.getBooleanValue();
+                } else if (field.equals("stopOnMetadata") && value.isBoolean()) {
+                    stopOnMetadata = p.getBooleanValue();
                 } else if (field.equals("suffixed") && value == JsonToken.START_ARRAY) {
                     JsonToken entry;
                     while ((entry = p.nextToken()) != JsonToken.END_ARRAY) {
@@ -206,6 +232,6 @@ public record TorrentStorage(
         } catch (RuntimeException e) {
             throw new IOException("not a storage object: " + e.getMessage(), e);
         }
-        return new TorrentStorage(destination, partSuffix, suffixed, renamed, found);
+        return new TorrentStorage(destination, partSuffix, suffixed, renamed, found, stopOnMetadata);
     }
 }

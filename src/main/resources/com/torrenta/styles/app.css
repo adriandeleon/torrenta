@@ -1465,7 +1465,8 @@
     -fx-background-color: -color-danger-muted, -color-danger-subtle;
 }
 
-.diagnosis-card.diagnosis-queued {
+.diagnosis-card.diagnosis-queued,
+.diagnosis-card.diagnosis-choose {
     -fx-background-color: -color-border-default, -color-bg-subtle;
 }
 
@@ -1480,7 +1481,8 @@
     -fx-text-fill: -color-danger-fg;
 }
 
-.diagnosis-queued .diagnosis-title {
+.diagnosis-queued .diagnosis-title,
+.diagnosis-choose .diagnosis-title {
     -fx-text-fill: -color-fg-default;
 }
 
@@ -1525,11 +1527,14 @@
 }
 
 .diagnosis-queued .remedy.primary,
-.diagnosis-queued .remedy:hover {
+.diagnosis-queued .remedy:hover,
+.diagnosis-choose .remedy.primary,
+.diagnosis-choose .remedy:hover {
     -fx-background-color: -torrenta-idle-chip;
 }
 
-.diagnosis-queued .remedy.primary .remedy-label {
+.diagnosis-queued .remedy.primary .remedy-label,
+.diagnosis-choose .remedy.primary .remedy-label {
     -fx-text-fill: -color-fg-default;
 }
 

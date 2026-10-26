@@ -7,6 +7,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **A torrent waiting for you to pick its files says so.** One added with "Add now, pick files
+  when ready" reads "Files to choose" in the list once its file list is in, instead of "Paused by
+  you", and its Overview offers Choose files… .
+
 - **Files already on disk are found for v1 torrents too.** The Add dialog's "Already on disk"
   used to know only v2 and hybrid torrents' files. Now a file of a v1-only torrent is found as
   well when its pieces hold nothing else (a single-file torrent, or a padded one) and the other
@@ -210,6 +214,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   first sync after updating only adds, so nothing that exists on just one computer is lost.
 
 ### Fixed
+
+- **"Add now, pick files when ready" holds across a restart.** A magnet added that way and
+  closed before its file list arrived used to download every file once it came back; it now
+  stops for you to choose, as it would have without the restart.
 
 - **Quitting with a dialog open is clean.** Quit from the tray menu (or the system's) while a
   dialog such as Add Torrent was asking now cancels the dialog first and quits once it has gone,

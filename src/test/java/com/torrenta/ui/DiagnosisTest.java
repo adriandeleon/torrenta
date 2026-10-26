@@ -260,4 +260,20 @@ class DiagnosisTest {
         TorrentDetail d = detail(files(Priority.NORMAL), List.of(peer("dI", 0)), List.of(), have(9), new int[3]);
         assertEquals(0, Diagnosis.unavailable(d).pieces());
     }
+
+    /** With its file list in and its files still to choose, the card says so and offers the command. */
+    @Test
+    void aTorrentWaitingForItsFilesToBeChosenOffersTheChoice() {
+        com.torrenta.engine.Torrent t = T.downloading().paused().build();
+        TorrentDetail d = detail(files(Priority.NORMAL), List.of(), List.of(), have(), availability());
+        Diagnosis card = Diagnosis.of(t, RowState.of(t, 0), d, 0, true).orElseThrow();
+        assertEquals(Diagnosis.Title.CHOOSE, card.title());
+        assertEquals(List.of(Diagnosis.Remedy.CHOOSE_FILES), card.remedies());
+        assertEquals(java.util.Optional.of("choose-files"), Diagnosis.Remedy.CHOOSE_FILES.command());
+        assertTrue(card.body().startsWith("Its file list is in: " + d.files().size() + " files."), card.body());
+        assertTrue(Diagnosis.of(t, RowState.of(t, 0), d, 0, false).isEmpty(), "unmarked, a pause is no story");
+        assertTrue(
+                Diagnosis.of(t, RowState.of(t, 0), null, 0, true).isEmpty(),
+                "no file list yet: nothing to choose from");
+    }
 }

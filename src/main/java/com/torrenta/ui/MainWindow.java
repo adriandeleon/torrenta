@@ -482,6 +482,9 @@ public final class MainWindow {
                 id -> commands.stream().filter(c -> c.id().equals(id)).findFirst());
         detail.setMoreMenu(buildContextMenu());
         detail.setEvents(log.events());
+        detail.setFilesToChoose(settings::filesToPick);
+        // The rows' sentence reads the mark; equal snapshots redraw nothing, so a change of it does.
+        pickFilesMarks.addListener(o -> table.refresh());
         palette = new CommandPalette(host, this::focusList, Chords.of("palette").getDisplayText());
         palette.setResolver(this::typedCommand);
         logWindow = new LogWindow(stage, log);
@@ -1688,7 +1691,7 @@ public final class MainWindow {
         System.out.println("capture: focus-sidebar=" + sidebar.hasFocus() + " cursor=" + sidebar.cursorForCapture());
         for (TorrentRow row : table.getItems()) {
             Torrent t = row.torrent();
-            StatusLine line = StatusLine.of(t, row.quietSeconds(), shareLimitFor(t));
+            StatusLine line = StatusLine.of(t, row.quietSeconds(), shareLimitFor(t), settings.filesToPick(t.id()));
             System.out.println("capture: row=" + line.state().glyph() + " " + t.name() + " | " + line.text());
         }
         System.out.println("capture: layout=sidebar:"
@@ -5682,7 +5685,7 @@ public final class MainWindow {
             return row.torrentProperty()
                     .map(t -> new RowView(
                             t.name(),
-                            StatusLine.of(t, row.quietSeconds(), shareLimitFor(t)),
+                            StatusLine.of(t, row.quietSeconds(), shareLimitFor(t), settings.filesToPick(t.id())),
                             t.progress(),
                             t.direct()));
         });
@@ -5795,7 +5798,8 @@ public final class MainWindow {
         column.setPrefWidth(300);
         column.setCellValueFactory(cell -> {
             TorrentRow row = cell.getValue();
-            return row.torrentProperty().map(t -> StatusLine.of(t, row.quietSeconds(), shareLimitFor(t)));
+            return row.torrentProperty()
+                    .map(t -> StatusLine.of(t, row.quietSeconds(), shareLimitFor(t), settings.filesToPick(t.id())));
         });
         column.setCellFactory(c -> new StatusCell());
         return column;

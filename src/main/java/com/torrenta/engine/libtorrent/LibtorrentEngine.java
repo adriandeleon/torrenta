@@ -445,6 +445,8 @@ public final class LibtorrentEngine implements Engine {
                 try {
                     TorrentStorage owed = TorrentStorage.decode(bytes);
                     if (!owed.isEmpty()) storage.put(id, owed);
+                    // Added to stop once its file list is in, and restarted before it came.
+                    if (owed.stopOnMetadata()) stopAfterMetadata.add(id);
                 } catch (IOException e) {
                     LOG.warning("Storage record for " + id + " is unreadable (" + e.getMessage() + "); skipped");
                 }
@@ -628,7 +630,8 @@ public final class LibtorrentEngine implements Engine {
         TorrentStorage owed = new TorrentStorage(
                         start.equals(destination) ? "" : destination.toString(), choices.partSuffix(), Set.of())
                 .withRenamed(laidOut, originals)
-                .withFound(info == null ? Map.of() : choices.found());
+                .withFound(info == null ? Map.of() : choices.found())
+                .withStopOnMetadata(stopAfterMetadata.contains(id));
         if (!owed.isEmpty()) writeStorage(id, owed);
 
         return snapshot(handle);
@@ -3406,6 +3409,10 @@ public final class LibtorrentEngine implements Engine {
                         if (t.handle().isValid() && stopAfterMetadata.remove(id(t.handle()))) {
                             t.handle().unsetFlags(Flags.AUTO_MANAGED);
                             t.handle().pause();
+                            String stopped = id(t.handle());
+                            TorrentStorage owed = storage.get(stopped);
+                            if (owed != null && owed.stopOnMetadata())
+                                writeStorageQuietly(stopped, owed.withStopOnMetadata(false));
                             torrentEvent(t, EngineEvent.Level.INFO, "engine.event.metadataStopped");
                         } else {
                             torrentEvent(t, EngineEvent.Level.INFO, "engine.event.metadata");
