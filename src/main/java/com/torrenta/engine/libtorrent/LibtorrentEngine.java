@@ -26,6 +26,7 @@ import com.torrenta.AppInfo;
 import com.torrenta.cli.CommandLine;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Connectivity;
+import com.torrenta.engine.ContentIndex;
 import com.torrenta.engine.CreateRequest;
 import com.torrenta.engine.CreatedTorrent;
 import com.torrenta.engine.Engine;
@@ -214,6 +215,13 @@ public final class LibtorrentEngine implements Engine {
     private volatile EngineSettings engineSettings;
     /** Kept by the alert thread from listen, port-map, incoming-connection and DHT alerts. */
     private final AtomicReference<Connectivity> connectivity = new AtomicReference<>(Connectivity.NONE);
+    /**
+     * The complete files of v2 torrents by root, kept by the alert thread: a torrent is indexed
+     * again when a file completes (libtorrent posts that for every whole file as it loads a
+     * torrent, so a start rebuilds it), when it finishes, is checked, renamed or moved, and is
+     * forgotten when it is removed.
+     */
+    private final ContentIndex contentIndex = new ContentIndex();
 
     /** The filter in force, kept so a start after a set applies it; empty means none. */
     private volatile List<IpRange> ipFilter = List.of();
@@ -716,6 +724,54 @@ public final class LibtorrentEngine implements Engine {
     }
 
     /**
+     * Puts the torrent's complete files into the content index under the names they have on disk
+     * (a person's or the layout's rename included), replacing what it had of the torrent. Alert
+     * thread. A v1-only torrent has no roots and is left out; a file still carrying the {@code
+     * .part} suffix is about to be renamed back, and that rename indexes it again.
+     */
+    private void indexContent(String id, TorrentHandle h) {
+        TorrentInfo info = h.status(StatusQuery.FLAGS).hasMetadata() ? h.torrentFile() : null;
+        if (info == null || !info.isValid() || !info.swig().v2()) {
+            contentIndex.remove(id);
+            return;
+        }
+        try {
+            FileStorage files = info.files();
+            long[] progress = h.fileProgress();
+            Path save = Path.of(h.savePath());
+            TorrentStorage owed = storage.getOrDefault(id, TorrentStorage.NONE);
+            List<ContentIndex.Entry> complete = new ArrayList<>();
+            for (int i = 0; i < files.numFiles(); i++) {
+                long size = files.fileSize(i);
+                if (files.padFileAt(i) || size <= 0 || i >= progress.length || progress[i] < size) continue;
+                if (owed.suffixed().contains(i)) continue;
+                String root = root(files, i);
+                if (root.isEmpty()) continue;
+                Path onDisk = save.resolve(owed.name(i, slashes(files.filePath(i))))
+                        .toAbsolutePath()
+                        .normalize();
+                complete.add(new ContentIndex.Entry(root, id, i, onDisk, size));
+            }
+            // Under the store's lock, against remove(): an alert that came in just before the
+            // torrent went must not put it back.
+            synchronized (store) {
+                if (!removed.contains(id)) contentIndex.put(id, complete);
+            }
+        } catch (RuntimeException e) {
+            // An index that misses a torrent costs a download, never the alert thread.
+            LOG.log(Level.FINE, "Could not index " + id, e);
+        } finally {
+            Reference.reachabilityFence(info);
+        }
+    }
+
+    /** A file's v2 Merkle root, hex; empty for a v1-only torrent's file or an empty one. */
+    private static String root(FileStorage files, int index) {
+        org.libtorrent4j.swig.sha256_hash root = files.swig().root(index);
+        return root.is_all_zeros() ? "" : root.to_hex();
+    }
+
+    /**
      * Moves a finished torrent to its destination, once. {@code dont_replace}: a file already at
      * the destination is kept and the torrent uses it, so a complete copy is never written over.
      * The answer is a {@code storage_moved} alert, where the record is cleared.
@@ -898,9 +954,11 @@ public final class LibtorrentEngine implements Engine {
             TorrentInfo info = params.getTorrentInfo();
             FileStorage files = info.files();
             List<TorrentPreview.FileEntry> entries = new ArrayList<>(files.numFiles());
+            boolean v2 = info.swig().v2();
             for (int i = 0; i < files.numFiles(); i++) {
                 if (files.padFileAt(i)) continue;
-                entries.add(new TorrentPreview.FileEntry(i, files.filePath(i).replace('\\', '/'), files.fileSize(i)));
+                entries.add(new TorrentPreview.FileEntry(
+                        i, files.filePath(i).replace('\\', '/'), files.fileSize(i), v2 ? root(files, i) : ""));
             }
             // The real files' bytes, not totalSize(): a hybrid torrent's padding files are not content.
             long size =
@@ -1438,6 +1496,7 @@ public final class LibtorrentEngine implements Engine {
             removed.add(id);
             labels.remove(id);
             storage.remove(id);
+            contentIndex.remove(id);
             archiveReads.remove(id);
             encryptedArchives.remove(id);
             moving.remove(id);
@@ -2118,6 +2177,12 @@ public final class LibtorrentEngine implements Engine {
     @Override
     public Connectivity connectivity() {
         return connectivity.get();
+    }
+
+    /** Kept by the alert thread; reading it never reaches the session, so no lock. */
+    @Override
+    public ContentIndex contentIndex() {
+        return contentIndex;
     }
 
     @Override
@@ -2896,6 +2961,7 @@ public final class LibtorrentEngine implements Engine {
                             // Names first, then the move: both are disk jobs, done in this order.
                             applySuffixes(id(t.handle()), t.handle());
                             maybeMove(id(t.handle()), t.handle());
+                            indexContent(id(t.handle()), t.handle());
                         }
                     }
                     case TORRENT_CHECKED -> {
@@ -2906,11 +2972,17 @@ public final class LibtorrentEngine implements Engine {
                             // Finished at the check (the files were there, or a move was owed
                             // from before a restart): the finished alert does not come again.
                             maybeMove(id(t.handle()), t.handle());
+                            // After a recheck too, which is the one thing that says a file is
+                            // no longer complete: nothing else is posted for that.
+                            indexContent(id(t.handle()), t.handle());
                         }
                     }
                     case FILE_COMPLETED -> {
                         FileCompletedAlert t = (FileCompletedAlert) alert;
-                        if (t.handle().isValid()) unsuffix(id(t.handle()), t.handle(), t.index());
+                        if (t.handle().isValid()) {
+                            unsuffix(id(t.handle()), t.handle(), t.index());
+                            indexContent(id(t.handle()), t.handle());
+                        }
                     }
                     case STORAGE_MOVED -> {
                         StorageMovedAlert t = (StorageMovedAlert) alert;
@@ -2921,6 +2993,7 @@ public final class LibtorrentEngine implements Engine {
                             if (owed != null) writeStorageQuietly(id, owed.withDestination(""));
                             // The save path is part of the resume data: written now, not later.
                             requestSave(t.handle(), false);
+                            indexContent(id, t.handle());
                         }
                         torrentEvent(t, EngineEvent.Level.INFO, "engine.event.moved", t.storagePath());
                     }
@@ -2949,10 +3022,12 @@ public final class LibtorrentEngine implements Engine {
                         // No line per file: the suffix going on and off is the engine's own doing,
                         // and a person's rename says itself once, from renamePath. A folder that
                         // the rename emptied goes, as it would in a file manager.
-                        if (t.handle().isValid())
+                        if (t.handle().isValid()) {
                             removeEmptyFolders(
                                     t.handle().status(StatusQuery.FLAGS).swig().getSave_path(),
                                     t.swig().old_name());
+                            indexContent(id(t.handle()), t.handle());
+                        }
                     }
                     case FILE_RENAME_FAILED -> {
                         FileRenameFailedAlert t = (FileRenameFailedAlert) alert;

@@ -582,7 +582,12 @@ remote caller's behalf.
    libtorrent's picker crash lives. An incomplete torrent is not imported while the other client
    runs (qBittorrent's `lockfile`, a daemon's RPC port): two writers on one file is corruption.
    libtorrent only; into a Transmission profile it would be a full verify, which is not the promise.
-4. **Dedup, the index**: `engine.ContentIndex`, v2 Merkle root → (torrent, path on disk, size) for
+4. **Dedup, the index** (done: `TorrentPreview.FileEntry.root`, `Engine.contentIndex()`, kept from
+   the alerts; found: libtorrent posts a file-completed alert for every whole file as it loads a
+   torrent, so a start rebuilds the index without a pass of its own, and a recheck is the one
+   thing that says a file is no longer whole; `DedupPlan` takes the skipped files and a `Disk`
+   for sizes and volumes, never overwrites a target, and prefers a source it can link):
+   `engine.ContentIndex`, v2 Merkle root → (torrent, path on disk, size) for
    complete files only, built at start from torrents with v2 metadata and kept on finish, rename,
    move and remove; never persisted, since the metadata is already there. `DedupPlan.of(preview,
    index, layout, savePath, renames)`, pure, maps each wanted file with a known root to (source,

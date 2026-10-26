@@ -306,6 +306,16 @@ public interface Engine extends AutoCloseable {
         return Connectivity.NONE;
     }
 
+    /**
+     * The complete files the torrents have on disk, by v2 root, kept by the engine as they check,
+     * finish, are renamed, moved and removed: what a new torrent's files are looked for in before
+     * they are downloaded again. {@link ContentIndex#EMPTY} from an engine that keeps none (a
+     * daemon, whose disk is not this machine's).
+     */
+    default ContentIndex contentIndex() {
+        return ContentIndex.EMPTY;
+    }
+
     /** Writes what is needed to bring the torrents back; also done on {@link #stop()}. */
     void flush();
 
