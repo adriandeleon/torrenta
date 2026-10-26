@@ -113,7 +113,7 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | IPv6 | ✓ | ✓ | 0.4 |
 | Proxy: SOCKS5/HTTP, with auth, for peers and trackers | ✗ | ✓ | 0.4 |
 | IP filter: blocklist URL, eMule `.dat` and PeerGuardian `.p2p`, manual bans | ✓ | ✓ | 0.4 |
-| Bind to a network interface or address (the peers it dials too since 0.2.1, #92) | ✓ | ✓ | 0.4 |
+| Bind to a network interface or address (the peers it dials too since 0.3.0, #92) | ✓ | ✓ | 0.4 |
 | Leak check: the bound interface's state, the address the swarm sees, where traffic exits | ✗ | ✗ | 1.1 |
 | Anonymous mode (no client identification) | ✗ | ✓ | 0.4 |
 | Connection limits: global, per torrent, upload slots | ✓ | ✓ | 0.4 |
@@ -240,7 +240,7 @@ Everything in Settings that the engine already knows how to do.
    and goes with 0.8's OS integration or stays out): port, random port, UPnP/NAT-PMP, interface
    binding, IPv6, connection limits, proxy. `EngineSettings` maps onto `settings_pack`, applied at
    start and live; the per-torrent limit is set on each add. The binding covered only the
-   listening sockets until 0.2.1 (#92): `outgoing_interfaces` binds the peers the session dials.
+   listening sockets until 0.3.0 (#92): `outgoing_interfaces` binds the peers the session dials.
 3. **Protocol** — done: DHT, PEX (a per-torrent flag, set on add and carried to existing
    torrents), LSD, uTP, encryption mode, anonymous mode, default trackers (appended on add and to
    existing torrents).
@@ -389,7 +389,7 @@ requires it; the README's "Not done" list empty.
 
 Asked for by adl on 2026-10-24 and planned the same day; the open questions were decided then
 and are recorded where they apply. The plan's first item, binding the peers the session dials to
-the chosen interface, was a bug and shipped at once (#92, 0.2.1). Every API below was checked
+the chosen interface, was a bug and shipped at once (#92, in 0.3.0). Every API below was checked
 against libtorrent4j 2.1.0-39: the v2 file roots (`file_storage.root`), mutable DHT items
 (`dhtGetItem`/`dhtPutItem`, `Ed25519`), piece deadlines, `ExternalIpAlert` and `ScrapeReplyAlert`
 are all there, and `jdk.httpserver` is in the JDK, so nothing here adds a native dependency.
