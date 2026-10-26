@@ -48,6 +48,11 @@ final class FactsCache {
         return known;
     }
 
+    /** Read again at the next ask: an edit through the API changed what is kept. */
+    void forget(String id) {
+        entries.remove(id);
+    }
+
     /** Forgets the torrents no longer in the list. */
     void retain(Collection<Torrent> torrents) {
         Set<String> ids = new HashSet<>();

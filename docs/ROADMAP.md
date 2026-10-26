@@ -518,7 +518,9 @@ so the order is extract, then serve.
    `app/setPreferences`, `log/main`). The first is in: `MainData` (the diff, pure; one snapshot
    per session, as qBittorrent keeps, not a history), `sync/maindata` with `server_state`,
    `sync/torrentPeers`, `StaticFiles` (`webapi.rootFolder`), unknown API paths 404 for every
-   method.
+   method. So is the second: `Edits` (the torrent, file, tracker, limit, queue, category and tag
+   edits; `torrents/trackers`, `webseeds` and `pieceStates` beside them), `QueueOrder` moved to
+   `engine` so the API orders a selection's moves as the window does.
 6. **Compatibility**: contract tests from a real qBittorrent 5.0's recorded answers;
    `QbittorrentContractTest`, `@EnabledIf` `qbittorrent-nox` is on the PATH as
    `TransmissionDaemonTest` is, sends the same requests to both and compares the shapes; a manual

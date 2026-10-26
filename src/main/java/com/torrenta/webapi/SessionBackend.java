@@ -237,6 +237,16 @@ public final class SessionBackend implements WebApi.Backend {
     }
 
     @Override
+    public void removeCategory(String name) throws IOException {
+        labels.removeCategory(name);
+    }
+
+    @Override
+    public void removeTag(String name) throws IOException {
+        labels.removeTag(name);
+    }
+
+    @Override
     public void setShareOverride(String id, ShareLimit limit) {
         settings.setShareOverride(id, limit);
         settings.saveQuietly();

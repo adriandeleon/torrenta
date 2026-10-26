@@ -13,7 +13,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   is open to anyone (the login page), its private half only after signing in; nothing outside the
   folder, hidden in it, or behind a link out of it is served. The API gains what such interfaces
   poll: `sync/maindata` (the whole picture once, then only the fields that changed) and
-  `sync/torrentPeers`.
+  `sync/torrentPeers`. And what their detail screens edit: file priorities, the location (inside
+  the allowed folders), a torrent's name, a file's or folder's name, trackers, per-torrent limits,
+  sequential and first-and-last-piece, super seeding, the queue, and the categories and tags
+  themselves; with the trackers, web seeds and piece states to read.
 
 - **Remote access, the door for Sonarr, Radarr and the phone apps.** Settings → Remote access
   speaks qBittorrent's WebUI API at `/api/v2`, off until switched on and on `127.0.0.1:8080` until
