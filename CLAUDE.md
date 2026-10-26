@@ -280,6 +280,14 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   `App.start`), and attached per scene and per dialog pane (`Fonts.installUiFont`), never in
   app.css: every window and dialog is its own scene, and a scene sheet survives a theme switch.
   A new Stage or Dialog without the call shows the system face.
+- **A dialog's window grows to its content, never the other way.** Each dialog `Stage` opens at a
+  size chosen for its usual content and calls `DialogFit.install(stage)` after `setScene`: on
+  showing and after every layout pulse the window grows to the root's `minHeight` at its width
+  (the screen's height at most) and its `minHeight` follows, so a longer sentence, a card that
+  appears or another language cannot push the footer out (the Limits dialog's did). A new dialog
+  stage needs the call. JavaFX `Dialog`s and `Alert`s size themselves. Every capture prints a
+  `dialog-fit=` line per window showing besides the main one: the scene's height, how far down its
+  lowest button reaches (a `ScrollPane`'s content not counted) and `fits=`.
 - **Nothing in the chrome may be focus-traversable** (Termina's rule holds here). The filter box
   took initial focus on a fresh launch because the table is hidden until the first torrent, so it
   was the first traversable node. It is `setFocusTraversable(false)`; Ctrl+K (and Ctrl+F) reach it.

@@ -476,6 +476,7 @@ final class AddDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
 
         if (preview != null) showFiles(source, preview);
         else if (!existing) showFetching(0);

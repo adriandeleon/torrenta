@@ -175,6 +175,7 @@ final class ImportDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
         status.setText(found.isEmpty() ? tr("dialog.import.none") : "");
         if (!found.isEmpty()) source.getSelectionModel().select(0);
     }

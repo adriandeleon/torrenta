@@ -182,6 +182,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Fixed
 
+- **Every dialog shows its buttons.** A dialog now grows to fit what it holds, when it opens and
+  whenever something appears in it, up to the screen's height, and cannot be dragged shorter than
+  that. The torrent Limits dialog cut its Cancel and Apply buttons off the bottom of the window.
+
 - **A finished torrent no longer "finishes" again at every start.** libtorrent reports a complete
   torrent as finished when it loads one, so each seed ran your on-finished command and showed its
   notification again every time Torrenta started (and an import would have done it for every

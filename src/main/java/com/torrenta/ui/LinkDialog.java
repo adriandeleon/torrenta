@@ -128,6 +128,7 @@ final class LinkDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
     }
 
     /**

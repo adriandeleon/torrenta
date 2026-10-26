@@ -158,6 +158,7 @@ final class WatchFolderDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
 
         if (existing == null) {
             saveTo.setValue(WatchFolder.SaveTo.DEFAULT);

@@ -125,6 +125,7 @@ final class LocationDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
     }
 
     /** Hides Browse and the free-space line for an engine whose files are on another machine. Before showing. */
