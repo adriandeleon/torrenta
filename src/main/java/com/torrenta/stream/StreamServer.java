@@ -5,10 +5,7 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URLEncoder;
-import java.nio.ByteBuffer;
-import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.StandardOpenOption;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Base64;
@@ -33,8 +30,8 @@ import com.torrenta.http.WebServer;
  * as the app, so what reaches the server is only what the app gave a player; anything else, a
  * listing included, is 404. A {@code Range} is answered with 206 and its {@code Content-Range}
  * (HTTP's own plumbing, {@link Response.Ranged}); each piece a range needs is asked for and
- * waited on before its bytes are read from the file on disk, so a player that seeks ahead waits
- * for that piece rather than reads zeros.
+ * waited on before its bytes are read through the engine, so a player that seeks ahead waits for
+ * that piece rather than reads zeros.
  */
 public final class StreamServer implements AutoCloseable {
 
@@ -132,36 +129,26 @@ public final class StreamServer implements AutoCloseable {
         public void write(long first, long length, OutputStream out) throws IOException {
             long position = first;
             long last = first + length - 1;
-            ByteBuffer buffer = ByteBuffer.allocate(64 * 1024);
             Playback playback = playbacks.computeIfAbsent(target, t -> new Playback(t, file));
             playback.open();
             try {
                 playback.at(first, true);
-                send(position, last, out, buffer, playback);
+                send(position, last, out, playback);
             } finally {
                 playback.close();
             }
         }
 
-        private void send(long position, long last, OutputStream out, ByteBuffer buffer, Playback playback)
-                throws IOException {
+        private void send(long position, long last, OutputStream out, Playback playback) throws IOException {
             while (position <= last) {
                 playback.at(position, false);
                 long chunkEnd = Math.min(last, file.chunkEnd(position));
                 waitFor(position, chunkEnd);
-                // Opened for each chunk: the name loses its .part and the file moves on finish.
-                try (FileChannel channel = FileChannel.open(path(), StandardOpenOption.READ)) {
-                    long at = position;
-                    while (at <= chunkEnd) {
-                        buffer.clear();
-                        buffer.limit((int) Math.min(buffer.capacity(), chunkEnd - at + 1));
-                        int n = channel.read(buffer, at);
-                        if (n < 0) throw new IOException("the file ends before its piece does");
-                        out.write(buffer.array(), 0, n);
-                        playback.served(n);
-                        at += n;
-                    }
-                }
+                // Through the engine, not the file: a verified piece can be in its write buffer
+                // still (measured on Windows: zeros right after the piece's alert).
+                byte[] bytes = read(position, chunkEnd);
+                out.write(bytes);
+                playback.served(bytes.length);
                 position = chunkEnd + 1;
             }
         }
@@ -182,11 +169,14 @@ public final class StreamServer implements AutoCloseable {
             }
         }
 
-        private java.nio.file.Path path() throws IOException {
+        private byte[] read(long from, long to) throws IOException {
             try {
-                return file.path();
+                return file.read(from, to);
             } catch (EngineException e) {
                 throw new IOException(e.getMessage(), e);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("interrupted", e);
             }
         }
     }

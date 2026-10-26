@@ -62,8 +62,12 @@ class StreamServerTest {
             }
 
             @Override
-            public Path path() {
-                return path;
+            public byte[] read(long from, long to) {
+                try {
+                    return Arrays.copyOfRange(Files.readAllBytes(path), (int) from, (int) to + 1);
+                } catch (java.io.IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
             }
 
             @Override

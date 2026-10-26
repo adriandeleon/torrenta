@@ -145,9 +145,10 @@ a new token per URL handed out, everything else 404. Its body is `Response.Range
 writer of any range, planned by `Ranges` as a file is, HEAD answered with the length alone), and
 the writer goes a piece at a time: `StreamFile.await` (the engine's: a future per missing piece,
 registered before a second `havePiece`, then `set_piece_deadline`, completed by
-`piece_finished_alert`, failed when the torrent goes or the engine stops), then the bytes from the
-file on disk under its recorded name (`onDisk`, `.part` and all), the file opened again for each
-piece since it is renamed and moved under the stream. The wait is sliced (250 ms) so a close does
+`piece_finished_alert`, failed when the torrent goes or the engine stops), then the bytes through
+`StreamFile.read`, libtorrent's `read_piece` (a future per piece, completed in `onPieceRead` before
+the archive probe's reading), never the file on disk: a piece is announced once it is verified,
+which can be before its bytes reach the file (Windows CI read zeros right after the alert). The wait is sliced (250 ms) so a close does
 not wait out `PIECE_TIMEOUT` (60 s), after which the answer is cut short and a player asks again.
 A skipped file's pieces go into libtorrent's part file, not the file, so `Engine.stream` raises a
 skipped file to low priority: a file played is a file wanted. The read-ahead is the server's: a

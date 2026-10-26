@@ -2260,8 +2260,15 @@ public final class LibtorrentEngine implements Engine {
         }
 
         @Override
-        public Path path() throws EngineException {
-            return streamPath(id, index, original);
+        public byte[] read(long from, long to) throws EngineException, InterruptedException {
+            int piece = com.torrenta.engine.PieceMath.span(offset, pieceLength, from, from)
+                    .first();
+            byte[] bytes = readPiece(id, piece);
+            // Where the range starts in the piece: the file need not start on a piece's edge.
+            long at = offset + from - piece * pieceLength;
+            int length = (int) (to - from + 1);
+            if (at < 0 || at + length > bytes.length) throw new EngineException(tr("engine.error.streamGone", name));
+            return java.util.Arrays.copyOfRange(bytes, (int) at, (int) at + length);
         }
 
         @Override
@@ -2287,6 +2294,41 @@ public final class LibtorrentEngine implements Engine {
         @Override
         public void clearDeadlines(int first, int last) throws EngineException {
             streamClear(id, first, last);
+        }
+    }
+
+    /**
+     * Pieces being read for a stream, by torrent id and piece: completed by the {@code
+     * read_piece_alert} with the piece's bytes, failed when it says it could not.
+     */
+    private final Map<String, Map<Integer, java.util.concurrent.CompletableFuture<byte[]>>> pieceReads =
+            new ConcurrentHashMap<>();
+
+    /**
+     * A piece's bytes as libtorrent has them, its write buffer included: asked under the lock,
+     * waited for outside it. Reads of one piece at once share one request.
+     */
+    private byte[] readPiece(String id, int piece) throws EngineException, InterruptedException {
+        java.util.concurrent.CompletableFuture<byte[]> f;
+        synchronized (this) {
+            TorrentHandle h = handle(id);
+            Map<Integer, java.util.concurrent.CompletableFuture<byte[]>> reads =
+                    pieceReads.computeIfAbsent(id, k -> new ConcurrentHashMap<>());
+            boolean[] asked = {false};
+            f = reads.computeIfAbsent(piece, p -> {
+                asked[0] = true;
+                return new java.util.concurrent.CompletableFuture<>();
+            });
+            if (asked[0]) h.readPiece(piece);
+        }
+        try {
+            return f.get(30, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            Map<Integer, java.util.concurrent.CompletableFuture<byte[]>> reads = pieceReads.get(id);
+            if (reads != null) reads.remove(piece, f);
+            throw new EngineException(tr("engine.error.streamGone", id), e);
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw e.getCause() instanceof EngineException ee ? ee : new EngineException(e.getMessage(), e);
         }
     }
 
@@ -2335,17 +2377,12 @@ public final class LibtorrentEngine implements Engine {
         return out;
     }
 
-    /** Where a streamed file is on disk now: the save path (it moves on finish) and its name there. */
-    private synchronized Path streamPath(String id, int index, String original) throws EngineException {
-        TorrentHandle h = handle(id);
-        return Path.of(h.savePath())
-                .resolve(storage.getOrDefault(id, TorrentStorage.NONE).onDisk(index, original));
-    }
-
     /** The streams waiting on a torrent hear it is gone. */
     private void failWaits(String id, String why) {
         Map<Integer, java.util.concurrent.CompletableFuture<Void>> waits = pieceWaits.remove(id);
         if (waits != null) for (var f : waits.values()) f.completeExceptionally(new EngineException(why));
+        Map<Integer, java.util.concurrent.CompletableFuture<byte[]>> reads = pieceReads.remove(id);
+        if (reads != null) for (var f : reads.values()) f.completeExceptionally(new EngineException(why));
     }
 
     private TorrentHandle handle(String id) throws EngineException {
@@ -2729,7 +2766,9 @@ public final class LibtorrentEngine implements Engine {
         if (pendingSaves.get() > 0) {
             LOG.warning(pendingSaves.get() + " resume-data write(s) did not finish before stop");
         }
-        for (String id : List.copyOf(pieceWaits.keySet())) failWaits(id, tr("engine.error.stopped"));
+        java.util.Set<String> streamed = new java.util.HashSet<>(pieceWaits.keySet());
+        streamed.addAll(pieceReads.keySet());
+        for (String id : streamed) failWaits(id, tr("engine.error.stopped"));
         session.stop();
         session = null;
         connectivity.set(Connectivity.NONE);
@@ -2875,11 +2914,22 @@ public final class LibtorrentEngine implements Engine {
      * for {@link #detail} (the Overview's card) and said once in the log.
      */
     private void onPieceRead(ReadPieceAlert alert) {
-        if (alert.error().isError() || !alert.handle().isValid()) return;
+        if (!alert.handle().isValid()) return;
         String id = id(alert.handle());
+        int piece = alert.piece();
+        // A stream's read first: the bytes, or why there are none.
+        Map<Integer, java.util.concurrent.CompletableFuture<byte[]>> streamReads = pieceReads.get(id);
+        java.util.concurrent.CompletableFuture<byte[]> streamRead =
+                streamReads == null ? null : streamReads.remove(piece);
+        if (streamRead != null) {
+            if (alert.error().isError())
+                streamRead.completeExceptionally(
+                        new EngineException(alert.error().getMessage()));
+            else streamRead.complete(NativeBytes.copy(alert.bufferPtr(), alert.size()));
+        }
+        if (alert.error().isError()) return;
         ArchiveReads reads = archiveReads.get(id);
         if (reads == null) return;
-        int piece = alert.piece();
         List<com.torrenta.engine.ArchiveProbe.Reading> wanting = reads.byFile().values().stream()
                 .filter(r -> r.missing().contains(piece))
                 .toList();

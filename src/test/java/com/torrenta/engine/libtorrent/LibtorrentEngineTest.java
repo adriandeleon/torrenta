@@ -1684,12 +1684,9 @@ class LibtorrentEngineTest {
                     });
             awaitDownload("the range's piece, asked with a deadline", engine, t.id(), seed, got::isDone);
             assertTrue(got.get(), "there before the wait ran out");
-            byte[] read = new byte[1000];
-            try (java.nio.channels.FileChannel channel =
-                    java.nio.channels.FileChannel.open(file.path(), java.nio.file.StandardOpenOption.READ)) {
-                channel.read(java.nio.ByteBuffer.wrap(read), from);
-            }
-            assertArrayEquals(java.util.Arrays.copyOfRange(content, (int) from, (int) to + 1), read);
+            // Read through libtorrent, the moment its alert says the piece is there: on Windows the
+            // file still had zeros there (CI, the first run of this test), the bytes in its buffer.
+            assertArrayEquals(java.util.Arrays.copyOfRange(content, (int) from, (int) to + 1), file.read(from, to));
             assertTrue(file.await(from, to, java.time.Duration.ofMillis(10)), "there now: no wait");
 
             // And as a player has it: a range over loopback HTTP from the stream server.
