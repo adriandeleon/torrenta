@@ -254,6 +254,12 @@ public final class MainWindow {
     private String locationForCapture;
 
     private LinkDialog linkDialog;
+    /** File → Import from another client…, while it is open. */
+    private ImportDialog importDialog;
+    /** The capture hook's folder for the next Import dialog, instead of the ones found on this machine. */
+    private Path importFolderForCapture;
+    /** The capture hook's Import, pressed once the next dialog's rows are in. */
+    private boolean importConfirmForCapture;
     /** Links that arrived while the Add Link dialog was open, each asked about in turn. */
     private final java.util.ArrayDeque<String> linksWaiting = new java.util.ArrayDeque<>();
     /** A name the capture hook types into the Add Link dialog when it opens. */
@@ -1065,6 +1071,7 @@ public final class MainWindow {
         if (tagsDialog != null && tagsDialog.isShowing()) return tagsDialog.scene();
         if (locationDialog != null && locationDialog.isShowing()) return locationDialog.scene();
         if (linkDialog != null && linkDialog.isShowing()) return linkDialog.scene();
+        if (importDialog != null && importDialog.isShowing()) return importDialog.scene();
         if (promptDialog != null && promptDialog.isShowing())
             return promptDialog.getDialogPane().getScene();
         if (aboutDialog != null && aboutDialog.isShowing())
@@ -1128,6 +1135,7 @@ public final class MainWindow {
         if (locationDialog != null && locationDialog.isShowing()) locationDialog.cancel();
         linksWaiting.clear(); // or the next one opens as this one closes
         if (linkDialog != null && linkDialog.isShowing()) linkDialog.cancel();
+        if (importDialog != null && importDialog.isShowing()) importDialog.cancel();
         if (promptDialog != null && promptDialog.isShowing()) promptDialog.close();
         if (aboutDialog != null && aboutDialog.isShowing()) aboutDialog.close();
         if (rssPane != null) rssPane.closeDialog();
@@ -1153,6 +1161,10 @@ public final class MainWindow {
         if (linkDialog != null && linkDialog.isShowing()) {
             out.add("dialog=" + linkDialog.title());
             out.add("link-dialog=" + linkDialog.describe());
+        }
+        if (importDialog != null && importDialog.isShowing()) {
+            out.add("dialog=" + importDialog.title());
+            out.addAll(importDialog.linesForCapture());
         }
         // After the shot: the window and the tab have had their ticks by then.
         if (statsWindow.isShowing()) {
@@ -1387,6 +1399,14 @@ public final class MainWindow {
             else linkNameForCapture = typed;
         } else if (action.equals("link-download")) {
             if (linkDialog != null && linkDialog.isShowing()) linkDialog.confirm();
+        } else if (action.startsWith("import-from:")) {
+            // The Import dialog on this folder, not the ones found on this machine; `~` for a space.
+            importFolderForCapture =
+                    Path.of(action.substring("import-from:".length()).replace('~', ' '));
+            Platform.runLater(this::importFromClient);
+        } else if (action.equals("import-confirm")) {
+            if (importDialog != null && importDialog.isShowing()) importDialog.confirmWhenLoaded();
+            else importConfirmForCapture = true;
         } else if (action.startsWith("set-location:")) {
             // The Set Location dialog with this folder typed in, so its free-space line can be read;
             // the dialog opens on a later pulse, so the folder waits for it.
@@ -2154,6 +2174,61 @@ public final class MainWindow {
                 Platform.runLater(() -> setStatus(message));
             }
         });
+    }
+
+    /**
+     * FX thread. File → Import from another client…: the dialog on the qBittorrent folders found on
+     * this machine (or the capture hook's), each read and planned on a worker, then the chosen
+     * torrents brought over on another; the session logs the summary and each failure.
+     */
+    private void importFromClient() {
+        if (engine == null || (importDialog != null && importDialog.isShowing())) return;
+        Path home = Path.of(System.getProperty("user.home"));
+        List<Path> found = importFolderForCapture != null
+                ? List.of()
+                : ImportText.found(System.getProperty("os.name"), home, System.getenv());
+        ImportDialog dialog = new ImportDialog(stage, found, folder -> loadImport(folder, home));
+        if (importFolderForCapture != null) {
+            dialog.showFolder(importFolderForCapture);
+            importFolderForCapture = null;
+        }
+        if (importConfirmForCapture) {
+            dialog.confirmWhenLoaded();
+            importConfirmForCapture = false;
+        }
+        importDialog = dialog;
+        Optional<List<com.torrenta.migrate.ImportPlan.Item>> chosen = dialog.showAndWait();
+        importDialog = null;
+        table.requestFocus();
+        if (chosen.isEmpty()) return;
+        setStatus(tr("status.importing", chosen.get().size()));
+        Thread.ofVirtual().name("engine-import").start(() -> {
+            try {
+                session.importTorrents(chosen.get());
+            } catch (EngineException ex) {
+                Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
+            }
+        });
+    }
+
+    /** Worker. One folder read and planned against the torrents the engine has now. */
+    private ImportText.Loaded loadImport(Path folder, Path home) {
+        java.util.Map<String, String> env = System.getenv();
+        com.torrenta.migrate.QbittorrentReader.Found found =
+                com.torrenta.migrate.QbittorrentReader.read(folder, home, env);
+        // The dialog's note counts them; which ones is here, in the debug log.
+        for (String line : found.unreadable()) LOG.warning("Import: not readable in " + found.backup() + ": " + line);
+        Engine e = engine;
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        if (e != null) for (Torrent t : e.torrents()) ids.add(t.id());
+        boolean running = com.torrenta.migrate.QbittorrentReader.running(found.backup(), home, env);
+        return new ImportText.Loaded(
+                found.backup(),
+                com.torrenta.migrate.ImportPlan.of(
+                        found.candidates(), ids, com.torrenta.migrate.ImportPlan::sizeOnDisk, running),
+                found.sqlite(),
+                running,
+                found.unreadable());
     }
 
     /**
@@ -3972,6 +4047,13 @@ public final class MainWindow {
                         () -> settingsWindow.show(stage)),
                 new Command("switch-profile", tr("command.switchProfile"), null, null, always, this::chooseProfile),
                 new Command(
+                        "import-from-client",
+                        tr("command.importFromClient"),
+                        null,
+                        null,
+                        gate("import-from-client", always),
+                        this::importFromClient),
+                new Command(
                         "retry-engine", tr("command.retryEngine"), null, null, engineDown, () -> startEngine(profile)),
                 new Command("search", tr("command.search"), Chords.of("search"), null, always, this::showSearch),
                 new Command(
@@ -4266,6 +4348,8 @@ public final class MainWindow {
                         addTorrent,
                         addMagnet,
                         addClipboard,
+                        new SeparatorMenuItem(),
+                        menuItem("import-from-client"),
                         new SeparatorMenuItem(),
                         menuItem("rss-run-rules"),
                         menuItem("settings"),

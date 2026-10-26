@@ -105,7 +105,11 @@ class QbittorrentImportTest {
         // resume data's progress stands; checked, that piece would fail and the torrent drop below it.
         flipAByte(downloads.resolve("Seed.bin"));
         flipAByte(downloads.resolve("Pack/a.bin"));
+        List<com.torrenta.engine.EngineEvent> finished = new java.util.concurrent.CopyOnWriteArrayList<>();
         try (LibtorrentEngine engine = new LibtorrentEngine(downloads, store)) {
+            engine.addListener(e -> {
+                if (e.kind() == com.torrenta.engine.EngineEvent.Kind.FINISHED) finished.add(e);
+            });
             engine.start();
             assertTrue(engine.capabilities().has(Engine.Capability.IMPORT_RESUME));
             for (ImportCandidate c : candidates) assertEquals(c.id(), engine.adopt(adoption(c, downloads)), c.name());
@@ -128,6 +132,8 @@ class QbittorrentImportTest {
             Torrent m = byId(engine, magnet.id());
             assertEquals("Nobody.Serves.This", m.name());
             assertTrue(m.paused());
+            // Finished long ago in qBittorrent: run-on-finished must not run for it now.
+            assertEquals(List.of(), finished, "no finished event for a torrent brought over complete");
             assertTrue(engine.adopt(adoption(seed, downloads)) == null, "unreachable");
         } catch (com.torrenta.engine.EngineException expected) {
             assertTrue(
@@ -137,11 +143,16 @@ class QbittorrentImportTest {
 
         // Written as this engine's own: a restart brings them back as they were, still unchecked.
         try (LibtorrentEngine again = new LibtorrentEngine(downloads, store)) {
+            again.addListener(e -> {
+                if (e.kind() == com.torrenta.engine.EngineEvent.Kind.FINISHED) finished.add(e);
+            });
             again.start();
             assertEquals(3, again.torrents().size());
             await("back as they were", () -> progress(again, seed) == 1.0 && progress(again, pack) == 0.5);
             assertEquals("Pack Renamed", byId(again, pack.id()).name());
             assertEquals("tv", byId(again, seed.id()).category());
+            Thread.sleep(500);
+            assertEquals(List.of(), finished, "nor at a start, for a seed restored complete");
         }
     }
 
