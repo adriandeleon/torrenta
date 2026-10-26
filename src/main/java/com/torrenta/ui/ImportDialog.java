@@ -33,6 +33,7 @@ import javafx.stage.Stage;
 import javafx.stage.Window;
 
 import com.torrenta.migrate.ImportPlan;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -67,8 +68,8 @@ final class ImportDialog {
     private final Label status = new Label();
     private final VBox notes = new VBox(4);
     private final Button importButton = new Button();
-    private List<ImportPlan.Item> result;
-    private Path shown;
+    private @Nullable List<ImportPlan.Item> result;
+    private @Nullable Path shown;
     /** The capture hook asked for Import before the rows were in: pressed once they are. */
     private boolean confirmWhenLoaded;
 

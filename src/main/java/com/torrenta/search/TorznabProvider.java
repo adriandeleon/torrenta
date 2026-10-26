@@ -22,6 +22,8 @@ import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -231,7 +233,7 @@ public final class TorznabProvider implements SearchProvider {
     }
 
     /** Positioned on {@code <item>}; returns past {@code </item>}. */
-    private static SearchResult readItem(XMLStreamReader r, String provider) throws XMLStreamException {
+    private static @Nullable SearchResult readItem(XMLStreamReader r, String provider) throws XMLStreamException {
         String title = "";
         String link = "";
         String guid = "";
@@ -344,7 +346,7 @@ public final class TorznabProvider implements SearchProvider {
     }
 
     /** RFC 1123 as RSS writes it ("Sat, 18 Oct 2026 09:12:00 +0000"), or ISO; null otherwise. */
-    public static Instant parseDate(String text) {
+    public static @Nullable Instant parseDate(@Nullable String text) {
         if (text == null || text.isBlank()) return null;
         String t = text.trim();
         try {

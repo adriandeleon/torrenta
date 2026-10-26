@@ -22,6 +22,7 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.transmission.Bencode;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Deluge's torrents, from its config folder: {@code state/torrents.fastresume} (one bencoded
@@ -144,7 +145,7 @@ public final class DelugeReader {
      * A Deluge config file is two JSON objects, one after the other: the file's version, then the
      * settings. The parser positioned inside the second, or null when there is none.
      */
-    private static JsonParser body(String text) throws IOException {
+    private static @Nullable JsonParser body(String text) throws IOException {
         JsonParser p = new JsonFactory().createParser(text);
         if (p.nextToken() != JsonToken.START_OBJECT) {
             p.close();
@@ -217,7 +218,7 @@ public final class DelugeReader {
 
     /** The {@code TorrentManagerState}'s torrents, each as its {@code TorrentState}'s fields. */
     @SuppressWarnings("unchecked")
-    static List<Map<String, Object>> torrents(Object pickled) throws IOException {
+    static List<Map<String, Object>> torrents(@Nullable Object pickled) throws IOException {
         if (!(pickled instanceof Pickle.Obj manager) || !(manager.state().get("torrents") instanceof List<?> list))
             throw new IOException("not Deluge's torrent state");
         List<Map<String, Object>> out = new ArrayList<>();
@@ -230,7 +231,8 @@ public final class DelugeReader {
      * .torrent} and its state. Pure.
      */
     @SuppressWarnings("unchecked")
-    static ImportCandidate candidate(String id, byte[] resume, byte[] torrent, Map<String, Object> state, String label)
+    static ImportCandidate candidate(
+            String id, byte @Nullable [] resume, byte @Nullable [] torrent, Map<String, Object> state, String label)
             throws IOException {
         boolean stopped = state.get("paused") instanceof Boolean b && b;
         String savePath = text(state.get("save_path"));
@@ -277,7 +279,7 @@ public final class DelugeReader {
                     stopped,
                     files,
                     0,
-                    preview == null ? 0 : pieceCount(torrent),
+                    torrent == null ? 0 : pieceCount(torrent),
                     ratio,
                     -2);
         }
@@ -334,7 +336,7 @@ public final class DelugeReader {
         return tiers;
     }
 
-    private static String text(Object v) {
+    private static String text(@Nullable Object v) {
         return v instanceof String s ? s : v instanceof byte[] b ? new String(b, StandardCharsets.UTF_8) : "";
     }
 

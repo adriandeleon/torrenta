@@ -917,6 +917,24 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   set with matching placeholders. In a choice limb that carries a `{0}` an apostrophe needs four
   quotes (`''''`), in one without a brace two; a new key goes into all six files.
 
+## Null annotations (JSpecify, checked by NullAway; Editora's)
+
+- **Every package is `@NullMarked`** in its `package-info.java`, and NullAway (an Error Prone plugin,
+  NullAway only, main compile only, not the tests) fails `mvn compile` on a null it cannot prove
+  safe. `NullMarkedPackagesTest` fails for a new package without the file. JSpecify is `provided`
+  and `requires static org.jspecify`, so nothing ships; `.mvn/jvm.config` opens javac to Error Prone.
+- **Non-null unless it says `@Nullable`** (`org.jspecify.annotations`, type-use: `Outer.@Nullable
+  Inner`, `byte @Nullable []`, `java.nio.file.@Nullable Path`). Mark what really may be null; prefer a
+  shape that is not null (a parameter instead of re-reading a nullable field, a local copy of a
+  volatile field, an accessor that fails clearly: `Reads.Found.torrent()`, `Sidebar.section`).
+- **NullAway does not follow a boolean that holds a null check**, nor a record whose compact
+  constructor replaces a null: pass the normalised value at the call (`TorrentLabels`, `Detached`),
+  or add a constructor without it (`Command` without a hint).
+- **`@Initializer`** (`ui.Initializer`) marks a method the constructor always runs that assigns
+  fields (`MainWindow.buildCenter`/`buildToolbar`/`buildMenuBar`, `SettingsWindow`'s page builders,
+  `DetailPane.buildPeers`); a field set later stays `@Nullable`. An exception class whose message is
+  shown overrides `getMessage()` to never be null (`EngineException`, `SearchException`, …).
+
 ## Not done
 
 0.2 through 0.9 are feature-complete; 0.4's Settings pages (Connection, Protocol, IP filter, Speed,

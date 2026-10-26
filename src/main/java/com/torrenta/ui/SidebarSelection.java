@@ -5,6 +5,7 @@ import java.util.Map;
 
 import com.torrenta.engine.Torrent;
 import com.torrenta.ui.SidebarFilter.Axis;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The sidebar's choices, one per section, composed: a torrent shows when it passes every one. The
@@ -124,7 +125,8 @@ public record SidebarSelection(
         return parse(status, category, tag, tracker, null);
     }
 
-    public static SidebarSelection parse(String status, String category, String tag, String tracker, String view) {
+    public static SidebarSelection parse(
+            String status, String category, String tag, String tracker, @Nullable String view) {
         return new SidebarSelection(
                 SidebarFilter.parse(status, Axis.STATUS),
                 SidebarFilter.parse(category, Axis.CATEGORY),

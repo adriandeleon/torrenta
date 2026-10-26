@@ -5,6 +5,8 @@ import java.math.RoundingMode;
 import java.util.Locale;
 import java.util.Optional;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -69,7 +71,7 @@ public record ShareLimit(double ratio, int seedingMinutes, Action action) {
      * The action due for a torrent now, if any: only one that has finished downloading and is not
      * paused by hand, against its own override when it has one, else the global limit.
      */
-    public static Optional<Action> decide(Torrent torrent, ShareLimit global, ShareLimit override) {
+    public static Optional<Action> decide(Torrent torrent, ShareLimit global, @Nullable ShareLimit override) {
         ShareLimit limit = override != null ? override : global;
         if (limit == null || !limit.limited()) return Optional.empty();
         boolean finished = torrent.state() == TorrentState.SEEDING || torrent.state() == TorrentState.FINISHED;

@@ -11,6 +11,7 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 
 import com.torrenta.search.SearchResult;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The results table's rows, reconciled in place from each merged list as the providers answer one
@@ -30,7 +31,7 @@ public final class SearchRows {
         return rows;
     }
 
-    public SearchRow get(String id) {
+    public @Nullable SearchRow get(String id) {
         return byId.get(id);
     }
 

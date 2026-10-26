@@ -6,6 +6,7 @@ import java.util.Map;
 import javafx.scene.input.KeyCombination;
 
 import com.torrenta.store.Settings;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The Keyboard page's edits: given the defaults and the stored bindings, the stored bindings after
@@ -72,7 +73,8 @@ final class KeybindingEdits {
     }
 
     /** The command now on {@code id}'s default chord, other than {@code id} itself, or null. */
-    static String taken(Map<String, KeyCombination> defaults, Map<String, String> stored, String id, boolean mac) {
+    static @Nullable String taken(
+            Map<String, KeyCombination> defaults, Map<String, String> stored, String id, boolean mac) {
         KeyCombination home = defaults.get(id);
         if (home == null) return null;
         return conflict(Keybindings.resolve(defaults, stored, mac), home, id, mac);
@@ -83,7 +85,8 @@ final class KeybindingEdits {
      *
      * @param effective what {@link Keybindings#resolve} says every command is on
      */
-    static String conflict(Map<String, KeyCombination> effective, KeyCombination chord, String id, boolean mac) {
+    static @Nullable String conflict(
+            Map<String, KeyCombination> effective, KeyCombination chord, String id, boolean mac) {
         for (Map.Entry<String, KeyCombination> entry : effective.entrySet()) {
             if (!entry.getKey().equals(id) && Keybindings.same(entry.getValue(), chord, mac)) return entry.getKey();
         }

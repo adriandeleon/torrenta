@@ -4,6 +4,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -113,7 +115,7 @@ public final class FileRenames {
     }
 
     /** The first segment every path shares as a folder, or null when they do not all have one. */
-    private static String root(Map<Integer, String> paths) {
+    private static @Nullable String root(Map<Integer, String> paths) {
         String root = null;
         for (String path : paths.values()) {
             int slash = path.indexOf('/');

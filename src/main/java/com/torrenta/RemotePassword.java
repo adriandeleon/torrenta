@@ -13,6 +13,7 @@ import java.util.Arrays;
 
 import com.torrenta.store.Settings;
 import com.torrenta.webapi.Passwords;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code torrenta --set-remote-password}: Remote access's password for a server with no window to
@@ -25,8 +26,8 @@ final class RemotePassword {
     private RemotePassword() {}
 
     /** The exit status: 0 set, 1 not. */
-    static int run(Path configDir, Console console, InputStream in, PrintStream out, PrintStream err) {
-        char[] password;
+    static int run(Path configDir, @Nullable Console console, InputStream in, PrintStream out, PrintStream err) {
+        char @Nullable [] password;
         try {
             password = console != null ? ask(console) : readLine(in);
         } catch (IOException e) {
@@ -58,7 +59,7 @@ final class RemotePassword {
     }
 
     /** Twice with no echo; null when the two differ. */
-    private static char[] ask(Console console) {
+    private static char @Nullable [] ask(Console console) {
         char[] first = console.readPassword("Password for Remote access: ");
         char[] second = console.readPassword("Again: ");
         if (first == null || second == null) return new char[0];

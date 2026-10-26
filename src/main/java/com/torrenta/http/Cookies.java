@@ -3,6 +3,8 @@ package com.torrenta.http;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Cookies both ways: a request's {@code Cookie} header read into names and values, and a {@code
  * Set-Cookie} written. A session cookie is always {@code HttpOnly}, {@code SameSite=Strict} and
@@ -13,7 +15,7 @@ public final class Cookies {
     private Cookies() {}
 
     /** {@code a=1; b=2} into its pairs, the first of a repeated name kept. */
-    public static Map<String, String> parse(String header) {
+    public static Map<String, String> parse(@Nullable String header) {
         Map<String, String> out = new LinkedHashMap<>();
         if (header == null) return out;
         for (String pair : header.split(";")) {

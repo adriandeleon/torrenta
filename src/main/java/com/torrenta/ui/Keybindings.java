@@ -13,6 +13,7 @@ import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 
 import com.torrenta.store.Settings;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The chord each command is on: its default ({@link Chords}) unless the user's key bindings say
@@ -44,7 +45,8 @@ final class Keybindings {
      * @param label what it does, as the menu says it
      * @param defaultChord the chord it has unless the user says otherwise, or null for none
      */
-    record Command(String id, String group, String label, KeyCombination defaultChord) {}
+    record Command(
+            String id, String group, String label, @Nullable KeyCombination defaultChord) {}
 
     /** The defaults of a command list, by id, in its order: what {@link #resolve} takes. */
     static Map<String, KeyCombination> defaults(List<Command> commands) {
@@ -105,7 +107,7 @@ final class Keybindings {
      * <em>character</em> combination, which matches on what a key types rather than which key it
      * is, so it could never be compared with what the recorder writes.
      */
-    static KeyCombination parse(String text) {
+    static @Nullable KeyCombination parse(String text) {
         if (text == null || text.isBlank()) return null;
         try {
             KeyCombination chord = KeyCombination.valueOf(text.trim());
@@ -151,7 +153,7 @@ final class Keybindings {
     }
 
     /** Whether two chords answer to the same keystroke on this platform. Null is no chord, and equals nothing. */
-    static boolean same(KeyCombination a, KeyCombination b, boolean mac) {
+    static boolean same(@Nullable KeyCombination a, @Nullable KeyCombination b, boolean mac) {
         return a != null && b != null && normalize(a, mac).equals(normalize(b, mac));
     }
 

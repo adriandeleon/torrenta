@@ -14,6 +14,8 @@ import javafx.scene.layout.Region;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -34,7 +36,7 @@ final class LeakCard {
     private final Label sentence = new Label();
     private final GridPane rows = new GridPane();
     private final Button checkNow = new Button(tr("leak.checkNow"));
-    private LeakView shown;
+    private @Nullable LeakView shown;
 
     /**
      * @param anchor the status bar, which the card sits just above, at the left where the pill is

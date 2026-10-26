@@ -2,6 +2,8 @@ package com.torrenta.migrate;
 
 import java.util.List;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * One torrent as another client has it, read and ready to bring over: what the import plan decides
  * by and what the engine adds from.
@@ -33,7 +35,7 @@ public record ImportCandidate(
         String name,
         String rename,
         byte[] resume,
-        byte[] metainfo,
+        byte @Nullable [] metainfo,
         String savePath,
         String category,
         String categoryPath,
@@ -69,7 +71,7 @@ public record ImportCandidate(
             String name,
             String rename,
             byte[] resume,
-            byte[] metainfo,
+            byte @Nullable [] metainfo,
             String savePath,
             String category,
             String categoryPath,

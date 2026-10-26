@@ -12,6 +12,7 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
+import org.jspecify.annotations.Nullable;
 
 /**
  * What a torrent is filed under: one category or none, and any number of tags; and the name it is
@@ -29,7 +30,11 @@ import com.fasterxml.jackson.core.JsonToken;
  * @param following where newer versions of it are looked for (BEP 46); null for a torrent that
  *     came from no updatable address
  */
-public record TorrentLabels(String category, List<String> tags, String name, Following following) {
+public record TorrentLabels(
+        String category,
+        List<String> tags,
+        String name,
+        @Nullable Following following) {
 
     public static final TorrentLabels NONE = new TorrentLabels("", List.of(), "");
 
@@ -70,7 +75,7 @@ public record TorrentLabels(String category, List<String> tags, String name, Fol
     }
 
     /** Followed from {@code f}; null for nowhere. */
-    public TorrentLabels withFollowing(Following f) {
+    public TorrentLabels withFollowing(@Nullable Following f) {
         return new TorrentLabels(category, tags, name, f);
     }
 

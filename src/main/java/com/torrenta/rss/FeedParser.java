@@ -22,6 +22,8 @@ import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * RSS 2.0 (and RSS 1.0's RDF shape) and Atom, read as a stream with the JDK's StAX, entities and
  * DTDs off: a feed comes from the network. Lenient: a missing field is empty or null, never a
@@ -374,7 +376,7 @@ public final class FeedParser {
      * RFC 1123 as RSS writes it, ISO 8601 as Atom does, and the common slips (no weekday, a
      * two-digit year, a zone name, a date alone); null when nothing fits.
      */
-    public static Instant parseDate(String text) {
+    public static @Nullable Instant parseDate(@Nullable String text) {
         if (text == null || text.isBlank()) return null;
         String t = text.trim().replaceAll("\\s+", " ");
         try {

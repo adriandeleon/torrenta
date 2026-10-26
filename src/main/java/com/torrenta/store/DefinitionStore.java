@@ -22,6 +22,7 @@ import java.util.zip.ZipOutputStream;
 
 import com.torrenta.search.Definition;
 import com.torrenta.search.DefinitionException;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -46,7 +47,7 @@ public final class DefinitionStore {
     static final String EXAMPLES = "/com/torrenta/search/examples/";
 
     /** One file in the folder: loaded (definition set) or not (problem set). */
-    public record Entry(Path file, String id, Definition definition, String problem) {
+    public record Entry(Path file, String id, @Nullable Definition definition, String problem) {
         public boolean loaded() {
             return definition != null;
         }
@@ -239,7 +240,7 @@ public final class DefinitionStore {
     }
 
     /** A shipped example's text, or null when there is none of that name. */
-    public static String example(String name) {
+    public static @Nullable String example(String name) {
         try (InputStream in = DefinitionStore.class.getResourceAsStream(EXAMPLES + name)) {
             if (in == null) return null;
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
@@ -297,7 +298,7 @@ public final class DefinitionStore {
         }
     }
 
-    private static String readQuietly(Path file) {
+    private static @Nullable String readQuietly(Path file) {
         try {
             return Files.isRegularFile(file) ? Files.readString(file, StandardCharsets.UTF_8) : null;
         } catch (IOException e) {

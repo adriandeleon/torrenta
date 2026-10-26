@@ -9,6 +9,8 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -32,8 +34,8 @@ public final class RuleMatcher {
     }
 
     private final Rule rule;
-    private final Pattern mustPattern;
-    private final Pattern mustNotPattern;
+    private final @Nullable Pattern mustPattern;
+    private final @Nullable Pattern mustNotPattern;
     private final List<Phrase> mustPhrases;
     private final List<Phrase> mustNotPhrases;
     private final EpisodeFilter episodes;
@@ -94,13 +96,13 @@ public final class RuleMatcher {
     }
 
     /** The one-off form: compiles and asks; null when the rule has a problem or does not want the article. */
-    public static Match matches(Rule rule, Article article, Instant now) {
+    public static @Nullable Match matches(Rule rule, Article article, Instant now) {
         if (problem(rule).isPresent()) return null;
         return new RuleMatcher(rule).match(article, now);
     }
 
     /** The match, or null. {@code now} is for the age rule; a test passes a fixed instant. */
-    public Match match(Article article, Instant now) {
+    public @Nullable Match match(Article article, Instant now) {
         if (!article.hasTorrent()) return null;
         if (!rule.appliesTo(article.feedId())) return null;
         String title = article.title();

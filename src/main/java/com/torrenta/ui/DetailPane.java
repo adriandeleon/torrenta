@@ -55,6 +55,7 @@ import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
 import com.torrenta.session.SpeedHistory;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -109,8 +110,8 @@ final class DetailPane extends VBox {
     /** Pause's glyph: two bars while it pauses, the play triangle while it resumes. */
     private final StackPane pauseGlyph = new StackPane();
 
-    private Boolean pauseShowsResume;
-    private RowState headerState;
+    private @Nullable Boolean pauseShowsResume;
+    private @Nullable RowState headerState;
     private boolean wide;
 
     // ---- overview
@@ -119,15 +120,15 @@ final class DetailPane extends VBox {
     private final Label cardTitle = new Label();
     private final TextFlow cardBody = new TextFlow();
     private final VBox remedies = new VBox(2);
-    private Diagnosis shownDiagnosis;
+    private @Nullable Diagnosis shownDiagnosis;
     /** The capture hook asked for a remedy before a card offered it: pressed when one does. */
-    private Diagnosis.Remedy remedyPending;
+    private Diagnosis.@Nullable Remedy remedyPending;
 
     private boolean remedyPendingAny;
     private final Label piecesValue = new Label();
     private final PieceStrip pieceStrip = new PieceStrip();
     /** The pieces a player's read-ahead covers in the torrent shown; null while none plays it. */
-    private com.torrenta.engine.PieceMath.Span streamWindow;
+    private com.torrenta.engine.PieceMath.@Nullable Span streamWindow;
 
     private final VBox piecesBox = new VBox(8);
     private final Sparkline overviewSpark = new Sparkline(Sparkline.Series.BOTH, 200, 56);
@@ -169,11 +170,11 @@ final class DetailPane extends VBox {
     /** The selected torrent's graph; fed every tick, painted only while its tab shows. */
     private final SpeedGraph speed = new SpeedGraph(600, false);
 
-    private SpeedHistory speedHistory;
+    private @Nullable SpeedHistory speedHistory;
     private long speedNow;
     private final Label empty = new Label(tr("detail.empty"));
     private boolean[] lastPieces = new boolean[0];
-    private String shownId;
+    private @Nullable String shownId;
 
     /**
      * The tab the person chose, kept while a download from a link shows the Overview in place of
@@ -194,7 +195,7 @@ final class DetailPane extends VBox {
     private Consumer<FileRows.Row> onCopyStream = r -> {};
     private BiConsumer<FileRows.Row, String> onRename = (r, name) -> {};
     /** What the capture hook types into the next file Rename dialog before pressing OK. */
-    private String renameForCapture;
+    private @Nullable String renameForCapture;
 
     private Consumer<List<String>> onAddTrackers = urls -> {};
     private Consumer<List<String>> onAddWebSeeds = urls -> {};
@@ -204,7 +205,7 @@ final class DetailPane extends VBox {
     /** Add and Remove for the web seeds: hidden for an engine that only lists them. */
     private final HBox webSeedBar = new HBox(8);
     /** What the capture hook types into the next Add Web Seeds dialog before pressing OK. */
-    private String webSeedsForCapture;
+    private @Nullable String webSeedsForCapture;
 
     private Consumer<String> onRemoveTracker = url -> {};
     private Runnable onReannounce = () -> {};
@@ -215,7 +216,7 @@ final class DetailPane extends VBox {
     private TableView<TorrentDetail.Peer> peerTable;
     private ContextMenu peerMenu;
     /** The peer the open context menu is about, read when it shows: the list is replaced every tick. */
-    private String peerTarget;
+    private @Nullable String peerTarget;
     /** The files are on this machine (not a remote daemon's): Open File and the folder actions show. */
     private boolean localFiles = true;
     /** The engine can serve a file while it downloads ({@code Capability.STREAMING}). */
@@ -279,7 +280,7 @@ final class DetailPane extends VBox {
     }
 
     /** The read-ahead's pieces, marked on the strip from the next show; null for none. */
-    void showStreamWindow(com.torrenta.engine.PieceMath.Span window) {
+    void showStreamWindow(com.torrenta.engine.PieceMath.@Nullable Span window) {
         streamWindow = window;
     }
 
@@ -389,7 +390,7 @@ final class DetailPane extends VBox {
      * Overview's half hour is drawn every tick (a few shapes), the Speed tab's graph only while it
      * is the one showing, and when it becomes so.
      */
-    void showSpeed(SpeedHistory history, long nowSeconds) {
+    void showSpeed(@Nullable SpeedHistory history, long nowSeconds) {
         speedHistory = history;
         speedNow = nowSeconds;
         if (history == null) {
@@ -472,7 +473,7 @@ final class DetailPane extends VBox {
      * FX thread. A fresh snapshot of the selected torrent, with its row's torrent and stall clock
      * (null when the row has not arrived yet: the header and the facts then wait a tick).
      */
-    void show(TorrentDetail detail, Torrent torrent, long quietSeconds, long nowSeconds) {
+    void show(TorrentDetail detail, @Nullable Torrent torrent, long quietSeconds, long nowSeconds) {
         TorrentDetail.General g = detail.general();
         boolean another = !g.id().equals(shownId);
         shownId = g.id();
@@ -657,7 +658,7 @@ final class DetailPane extends VBox {
     }
 
     /** A command's chord in the muted key face, or nothing for one with none. */
-    private Node keyHint(String id) {
+    private @Nullable Node keyHint(String id) {
         String hint = commands.apply(id).map(Command::hint).orElse("");
         if (hint.isEmpty()) return null;
         Label key = new Label(hint);
@@ -911,7 +912,7 @@ final class DetailPane extends VBox {
      * first when null. The hook acts before a stall has had its minute, so with no card offering it
      * yet, it is pressed when one first does.
      */
-    void pressRemedyForCapture(Diagnosis.Remedy wanted) {
+    void pressRemedyForCapture(Diagnosis.@Nullable Remedy wanted) {
         remedyPending = wanted;
         remedyPendingAny = wanted == null;
         if (shownDiagnosis != null) pressPending(shownDiagnosis);
@@ -971,7 +972,7 @@ final class DetailPane extends VBox {
      * A tab with its glyph before the title, at the menus' size, and a muted count after it when
      * {@code count} is given (Files, Peers, Trackers).
      */
-    private static Tab tab(String title, Icons.Glyph glyph, Label count, Node content) {
+    private static Tab tab(String title, Icons.Glyph glyph, @Nullable Label count, Node content) {
         Tab tab = new Tab(title, content);
         if (count == null) {
             tab.setGraphic(glyph.at(Icons.MENU_SIZE));
@@ -1033,7 +1034,7 @@ final class DetailPane extends VBox {
                     }
 
                     @Override
-                    public com.torrenta.engine.Priority fromString(String s) {
+                    public com.torrenta.engine.@Nullable Priority fromString(String s) {
                         return null;
                     }
                 },
@@ -1281,6 +1282,7 @@ final class DetailPane extends VBox {
         return lines;
     }
 
+    @Initializer // from the constructor
     private javafx.scene.Node buildPeers() {
         TableView<TorrentDetail.Peer> peers = new TableView<>(peerItems);
         peers.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);

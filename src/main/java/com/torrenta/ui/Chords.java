@@ -8,6 +8,8 @@ import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyCodeCombination;
 import javafx.scene.input.KeyCombination;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Every chord the main window binds <em>by default</em>, in one table: under the command's id where
  * it is a command's accelerator or the hint a command shows, under a name of its own for a scene
@@ -130,7 +132,7 @@ final class Chords {
     }
 
     /** The menu an entry is listed under ({@code file}, {@code torrent}, {@code view}), or null for no entry. */
-    static String group(String name) {
+    static @Nullable String group(String name) {
         return GROUPS.get(name);
     }
 

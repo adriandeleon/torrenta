@@ -21,6 +21,7 @@ import com.torrenta.store.WatchFolderStore;
 import com.torrenta.ui.DebugLog;
 import com.torrenta.webapi.SessionBackend;
 import com.torrenta.webapi.WebApiService;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -39,7 +40,7 @@ final class Headless {
     private Headless() {}
 
     /** Runs until the process is told to stop, or the engine cannot start; the exit status. */
-    static int run(CommandLine cli, Path configDir, SingleInstance instance) {
+    static int run(CommandLine cli, Path configDir, @Nullable SingleInstance instance) {
         Settings settings = new Settings(configDir.resolve(Settings.FILE_NAME));
         settings.load();
         DebugLog.attachFile(configDir);

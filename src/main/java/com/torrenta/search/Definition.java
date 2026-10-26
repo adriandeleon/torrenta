@@ -11,6 +11,8 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -122,7 +124,8 @@ public record Definition(
 
     /** The row selector or path. */
     public Field rows() {
-        return fields.get(ROWS);
+        // parse refuses a file without one
+        return java.util.Objects.requireNonNull(fields.get(ROWS), "a definition without rows");
     }
 
     // ---- parsing --------------------------------------------------------------------------------
@@ -138,7 +141,7 @@ public record Definition(
         try {
             root = JsonExtractor.read(json);
         } catch (IOException e) {
-            throw new DefinitionException(file, "", e.getMessage());
+            throw new DefinitionException(file, "", String.valueOf(e.getMessage()));
         }
         Map<String, Object> top = object(root, file, "");
         unknown(top, TOP, file, "");
@@ -282,7 +285,7 @@ public record Definition(
         try {
             Selector.parse(path);
         } catch (IllegalArgumentException e) {
-            throw new DefinitionException(file, at, e.getMessage());
+            throw new DefinitionException(file, at, String.valueOf(e.getMessage()));
         }
     }
 
@@ -341,7 +344,8 @@ public record Definition(
         throw new DefinitionException(file, join(at, key), tr("search.def.boolean"));
     }
 
-    private static Map<String, String> strings(Object value, String file, String at) throws DefinitionException {
+    private static Map<String, String> strings(@Nullable Object value, String file, String at)
+            throws DefinitionException {
         if (value == null || value == JsonExtractor.NULL) return Map.of();
         Map<String, Object> o = object(value, file, at);
         Map<String, String> out = new LinkedHashMap<>();

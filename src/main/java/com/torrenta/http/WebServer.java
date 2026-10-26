@@ -7,6 +7,7 @@ import java.net.InetSocketAddress;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.HashMap;
 import java.util.List;
@@ -22,6 +23,7 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsServer;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The JDK's own HTTP server ({@code jdk.httpserver}) with a virtual thread per request, in front of
@@ -48,7 +50,7 @@ public final class WebServer implements AutoCloseable {
      * Listens on {@code address} (port 0 for any free one) and serves {@code router} until {@link
      * #close}; HTTPS when {@code tls} is given, HTTP otherwise.
      */
-    public static WebServer start(InetSocketAddress address, Router router, Limits limits, SSLContext tls)
+    public static WebServer start(InetSocketAddress address, Router router, Limits limits, @Nullable SSLContext tls)
             throws IOException {
         HttpServer server;
         if (tls != null) {
@@ -135,12 +137,14 @@ public final class WebServer implements AutoCloseable {
     private static void write(HttpExchange exchange, Response response) throws IOException {
         for (Map.Entry<String, String> h : response.headers())
             exchange.getResponseHeaders().add(h.getKey(), h.getValue());
-        if (response.file() != null) {
-            writeFile(exchange, response);
+        Path file = response.file();
+        if (file != null) {
+            writeFile(exchange, response, file);
             return;
         }
-        if (response.ranged() != null) {
-            writeRanged(exchange, response);
+        Response.Ranged ranged = response.ranged();
+        if (ranged != null) {
+            writeRanged(exchange, response, ranged);
             return;
         }
         byte[] body = response.body();
@@ -157,8 +161,7 @@ public final class WebServer implements AutoCloseable {
      * has the headers alone. A write that throws leaves the response short, and the exchange is
      * closed by the caller.
      */
-    private static void writeRanged(HttpExchange exchange, Response response) throws IOException {
-        Response.Ranged body = response.ranged();
+    private static void writeRanged(HttpExchange exchange, Response response, Response.Ranged body) throws IOException {
         long size = body.size();
         exchange.getResponseHeaders().set("Accept-Ranges", "bytes");
         Ranges.Plan plan = Ranges.plan(exchange.getRequestHeaders().getFirst("Range"), size);
@@ -192,8 +195,8 @@ public final class WebServer implements AutoCloseable {
     }
 
     /** A file, whole or the part {@code Range} asks for; gone is 404, a range past it 416. */
-    private static void writeFile(HttpExchange exchange, Response response) throws IOException {
-        if (!Files.isRegularFile(response.file())) {
+    private static void writeFile(HttpExchange exchange, Response response, Path file) throws IOException {
+        if (!Files.isRegularFile(file)) {
             exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
             byte[] gone = "Not Found".getBytes(java.nio.charset.StandardCharsets.UTF_8);
             exchange.sendResponseHeaders(404, gone.length);
@@ -202,7 +205,7 @@ public final class WebServer implements AutoCloseable {
             }
             return;
         }
-        long size = Files.size(response.file());
+        long size = Files.size(file);
         exchange.getResponseHeaders().set("Accept-Ranges", "bytes");
         Ranges.Plan plan = Ranges.plan(exchange.getRequestHeaders().getFirst("Range"), size);
         long first = 0;
@@ -224,7 +227,7 @@ public final class WebServer implements AutoCloseable {
         }
         exchange.sendResponseHeaders(status, length == 0 ? -1 : length);
         if (length == 0) return;
-        try (FileChannel channel = FileChannel.open(response.file(), StandardOpenOption.READ);
+        try (FileChannel channel = FileChannel.open(file, StandardOpenOption.READ);
                 OutputStream out = exchange.getResponseBody()) {
             channel.position(first);
             InputStream in = Channels.newInputStream(channel);

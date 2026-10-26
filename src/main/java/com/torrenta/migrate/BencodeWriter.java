@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Bencode out: what a converted resume file is written as. Integers, byte strings (text as UTF-8),
@@ -40,7 +41,10 @@ final class BencodeWriter {
                 out.write('d');
                 for (byte[] k : keys) {
                     bytes(out, k);
-                    write(out, map.get(new String(k, StandardCharsets.UTF_8)));
+                    write(
+                            out,
+                            Objects.requireNonNull(
+                                    map.get(new String(k, StandardCharsets.UTF_8)), "not bencodable: null"));
                 }
                 out.write('e');
             }

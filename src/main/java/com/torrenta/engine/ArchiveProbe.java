@@ -6,6 +6,8 @@ import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Whether an archive asks for a password, read off its first bytes (and, for 7z, its last): the
  * check the content card cannot make from a file list, since the answer is in the data. A
@@ -163,7 +165,7 @@ public final class ArchiveProbe {
     }
 
     /** RAR 5's variable-length integer at {@code pos}: {value, bytes taken}, or null past the end. */
-    private static long[] vint(byte[] b, int pos) {
+    private static long @Nullable [] vint(byte[] b, int pos) {
         long value = 0;
         for (int i = 0; i < 10 && pos + i < b.length; i++) {
             int v = b[pos + i] & 0xff;

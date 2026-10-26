@@ -63,6 +63,7 @@ import com.torrenta.rss.Rule;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -153,10 +154,10 @@ public final class Session {
     private final Host host;
     private final IpFilterController ipFilter;
     private final RssService rss;
-    private volatile EngineFactory engineFactory;
+    private volatile @Nullable EngineFactory engineFactory;
     private volatile EngineProfile profile = EngineProfile.LOCAL;
     /** The engine started last and not yet stopped: what {@link #stopEngine} and {@link #switchTo} end. */
-    private volatile Engine running;
+    private volatile @Nullable Engine running;
     /**
      * Counts {@link #startEngine} calls: an engine that finishes starting after a newer start was
      * asked for (a switch while it was still connecting) is stopped, never polled beside the next.
@@ -165,11 +166,11 @@ public final class Session {
     /** Counted down at the first {@link #start}, and never again: a rule's add waits on it. */
     private final CountDownLatch engineUp = new CountDownLatch(1);
 
-    private volatile WatchFolders watcher;
+    private volatile @Nullable WatchFolders watcher;
     /** What an engine that fetches its own blocklist (a daemon) said last. */
     private volatile String blocklistStatus = "";
     /** Run-on-event and notifications for the engine in use; built with it. */
-    private volatile Automation automation;
+    private volatile @Nullable Automation automation;
     /** The session's rates, a sample a poll: the Statistics window's graph, the status bar's minute. */
     private final SpeedHistory history = new SpeedHistory();
     /**
@@ -192,11 +193,11 @@ public final class Session {
     private final SessionLog log = new SessionLog(1000);
 
     private final List<Consumer<Poll>> listeners = new CopyOnWriteArrayList<>();
-    private volatile Engine engine;
+    private volatile @Nullable Engine engine;
     /** The battery and the network's cost; none until the owner gives the machine's. */
     private volatile Conditions.Source conditions = Conditions.Source.NONE;
 
-    private volatile ScheduledExecutorService poller;
+    private volatile @Nullable ScheduledExecutorService poller;
     /** The updatable torrents this machine publishes, {@code keys/<name>.key}. */
     private final com.torrenta.store.KeyStore keys;
 
@@ -270,7 +271,7 @@ public final class Session {
     }
 
     /** The watch folders while an engine is up; null otherwise. */
-    public WatchFolders watcher() {
+    public @Nullable WatchFolders watcher() {
         return watcher;
     }
 
@@ -401,7 +402,7 @@ public final class Session {
     }
 
     /** The engine being polled; null before {@link #start} and after {@link #stop}. */
-    public Engine engine() {
+    public @Nullable Engine engine() {
         return engine;
     }
 
@@ -895,7 +896,7 @@ public final class Session {
      * (no limit of its own here), -1 none; a half at -2 takes the global value. Null when both are
      * the global one. Pure.
      */
-    static ShareLimit importedShare(com.torrenta.migrate.ImportCandidate c, ShareLimit global) {
+    static @Nullable ShareLimit importedShare(com.torrenta.migrate.ImportCandidate c, ShareLimit global) {
         if (c.ratioLimit() == -2 && c.seedingMinutes() == -2) return null;
         double ratio = c.ratioLimit() == -2 ? global.ratio() : Math.max(0, c.ratioLimit());
         int minutes = c.seedingMinutes() == -2 ? global.seedingMinutes() : (int) Math.max(0, c.seedingMinutes());
@@ -1066,7 +1067,7 @@ public final class Session {
     }
 
     /** A torrent's content-check mark set, or with {@code null} cleared, and saved. */
-    private void mark(String id, String value) {
+    private void mark(String id, @Nullable String value) {
         synchronized (marks) {
             settings.setUnsafeContentPending(id, value);
             settings.saveQuietly();
@@ -1121,7 +1122,7 @@ public final class Session {
     }
 
     /** A followed torrent's history; null for one never followed, or gone. */
-    public SpeedHistory followed(String id) {
+    public @Nullable SpeedHistory followed(String id) {
         return followed.get(id);
     }
 

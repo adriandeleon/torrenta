@@ -5,6 +5,7 @@ import java.util.Locale;
 import java.util.Optional;
 
 import com.torrenta.engine.WatchFolder;
+import org.jspecify.annotations.Nullable;
 
 /**
  * One hit from one provider: what the results table shows and what the Add dialog is given.
@@ -25,7 +26,7 @@ public record SearchResult(
         long size,
         int seeds,
         int leechers,
-        Instant published,
+        @Nullable Instant published,
         Link link,
         String infoHash,
         String provider,

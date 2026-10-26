@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
@@ -122,6 +123,7 @@ import com.torrenta.update.UpdateService;
 import com.torrenta.webapi.SessionBackend;
 import com.torrenta.webapi.WebApiConfig;
 import com.torrenta.webapi.WebApiService;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -189,7 +191,7 @@ public final class MainWindow {
     /** The last poll's torrents, for a sidebar refresh that cannot wait for the next one. */
     private List<Torrent> lastSnapshot = List.of();
     /** A name the capture hook types into Save Filter as View's prompt; null for a person's. */
-    private String saveViewForCapture;
+    private @Nullable String saveViewForCapture;
 
     private final HBox chipRow = new HBox(4);
     /** Set while the field's text is being written from the value, so the listener stays quiet. */
@@ -228,7 +230,7 @@ public final class MainWindow {
     private HBox statusBar;
     private final MessageLogPopup messagePopup;
     /** Built on first use: most sessions never open it. */
-    private DebugLogWindow debugLogWindow;
+    private @Nullable DebugLogWindow debugLogWindow;
 
     private final Label errorBadge = new Label();
     private TableView<TorrentRow> table;
@@ -245,27 +247,27 @@ public final class MainWindow {
     private final java.util.Map<Density, javafx.scene.control.RadioMenuItem> densityItems =
             new java.util.EnumMap<>(Density.class);
     private List<Command> commands = List.of();
-    private AddDialog currentDialog;
-    private CreateDialog createDialog;
-    private LimitsDialog limitsDialog;
-    private TagsDialog tagsDialog;
-    private LocationDialog locationDialog;
+    private @Nullable AddDialog currentDialog;
+    private @Nullable CreateDialog createDialog;
+    private @Nullable LimitsDialog limitsDialog;
+    private @Nullable TagsDialog tagsDialog;
+    private @Nullable LocationDialog locationDialog;
     /** A folder the capture hook wants typed into the next Set Location dialog, or null. */
-    private String locationForCapture;
+    private @Nullable String locationForCapture;
 
-    private LinkDialog linkDialog;
+    private @Nullable LinkDialog linkDialog;
     /** File → Import from another client…, while it is open. */
-    private ImportDialog importDialog;
+    private @Nullable ImportDialog importDialog;
     /** The capture hook's folder for the next Import dialog, instead of the ones found on this machine. */
-    private Path importFolderForCapture;
+    private @Nullable Path importFolderForCapture;
     /** The capture hook's Import, pressed once the next dialog's rows are in. */
     private boolean importConfirmForCapture;
     /** Links that arrived while the Add Link dialog was open, each asked about in turn. */
     private final java.util.ArrayDeque<String> linksWaiting = new java.util.ArrayDeque<>();
     /** A name the capture hook types into the Add Link dialog when it opens. */
-    private String linkNameForCapture;
+    private @Nullable String linkNameForCapture;
     /** A choice or text prompt of the category commands, while one is up. */
-    private javafx.scene.control.Dialog<?> promptDialog;
+    private javafx.scene.control.@Nullable Dialog<?> promptDialog;
 
     private final LabelStore labels;
     private final WatchFolderStore watchStore;
@@ -309,14 +311,14 @@ public final class MainWindow {
     /** Whether the alternative limits were in force at the last refresh, on the FX thread. */
     private boolean altSpeedOn;
 
-    private ReleaseInfo availableUpdate;
+    private @Nullable ReleaseInfo availableUpdate;
     /** A check is running; and the last one's failure this session, null when it answered. */
     private boolean updateChecking;
 
-    private String updateError;
+    private @Nullable String updateError;
     private SettingsSync sync;
     private final Label syncBadge = new Label(tr("status.syncProblem"));
-    private Alert aboutDialog;
+    private @Nullable Alert aboutDialog;
     /** On the sidebar when it sits on the right: the rule faces the list. */
     private static final javafx.css.PseudoClass BESIDE = javafx.css.PseudoClass.getPseudoClass("right");
 
@@ -329,7 +331,7 @@ public final class MainWindow {
     private CheckMenuItem detailItem;
     private CheckMenuItem detailBottomItem;
     private CheckMenuItem sidebarRightItem;
-    private volatile String detailId;
+    private volatile @Nullable String detailId;
     private volatile boolean detailWanted;
     /** A {@link #refreshDetailNow} waiting on the poll thread; later requests ride on it. */
     private final java.util.concurrent.atomic.AtomicBoolean detailRefreshQueued =
@@ -341,7 +343,7 @@ public final class MainWindow {
      * Set on the FX thread, read by the poll thread and workers: volatile, and copied to a local
      * before use, since a profile switch sets it to null while a poll may still be running.
      */
-    private volatile Engine engine;
+    private volatile @Nullable Engine engine;
 
     private String engineDescription = "";
     /** What the engine can do; everything until one has started. Read by workers, set on the FX thread. */
@@ -386,7 +388,7 @@ public final class MainWindow {
     private final WebApiService webApi;
 
     /** The tray icon once one has come up, else null; set on the FX thread, read by the poll. */
-    private volatile TorrentaTray tray;
+    private volatile @Nullable TorrentaTray tray;
     /** Why there is no tray, once an attempt has said; empty before one and while there is one. */
     private volatile String trayReason = "";
     /** What the tray was last given, so an equal snapshot costs no round trip; poll thread. */
@@ -397,7 +399,7 @@ public final class MainWindow {
     private boolean quitting;
 
     /** The dock or launcher badge once one has come up, else null; set on the FX thread, read by the poll. */
-    private volatile Badge badge;
+    private volatile @Nullable Badge badge;
     /** Why there is no badge, once an attempt has said; empty before one and while there is one. */
     private volatile String badgeReason = "";
     /** What the badge was last given, so an equal snapshot costs nothing; poll thread. */
@@ -463,6 +465,7 @@ public final class MainWindow {
         }
 
         BorderPane root = new BorderPane();
+        table = buildTable();
         root.setCenter(buildCenter());
         statusBar = buildStatusBar();
         root.setBottom(statusBar);
@@ -743,7 +746,7 @@ public final class MainWindow {
         String said = inputs.isEmpty()
                 ? tr("status.broughtToFront", origin)
                 : tr("status.received", inputs.size(), origin, String.join(", ", inputs));
-        log.add(EngineEvent.info(null, null, said));
+        log.add(EngineEvent.info(null, "", said));
         setStatus(said);
         inputs.forEach(this::addInput);
     }
@@ -1101,7 +1104,7 @@ public final class MainWindow {
      * The menu or context menu open now, or null: a popup is its own window, so its own scene. The
      * last one showing, since a submenu is a second context menu opened after its parent.
      */
-    private static javafx.stage.PopupWindow shownPopup() {
+    private static javafx.stage.@Nullable PopupWindow shownPopup() {
         ContextMenu last = null;
         for (javafx.stage.Window w : javafx.stage.Window.getWindows()) {
             if (w instanceof ContextMenu c && c.isShowing()) last = c;
@@ -1947,7 +1950,7 @@ public final class MainWindow {
         startUpdateCheck(outcome -> {
             onUpdateOutcome(outcome, true);
             if (outcome.error() != null) setStatus(tr("status.updateFailed", outcome.error()), EngineEvent.Level.ERROR);
-            else if (outcome.available())
+            else if (outcome.latest() != null)
                 setStatus(tr(
                         "status.updateAvailable", AppInfo.NAME, outcome.latest().version()));
             else setStatus(tr("status.upToDate", AppInfo.NAME, AppInfo.VERSION));
@@ -1956,9 +1959,10 @@ public final class MainWindow {
 
     /** FX thread. */
     private void onUpdateOutcome(UpdateService.Outcome outcome, boolean manual) {
-        if (!outcome.available()) return;
-        if (!manual && outcome.latest().version().equals(settings.dismissedUpdate())) return;
-        availableUpdate = outcome.latest();
+        ReleaseInfo latest = outcome.latest();
+        if (!outcome.available() || latest == null) return;
+        if (!manual && latest.version().equals(settings.dismissedUpdate())) return;
+        availableUpdate = latest;
         downloadUpdateItem.setText(tr("menu.help.downloadUpdate", AppInfo.NAME, availableUpdate.version()));
         skipUpdateItem.setText(tr("menu.help.skipVersion", availableUpdate.version()));
         downloadUpdateItem.setVisible(true);
@@ -2027,7 +2031,7 @@ public final class MainWindow {
     }
 
     /** FX thread. The empty state says why the engine is not there, or nothing when it is. */
-    private void showEngineProblem(String message) {
+    private void showEngineProblem(@Nullable String message) {
         boolean down = message != null;
         engineDown.set(down);
         if (engineProblem == null) return;
@@ -2168,7 +2172,7 @@ public final class MainWindow {
     }
 
     /** {@code via} is for the dialog's header; null reads it off the input itself. */
-    private void addInput(String input, AddDialog.Via via) {
+    private void addInput(String input, AddDialog.@Nullable Via via) {
         if (engine == null) {
             session.input(input);
             return;
@@ -2400,7 +2404,7 @@ public final class MainWindow {
      * FX thread, since cancelling is an engine call.
      */
     private static final class FetchSlot {
-        private Engine.SwarmProbe fetch;
+        private Engine.@Nullable SwarmProbe fetch;
         private boolean closed;
 
         /** False, and the fetch cancelled, if the dialog closed first. */
@@ -2413,7 +2417,7 @@ public final class MainWindow {
             return true;
         }
 
-        synchronized Engine.SwarmProbe get() {
+        synchronized Engine.@Nullable SwarmProbe get() {
             return closed ? null : fetch;
         }
 
@@ -2427,14 +2431,14 @@ public final class MainWindow {
          * Added: the fetch, for {@link Engine#add(AddRequest, Engine.SwarmProbe)} to end and
          * take the peers from; null if there was none. A fetch that starts later is cancelled.
          */
-        synchronized Engine.SwarmProbe take() {
+        synchronized Engine.@Nullable SwarmProbe take() {
             closed = true;
             return fetch;
         }
     }
 
     /** The open dialog's fetch, for the poll thread to report peers to; null when there is none. */
-    private volatile FetchWatch fetchWatch;
+    private volatile @Nullable FetchWatch fetchWatch;
 
     private record FetchWatch(FetchSlot slot, AddDialog dialog) {}
 
@@ -2442,7 +2446,7 @@ public final class MainWindow {
     private final List<Runnable> queuedDialogs = new ArrayList<>();
 
     /** FX thread. Shows the dialog and, if confirmed, adds on a worker. */
-    private void openDialog(AddRequest.Source source, TorrentPreview preview, AddDialog.Via via) {
+    private void openDialog(AddRequest.Source source, @Nullable TorrentPreview preview, AddDialog.Via via) {
         if (currentDialog != null) {
             // One dialog at a time: several files chosen at once open one after the other.
             queuedDialogs.add(() -> openDialog(source, preview, via));
@@ -2531,6 +2535,11 @@ public final class MainWindow {
             dialog.noFetch(tr("dialog.add.filesAfterAdd"));
             return;
         }
+        if (e == null) {
+            // Gone between the dialog opening and the fetch: a profile switch, a quit.
+            Platform.runLater(() -> dialog.fetchFailed(tr("engine.error.notRunning")));
+            return;
+        }
         Thread.ofVirtual().name("engine-fetch").start(() -> {
             Engine.SwarmProbe fetch;
             try {
@@ -2544,7 +2553,8 @@ public final class MainWindow {
             fetch.torrent().whenComplete((bytes, failure) -> {
                 if (failure != null) {
                     if (!(failure instanceof java.util.concurrent.CancellationException)) {
-                        Platform.runLater(() -> dialog.fetchFailed(failure.getMessage()));
+                        Platform.runLater(() -> dialog.fetchFailed(
+                                java.util.Objects.toString(failure.getMessage(), failure.toString())));
                     }
                     return;
                 }
@@ -2596,7 +2606,7 @@ public final class MainWindow {
         AddDialog.folderToRemember(request.savePath(), settings.downloadDir(), categoryFolder)
                 .ifPresent(settings::downloadDir);
         settings.saveQuietly();
-        log.add(EngineEvent.info(null, null, tr("log.addWithoutAsking")));
+        log.add(EngineEvent.info(null, "", tr("log.addWithoutAsking")));
     }
 
     /**
@@ -2866,7 +2876,7 @@ public final class MainWindow {
         long nowSeconds = poll.nowSeconds();
         FetchWatch watch = fetchWatch;
         Engine.SwarmProbe fetch = watch == null ? null : watch.slot().get();
-        if (fetch != null) {
+        if (watch != null && fetch != null) {
             if (!fetch.torrent().isDone()) {
                 int peers = fetch.peers();
                 Platform.runLater(() -> watch.dialog().showFetching(peers));
@@ -2904,7 +2914,7 @@ public final class MainWindow {
      * Poll thread. The detail pane costs a status with the pieces bitfield; only for one shown
      * torrent, and null for none or for one gone between the selection and the poll.
      */
-    private TorrentDetail fetchDetail(Engine engine) {
+    private @Nullable TorrentDetail fetchDetail(Engine engine) {
         String id = detailWanted ? detailId : null;
         if (id == null) return null;
         try {
@@ -2915,14 +2925,15 @@ public final class MainWindow {
     }
 
     /** FX thread. A detail snapshot into the pane, unless the selection has moved on since. */
-    private void applyDetail(TorrentDetail shown, long nowSeconds) {
+    private void applyDetail(@Nullable TorrentDetail shown, long nowSeconds) {
         if (!detailWanted) return;
-        if (shown != null && shown.general().id().equals(detailId)) {
-            TorrentRow row = rows.get(detailId);
-            detail.showStreamWindow(session.streamWindow(detailId).orElse(null));
+        String id = detailId;
+        if (shown != null && id != null && shown.general().id().equals(id)) {
+            TorrentRow row = rows.get(id);
+            detail.showStreamWindow(session.streamWindow(id).orElse(null));
             detail.show(shown, row == null ? null : row.torrent(), row == null ? 0 : row.quietSeconds(), nowSeconds);
-            detail.showSpeed(session.followed(detailId), nowSeconds);
-        } else if (detailId == null) detail.clear();
+            detail.showSpeed(session.followed(id), nowSeconds);
+        } else if (id == null) detail.clear();
     }
 
     /**
@@ -3014,7 +3025,7 @@ public final class MainWindow {
 
     /** The saved divider of the place the pane is in; see {@link DetailSplit} for what is not restored. */
     private double dividerFromSettings() {
-        return detailPlace.divider(settings.get(dividerKey(detailPlace), null));
+        return detailPlace.divider(settings.raw(dividerKey(detailPlace)));
     }
 
     /**
@@ -3230,16 +3241,18 @@ public final class MainWindow {
                         command.on() ? tr("actions.verb.sequentialOn") : tr("actions.verb.sequentialOff"),
                         targets,
                         (e, t) -> e.setSequential(t.id(), command.on()));
-            case QUEUE ->
+            case QUEUE -> {
+                Engine.QueueMove move = Objects.requireNonNull(command.move(), "a queue command has its move");
                 onTorrents(
-                        switch (command.move()) {
+                        switch (move) {
                             case TOP -> tr("actions.verb.queueTop");
                             case UP -> tr("actions.verb.queueUp");
                             case DOWN -> tr("actions.verb.queueDown");
                             case BOTTOM -> tr("actions.verb.queueBottom");
                         },
                         targets,
-                        (e, t) -> e.queueMove(t.id(), command.move()));
+                        (e, t) -> e.queueMove(t.id(), move));
+            }
             case PAUSE -> onTorrents(tr("actions.verb.paused"), targets, (e, t) -> e.pause(t.id()));
             case RESUME -> onTorrents(tr("actions.verb.resumed"), targets, (e, t) -> e.resume(t.id()));
             case RECHECK -> onTorrents(tr("actions.verb.rechecking"), targets, (e, t) -> e.recheck(t.id()));
@@ -3758,7 +3771,7 @@ public final class MainWindow {
         }
     }
 
-    private com.torrenta.store.SavedView savedView(String slug) {
+    private com.torrenta.store.@Nullable SavedView savedView(String slug) {
         return settings.savedViews().stream()
                 .filter(v -> v.slug().equals(slug))
                 .findFirst()
@@ -3921,7 +3934,7 @@ public final class MainWindow {
     }
 
     /** What the capture hook types into the next Rename dialog before pressing OK. */
-    private String renameForCapture;
+    private @Nullable String renameForCapture;
 
     private void renameTo(Torrent t, String name) {
         onTorrents(
@@ -3975,7 +3988,7 @@ public final class MainWindow {
     private void export(Map<Torrent, Path> targets) {
         onTorrents(tr("actions.verb.exported"), List.copyOf(targets.keySet()), (e, t) -> {
             try {
-                CreateDialog.write(targets.get(t), e.exportTorrent(t.id()));
+                CreateDialog.write(Objects.requireNonNull(targets.get(t), "one of the keys"), e.exportTorrent(t.id()));
             } catch (IOException ex) {
                 throw new EngineException(tr("status.export.writeFailed", targets.get(t), ex.getMessage()), ex);
             }
@@ -3991,7 +4004,7 @@ public final class MainWindow {
     }
 
     /** The torrent the detail pane shows, or null with no single selection or none in the list. */
-    private Torrent detailTorrent() {
+    private @Nullable Torrent detailTorrent() {
         String id = detailId;
         TorrentRow row = id == null ? null : rows.get(id);
         return row == null ? null : row.torrent();
@@ -4026,13 +4039,11 @@ public final class MainWindow {
                         "new-version",
                         tr("command.newVersion"),
                         null,
-                        null,
                         gate("new-version", published),
                         this::newVersion),
                 new Command(
                         "copy-updatable-link",
                         tr("command.copyUpdatableLink"),
-                        null,
                         null,
                         gate("copy-updatable-link", published),
                         this::copyUpdatableLink),
@@ -4040,18 +4051,11 @@ public final class MainWindow {
                         "create",
                         tr("command.create"),
                         Chords.of("create"),
-                        null,
                         gate("create", always),
                         this::createTorrent),
+                new Command("add-file", tr("command.addFile"), Chords.of("add-file"), always, this::addTorrentFile),
                 new Command(
-                        "add-file", tr("command.addFile"), Chords.of("add-file"), null, always, this::addTorrentFile),
-                new Command(
-                        "add-magnet",
-                        tr("command.addMagnet"),
-                        Chords.of("add-magnet"),
-                        null,
-                        always,
-                        this::addMagnetLink),
+                        "add-magnet", tr("command.addMagnet"), Chords.of("add-magnet"), always, this::addMagnetLink),
                 // The chord is a scene accelerator, not a menu one: Ctrl+V in a text field must paste.
                 new Command(
                         "add-clipboard",
@@ -4066,14 +4070,12 @@ public final class MainWindow {
                         "force-resume",
                         tr("command.forceResume"),
                         Chords.of("force-resume"),
-                        null,
                         selection,
                         () -> onSelection(tr("actions.verb.forced"), (e, t) -> e.forceResume(t.id()))),
                 new Command(
                         "recheck",
                         tr("command.recheck"),
                         Chords.of("recheck"),
-                        null,
                         torrents,
                         () -> onTorrents(
                                 tr("actions.verb.rechecking"), torrentsSelected(), (e, t) -> e.recheck(t.id()))),
@@ -4081,7 +4083,6 @@ public final class MainWindow {
                         "reannounce",
                         tr("command.reannounce"),
                         Chords.of("reannounce"),
-                        null,
                         torrents,
                         () -> onTorrents(
                                 tr("actions.verb.reannounced"), torrentsSelected(), (e, t) -> e.reannounce(t.id()))),
@@ -4089,58 +4090,50 @@ public final class MainWindow {
                         "sequential",
                         tr("command.sequential"),
                         Chords.of("sequential"),
-                        null,
                         gate("sequential", torrents),
                         this::toggleSequential),
                 new Command(
                         "super-seed",
                         tr("command.superSeed"),
                         null,
-                        null,
                         gate("super-seed", torrents),
                         this::toggleSuperSeeding),
-                new Command("limits", tr("command.limits"), Chords.of("limits"), null, selection, this::editLimits),
+                new Command("limits", tr("command.limits"), Chords.of("limits"), selection, this::editLimits),
                 // The four chords are also taken on the table itself (onTableChord): its own
                 // Ctrl+Shift+arrow bindings would consume them before the accelerators saw them.
                 new Command(
                         "queue-top",
                         tr("command.queueTop"),
                         Chords.of("queue-top"),
-                        null,
                         gate("queue-top", torrents),
                         () -> queueMove(Engine.QueueMove.TOP)),
                 new Command(
                         "queue-up",
                         tr("command.queueUp"),
                         Chords.of("queue-up"),
-                        null,
                         gate("queue-up", torrents),
                         () -> queueMove(Engine.QueueMove.UP)),
                 new Command(
                         "queue-down",
                         tr("command.queueDown"),
                         Chords.of("queue-down"),
-                        null,
                         gate("queue-down", torrents),
                         () -> queueMove(Engine.QueueMove.DOWN)),
                 new Command(
                         "queue-bottom",
                         tr("command.queueBottom"),
                         Chords.of("queue-bottom"),
-                        null,
                         gate("queue-bottom", torrents),
                         () -> queueMove(Engine.QueueMove.BOTTOM)),
                 new Command(
                         "set-location",
                         tr("command.setLocation"),
                         Chords.of("set-location"),
-                        null,
                         gate("set-location", selection),
                         this::setLocation),
                 new Command(
                         "choose-files",
                         tr("command.chooseFiles"),
-                        null,
                         null,
                         filesToChoose,
                         () -> selectedTorrents().stream().findFirst().ifPresent(t -> chooseFiles(t.id()))),
@@ -4148,12 +4141,10 @@ public final class MainWindow {
                         "set-category",
                         tr("command.setCategory"),
                         Chords.of("set-category"),
-                        null,
                         selection,
                         this::chooseCategory),
-                new Command(
-                        "edit-tags", tr("command.editTags"), Chords.of("edit-tags"), null, selection, this::editTags),
-                new Command("manage-categories", tr("command.manageCategories"), null, null, always, () -> {
+                new Command("edit-tags", tr("command.editTags"), Chords.of("edit-tags"), selection, this::editTags),
+                new Command("manage-categories", tr("command.manageCategories"), null, always, () -> {
                     settingsWindow.show(stage);
                     settingsWindow.selectPageForCapture("LABELS");
                 }),
@@ -4161,21 +4152,18 @@ public final class MainWindow {
                         "copy-name",
                         tr("command.copyName"),
                         Chords.of("copy-name"),
-                        null,
                         selection,
                         () -> copyToClipboard("status.copied.name", Torrent::name)),
                 new Command(
                         "copy-hash",
                         tr("command.copyHash"),
                         Chords.of("copy-hash"),
-                        null,
                         torrents,
                         () -> copyToClipboard("status.copied.infoHash", torrentsSelected(), Torrent::id)),
                 new Command(
                         "copy-magnet",
                         tr("command.copyMagnet"),
                         Chords.of("copy-magnet"),
-                        null,
                         torrents,
                         this::copyMagnetLinks),
                 // F2 is handled on the table, like Space and Delete: a text field takes it too.
@@ -4191,14 +4179,12 @@ public final class MainWindow {
                         "export-torrent",
                         tr("command.exportTorrent"),
                         Chords.of("export-torrent"),
-                        null,
                         gate("export-torrent", torrents),
                         this::exportTorrents),
                 new Command(
                         "open-folder",
                         tr("command.openFolder"),
                         Chords.of("open-folder"),
-                        null,
                         gate("open-folder", selection),
                         this::openFolder),
                 new Command("remove", tr("command.remove"), null, tr("key.delete"), selection, () -> remove(false)),
@@ -4213,30 +4199,26 @@ public final class MainWindow {
                         "alt-speed",
                         tr("command.altSpeed"),
                         Chords.of("alt-speed"),
-                        null,
                         always,
                         this::toggleAlternativeSpeed),
-                new Command("quit", tr("menu.file.quit"), Chords.of("quit"), null, always, this::quit),
-                new Command("check-updates", tr("command.checkUpdates"), null, null, always, this::checkForUpdatesNow),
-                new Command("about", tr("command.about", AppInfo.NAME), null, null, always, this::showAbout),
+                new Command("quit", tr("menu.file.quit"), Chords.of("quit"), always, this::quit),
+                new Command("check-updates", tr("command.checkUpdates"), null, always, this::checkForUpdatesNow),
+                new Command("about", tr("command.about", AppInfo.NAME), null, always, this::showAbout),
                 new Command(
                         "settings",
                         tr("command.settings"),
                         Chords.of("settings"),
-                        null,
                         always,
                         () -> settingsWindow.show(stage)),
-                new Command("switch-profile", tr("command.switchProfile"), null, null, always, this::chooseProfile),
+                new Command("switch-profile", tr("command.switchProfile"), null, always, this::chooseProfile),
                 new Command(
                         "import-from-client",
                         tr("command.importFromClient"),
                         null,
-                        null,
                         gate("import-from-client", always),
                         this::importFromClient),
-                new Command(
-                        "retry-engine", tr("command.retryEngine"), null, null, engineDown, () -> startEngine(profile)),
-                new Command("search", tr("command.search"), Chords.of("search"), null, always, this::showSearch),
+                new Command("retry-engine", tr("command.retryEngine"), null, engineDown, () -> startEngine(profile)),
+                new Command("search", tr("command.search"), Chords.of("search"), always, this::showSearch),
                 new Command(
                         "search-clear",
                         tr("command.searchClear"),
@@ -4244,8 +4226,8 @@ public final class MainWindow {
                         tr("dialog.common.key.esc"),
                         searchPane.clearableProperty(),
                         this::clearSearch),
-                new Command("rss", tr("command.rss"), Chords.of("rss"), null, always, this::showRss),
-                new Command("rss-run-rules", tr("command.rssRunRules"), null, null, always, rss::runRulesNow),
+                new Command("rss", tr("command.rss"), Chords.of("rss"), always, this::showRss),
+                new Command("rss-run-rules", tr("command.rssRunRules"), null, always, rss::runRulesNow),
                 new Command(
                         "transfers",
                         tr("command.transfers"),
@@ -4277,16 +4259,10 @@ public final class MainWindow {
                         always,
                         this::focusFilter),
                 new Command(
-                        "save-view",
-                        tr("command.saveView"),
-                        Chords.of("save-view"),
-                        null,
-                        filterSaveable,
-                        this::saveView),
+                        "save-view", tr("command.saveView"), Chords.of("save-view"), filterSaveable, this::saveView),
                 new Command(
                         "toggle-density",
                         tr("command.toggleDensity"),
-                        null,
                         null,
                         always,
                         () -> chooseDensity(density.other())),
@@ -4318,11 +4294,10 @@ public final class MainWindow {
                         Chords.of("message-log").getDisplayText(),
                         always,
                         () -> messagePopup.toggle()),
-                new Command("debug-log", tr("command.debugLog"), null, null, always, this::showDebugLog),
+                new Command("debug-log", tr("command.debugLog"), null, always, this::showDebugLog),
                 new Command(
                         "toggle-toolbar",
                         tr("command.toggleToolbar"),
-                        null,
                         null,
                         always,
                         () -> toolbar.setVisible(!toolbar.isVisible())),
@@ -4330,33 +4305,28 @@ public final class MainWindow {
                         "toggle-sidebar",
                         tr("command.toggleSidebar"),
                         Chords.of("toggle-sidebar"),
-                        null,
                         always,
                         () -> setSidebarVisible(!sidebar.isVisible())),
                 new Command(
                         "focus-sidebar",
                         tr("command.focusSidebar"),
                         Chords.of("focus-sidebar"),
-                        null,
                         always,
                         this::focusSidebar),
-                new Command("sidebar-side", tr("command.sidebarSide"), null, null, always, this::switchSidebarSide),
+                new Command("sidebar-side", tr("command.sidebarSide"), null, always, this::switchSidebarSide),
                 new Command(
                         "toggle-detail",
                         tr("command.toggleDetail"),
                         Chords.of("toggle-detail"),
-                        null,
                         always,
                         this::toggleDetail),
-                new Command("detail-side", tr("command.detailSide"), null, null, always, this::switchDetailSide)));
+                new Command("detail-side", tr("command.detailSide"), null, always, this::switchDetailSide)));
         // One "Show: …" per status, and Show: All, so a filter is picked without the mouse.
-        all.add(new Command(
-                "show-all", tr("command.showAll"), null, null, always, () -> chooseFilter(SidebarFilter.ALL)));
+        all.add(new Command("show-all", tr("command.showAll"), null, always, () -> chooseFilter(SidebarFilter.ALL)));
         for (SidebarStatus status : SidebarStatus.values()) {
             all.add(new Command(
                     "show-" + status.key(),
                     tr("command.show", status.title()),
-                    null,
                     null,
                     always,
                     () -> chooseFilter(SidebarFilter.status(status))));
@@ -4369,6 +4339,7 @@ public final class MainWindow {
      * with Editora's glyphs. Hidden and unmanaged together, so View → Toolbar gives the row back to
      * the list; the choice is kept.
      */
+    @Initializer // from the constructor
     private ToolBar buildToolbar() {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -4435,7 +4406,7 @@ public final class MainWindow {
     }
 
     /** A glyph at the menus' size, or null for none. */
-    private static javafx.scene.Node menuIcon(Icons.Glyph glyph) {
+    private static javafx.scene.@Nullable Node menuIcon(Icons.@Nullable Glyph glyph) {
         return glyph == null ? null : glyph.at(Icons.MENU_SIZE);
     }
 
@@ -4514,6 +4485,7 @@ public final class MainWindow {
         }
     }
 
+    @Initializer // from the constructor
     private MenuBar buildMenuBar() {
         MenuItem addTorrent = menuItem("add-file");
         MenuItem addMagnet = menuItem("add-magnet");
@@ -4727,8 +4699,8 @@ public final class MainWindow {
 
     // ---- layout ---------------------------------------------------------------------------------
 
+    @Initializer // from the constructor
     private VBox buildCenter() {
-        table = buildTable();
         table.visibleProperty().bind(Bindings.isNotEmpty(rows.list()));
         table.managedProperty().bind(table.visibleProperty());
         // The first torrent makes the table appear; it takes the focus then, unless the person is
@@ -5449,7 +5421,7 @@ public final class MainWindow {
     }
 
     /** The chord {@code id} is on now, or null for none. */
-    private KeyCombination chord(String id) {
+    private @Nullable KeyCombination chord(String id) {
         return keyChords.get(id);
     }
 
@@ -5485,7 +5457,8 @@ public final class MainWindow {
         List<Keybindings.Command> out = new ArrayList<>();
         Set<String> listed = new HashSet<>();
         Chords.rebindable().forEach((id, chord) -> {
-            String group = menuOf.getOrDefault(id, tableGroups.get(Chords.group(id)));
+            String table = Chords.group(id);
+            String group = menuOf.getOrDefault(id, table == null ? other : tableGroups.getOrDefault(table, other));
             out.add(new Keybindings.Command(id, group, keyLabel(id), chord));
             listed.add(id);
         });
@@ -5591,7 +5564,7 @@ public final class MainWindow {
         }
     }
 
-    private void putSceneChord(Scene scene, KeyCombination chord, Runnable action) {
+    private void putSceneChord(Scene scene, @Nullable KeyCombination chord, Runnable action) {
         if (chord == null) return;
         scene.getAccelerators().put(chord, action);
         sceneChords.add(chord);
@@ -5780,8 +5753,8 @@ public final class MainWindow {
         private static final javafx.css.PseudoClass INACTIVE = javafx.css.PseudoClass.getPseudoClass("inactive");
         // Invalidation, not change: two equal snapshots fire no change, yet the stall clock moved.
         private final javafx.beans.InvalidationListener onTorrent = o -> restyle();
-        private TorrentRow watched;
-        private RowState shown;
+        private @Nullable TorrentRow watched;
+        private @Nullable RowState shown;
 
         @Override
         protected void updateItem(TorrentRow item, boolean empty) {
@@ -5819,6 +5792,7 @@ public final class MainWindow {
      * When the engine could not start: the reason, and the two ways out, under the welcome's drop
      * zone. Hidden otherwise; the palette offers both as commands as well.
      */
+    @Initializer // from the constructor, through installWelcome
     private VBox buildEngineProblem() {
         engineProblemText = new Label();
         engineProblemText.getStyleClass().addAll("empty-hint", "engine-problem");
@@ -6154,7 +6128,7 @@ public final class MainWindow {
     }
 
     /** Poll thread: the bound interface as last read; null before the first look. */
-    private InterfaceWatch.State bound;
+    private InterfaceWatch.@Nullable State bound;
 
     private long boundCheckedAt;
 
@@ -6231,7 +6205,8 @@ public final class MainWindow {
             try {
                 url = session.streamUrl(id, row.index(), name);
             } catch (java.io.IOException e) {
-                Platform.runLater(() -> setStatus(e.getMessage(), EngineEvent.Level.WARNING));
+                Platform.runLater(
+                        () -> setStatus(Objects.toString(e.getMessage(), e.toString()), EngineEvent.Level.WARNING));
                 return;
             }
             if (!play) {

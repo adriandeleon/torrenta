@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.torrenta.engine.TorrentPreview;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A bencode decoder, enough to read a {@code .torrent} for the Add dialog without libtorrent: a
@@ -160,23 +161,23 @@ public final class Bencode {
         if (!url.isEmpty() && !out.contains(url)) out.add(url);
     }
 
-    private static List<String> parts(Object value) {
+    private static List<String> parts(@Nullable Object value) {
         List<String> out = new ArrayList<>();
         for (Object o : list(value)) out.add(text(o, ""));
         return out;
     }
 
-    private static String text(Object value, String fallback) {
+    private static String text(@Nullable Object value, String fallback) {
         return value instanceof byte[] b ? new String(b, StandardCharsets.UTF_8) : fallback;
     }
 
     @SuppressWarnings("unchecked")
-    private static Map<String, Object> map(Object value) {
+    private static Map<String, Object> map(@Nullable Object value) {
         return value instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
     }
 
     @SuppressWarnings("unchecked")
-    private static List<Object> list(Object value) {
+    private static List<Object> list(@Nullable Object value) {
         return value instanceof List<?> l ? (List<Object>) l : List.of();
     }
 

@@ -72,6 +72,7 @@ import com.torrenta.sync.SyncEngine;
 import com.torrenta.webapi.Passwords;
 import com.torrenta.webapi.WebApiConfig;
 import com.torrenta.webapi.WebApiService;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -136,7 +137,8 @@ final class SettingsWindow {
     }
 
     /** {@code capability} is what the row needs of the engine, or null for every engine. */
-    private record Row(Category category, Node node, String keywords, VBox section, Engine.Capability capability) {
+    private record Row(
+            Category category, Node node, String keywords, VBox section, Engine.@Nullable Capability capability) {
         Row(Category category, Node node, String keywords, VBox section) {
             this(category, node, keywords, section, null);
         }
@@ -219,7 +221,7 @@ final class SettingsWindow {
         void tagDeleted(String name);
     }
 
-    private LabelStore labelStore;
+    private @Nullable LabelStore labelStore;
     private LabelsHost labelsHost = new LabelsHost() {
         @Override
         public void labelsChanged() {}
@@ -254,7 +256,7 @@ final class SettingsWindow {
         String watchStatus();
     }
 
-    private WatchFolderStore watchStore;
+    private @Nullable WatchFolderStore watchStore;
     private WatchHost watchHost = new WatchHost() {
         @Override
         public void watchFoldersChanged() {}
@@ -266,7 +268,7 @@ final class SettingsWindow {
     };
     private TableView<WatchFolder> watchTable;
     private Label watchStatusLabel;
-    private WatchFolderDialog watchDialog;
+    private @Nullable WatchFolderDialog watchDialog;
 
     private TextField onAdded;
     private TextField onFinished;
@@ -303,11 +305,11 @@ final class SettingsWindow {
         if (watchStatusLabel != null) watchStatusLabel.setText(watchHost.watchStatus());
     }
 
-    private SearchProviderStore searchStore;
+    private @Nullable SearchProviderStore searchStore;
     private Runnable onSearchProvidersChanged = () -> {};
     private TableView<TorznabEndpoint> searchTable;
     private Label searchStatusLabel;
-    private SearchProviderDialog searchDialog;
+    private @Nullable SearchProviderDialog searchDialog;
     /** Asks a server for the page's Test; a capture swaps a fake in. */
     private SearchProviderDialog.Tester searchTester = endpoint -> new TorznabProvider(endpoint).capabilities();
 
@@ -318,15 +320,15 @@ final class SettingsWindow {
         reloadSearch();
     }
 
-    private RssService rssService;
+    private @Nullable RssService rssService;
     private TableView<Feed> rssTable;
     private Label rssStatusLabel;
-    private FeedDialog rssDialog;
+    private @Nullable FeedDialog rssDialog;
     private Spinner<Integer> rssMinutes;
     private CheckBox rssAutoDownload;
     private TableView<Rule> rulesTable;
     private Label rulesStatusLabel;
-    private RuleDialog ruleDialog;
+    private @Nullable RuleDialog ruleDialog;
 
     /** The reader the RSS page edits; its changes come back through the service's listener (FX thread). */
     void setRss(RssService service) {
@@ -395,7 +397,7 @@ final class SettingsWindow {
         javafx.application.Platform.runLater(() -> addRule(phrase, phrase));
     }
 
-    private DefinitionStore definitionStore;
+    private @Nullable DefinitionStore definitionStore;
     private Runnable openDefinitionFolder = () -> {};
     private TableView<DefinitionStore.Entry> definitionTable;
     private Label definitionStatusLabel;
@@ -441,6 +443,7 @@ final class SettingsWindow {
     }
 
     /** The open watch-folder or search-provider dialog's scene, for a capture; null while none is open. */
+    @Nullable
     Scene dialogScene() {
         if (watchDialog != null && watchDialog.isShowing()) return watchDialog.scene();
         if (searchDialog != null && searchDialog.isShowing()) return searchDialog.scene();
@@ -574,7 +577,7 @@ final class SettingsWindow {
         onEngineSettingsChanged = handler;
     }
 
-    private SettingsSync sync;
+    private @Nullable SettingsSync sync;
     private CheckBox syncEnabled;
     private TextField syncUrl;
     private TextField syncBranch;
@@ -595,6 +598,7 @@ final class SettingsWindow {
         reload();
     }
 
+    @Initializer // build() makes every page
     private void buildSync(VBox page) {
         VBox repository = section(page, tr("settings.sync.repository"));
         syncEnabled = new CheckBox();
@@ -726,8 +730,10 @@ final class SettingsWindow {
                     return;
                 }
             }
-            sync.settingsChanged();
-            sync.syncNow();
+            SettingsSync s = sync;
+            if (s == null) return;
+            s.settingsChanged();
+            s.syncNow();
         });
     }
 
@@ -798,6 +804,7 @@ final class SettingsWindow {
         showRemoteStatus(status.get());
     }
 
+    @Initializer // build() makes every page
     private void buildRemote(VBox page) {
         VBox server = section(page, tr("settings.remote.server"));
         remoteEnabled = new CheckBox();
@@ -1072,7 +1079,7 @@ final class SettingsWindow {
         syncDisconnect.setDisable(!on && settings.syncUrl().isEmpty());
     }
 
-    private static String at(java.time.LocalDateTime when) {
+    private static String at(java.time.@Nullable LocalDateTime when) {
         return when == null ? "" : when.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
     }
 
@@ -1174,6 +1181,7 @@ final class SettingsWindow {
 
     // ---------------------------------------------------------------- shell
 
+    @Initializer // from the constructor
     private void build() {
         stage.setTitle(tr("settings.title", AppInfo.NAME));
         for (Category category : Category.values()) pages.put(category, buildPage(category));
@@ -1287,8 +1295,8 @@ final class SettingsWindow {
                 Category category = (Category) item;
                 setText(category.title());
                 // A square box per glyph, so the titles line up whatever each glyph's own width.
-                StackPane glyph =
-                        new StackPane(Icons.forSettingsPage(category.id).at(Icons.MENU_SIZE));
+                Icons.Glyph icon = Icons.forSettingsPage(category.id);
+                StackPane glyph = icon == null ? new StackPane() : new StackPane(icon.at(Icons.MENU_SIZE));
                 glyph.setMinSize(Icons.MENU_SIZE, Icons.MENU_SIZE);
                 glyph.setMaxSize(Icons.MENU_SIZE, Icons.MENU_SIZE);
                 setGraphic(glyph);
@@ -1338,7 +1346,7 @@ final class SettingsWindow {
 
     private Map<String, String> ownedValues() {
         Map<String, String> values = new java.util.HashMap<>();
-        for (String key : OWNED_KEYS) values.put(key, settings.get(key, null));
+        for (String key : OWNED_KEYS) values.put(key, settings.raw(key));
         return values;
     }
 
@@ -1535,7 +1543,7 @@ final class SettingsWindow {
             String description,
             Region control,
             String keywords,
-            Engine.Capability capability) {
+            Engine.@Nullable Capability capability) {
         Label name = new Label(title);
         name.getStyleClass().add("settings-row-title");
         VBox text = new VBox(2, name);
@@ -1620,6 +1628,7 @@ final class SettingsWindow {
     private static final Object PENDING_TAKEOVER = new Object();
 
     /** The Reset All row; the commands' rows follow, under their menus, once {@link #setKeyboard} names them. */
+    @Initializer // build() makes every page
     private void buildKeyboard(VBox page) {
         keyboardPage = page;
         VBox all = section(page, tr("settings.keys.section"));
@@ -1723,6 +1732,7 @@ final class SettingsWindow {
             case NEEDS_MODIFIER -> showKeyStatus(row.status(), tr("settings.keys.needsModifier"), true);
             case OK -> {
                 javafx.scene.input.KeyCombination chord = ShortcutCapture.combination(e);
+                if (chord == null) return; // decide said OK, so there is one
                 String fixed = ShortcutCapture.fixedOwner(chord, Keybindings.MAC);
                 if (fixed != null) {
                     showKeyStatus(row.status(), tr("settings.keys.fixed", chord.getDisplayText()), true);
@@ -1757,7 +1767,11 @@ final class SettingsWindow {
         if (holder != null
                 && !confirmKeys(
                         tr("settings.keys.reset"),
-                        tr("settings.keys.resetTaken.title", keyDefaults.get(id).getDisplayText()),
+                        tr(
+                                "settings.keys.resetTaken.title",
+                                java.util.Optional.ofNullable(keyDefaults.get(id))
+                                        .map(javafx.scene.input.KeyCombination::getDisplayText)
+                                        .orElse(tr("settings.keys.none"))),
                         tr("settings.keys.resetTaken.detail", labelOf(holder), labelOf(id)))) {
             return;
         }
@@ -1809,7 +1823,7 @@ final class SettingsWindow {
     }
 
     /** A refusal is red; a note is the warning colour. Hidden when null. */
-    private static void showKeyStatus(Label status, String message, boolean refusal) {
+    private static void showKeyStatus(Label status, @Nullable String message, boolean refusal) {
         status.setText(message == null ? "" : message);
         status.setStyle(refusal ? "-fx-text-fill: -color-danger-fg;" : "-fx-text-fill: -color-warning-fg;");
         status.setVisible(message != null);
@@ -1891,6 +1905,7 @@ final class SettingsWindow {
         return out.append("stored=").append(settings.keyBindings()).toString();
     }
 
+    @Initializer // build() makes every page
     private void buildGeneral(VBox page) {
         VBox languageSection = section(page, tr("settings.general.language.section"));
         language = new ChoiceBox<String>();
@@ -2210,6 +2225,7 @@ final class SettingsWindow {
      * keys: the lists live in {@code categories.json} and {@code tags.json}, through the store,
      * and the window re-files the torrents when one is deleted.
      */
+    @Initializer // build() makes every page
     private void buildLabels(VBox page) {
         VBox categories = section(page, tr("settings.labels.categories"));
         categoryTable = new TableView<>();
@@ -2388,6 +2404,7 @@ final class SettingsWindow {
         alert.showAndWait();
     }
 
+    @Initializer // build() makes every page
     private void buildWatch(VBox page) {
         VBox folders = section(page, tr("settings.watchFolders.folders"));
         watchTable = new TableView<>();
@@ -2490,7 +2507,9 @@ final class SettingsWindow {
         saveWatchFolders(list, null);
     }
 
-    private void saveWatchFolders(List<WatchFolder> list, WatchFolder select) {
+    private void saveWatchFolders(List<WatchFolder> list, @Nullable WatchFolder select) {
+        WatchFolderStore watchStore = this.watchStore;
+        if (watchStore == null) return;
         try {
             watchStore.set(list);
         } catch (IOException e) {
@@ -2513,6 +2532,7 @@ final class SettingsWindow {
         refreshWatchStatus();
     }
 
+    @Initializer // build() makes every page
     private void buildRss(VBox page) {
         VBox refresh = section(page, tr("settings.rss.refreshing"));
         rssMinutes = new Spinner<>(Feed.MIN_MINUTES, Feed.MAX_MINUTES, 30, 5);
@@ -2719,14 +2739,16 @@ final class SettingsWindow {
         reloadRules();
     }
 
-    private void saveRule(String replacing, Rule rule) {
+    private void saveRule(@Nullable String replacing, Rule rule) {
+        RssService rssService = this.rssService;
+        if (rssService == null) return;
         try {
             rssService.putRule(replacing, rule);
         } catch (IOException e) {
             report(tr("settings.rss.saveRuleFailed", e.getMessage()));
             return;
         } catch (IllegalArgumentException e) {
-            report(e.getMessage());
+            report(String.valueOf(e.getMessage()));
             return;
         }
         reloadRules();
@@ -2742,12 +2764,14 @@ final class SettingsWindow {
         return new RuleDialog.Articles() {
             @Override
             public List<com.torrenta.rss.Article> all() {
-                return rssService.allArticles();
+                RssService service = rssService;
+                return service == null ? List.of() : service.allArticles();
             }
 
             @Override
             public Map<String, String> namesById() {
-                return rssService.namesById();
+                RssService service = rssService;
+                return service == null ? Map.of() : service.namesById();
             }
         };
     }
@@ -2845,6 +2869,7 @@ final class SettingsWindow {
         rssStatusLabel.setText(feeds.isEmpty() ? "" : tr("settings.rss.status", feeds.size(), unread));
     }
 
+    @Initializer // build() makes every page
     private void buildSearch(VBox page) {
         VBox providers = section(page, tr("settings.search.providers"));
         searchTable = new TableView<>();
@@ -2914,6 +2939,7 @@ final class SettingsWindow {
     }
 
     /** The definition files: listed read-only, switched on or off, reloaded, the folder opened. */
+    @Initializer // build() makes every page
     private void buildDefinitions(VBox page) {
         VBox section = section(page, tr("settings.search.definitions"));
         definitionTable = new TableView<>();
@@ -2987,7 +3013,8 @@ final class SettingsWindow {
     }
 
     private static String definitionType(DefinitionStore.Entry e) {
-        return e.loaded() ? e.definition().type().name().toLowerCase(Locale.ROOT) : "";
+        com.torrenta.search.Definition d = e.definition();
+        return d != null ? d.type().name().toLowerCase(Locale.ROOT) : "";
     }
 
     private static String definitionStatus(DefinitionStore.Entry e) {
@@ -3080,6 +3107,8 @@ final class SettingsWindow {
     }
 
     private void addSearchProvider(TorznabEndpoint made) {
+        SearchProviderStore searchStore = this.searchStore;
+        if (searchStore == null) return;
         List<TorznabEndpoint> list = new ArrayList<>(searchStore.entries());
         list.add(made);
         saveSearchProviders(list, made);
@@ -3133,8 +3162,9 @@ final class SettingsWindow {
             String text = line;
             javafx.application.Platform.runLater(() -> {
                 searchStatusLabel.setText(text);
-                if (found == null || found.equals(selected)) return;
-                List<TorznabEndpoint> list = new ArrayList<>(searchStore.entries());
+                SearchProviderStore store = searchStore;
+                if (found == null || found.equals(selected) || store == null) return;
+                List<TorznabEndpoint> list = new ArrayList<>(store.entries());
                 int at = list.indexOf(selected);
                 if (at < 0) return;
                 list.set(at, found);
@@ -3144,7 +3174,9 @@ final class SettingsWindow {
         });
     }
 
-    private void saveSearchProviders(List<TorznabEndpoint> list, TorznabEndpoint select) {
+    private void saveSearchProviders(List<TorznabEndpoint> list, @Nullable TorznabEndpoint select) {
+        SearchProviderStore searchStore = this.searchStore;
+        if (searchStore == null) return;
         try {
             searchStore.set(list);
         } catch (IOException e) {
@@ -3193,12 +3225,12 @@ final class SettingsWindow {
         String engineLine();
     }
 
-    private ProfileStore profileStore;
-    private ProfilesHost profilesHost;
+    private @Nullable ProfileStore profileStore;
+    private @Nullable ProfilesHost profilesHost;
     private TableView<EngineProfile> profileTable;
     private Label profileStatusLabel;
     private Label profileInUseLabel;
-    private EngineProfileDialog profileDialog;
+    private @Nullable EngineProfileDialog profileDialog;
     /** Asks a daemon who it is; swapped for a fake in a capture or a test. */
     private EngineProfileDialog.Tester profileTester = TransmissionEngine::probe;
 
@@ -3214,6 +3246,7 @@ final class SettingsWindow {
         reloadProfiles();
     }
 
+    @Initializer // build() makes every page
     private void buildEngine(VBox page) {
         VBox section = section(page, tr("settings.engine.profiles"));
         profileTable = new TableView<>();
@@ -3369,7 +3402,9 @@ final class SettingsWindow {
         reloadProfiles();
     }
 
-    private void saveProfiles(List<EngineProfile> list, EngineProfile select) {
+    private void saveProfiles(List<EngineProfile> list, @Nullable EngineProfile select) {
+        ProfileStore profileStore = this.profileStore;
+        if (profileStore == null) return;
         try {
             profileStore.set(list);
         } catch (IOException e) {
@@ -3424,6 +3459,7 @@ final class SettingsWindow {
         });
     }
 
+    @Initializer // build() makes every page
     private void buildAutomation(VBox page) {
         VBox run = section(page, tr("settings.automation.runOnEvent"));
         onAdded = commandField(EngineEvent.Kind.ADDED);
@@ -3544,6 +3580,7 @@ final class SettingsWindow {
         return box;
     }
 
+    @Initializer // build() makes every page
     private void buildAdding(VBox page) {
         VBox defaults = section(page, tr("settings.adding.defaults"));
         addStartPaused = new CheckBox();
@@ -3707,6 +3744,7 @@ final class SettingsWindow {
                 Engine.Capability.MUTABLE);
     }
 
+    @Initializer // build() makes every page
     private void buildConnection(VBox page) {
         VBox listening = section(page, tr("settings.connection.listening"));
         port = intSpinner(1024, 65535, Settings.CONN_PORT);
@@ -3823,7 +3861,7 @@ final class SettingsWindow {
             }
 
             @Override
-            public EngineSettings.ProxyType fromString(String s) {
+            public EngineSettings.@Nullable ProxyType fromString(String s) {
                 return null;
             }
         });
@@ -3896,6 +3934,7 @@ final class SettingsWindow {
         }
     }
 
+    @Initializer // build() makes every page
     private void buildProtocol(VBox page) {
         VBox discovery = section(page, tr("settings.protocol.findingPeers"));
         dht = bool(Settings.PROTO_DHT);
@@ -3941,7 +3980,7 @@ final class SettingsWindow {
             }
 
             @Override
-            public EngineSettings.Protocol.Encryption fromString(String s) {
+            public EngineSettings.Protocol.@Nullable Encryption fromString(String s) {
                 return null;
             }
         });
@@ -3987,6 +4026,7 @@ final class SettingsWindow {
                 tr("settings.protocol.defaultTrackers.keywords"));
     }
 
+    @Initializer // build() makes every page
     private void buildIpFilter(VBox page) {
         VBox list = section(page, tr("settings.ipFilter.blocklist"));
         ipFilterEnabled = new CheckBox();
@@ -4088,6 +4128,7 @@ final class SettingsWindow {
                 tr("settings.ipFilter.status.keywords"));
     }
 
+    @Initializer // build() makes every page
     private void buildSpeed(VBox page) {
         VBox limits = section(page, tr("settings.speed.limits"));
         speedDown = intSpinner(0, 10_000_000, Settings.SPEED_DOWNLOAD);
@@ -4212,6 +4253,7 @@ final class SettingsWindow {
         return box;
     }
 
+    @Initializer // build() makes every page
     private void buildQueue(VBox page) {
         VBox queue = section(page, tr("settings.queue.queue"));
         activeDownloads = intSpinner(0, 10_000, Settings.QUEUE_ACTIVE_DOWNLOADS);
@@ -4274,7 +4316,7 @@ final class SettingsWindow {
             }
 
             @Override
-            public ShareLimit.Action fromString(String s) {
+            public ShareLimit.@Nullable Action fromString(String s) {
                 return null;
             }
         });

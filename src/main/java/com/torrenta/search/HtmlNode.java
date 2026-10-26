@@ -9,6 +9,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * One node of a parsed page: an element with a lower-case tag, attributes and children, or a run
  * of text. What a {@link Selector} walks and a definition's fields read from.
@@ -62,13 +64,13 @@ public final class HtmlNode {
             "size",
             "infohash");
 
-    private final String tag;
-    private final String text;
+    private final @Nullable String tag;
+    private final @Nullable String text;
     private final Map<String, String> attrs;
     private final List<HtmlNode> children = new ArrayList<>();
-    private HtmlNode parent;
+    private @Nullable HtmlNode parent;
 
-    private HtmlNode(String tag, String text, Map<String, String> attrs) {
+    private HtmlNode(@Nullable String tag, @Nullable String text, Map<String, String> attrs) {
         this.tag = tag;
         this.text = text;
         this.attrs = attrs;
@@ -97,11 +99,11 @@ public final class HtmlNode {
     }
 
     /** The lower-case tag; null for text. */
-    public String tag() {
+    public @Nullable String tag() {
         return tag;
     }
 
-    public HtmlNode parent() {
+    public @Nullable HtmlNode parent() {
         return parent;
     }
 

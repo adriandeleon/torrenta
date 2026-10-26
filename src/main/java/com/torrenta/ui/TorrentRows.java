@@ -11,6 +11,7 @@ import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
 
 import com.torrenta.engine.Torrent;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The transfer list's rows, reconciled in place from each snapshot.
@@ -32,7 +33,7 @@ public final class TorrentRows {
         return rows;
     }
 
-    public TorrentRow get(String id) {
+    public @Nullable TorrentRow get(String id) {
         return byId.get(id);
     }
 

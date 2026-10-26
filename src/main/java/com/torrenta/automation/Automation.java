@@ -12,6 +12,7 @@ import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -117,7 +118,7 @@ public final class Automation {
      * event raised after the torrent left the session (the share limit removed it); null to look
      * it up.
      */
-    public void handle(EngineEvent event, Torrent known) {
+    public void handle(EngineEvent event, @Nullable Torrent known) {
         if (event == null || event.kind() == EngineEvent.Kind.OTHER) return;
         Plan planned = plan(event, settings.get());
         Plan plan =
@@ -182,7 +183,7 @@ public final class Automation {
         }
     }
 
-    private void runCommand(EngineEvent event, List<String> tokens, Torrent known) {
+    private void runCommand(EngineEvent event, List<String> tokens, @Nullable Torrent known) {
         Torrent torrent = known != null ? known : find(event.torrentId());
         TorrentDetail detail = null;
         if (engine != null && torrent != null && event.torrentId() != null) {
@@ -218,7 +219,7 @@ public final class Automation {
         }
     }
 
-    private Torrent find(String id) {
+    private @Nullable Torrent find(@Nullable String id) {
         if (id == null) return null;
         for (Torrent t : engine.torrents()) if (t.id().equals(id)) return t;
         return null;

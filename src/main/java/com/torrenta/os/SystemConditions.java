@@ -14,6 +14,7 @@ import org.freedesktop.dbus.connections.impl.DBusConnection;
 import org.freedesktop.dbus.connections.impl.DBusConnectionBuilder;
 import org.freedesktop.dbus.interfaces.Properties;
 import org.freedesktop.dbus.types.Variant;
+import org.jspecify.annotations.Nullable;
 
 /**
  * This machine's {@link Conditions.Source}: on Linux UPower and NetworkManager over the system bus,
@@ -72,7 +73,7 @@ public final class SystemConditions {
         }
 
         /** A property, or null: the service is not there (a desktop without UPower), or answers oddly. */
-        private static Object get(Properties props, String iface, String name) {
+        private static @Nullable Object get(Properties props, String iface, String name) {
             try {
                 Object v = props.Get(iface, name);
                 return v instanceof Variant<?> var ? var.getValue() : v;

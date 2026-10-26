@@ -61,8 +61,10 @@ public record SavedView(String slug, String name, String query) {
     }
 
     private static void add(List<SavedView> out, Map<String, String> settings, String slug) {
-        SavedView v =
-                new SavedView(slug, settings.get(PREFIX + slug + ".name"), settings.get(PREFIX + slug + ".query"));
+        SavedView v = new SavedView(
+                slug,
+                settings.getOrDefault(PREFIX + slug + ".name", ""),
+                settings.getOrDefault(PREFIX + slug + ".query", ""));
         if (!v.name().isEmpty() && !v.query().isEmpty()) out.add(v);
     }
 

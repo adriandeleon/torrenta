@@ -3,6 +3,8 @@ package com.torrenta.engine;
 import java.nio.file.Path;
 import java.util.Map;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -88,7 +90,7 @@ public record AddRequest(
      *     the engine keeps the record for the Files tab
      */
     public record Storage(
-            Path incompletePath,
+            @Nullable Path incompletePath,
             boolean partSuffix,
             boolean preallocate,
             FileRenames.Layout layout,
@@ -101,12 +103,13 @@ public record AddRequest(
         }
 
         /** Nothing found on disk. */
-        public Storage(Path incompletePath, boolean partSuffix, boolean preallocate, FileRenames.Layout layout) {
+        public Storage(
+                @Nullable Path incompletePath, boolean partSuffix, boolean preallocate, FileRenames.Layout layout) {
             this(incompletePath, partSuffix, preallocate, layout, Map.of());
         }
 
         /** The torrent's own layout. */
-        public Storage(Path incompletePath, boolean partSuffix, boolean preallocate) {
+        public Storage(@Nullable Path incompletePath, boolean partSuffix, boolean preallocate) {
             this(incompletePath, partSuffix, preallocate, FileRenames.Layout.ORIGINAL);
         }
 

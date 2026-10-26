@@ -17,6 +17,7 @@ import com.torrenta.engine.EngineException;
 import com.torrenta.engine.IpRange;
 import com.torrenta.net.BlocklistFetch;
 import com.torrenta.store.Settings;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -37,7 +38,7 @@ public final class IpFilterController {
 
     private final Settings settings;
     private final Path cache;
-    private volatile Engine engine;
+    private volatile @Nullable Engine engine;
     private volatile Status status = new Status(0, 0, 0, tr("settings.ipFilter.status.off"));
 
     IpFilterController(Settings settings, Path configDir) {
@@ -159,7 +160,7 @@ public final class IpFilterController {
         }
     }
 
-    private static Blocklist.Parsed read(Path path) {
+    private static Blocklist.@Nullable Parsed read(Path path) {
         try {
             byte[] bytes = BlocklistFetch.gunzipIfNeeded(Files.readAllBytes(path));
             try (Stream<String> lines = new String(bytes, StandardCharsets.UTF_8).lines()) {
