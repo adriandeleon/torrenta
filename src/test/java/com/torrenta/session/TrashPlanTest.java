@@ -10,7 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 class TrashPlanTest {
 
-    private static final Path SAVE = Path.of("/data/downloads");
+    /** Absolute where the tests run: on Windows, "/data" is on the current drive. */
+    private static Path abs(String path) {
+        return Path.of(path).toAbsolutePath().normalize();
+    }
+
+    private static final Path SAVE = abs("/data/downloads");
 
     private static List<Path> entries(String... files) {
         return TrashPlan.entries(new Engine.OnDisk(
@@ -29,7 +34,7 @@ class TrashPlanTest {
 
     @Test
     void theSavePathIsNeverAnItemAndAFileElsewhereIsItself() {
-        Path elsewhere = Path.of("/other/x.bin");
+        Path elsewhere = abs("/other/x.bin");
         List<Path> files = List.of(SAVE, SAVE.resolve("a/b.bin"), elsewhere);
         assertEquals(
                 List.of(SAVE.resolve("a"), elsewhere), TrashPlan.entries(new Engine.OnDisk(SAVE, files, List.of())));
@@ -41,7 +46,7 @@ class TrashPlanTest {
 
     @Test
     void anEntryInsideAnotherIsLeftToIt() {
-        Path outside = Path.of("/other");
+        Path outside = abs("/other");
         List<Path> files = List.of(outside.resolve("deep/x.bin"), outside);
         assertEquals(List.of(outside), TrashPlan.entries(new Engine.OnDisk(SAVE, files, List.of())));
     }
