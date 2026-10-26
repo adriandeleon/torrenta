@@ -346,6 +346,12 @@ public final class WithDownloads implements Engine {
         return torrents.connectivity();
     }
 
+    /** The torrents' files: a download from a link has no v2 root to be found by. */
+    @Override
+    public com.torrenta.engine.ContentIndex contentIndex() {
+        return torrents.contentIndex();
+    }
+
     @Override
     public void flush() {
         torrents.flush();
