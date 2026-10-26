@@ -135,6 +135,31 @@ public interface Engine extends AutoCloseable {
      * data written fresh for the occasion, its labels, its storage record, its place in the
      * queue. Only with {@link Capability#UNDO_REMOVE}.
      */
+    /**
+     * Another client's torrent, from its resume data, added as it is and without a check, as a
+     * restored one (nothing that runs on an add runs on it): its metainfo put back into the resume
+     * data, its files where {@code savePath} says, its labels filed; with {@link Adoption#check} its
+     * pieces are checked on the add instead, and a torrent whose files do not match comes up short
+     * rather than wrong. The id it is known by. Only with {@link Capability#IMPORT_RESUME}.
+     */
+    default String adopt(Adoption adoption) throws EngineException {
+        throw new EngineException(tr("engine.error.noImport"));
+    }
+
+    /**
+     * What {@link #adopt} takes.
+     *
+     * @param resume the other client's resume data, libtorrent's format
+     * @param metainfo the {@code .torrent}; null for a magnet whose metadata never arrived
+     * @param name for messages
+     * @param check the files on disk do not match what the resume data says (the import plan
+     *     looked): its pieces are not taken on trust, and the engine checks the files on the add.
+     *     libtorrent 2 keeps no file sizes in resume data, so it would believe a truncated file
+     *     whole and seed it
+     */
+    record Adoption(
+            byte[] resume, byte[] metainfo, String savePath, TorrentLabels labels, String name, boolean check) {}
+
     default Detached detach(String id) throws EngineException {
         throw new EngineException(tr("engine.error.noUndo"));
     }
@@ -430,7 +455,9 @@ public interface Engine extends AutoCloseable {
          * dialog's Swarm line, for a {@code .torrent} as for a magnet. A daemon has no hidden
          * torrents to look with.
          */
-        SWARM_PREVIEW;
+        SWARM_PREVIEW,
+        /** Another client's torrents brought over from their resume data, without a check. */
+        IMPORT_RESUME;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

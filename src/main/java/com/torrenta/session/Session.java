@@ -680,6 +680,69 @@ public final class Session {
 
     // ---- adds without a dialog ------------------------------------------------------------------
 
+    // ---- imports from another client --------------------------------------------------------------
+
+    /** What an import did: how many came over, and each one that did not, with why. */
+    public record ImportResult(int imported, List<String> failed) {}
+
+    /**
+     * Any thread but a toolkit's. The chosen torrents of another client brought over (roadmap 1.3,
+     * item 1): each one's category filed first, with the other client's folder for it when
+     * Torrenta has no such category, its tags kept, the torrent adopted as it was (checked on the
+     * add when the plan said its files do not match), its own share limits kept; a line in the log
+     * for the whole and one for each that failed. One that fails costs that one.
+     */
+    public ImportResult importTorrents(List<com.torrenta.migrate.ImportPlan.Item> chosen) throws EngineException {
+        Engine e = running;
+        if (e == null) throw new EngineException(tr("status.engineNotRunning"));
+        if (e.capabilities().lacks(Engine.Capability.IMPORT_RESUME))
+            throw new EngineException(tr("engine.error.noImport"));
+        int imported = 0;
+        List<String> failed = new java.util.ArrayList<>();
+        String client = "";
+        for (com.torrenta.migrate.ImportPlan.Item item : chosen) {
+            com.torrenta.migrate.ImportCandidate c = item.candidate();
+            client = c.client();
+            try {
+                if (!c.category().isEmpty() && labels.category(c.category()).isEmpty())
+                    labels.putCategory(new Category(c.category(), c.categoryPath()));
+                if (!c.tags().isEmpty()) labels.addTags(c.tags());
+                String id = e.adopt(new Engine.Adoption(
+                        c.resume(),
+                        c.metainfo(),
+                        c.savePath(),
+                        new com.torrenta.engine.TorrentLabels(c.category(), c.tags(), c.rename()),
+                        c.shownName(),
+                        item.verdict() == com.torrenta.migrate.ImportPlan.Verdict.CHECK));
+                ShareLimit own = importedShare(c, settings.shareLimit());
+                if (own != null) settings.setShareOverride(id, own);
+                imported++;
+            } catch (EngineException | java.io.IOException | RuntimeException ex) {
+                String why = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                failed.add(c.shownName() + ": " + why);
+                tellReport(EngineEvent.warning(c.id(), c.shownName(), tr("import.failed", why)));
+            }
+        }
+        settings.saveQuietly();
+        if (imported > 0 || !failed.isEmpty())
+            tellReport(EngineEvent.session(
+                    failed.isEmpty() ? EngineEvent.Level.INFO : EngineEvent.Level.WARNING,
+                    tr("import.summary", imported, client, failed.size())));
+        return new ImportResult(imported, List.copyOf(failed));
+    }
+
+    /**
+     * The other client's own share limit for a torrent as Torrenta's: -2 there is the global limit
+     * (no limit of its own here), -1 none; a half at -2 takes the global value. Null when both are
+     * the global one. Pure.
+     */
+    static ShareLimit importedShare(com.torrenta.migrate.ImportCandidate c, ShareLimit global) {
+        if (c.ratioLimit() == -2 && c.seedingMinutes() == -2) return null;
+        double ratio = c.ratioLimit() == -2 ? global.ratio() : Math.max(0, c.ratioLimit());
+        int minutes = c.seedingMinutes() == -2 ? global.seedingMinutes() : (int) Math.max(0, c.seedingMinutes());
+        return new ShareLimit(ratio, minutes, global.action());
+    }
+
     /**
      * What an add without a dialog starts from: the settings' defaults, with a daemon's own
      * download folder when the files are not on this machine.

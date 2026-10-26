@@ -1488,6 +1488,54 @@ public final class LibtorrentEngine implements Engine {
         return new Detached(id, name, resume, labelBytes, storageBytes, queue);
     }
 
+    /**
+     * Another client's torrent: its resume data read by libtorrent's own reader, the metainfo put
+     * back, the save path set, then written into the store as this engine's own resume data and
+     * added from there, as at start: no check unless libtorrent finds the files do not match.
+     */
+    @Override
+    public synchronized String adopt(Adoption a) throws EngineException {
+        SessionManager s = running();
+        error_code ec = new error_code();
+        add_torrent_params read = libtorrent.read_resume_data_ex(Vectors.bytes2byte_vector(a.resume()), ec);
+        if (ec.value() != 0) throw new EngineException(tr("engine.error.importUnreadable", a.name(), ec.message()));
+        if (a.check()) {
+            // Nothing taken on trust: with no pieces recorded, the add checks the files on disk, as
+            // an add of a .torrent whose data is already there does. Not force_recheck.
+            read.set_have_pieces(new org.libtorrent4j.swig.bitfield());
+            read.set_verified_pieces(new org.libtorrent4j.swig.bitfield());
+            read.set_unfinished_pieces(new org.libtorrent4j.swig.int_bitfield_map());
+            read.setFlags(read.getFlags().and_(org.libtorrent4j.TorrentFlags.SEED_MODE.inv()));
+        }
+        AddTorrentParams params = new AddTorrentParams(read);
+        if (a.metainfo() != null) {
+            try {
+                params.setTorrentInfo(new TorrentInfo(a.metainfo()));
+            } catch (IllegalArgumentException e) {
+                throw new EngineException(tr("engine.error.importUnreadable", a.name(), e.getMessage()), e);
+            }
+        }
+        params.setSavePath(a.savePath());
+        String id = params.getInfoHashes().getBest().toHex();
+        if (find(s, id) != null) throw new EngineException(tr("engine.error.importAlreadyHere", a.name()));
+        byte[] blob = AddTorrentParams.writeResumeDataBuf(params);
+        synchronized (store) {
+            removed.remove(id);
+            try {
+                store.save(id, blob);
+                if (!a.labels().isEmpty()) store.saveLabels(id, a.labels().encode());
+            } catch (IOException e) {
+                throw new EngineException(tr("engine.error.importUnreadable", a.name(), e.getMessage()), e);
+            }
+        }
+        restoring.add(id);
+        if (!addFromStore(s, id, blob)) {
+            restoring.remove(id);
+            throw new EngineException(tr("engine.error.importUnreadable", a.name(), ""));
+        }
+        return id;
+    }
+
     /** Writes the detached torrent back into the store and adds it from there, as at start. */
     @Override
     public synchronized void reattach(Detached torrent) throws EngineException {

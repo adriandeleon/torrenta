@@ -550,7 +550,11 @@ remote caller's behalf.
    qBittorrent to fastresume files (Advanced → Resume data storage type) and look again, rather
    than ship a second native library for an opt-in mode. File → Import from another client…:
    the sources found on this machine or a chosen folder, a table with a verdict per torrent, a
-   summary in the event log.
+   summary in the event log. In two PRs: the import (`migrate.QbittorrentReader`, `ImportPlan`,
+   `Engine.adopt`, `Session.importTorrents`, proven on what a real qBittorrent 5.1.0 wrote), then
+   the dialog. The first is in. Found on the way: libtorrent 2 keeps no file sizes in resume
+   data and believes a truncated file whole, so the plan compares sizes for the files whose pieces
+   are claimed and a torrent that does not match is adopted without its pieces, checked on the add.
 2. **Import from Deluge**, also libtorrent: `state/torrents.fastresume` is one bencoded dict of
    hash to resume bytes, `state/<hash>.torrent` beside it, labels from `label.conf` (Deluge's two
    concatenated JSON objects). `torrents.state` is a Python pickle and is not read; the save path
