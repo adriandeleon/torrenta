@@ -88,6 +88,7 @@ import org.libtorrent4j.alerts.ListenSucceededAlert;
 import org.libtorrent4j.alerts.PeerConnectAlert;
 import org.libtorrent4j.alerts.PeerDisconnectedAlert;
 import org.libtorrent4j.alerts.PeerErrorAlert;
+import org.libtorrent4j.alerts.PieceFinishedAlert;
 import org.libtorrent4j.alerts.PortmapAlert;
 import org.libtorrent4j.alerts.PortmapErrorAlert;
 import org.libtorrent4j.alerts.ReadPieceAlert;
@@ -1509,6 +1510,7 @@ public final class LibtorrentEngine implements Engine {
             moving.remove(id);
             trackerHosts.remove(id);
             trackerErrors.remove(id);
+            failWaits(id, tr("engine.error.streamGone", name));
             try {
                 store.delete(id);
             } catch (IOException e) {
@@ -2160,6 +2162,148 @@ public final class LibtorrentEngine implements Engine {
         return Priority.NORMAL;
     }
 
+    /**
+     * What streams wait on, by torrent id and piece: completed by the {@code piece_finished_alert},
+     * failed when the torrent goes or the engine stops.
+     */
+    private final Map<String, Map<Integer, java.util.concurrent.CompletableFuture<Void>>> pieceWaits =
+            new ConcurrentHashMap<>();
+
+    @Override
+    public synchronized com.torrenta.engine.StreamFile stream(String id, int fileIndex) throws EngineException {
+        TorrentHandle h = handle(id);
+        TorrentInfo info = h.status(StatusQuery.FLAGS).hasMetadata() ? h.torrentFile() : null;
+        if (info == null || !info.isValid()) throw new EngineException(tr("engine.error.streamNoMetadata", nameOf(h)));
+        try {
+            FileStorage files = info.files();
+            if (fileIndex < 0 || fileIndex >= files.numFiles() || files.padFileAt(fileIndex))
+                throw new EngineException(tr("engine.error.streamNoFile", fileIndex, nameOf(h)));
+            String original = slashes(files.filePath(fileIndex));
+            String name = storage.getOrDefault(id, TorrentStorage.NONE).name(fileIndex, original);
+            // A file played is a file wanted: a skipped file's pieces go into the part file, not the
+            // file read from (measured: the wait ended, the file was not there). Low, so the rest of
+            // it does not jump the queue; libtorrent moves what the part file has over.
+            org.libtorrent4j.Priority[] priorities = h.filePriorities();
+            if (fileIndex < priorities.length && priorities[fileIndex] == org.libtorrent4j.Priority.IGNORE) {
+                h.filePriority(fileIndex, org.libtorrent4j.Priority.LOW);
+                requestSave(h, false);
+            }
+            return new Stream(
+                    id,
+                    fileIndex,
+                    original,
+                    name.substring(name.lastIndexOf('/') + 1),
+                    files.fileOffset(fileIndex),
+                    files.fileSize(fileIndex),
+                    info.pieceLength());
+        } finally {
+            Reference.reachabilityFence(info);
+        }
+    }
+
+    /**
+     * A file read while it downloads. Each call that reaches the session goes through the engine's
+     * lock, as every call does; the wait itself is outside it, on futures the alert thread completes.
+     */
+    private final class Stream implements com.torrenta.engine.StreamFile {
+        private final String id;
+        private final int index;
+        private final String original;
+        private final String name;
+        private final long offset;
+        private final long size;
+        private final long pieceLength;
+
+        Stream(String id, int index, String original, String name, long offset, long size, long pieceLength) {
+            this.id = id;
+            this.index = index;
+            this.original = original;
+            this.name = name;
+            this.offset = offset;
+            this.size = size;
+            this.pieceLength = pieceLength;
+        }
+
+        @Override
+        public String name() {
+            return name;
+        }
+
+        @Override
+        public long size() {
+            return size;
+        }
+
+        @Override
+        public long chunkEnd(long from) {
+            int piece = com.torrenta.engine.PieceMath.span(offset, pieceLength, from, from)
+                    .first();
+            return com.torrenta.engine.PieceMath.lastByteOf(piece, offset, size, pieceLength);
+        }
+
+        @Override
+        public boolean await(long from, long to, java.time.Duration timeout)
+                throws EngineException, InterruptedException {
+            List<java.util.concurrent.CompletableFuture<Void>> waits =
+                    askFor(id, com.torrenta.engine.PieceMath.span(offset, pieceLength, from, to));
+            if (waits.isEmpty()) return true;
+            try {
+                java.util.concurrent.CompletableFuture.allOf(
+                                waits.toArray(java.util.concurrent.CompletableFuture[]::new))
+                        .get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+                return true;
+            } catch (java.util.concurrent.TimeoutException e) {
+                return false;
+            } catch (java.util.concurrent.ExecutionException e) {
+                throw e.getCause() instanceof EngineException ee ? ee : new EngineException(e.getMessage(), e);
+            }
+        }
+
+        @Override
+        public Path path() throws EngineException {
+            return streamPath(id, index, original);
+        }
+    }
+
+    /**
+     * The pieces of {@code span} the torrent lacks, each asked for with a deadline (ahead of
+     * everything else; a skipped file's piece is raised to the top priority by it) and its future
+     * registered before the second look, so a piece finished in between is not waited on forever.
+     */
+    private synchronized List<java.util.concurrent.CompletableFuture<Void>> askFor(
+            String id, com.torrenta.engine.PieceMath.Span span) throws EngineException {
+        TorrentHandle h = handle(id);
+        Map<Integer, java.util.concurrent.CompletableFuture<Void>> waits =
+                pieceWaits.computeIfAbsent(id, k -> new ConcurrentHashMap<>());
+        List<java.util.concurrent.CompletableFuture<Void>> out = new ArrayList<>();
+        for (int piece = span.first(); piece <= span.last(); piece++) {
+            if (h.havePiece(piece)) continue;
+            java.util.concurrent.CompletableFuture<Void> f =
+                    waits.computeIfAbsent(piece, p -> new java.util.concurrent.CompletableFuture<>());
+            h.setPieceDeadline(piece, 0);
+            if (h.havePiece(piece)) {
+                waits.remove(piece, f);
+                f.complete(null);
+                continue;
+            }
+            out.add(f);
+        }
+        return out;
+    }
+
+    /** Where a streamed file is on disk now: the save path (it moves on finish) and its name there. */
+    private synchronized Path streamPath(String id, int index, String original) throws EngineException {
+        TorrentHandle h = handle(id);
+        return Path.of(h.savePath())
+                .resolve(storage.getOrDefault(id, TorrentStorage.NONE).onDisk(index, original));
+    }
+
+    /** The streams waiting on a torrent hear it is gone. */
+    private void failWaits(String id, String why) {
+        Map<Integer, java.util.concurrent.CompletableFuture<Void>> waits = pieceWaits.remove(id);
+        if (waits != null) for (var f : waits.values()) f.completeExceptionally(new EngineException(why));
+    }
+
     private TorrentHandle handle(String id) throws EngineException {
         TorrentHandle handle = find(running(), id);
         if (handle == null) throw new EngineException(tr("engine.error.noSuchTorrent", id));
@@ -2541,6 +2685,7 @@ public final class LibtorrentEngine implements Engine {
         if (pendingSaves.get() > 0) {
             LOG.warning(pendingSaves.get() + " resume-data write(s) did not finish before stop");
         }
+        for (String id : List.copyOf(pieceWaits.keySet())) failWaits(id, tr("engine.error.stopped"));
         session.stop();
         session = null;
         connectivity.set(Connectivity.NONE);
@@ -2909,6 +3054,7 @@ public final class LibtorrentEngine implements Engine {
             AlertType.TORRENT_CHECKED.swig(),
             AlertType.TORRENT_ERROR.swig(),
             AlertType.FILE_COMPLETED.swig(),
+            AlertType.PIECE_FINISHED.swig(),
             AlertType.FILE_ERROR.swig(),
             AlertType.FILE_RENAMED.swig(),
             AlertType.FILE_RENAME_FAILED.swig(),
@@ -2992,6 +3138,16 @@ public final class LibtorrentEngine implements Engine {
                             // no longer complete: nothing else is posted for that.
                             indexContent(id(t.handle()), t.handle());
                         }
+                    }
+                    case PIECE_FINISHED -> {
+                        // Only while a stream waits: a downloading torrent says this for every piece.
+                        if (pieceWaits.isEmpty()) return;
+                        PieceFinishedAlert t = (PieceFinishedAlert) alert;
+                        if (!t.handle().isValid()) return;
+                        Map<Integer, java.util.concurrent.CompletableFuture<Void>> waits =
+                                pieceWaits.get(id(t.handle()));
+                        var f = waits == null ? null : waits.remove(t.pieceIndex());
+                        if (f != null) f.complete(null);
                     }
                     case FILE_COMPLETED -> {
                         FileCompletedAlert t = (FileCompletedAlert) alert;

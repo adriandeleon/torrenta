@@ -345,6 +345,13 @@ public final class WithDownloads implements Engine {
         return torrents.connectivity();
     }
 
+    /** A torrent's file; a download from a link is curl's, read when it is done. */
+    @Override
+    public com.torrenta.engine.StreamFile stream(String id, int fileIndex) throws EngineException {
+        if (DirectDownload.isId(id)) throw new EngineException(tr("engine.error.noStreaming"));
+        return torrents.stream(id, fileIndex);
+    }
+
     /** The torrents' files: a download from a link has no v2 root to be found by. */
     @Override
     public com.torrenta.engine.ContentIndex contentIndex() {
