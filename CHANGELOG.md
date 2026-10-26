@@ -5,6 +5,8 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+## 0.3.0 — 2026-10-26
+
 ### Added
 
 - **A torrent waiting for you to pick its files says so.** One added with "Add now, pick files
