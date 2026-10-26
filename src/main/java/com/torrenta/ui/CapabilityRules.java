@@ -32,6 +32,7 @@ final class CapabilityRules {
             Map.entry("queue-bottom", Capability.QUEUE_ORDER),
             Map.entry("set-location", Capability.MOVE_STORAGE),
             Map.entry("export-torrent", Capability.EXPORT_TORRENT),
+            Map.entry("import-from-client", Capability.IMPORT_RESUME),
             Map.entry("rename", Capability.RENAME_TORRENT));
 
     /** Settings pages that need one of a set of capabilities; the rest are for every engine. */

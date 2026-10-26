@@ -228,6 +228,13 @@ public final class LibtorrentEngine implements Engine {
     /** Ids re-added from the store at start, so their add alert reads "Restored", not "Added". */
     private final Set<String> restoring = ConcurrentHashMap.newKeySet();
 
+    /**
+     * Torrents brought back from the store this session (at start, by undo, by an import). Their
+     * finished alert, posted when libtorrent loads one already complete, is no download finishing:
+     * run-on-finished and the notification must not run for every seed at every start.
+     */
+    private final Set<String> broughtBack = ConcurrentHashMap.newKeySet();
+
     /** Magnets to pause once their metadata arrives: the dialog's "stop after metadata". */
     private final Set<String> stopAfterMetadata = ConcurrentHashMap.newKeySet();
 
@@ -2875,7 +2882,13 @@ public final class LibtorrentEngine implements Engine {
                     case TORRENT_FINISHED -> {
                         TorrentAlert<?> t = (TorrentAlert<?>) alert;
                         requestSave(t.handle(), false);
-                        torrentEvent(t, EngineEvent.Level.INFO, EngineEvent.Kind.FINISHED, "engine.event.finished");
+                        // Brought back complete, not finished now: no download, so nothing to run on.
+                        // One brought back part done that finishes this session has downloaded.
+                        boolean wasComplete = t.handle().isValid()
+                                && broughtBack.contains(id(t.handle()))
+                                && t.handle().status().totalPayloadDownload() == 0;
+                        if (!wasComplete)
+                            torrentEvent(t, EngineEvent.Level.INFO, EngineEvent.Kind.FINISHED, "engine.event.finished");
                         if (t.handle().isValid()) {
                             // Names first, then the move: both are disk jobs, done in this order.
                             applySuffixes(id(t.handle()), t.handle());
@@ -3116,6 +3129,7 @@ public final class LibtorrentEngine implements Engine {
             String id = alert.params().getInfoHashes().getBest().toHex();
             // A torrent restored at start is not new to the person; nothing runs on it.
             boolean restored = restoring.remove(id);
+            if (restored) broughtBack.add(id);
             if (restored) torrentEvent(alert, EngineEvent.Level.INFO, "engine.event.restored");
             else torrentEvent(alert, EngineEvent.Level.INFO, EngineEvent.Kind.ADDED, "engine.event.added");
             probeArchives(alert.handle(), restored);

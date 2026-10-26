@@ -53,6 +53,19 @@ public final class ImportPlan {
         /** Incomplete, and the other client is running: not imported. */
         CLIENT_RUNNING;
 
+        /**
+         * Its pieces are not taken on trust: the files do not match, or are not there at all (taken
+         * anyway, a missing torrent downloads again from nothing rather than claim pieces it lacks).
+         */
+        public boolean checkedOnTheAdd() {
+            return this == CHECK || this == MISSING;
+        }
+
+        /** A person may tick it: what is here already, or still being written by the other client, may not. */
+        public boolean choosable() {
+            return this != ALREADY_HERE && this != CLIENT_RUNNING;
+        }
+
         /** Imported when the dialog's defaults are taken. */
         public boolean importedByDefault() {
             return this == IMPORT || this == MAGNET || this == CHECK;
