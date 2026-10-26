@@ -70,4 +70,22 @@ class TorrentStorageTest {
         assertEquals(java.util.Map.of(1, "pair/y.bin"), back.renamed(), "its own name again");
         assertFalse(new TorrentStorage("", false, Set.of(), java.util.Map.of(0, "x")).isEmpty(), "a name to keep");
     }
+
+    @Test
+    void filesFoundOnDiskAreKeptAcrossEveryEditAndTheSidecar() throws IOException {
+        java.util.Map<Integer, FoundFile> found = java.util.Map.of(
+                0, new FoundFile(FoundFile.How.LINK, "Debian “13.1”"), 3, new FoundFile(FoundFile.How.CLONE, ""));
+        TorrentStorage owed = TorrentStorage.NONE.withFound(found);
+        assertFalse(owed.isEmpty(), "the Files tab's mark is kept for as long as the torrent is listed");
+        assertEquals(found, TorrentStorage.decode(owed.encode()).found());
+        TorrentStorage edited = owed.withDestination("/d")
+                .withSuffixed(Set.of(1))
+                .withRenamed(java.util.Map.of(1, "x"), java.util.Map.of(1, "y"));
+        assertEquals(found, edited.found(), "no edit drops it");
+        // A word it does not know is read as the way that promises least.
+        TorrentStorage read = TorrentStorage.decode(
+                "{\"found\":{\"2\":{\"how\":\"teleport\",\"from\":\"A\"},\"x\":{\"how\":\"link\"},\"4\":7}}"
+                        .getBytes(StandardCharsets.UTF_8));
+        assertEquals(java.util.Map.of(2, new FoundFile(FoundFile.How.COPY, "A")), read.found());
+    }
 }

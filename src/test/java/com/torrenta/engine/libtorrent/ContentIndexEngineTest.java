@@ -9,10 +9,13 @@ import java.util.function.BooleanSupplier;
 
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.ContentIndex;
+import com.torrenta.engine.DedupFiles;
 import com.torrenta.engine.DedupPlan;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.FileRenames;
+import com.torrenta.engine.FoundFile;
 import com.torrenta.engine.Torrent;
+import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.store.TorrentStore;
 import org.junit.jupiter.api.Test;
@@ -149,6 +152,91 @@ class ContentIndexEngineTest {
             again.remove(id, false);
             assertTrue(index.of(id).isEmpty(), "a removed torrent's files are not offered");
             assertTrue(index.find(rootA).isEmpty());
+        }
+    }
+
+    /**
+     * Item 5's promise, end to end: a file linked into place before the add is verified by the
+     * add's own check and counts as downloaded, with no peer anywhere; it is the hybrid's second
+     * file, so its v1 pieces are its own only thanks to the padding. The Files tab's record of it
+     * survives a restart.
+     */
+    @Test
+    void aFileFoundOnDiskIsLinkedAndPassesTheAddsOwnCheck(@TempDir Path dir) throws Exception {
+        Path downloads = Files.createDirectories(dir.resolve("downloads"));
+        Path album = Files.createDirectories(downloads.resolve("Album"));
+        byte[] shared = random(100 * 1024 + 123, 7);
+        Files.write(album.resolve("track.bin"), shared);
+        byte[] albumTorrent = torrentOf(album);
+
+        Path made = Files.createDirectories(dir.resolve("made/Other"));
+        Files.write(made.resolve("a-new.bin"), random(30 * 1024 + 7, 8));
+        Files.write(made.resolve("z-shared.bin"), shared);
+        byte[] otherTorrent = torrentOf(made);
+
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        Path start = Files.createDirectories(dir.resolve("next"));
+        String otherId;
+        try (LibtorrentEngine engine = new LibtorrentEngine(() -> downloads, store, quiet())) {
+            engine.start();
+            String albumId = engine.add(
+                            AddRequest.defaults(new AddRequest.TorrentFile(albumTorrent, "Album.torrent"), downloads))
+                    .id();
+            await("the album indexed", () -> engine.contentIndex().of(albumId).size() == 1);
+
+            TorrentPreview other = engine.inspect(otherTorrent);
+            AddRequest request = AddRequest.defaults(new AddRequest.TorrentFile(otherTorrent, "Other.torrent"), start);
+            DedupPlan plan = DedupPlan.of(
+                    other,
+                    engine.contentIndex(),
+                    Set.of(),
+                    request.storage().start(request.savePath()),
+                    request.storage().layout(),
+                    DedupPlan.Disk.SYSTEM);
+            DedupFiles.Placed placed = DedupFiles.place(plan, true, true, DedupFiles.Cloner.NONE, id -> "Album");
+            assertEquals(1, placed.found().size());
+            Path target = start.resolve("Other/z-shared.bin");
+            assertTrue(Files.isSameFile(album.resolve("track.bin"), target), "linked, not copied");
+
+            otherId = engine.add(request.withStorage(request.storage().withFound(placed.found())))
+                    .id();
+            String id = otherId;
+            int sharedIndex = placed.found().keySet().iterator().next();
+            await("the linked file whole by the add's own check", () -> {
+                TorrentDetail.FileStatus f = fileOf(engine, id, sharedIndex);
+                return f != null && f.done() == f.size();
+            });
+            TorrentDetail.FileStatus f = fileOf(engine, id, sharedIndex);
+            assertEquals(new FoundFile(FoundFile.How.LINK, "Album"), f.found());
+            // A hybrid's padding sits between the two, so the other file is found by its name.
+            TorrentDetail.FileStatus fresh = engine.detail(id).files().stream()
+                    .filter(x -> x.path().endsWith("a-new.bin"))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals(0, fresh.done(), "the other file still to download");
+            assertEquals(null, fresh.found());
+        }
+        try (LibtorrentEngine again = new LibtorrentEngine(() -> downloads, store, quiet())) {
+            again.start();
+            String id = otherId;
+            await("back", () -> again.torrents().stream().anyMatch(t -> t.id().equals(id)));
+            assertTrue(
+                    again.detail(id).files().stream()
+                            .anyMatch(x -> x.path().endsWith("z-shared.bin")
+                                    && x.found() != null
+                                    && x.found().how() == FoundFile.How.LINK),
+                    "the Files tab's record survives a restart");
+        }
+    }
+
+    private static TorrentDetail.FileStatus fileOf(LibtorrentEngine engine, String id, int index) {
+        try {
+            return engine.detail(id).files().stream()
+                    .filter(f -> f.index() == index)
+                    .findFirst()
+                    .orElse(null);
+        } catch (com.torrenta.engine.EngineException e) {
+            return null;
         }
     }
 

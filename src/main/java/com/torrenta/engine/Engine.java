@@ -485,7 +485,13 @@ public interface Engine extends AutoCloseable {
          */
         SWARM_PREVIEW,
         /** Another client's torrents brought over from their resume data, without a check. */
-        IMPORT_RESUME;
+        IMPORT_RESUME,
+        /**
+         * A new torrent's files found complete on disk in another torrent ({@link #contentIndex})
+         * and linked or copied into place before the add, rather than downloaded again. A daemon's
+         * disk is not this machine's.
+         */
+        DEDUP;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

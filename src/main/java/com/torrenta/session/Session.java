@@ -30,11 +30,15 @@ import com.torrenta.content.ContentCheck;
 import com.torrenta.content.UnsafeContent;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
+import com.torrenta.engine.DedupFiles;
+import com.torrenta.engine.DedupMode;
+import com.torrenta.engine.DedupPlan;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.EngineSettings;
+import com.torrenta.engine.FoundFile;
 import com.torrenta.engine.Inputs;
 import com.torrenta.engine.LinkRequest;
 import com.torrenta.engine.Priority;
@@ -777,10 +781,13 @@ public final class Session {
             ContentCheck check = UnsafeContent.check(preview, request);
             UnsafeContent.Decision decision = UnsafeContent.decide(mode, check, UnsafeContent.wanted(preview, request));
             if (decision.refused()) throw new UnsafeContent.Refused(preview.name(), decision, check);
-            Torrent added = e.add(
-                    decision == UnsafeContent.Decision.SKIP
-                            ? UnsafeContent.withSkipped(request, check.indices())
-                            : request);
+            AddRequest screened = decision == UnsafeContent.Decision.SKIP
+                    ? UnsafeContent.withSkipped(request, check.indices())
+                    : request;
+            // Without a dialog nobody is asked: links as the setting allows, copies only when chosen.
+            DedupMode dedup = DedupMode.byName(settings.addDedup());
+            if (dedup.links()) screened = placeFound(e, screened, preview, true, dedup.copiesWithoutAsking());
+            Torrent added = e.add(screened);
             String line = UnsafeContent.logLine(decision, added.name(), check, false);
             if (!line.isEmpty()) tellReport(EngineEvent.warning(added.id(), added.name(), line));
             return added;
@@ -794,6 +801,50 @@ public final class Session {
         if (before.contains(added.id())) return added;
         mark(added.id(), new UnsafeContent.Pending(mode, stop && !request.startPaused()).format());
         return added;
+    }
+
+    /**
+     * Any thread but a toolkit's, and blocking: a copy can take minutes. The files of {@code
+     * preview} that are complete on disk in another torrent ({@link DedupPlan}, from the engine's
+     * {@link Engine#contentIndex}) put where the add will look for them, the links when {@code
+     * links}, the copies when {@code copies}; the request comes back with them recorded for the Files tab, or
+     * as it was. The add's own check verifies every byte. A torrent the engine has already, or an
+     * engine without {@link Engine.Capability#DEDUP}, is left as it is; a file that cannot be
+     * placed is downloaded as it would have been, and said in the debug log.
+     */
+    public AddRequest placeFound(Engine e, AddRequest request, TorrentPreview preview, boolean links, boolean copies) {
+        if (!(links || copies) || !e.capabilities().has(Engine.Capability.DEDUP)) return request;
+        Map<String, String> names = new HashMap<>();
+        for (Torrent t : e.torrents()) names.put(t.id(), t.name());
+        if (names.containsKey(preview.id())) return request;
+        Set<Integer> skipped = new HashSet<>();
+        request.filePriorities().forEach((index, priority) -> {
+            if (priority == Priority.IGNORE) skipped.add(index);
+        });
+        DedupPlan plan = DedupPlan.of(
+                preview,
+                e.contentIndex(),
+                skipped,
+                request.storage().start(request.savePath()),
+                request.storage().layout(),
+                DedupPlan.Disk.SYSTEM);
+        if (plan.isEmpty()) return request;
+        DedupFiles.Placed placed =
+                DedupFiles.place(plan, links, copies, DedupFiles.Cloner.SYSTEM, id -> names.getOrDefault(id, id));
+        for (String problem : placed.problems())
+            LOG.warning("Not placed from disk for " + preview.name() + ", downloaded instead: " + problem);
+        if (placed.isEmpty()) return request;
+        tellReport(EngineEvent.info(preview.id(), preview.name(), dedupLine(preview.name(), placed)));
+        return request.withStorage(request.storage().withFound(placed.found()));
+    }
+
+    /** "3 files of “Album” were already on disk and are not downloaded: 2 linked, 1 copied". */
+    static String dedupLine(String name, DedupFiles.Placed placed) {
+        Map<FoundFile.How, Integer> by = new java.util.EnumMap<>(FoundFile.How.class);
+        for (FoundFile f : placed.found().values()) by.merge(f.how(), 1, Integer::sum);
+        List<String> parts = new java.util.ArrayList<>();
+        by.forEach((how, n) -> parts.add(tr("dedup.how." + how.key(), n)));
+        return tr("dedup.event.placed", placed.found().size(), name, String.join(", ", parts));
     }
 
     /**

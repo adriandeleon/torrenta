@@ -317,6 +317,12 @@ public final class Settings {
     public static final String ADD_UNSAFE_CONTENT = "add.unsafeContent";
 
     /**
+     * A new torrent's files already on disk in another torrent: {@code OFF}, {@code LINK},
+     * {@code ASK} (the default) or {@code COPY}; read through {@code engine.DedupMode.byName}.
+     */
+    public static final String ADD_DEDUP = "add.dedup";
+
+    /**
      * The Add dialog looks at a private torrent's swarm too. Off by default: a private tracker
      * counts every announce, and the probe announces before the person has added the torrent.
      */
@@ -942,6 +948,14 @@ public final class Settings {
 
     public void setAddUnsafeContent(String value) {
         properties.setProperty(ADD_UNSAFE_CONTENT, value);
+    }
+
+    public String addDedup() {
+        return properties.getProperty(ADD_DEDUP, "ASK").trim();
+    }
+
+    public void setAddDedup(String value) {
+        properties.setProperty(ADD_DEDUP, value);
     }
 
     public boolean addProbePrivate() {

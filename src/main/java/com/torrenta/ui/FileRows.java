@@ -34,6 +34,8 @@ public final class FileRows {
         private final LongProperty done = new SimpleLongProperty(this, "done");
         private final ObjectProperty<Priority> priority = new SimpleObjectProperty<>(this, "priority", Priority.NORMAL);
         private final List<Row> children = new ArrayList<>();
+        /** Found on disk in another torrent and put in place at the add; null when downloaded. */
+        private com.torrenta.engine.FoundFile found;
 
         Row(int index, String name, String path) {
             this.index = index;
@@ -72,6 +74,11 @@ public final class FileRows {
 
         public double progress() {
             return size.get() == 0 ? 1.0 : (double) done.get() / size.get();
+        }
+
+        /** How the file came from disk rather than the swarm, and from which torrent; null for neither. */
+        public com.torrenta.engine.FoundFile found() {
+            return found;
         }
 
         List<Row> children() {
@@ -118,6 +125,7 @@ public final class FileRows {
             row.size.set(f.size());
             row.done.set(f.done());
             row.priority.set(f.priority());
+            row.found = f.found();
         }
         refreshFolders(root);
         return false;
@@ -164,6 +172,7 @@ public final class FileRows {
             row.size.set(f.size());
             row.done.set(f.done());
             row.priority.set(f.priority());
+            row.found = f.found();
             parent.children.add(row);
             byIndex.put(f.index(), row);
         }

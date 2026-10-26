@@ -7,6 +7,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Files you already have are not downloaded again.** When a new torrent holds a file that
+  another torrent in the list has complete (v2 and hybrid torrents, matched by content, whatever
+  the names), the Add dialog offers to link it into place: no bytes written, the two torrents
+  share the file, and the add's own check verifies every byte. A file on another drive can be
+  copied instead (a clone where the file system can make one, so no space is used either); the
+  dialog asks first unless Settings → Adding → Files already on disk says to copy. Watch folders,
+  RSS rules and adds without a dialog link without asking. The Files tab marks such a file and
+  says where it came from.
+
 - **Bring your torrents over from qBittorrent, Transmission or Deluge.** File → Import from
   another client… finds qBittorrent, Transmission (the daemon or the app) and Deluge on this
   machine, Flatpak's too, or reads a folder you choose, and lists its torrents

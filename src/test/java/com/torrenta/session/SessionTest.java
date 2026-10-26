@@ -273,6 +273,8 @@ class SessionTest {
         final List<String> calls = new CopyOnWriteArrayList<>();
         volatile List<Torrent> torrents = List.of();
         volatile List<TorrentDetail.FileStatus> files = List.of();
+        volatile TorrentPreview preview = FILM;
+        volatile com.torrenta.engine.ContentIndex index = com.torrenta.engine.ContentIndex.EMPTY;
 
         Engine engine() {
             return (Engine) Proxy.newProxyInstance(
@@ -284,7 +286,8 @@ class SessionTest {
                         case "capabilities" -> Engine.Capabilities.ALL;
                         case "refreshLimits" -> false;
                         case "setIpFilter", "start", "stop", "addListener" -> null;
-                        case "inspect" -> FILM;
+                        case "inspect" -> preview;
+                        case "contentIndex" -> index;
                         case "add" -> {
                             added.add((AddRequest) args[0]);
                             yield seed("film", 0, true);
@@ -334,6 +337,65 @@ class SessionTest {
         assertTrue(
                 host.reports.get(0).message().contains("film.mkv.exe"),
                 host.reports.get(0).message());
+    }
+
+    /**
+     * An add without a dialog uses what is on disk as the setting says: the film, found complete
+     * in another torrent on the same volume, is linked into place before the add and recorded for
+     * the Files tab; the flagged program beside it is skipped and so never looked for. Off, the
+     * film is downloaded as ever.
+     */
+    @Test
+    void anAddWithoutADialogLinksWhatIsOnDiskAsTheSettingSays(@TempDir Path dir) throws Exception {
+        String root = "6".repeat(64);
+        Path old = dir.resolve("seeds/Old/old.mkv");
+        Files.createDirectories(old.getParent());
+        Files.write(old, new byte[1000]);
+        com.torrenta.engine.ContentIndex index = new com.torrenta.engine.ContentIndex();
+        index.put("old", List.of(new com.torrenta.engine.ContentIndex.Entry(root, "old", 0, old, 1000)));
+        Torrent oldTorrent = seed("old", 0, false);
+
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        settings.set(Settings.DOWNLOAD_DIR, dir.resolve("dl").toString());
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        Adds adds = new Adds();
+        adds.torrents = List.of(oldTorrent);
+        adds.index = index;
+        adds.preview = new TorrentPreview(
+                "film",
+                "Film.2026",
+                1010,
+                List.of(
+                        new TorrentPreview.FileEntry(0, "Film.2026/film.mkv", 1000, root),
+                        new TorrentPreview.FileEntry(1, "Film.2026/film.mkv.exe", 10, root.replace('6', '7'))),
+                false,
+                List.of(),
+                "",
+                "",
+                0,
+                true,
+                true);
+        AddRequest request =
+                AddDefaults.from(settings).withoutAsking(new AddRequest.TorrentFile(new byte[1], "film.torrent"));
+        session.add(adds.engine(), request);
+        AddRequest added = adds.added.getFirst();
+        assertEquals(
+                java.util.Map.of(0, new com.torrenta.engine.FoundFile(com.torrenta.engine.FoundFile.How.LINK, "name")),
+                added.storage().found(),
+                "linked without asking, from the torrent of that name");
+        Path target = dir.resolve("dl/Film.2026/film.mkv");
+        assertTrue(Files.isSameFile(old, target));
+        assertTrue(
+                host.reports.stream().anyMatch(e -> e.message().startsWith("One file of “Film.2026” already on disk")),
+                host.reports.toString());
+
+        // Off: nothing is looked for.
+        Files.delete(target);
+        settings.setAddDedup(com.torrenta.engine.DedupMode.OFF.name());
+        session.add(adds.engine(), request);
+        assertTrue(adds.added.get(1).storage().found().isEmpty());
+        assertFalse(Files.exists(target));
     }
 
     /**

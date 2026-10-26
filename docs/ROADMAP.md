@@ -593,7 +593,13 @@ remote caller's behalf.
    index, layout, savePath, renames)`, pure, maps each wanted file with a known root to (source,
    target, method), the target derived from `FileRenames` exactly where libtorrent will look at
    add: content layout, incomplete folder, `.part`.
-5. **Dedup, the add**: "3 files (4.2 GB) are already on disk in 'Debian 13.1' · link them", ticked
+5. **Dedup, the add** (done: `DedupFiles.place` before the add, off the FX thread and the engine's
+   lock, through `Session.placeFound` from both the dialog's add and `Session.add`;
+   `AddRequest.Storage.found` into the `.storage` sidecar's `found`, `TorrentDetail.FileStatus.found`
+   for the Files tab; `add.dedup` is `DedupMode` OFF, LINK, ASK (the default) or COPY; a clone is
+   `cp --reflink=always` on Linux and `cp -c` on macOS, else a full copy; a magnet added without a
+   dialog has no files to look for at the add and downloads as before): "3 files (4.2 GB) are
+   already on disk in 'Debian 13.1' · link them", ticked
    by default; a hardlink on the same file system, a reflink where there is one (`cp
    --reflink=auto`, `clonefile`), else a copy with its size shown first (`link | copy | ask`). The
    files are in place before `add_torrent`, whose own check verifies them: v2 pieces are per file,
