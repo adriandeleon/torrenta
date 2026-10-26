@@ -1678,6 +1678,29 @@ public final class LibtorrentEngine implements Engine {
         }
     }
 
+    @Override
+    public synchronized java.util.Optional<OnDisk> onDisk(String id) throws EngineException {
+        TorrentHandle h = handle(id);
+        Path save = Path.of(h.savePath()).toAbsolutePath().normalize();
+        List<Path> files = new ArrayList<>();
+        TorrentInfo info = h.status(StatusQuery.FLAGS).hasMetadata() ? h.torrentFile() : null;
+        try {
+            if (info != null && info.isValid()) {
+                FileStorage fs = info.files();
+                TorrentStorage owed = storage.getOrDefault(id, TorrentStorage.NONE);
+                for (int i = 0; i < fs.numFiles(); i++) {
+                    if (fs.padFileAt(i)) continue;
+                    files.add(save.resolve(owed.onDisk(i, slashes(fs.filePath(i))))
+                            .normalize());
+                }
+            }
+        } finally {
+            Reference.reachabilityFence(info);
+        }
+        // Where the pieces of skipped files wait: named by the same hash the id is.
+        return java.util.Optional.of(new OnDisk(save, files, List.of(save.resolve("." + id + ".parts"))));
+    }
+
     /**
      * Saves answered, by id, for a {@link #detach} waiting on its own torrent's: the alert thread
      * counts one down once the blob is written (or libtorrent said it was not).

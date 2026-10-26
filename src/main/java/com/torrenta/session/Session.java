@@ -55,6 +55,7 @@ import com.torrenta.engine.TorrentState;
 import com.torrenta.engine.WatchFolders;
 import com.torrenta.net.TorrentFetch;
 import com.torrenta.os.Conditions;
+import com.torrenta.os.Trash;
 import com.torrenta.rss.Article;
 import com.torrenta.rss.FeedFetcher;
 import com.torrenta.rss.RssService;
@@ -689,8 +690,9 @@ public final class Session {
                         yield tr("log.shareLimit.removed", t.name());
                     }
                     case REMOVE_DATA -> {
-                        engine.remove(t.id(), true);
-                        yield tr("log.shareLimit.removedData", t.name());
+                        boolean toTrash = removesToTrash(engine);
+                        removeWithFiles(engine, t);
+                        yield tr(toTrash ? "log.shareLimit.removedTrash" : "log.shareLimit.removedData", t.name());
                     }
                     case SUPER_SEED -> {
                         engine.setSuperSeeding(t.id(), true);
@@ -765,6 +767,78 @@ public final class Session {
         public Torrent add(Engine engine, AddRequest request) throws EngineException {
             return Session.this.add(engine, request);
         }
+    }
+
+    // ---- removing with files --------------------------------------------------------------------
+
+    /** How often a file the engine still holds is tried again, and how far apart: five seconds. */
+    static final int TRASH_ATTEMPTS = 20;
+
+    static final long TRASH_RETRY_MS = 250;
+
+    /** Where Remove with files puts them rather than deleting them; a test's own folder in tests. */
+    private volatile Trash trash = Trash.forPlatform();
+
+    void useTrash(Trash t) {
+        trash = t;
+    }
+
+    /** Whether a remove with files moves them to the trash: the setting, and files on this machine. */
+    public boolean removesToTrash(Engine e) {
+        return settings.removeToTrash() && e.capabilities().has(Engine.Capability.LOCAL_FILES);
+    }
+
+    /**
+     * Any thread but the FX one. Removes a torrent with its files: into the desktop's trash when
+     * {@link #removesToTrash}, deleted by the engine otherwise. The torrent goes at once; its files
+     * follow on a virtual thread, each tried again for a few seconds while the engine lets go of
+     * it (Windows will not move an open file), and one the trash refuses stays on disk and is said.
+     */
+    public void removeWithFiles(Engine e, Torrent t) throws EngineException {
+        Optional<Engine.OnDisk> where = removesToTrash(e) ? e.onDisk(t.id()) : Optional.empty();
+        if (where.isEmpty()) {
+            e.remove(t.id(), true);
+            return;
+        }
+        e.remove(t.id(), false);
+        Trash to = trash;
+        Thread.ofVirtual().name("trash").start(() -> moveToTrash(to, t, where.get()));
+    }
+
+    /** The trash thread: every entry of the plan, then the engine's leftovers deleted. */
+    void moveToTrash(Trash to, Torrent t, Engine.OnDisk onDisk) {
+        boolean all = true;
+        for (Path entry : TrashPlan.entries(onDisk)) {
+            IOException last = null;
+            for (int attempt = 0; attempt < TRASH_ATTEMPTS; attempt++) {
+                try {
+                    to.trash(entry);
+                    last = null;
+                    break;
+                } catch (IOException ex) {
+                    last = ex;
+                }
+                try {
+                    Thread.sleep(TRASH_RETRY_MS);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            if (last != null) {
+                all = false;
+                String why = last.getMessage() == null ? last.toString() : last.getMessage();
+                tellReport(EngineEvent.warning(t.id(), t.name(), tr("engine.event.trashFailed", entry, why)));
+            }
+        }
+        for (Path scratch : onDisk.scratch()) {
+            try {
+                Files.deleteIfExists(scratch);
+            } catch (IOException ex) {
+                // A part file left behind is clutter, not data.
+            }
+        }
+        if (all) tellReport(EngineEvent.info(t.id(), t.name(), tr("engine.event.trashed", t.name())));
     }
 
     // ---- RSS rules ------------------------------------------------------------------------------

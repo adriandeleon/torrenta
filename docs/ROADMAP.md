@@ -429,8 +429,12 @@ every match is where a mistake is largest.
    remove without data (held in memory, so a quit ends it rather than a crash bringing the torrent
    back), Set Location (a move back once `storage_moved_alert` came; a copy across volumes, and
    said so), category, tags, rename, file priorities, queue moves, a bulk pause. Remove with data
-   stays final until it can go to the OS trash (`Desktop.moveToTrash` needs headful AWT, which
-   `AwtUse` forbids on Linux; the freedesktop trash spec is a later item).
+   is not undone, but its files go to the desktop's trash (`remove.toTrash`, on by default) and
+   come back from the file manager: `os.Trash` without AWT, since `Desktop.moveToTrash` needs it
+   headful — the freedesktop.org spec in Java on Linux (the home trash, a volume's `.Trash/$uid` or
+   `.Trash-$uid`, never a copy), `~/.Trash` or `.Trashes/<uid>` on macOS, the Recycle Bin through
+   a PowerShell script on Windows. `Engine.onDisk` says where the files are before the remove,
+   `session.TrashPlan` makes the torrent's folder one item.
 6. **Bulk commands from the omnibox** (1–2 PRs): `ui.OmniCommand.parse` gives a command and typed
    arguments: a category or tag (completed from `LabelStore`), a path, a rate (`500k`, as
    `FilterQuery` reads sizes), a ratio, `on|off`, a queue move. `Actions.targets`: typed while the

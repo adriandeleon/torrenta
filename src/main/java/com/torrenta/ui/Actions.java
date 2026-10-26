@@ -137,7 +137,13 @@ public final class Actions {
 
     /** The confirmation for removal, worded by what it will do. */
     public static String removeQuestion(int count, boolean deleteFiles) {
-        return deleteFiles ? tr("actions.removeQuestion.delete", count) : tr("actions.removeQuestion.keep", count);
+        return removeQuestion(count, deleteFiles, false);
+    }
+
+    /** The same, for files that go to the trash rather than away for good. */
+    public static String removeQuestion(int count, boolean deleteFiles, boolean toTrash) {
+        if (!deleteFiles) return tr("actions.removeQuestion.keep", count);
+        return toTrash ? tr("actions.removeQuestion.trash", count) : tr("actions.removeQuestion.delete", count);
     }
 
     /**

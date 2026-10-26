@@ -7,6 +7,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Removed files go to the trash.** Remove with files now moves a torrent's files to the
+  desktop's trash (the Recycle Bin on Windows) instead of deleting them, so a mistake can be
+  undone from the file manager; a whole torrent folder goes as one item. Settings → General →
+  Move removed files to the trash turns it off. A drive without a trash keeps the files and says
+  so. The share limit's "remove with files" and the web API's delete do the same.
+
 - **Filter search results.** Once a search has results, a Filter box above them narrows the table
   by its columns in the omnibox's language: `provider:jack`, `cat:movies`, `size>1g`, `seeds>=10`,
   `leechers<5`, `date<7d` or `date>=2026-01-01` (a range is two terms), words for the name, `-`

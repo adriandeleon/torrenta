@@ -95,6 +95,29 @@ public interface Engine extends AutoCloseable {
     /** Removes the torrent and forgets it; with {@code deleteFiles}, its data on disk too. */
     void remove(String id, boolean deleteFiles) throws EngineException;
 
+    /**
+     * Where a torrent's data is on this machine, read before a remove that moves it to the trash
+     * instead of deleting it. Empty when the engine's files are elsewhere (a daemon's).
+     */
+    default java.util.Optional<OnDisk> onDisk(String id) throws EngineException {
+        return java.util.Optional.empty();
+    }
+
+    /**
+     * A torrent's data on disk.
+     *
+     * @param savePath the folder it is saved in, absolute
+     * @param files every file under the name it has on disk now (a rename, an incomplete file's
+     *     suffix), whether or not it exists yet
+     * @param scratch the engine's own leftovers (libtorrent's part file), deleted rather than kept
+     */
+    record OnDisk(java.nio.file.Path savePath, List<java.nio.file.Path> files, List<java.nio.file.Path> scratch) {
+        public OnDisk {
+            files = List.copyOf(files);
+            scratch = List.copyOf(scratch);
+        }
+    }
+
     /** Stops transferring and leaves the queue; the torrent stays until resumed. */
     void pause(String id) throws EngineException;
 

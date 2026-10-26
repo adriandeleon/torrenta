@@ -168,6 +168,11 @@ public final class WithDownloads implements Engine {
     }
 
     @Override
+    public java.util.Optional<OnDisk> onDisk(String id) throws EngineException {
+        return DirectDownload.isId(id) ? links.onDisk(id) : torrents.onDisk(id);
+    }
+
+    @Override
     public void pause(String id) throws EngineException {
         if (DirectDownload.isId(id)) links.pause(id);
         else torrents.pause(id);

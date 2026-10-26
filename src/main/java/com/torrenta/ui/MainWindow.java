@@ -1502,6 +1502,10 @@ public final class MainWindow {
             // Remove (the files kept) on the selection, its question answered yes.
             RemoveConfirm.answerForCapture = true;
             remove(false);
+        } else if (action.equals("remove-data-confirmed")) {
+            // Remove with files on the selection, its question answered yes: to the trash by default.
+            RemoveConfirm.answerForCapture = true;
+            remove(true);
         } else if (action.startsWith("undo-after:")) {
             // Shortcut+Z, that many milliseconds later: after the worker an undoable action ran on.
             javafx.animation.PauseTransition later = new javafx.animation.PauseTransition(javafx.util.Duration.millis(
@@ -3364,11 +3368,17 @@ public final class MainWindow {
     private void remove(boolean deleteFiles) {
         List<Torrent> selected = selectedTorrents();
         if (selected.isEmpty()) return;
+        Engine e = engine;
+        boolean toTrash = deleteFiles && e != null && session.removesToTrash(e);
         boolean yes = RemoveConfirm.ask(
                 stage,
-                deleteFiles ? tr("window.remove.header.delete") : tr("common.remove"),
-                Actions.removeQuestion(selected.size(), deleteFiles),
-                deleteFiles ? tr("window.remove.button.delete") : tr("common.remove"));
+                !deleteFiles
+                        ? tr("common.remove")
+                        : toTrash ? tr("window.remove.header.trash") : tr("window.remove.header.delete"),
+                Actions.removeQuestion(selected.size(), deleteFiles, toTrash),
+                !deleteFiles
+                        ? tr("common.remove")
+                        : toTrash ? tr("window.remove.button.trash") : tr("window.remove.button.delete"));
         if (!yes) return;
         removeTorrents(selected, deleteFiles);
     }
@@ -3392,7 +3402,8 @@ public final class MainWindow {
             return;
         }
         onSelection(tr("actions.verb.removed"), (e, t) -> {
-            e.remove(t.id(), deleteFiles);
+            if (deleteFiles) session.removeWithFiles(e, t);
+            else e.remove(t.id(), false);
             Platform.runLater(() -> forgetOverride(t.id()));
         });
     }

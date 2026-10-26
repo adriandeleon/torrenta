@@ -1183,6 +1183,24 @@ class LibtorrentEngineTest {
         assertEquals("IW", PeerFlags.text(0, 0, org.libtorrent4j.PeerInfo.ConnectionType.WEB_SEED));
     }
 
+    /** Where a torrent's files are, read before a remove that trashes them: every file, its part file aside. */
+    @Test
+    void onDiskNamesEveryFileWhereItIs(@TempDir Path dir) throws Exception {
+        byte[] pair = twoFileTorrent(dir.resolve("downloads"), "pair");
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            String id = engine.add(downloadsTorrent(dir, pair)).id();
+            Path downloads = dir.resolve("downloads").toAbsolutePath().normalize();
+            com.torrenta.engine.Engine.OnDisk onDisk = engine.onDisk(id).orElseThrow();
+            assertEquals(downloads, onDisk.savePath());
+            assertEquals(
+                    java.util.Set.of(downloads.resolve("pair/a.bin"), downloads.resolve("pair/sub/b.bin")),
+                    java.util.Set.copyOf(onDisk.files()));
+            assertEquals(List.of(downloads.resolve("." + id + ".parts")), onDisk.scratch());
+            assertEquals(List.of(downloads.resolve("pair")), com.torrenta.session.TrashPlan.entries(onDisk));
+        }
+    }
+
     private static AddRequest downloadsTorrent(Path dir, byte[] torrent) {
         return new AddRequest(
                 new AddRequest.TorrentFile(torrent, "pair.torrent"),

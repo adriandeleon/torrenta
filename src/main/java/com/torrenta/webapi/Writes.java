@@ -232,7 +232,8 @@ final class Writes {
     Response delete(Request request) {
         boolean files = bool(Reads.params(request), "deleteFiles").orElse(false);
         return each(request, (e, t) -> {
-            e.remove(t.id(), files);
+            if (files) backend.removeWithFiles(e, t);
+            else e.remove(t.id(), false);
             backend.setShareOverride(t.id(), null);
         });
     }
