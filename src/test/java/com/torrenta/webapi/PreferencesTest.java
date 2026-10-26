@@ -86,6 +86,13 @@ class PreferencesTest {
         assertEquals(0, settings.engineSettings().queue().activeDownloads(), "queueing off: no counts");
         assertEquals(0, settings.engineSettings().queue().share().ratio(), 0);
         assertTrue(apply("{\"listen_port\":80}").applied().isEmpty(), "below 1024, as the page refuses");
+
+        apply("{\"banned_IPs\":\"203.0.113.9\\n198.51.100.0/24\\n203.0.113.9\"}");
+        assertEquals(
+                List.of("203.0.113.9", "198.51.100.0/24"), settings.ipFilterBans(), "the IP filter's bans, once each");
+        assertEquals(
+                "203.0.113.9\n198.51.100.0/24",
+                Preferences.read(settings, downloads).get("banned_IPs"));
     }
 
     /** The door's own keys are changed on this machine's Settings page, never through the door. */

@@ -165,7 +165,10 @@ public final class SessionBackend implements WebApi.Backend {
                 Math.max(0, stats.peersConnected()),
                 e.capabilities().has(Engine.Capability.LOCAL_FILES) ? freeSpace(settings.downloadDir()) : -1,
                 speed.alternativeActive(now),
-                queue.activeDownloads() > 0 || queue.activeSeeds() > 0 || queue.activeLimit() > 0);
+                queue.activeDownloads() > 0 || queue.activeSeeds() > 0 || queue.activeLimit() > 0,
+                e.connectivity().externalAddress(),
+                Math.max(0, stats.queuedDiskJobs()),
+                Math.max(0, stats.wasted()));
     }
 
     /** Usable bytes on the volume of {@code dir}, or of its nearest folder that exists; -1 unknown. */
@@ -265,6 +268,8 @@ public final class SessionBackend implements WebApi.Backend {
         settings.saveQuietly();
         try {
             session.applySettings();
+            // The bans are the IP filter's: rebuilt from its cache, as the IP filter page does.
+            session.refreshIpFilter(false);
         } finally {
             onSettingsChanged.run();
         }

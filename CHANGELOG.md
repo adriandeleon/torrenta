@@ -20,6 +20,8 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   alternative speed limits switched and the limits in force set, the preferences Torrenta has read
   and written (live, as from the Settings page; the save path inside the allowed folders, and
   Remote access's own password, address and port never changed through it), and the event log.
+  Held to a real qBittorrent 5.1.0's recorded answers field by field, and tried with Sonarr and
+  Radarr through a whole grab, import and removal after seeding: `docs/webapi.md`.
 
 - **Remote access, the door for Sonarr, Radarr and the phone apps.** Settings → Remote access
   speaks qBittorrent's WebUI API at `/api/v2`, off until switched on and on `127.0.0.1:8080` until

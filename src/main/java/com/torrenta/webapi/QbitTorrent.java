@@ -42,6 +42,7 @@ public final class QbitTorrent {
      * @param metadata the file list was known when these were read
      * @param activeSeconds time spent running, as of the reading: the one fact here that moves,
      *     which is why they are read again now and then
+     * @param rootPath the folder every file sits under; empty for a single file or none
      */
     public record Facts(
             String infoHashV1,
@@ -52,12 +53,13 @@ public final class QbitTorrent {
             int pieceSize,
             int pieces,
             boolean metadata,
-            long activeSeconds) {
+            long activeSeconds,
+            String rootPath) {
 
         /** Before anything was read: the snapshot's own save path and name. */
         static Facts unknown(Torrent t) {
             return new Facts(
-                    "", "", QbitTorrent.contentPath(t.savePath(), t.name(), List.of()), "", false, 0, 0, false, 0);
+                    "", "", QbitTorrent.contentPath(t.savePath(), t.name(), List.of()), "", false, 0, 0, false, 0, "");
         }
 
         static Facts of(Torrent t, TorrentDetail detail, String magnet) {
@@ -71,7 +73,8 @@ public final class QbitTorrent {
                     g.pieceLength(),
                     g.pieceCount(),
                     !detail.files().isEmpty(),
-                    g.activeSeconds());
+                    g.activeSeconds(),
+                    QbitTorrent.rootPath(t.savePath(), detail.files()));
         }
     }
 
@@ -95,6 +98,13 @@ public final class QbitTorrent {
         for (TorrentDetail.FileStatus f : files)
             if (!firstSegment(f.path()).equals(root) || f.path().length() == root.length()) return base.toString();
         return base.resolve(root).toString();
+    }
+
+    /** qBittorrent's {@code root_path}: the shared root folder of a multi-file torrent, else empty. */
+    static String rootPath(String savePath, List<TorrentDetail.FileStatus> files) {
+        if (files.size() < 2) return "";
+        String content = contentPath(savePath, "", files);
+        return content.equals(Path.of(savePath).toString()) ? "" : content;
     }
 
     private static String firstSegment(String path) {
@@ -142,11 +152,13 @@ public final class QbitTorrent {
         m.put("category", t.category());
         m.put("completed", t.done());
         m.put("completion_on", t.completed() > 0 ? t.completed() : -1);
-        m.put("content_path", f.contentPath());
-        m.put("dl_limit", x.limits().downloadLimit() > 0 ? x.limits().downloadLimit() : -1);
+        m.put("comment", "");
+        m.put("content_path", f.metadata() ? f.contentPath() : "");
+        m.put("dl_limit", x.limits().downloadLimit());
         m.put("dlspeed", t.downloadRate());
         m.put("download_path", "");
         m.put("downloaded", t.downloaded());
+        m.put("downloaded_session", 0);
         m.put("eta", eta(t));
         m.put("f_l_piece_prio", x.limits().firstAndLastFirst());
         m.put("force_start", false);
@@ -165,11 +177,15 @@ public final class QbitTorrent {
         m.put("num_incomplete", Math.max(0, t.peers() - t.seeds()));
         m.put("num_leechs", Math.max(0, t.peers() - t.seeds()));
         m.put("num_seeds", t.seeds());
+        m.put("popularity", 0);
         m.put("priority", t.queuePosition() >= 0 ? t.queuePosition() + 1 : 0);
-        m.put("private", f.isPrivate());
+        // Unknown until the metadata says: qBittorrent writes null.
+        m.put("private", f.metadata() ? f.isPrivate() : null);
         m.put("progress", t.progress());
         m.put("ratio", ratio(t));
         m.put("ratio_limit", ratioLimit(x.ownShare()));
+        m.put("reannounce", 0);
+        m.put("root_path", f.rootPath());
         m.put("save_path", t.savePath());
         m.put("seeding_time", t.seedingTime());
         m.put("seeding_time_limit", seedingTimeLimit(x.ownShare()));
@@ -183,8 +199,9 @@ public final class QbitTorrent {
         m.put("total_size", size);
         m.put("tracker", t.tracker());
         m.put("trackers_count", t.trackers().size());
-        m.put("up_limit", x.limits().uploadLimit() > 0 ? x.limits().uploadLimit() : -1);
+        m.put("up_limit", x.limits().uploadLimit());
         m.put("uploaded", t.uploaded());
+        m.put("uploaded_session", 0);
         m.put("upspeed", t.uploadRate());
         return m;
     }

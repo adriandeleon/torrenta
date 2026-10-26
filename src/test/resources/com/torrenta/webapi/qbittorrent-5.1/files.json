@@ -1,0 +1,27 @@
+[
+ {
+  "availability": 0,
+  "index": 0,
+  "is_seed": false,
+  "name": "Episode.Pack/e1.mkv",
+  "piece_range": [
+   0,
+   18
+  ],
+  "priority": 1,
+  "progress": 0,
+  "size": 300000
+ },
+ {
+  "availability": 0,
+  "index": 1,
+  "name": "Episode.Pack/e2.mkv",
+  "piece_range": [
+   18,
+   30
+  ],
+  "priority": 1,
+  "progress": 0,
+  "size": 200000
+ }
+]

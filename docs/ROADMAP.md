@@ -523,7 +523,11 @@ so the order is extract, then serve.
    `engine` so the API orders a selection's moves as the window does. And the third: `SessionEdits`
    (the speed mode and global limits, `app/setPreferences` through `Preferences`, `log/main` from
    `session.SessionLog`), `Session.applySettings`. Item 5 is done.
-6. **Compatibility**: contract tests from a real qBittorrent 5.0's recorded answers;
+6. **Compatibility** (done, `docs/webapi.md`): `QbittorrentContractTest` against a real qBittorrent
+   5.1.0's answers recorded by `scripts/webapi-record.py` (no qBittorrent needed to run it; the
+   recordings found differences, every one fixed, and `scripts/webapi-compare.py` then found none
+   against a live headless Torrenta); Sonarr 4.0 and Radarr 6.4 through grab, import and removal
+   after seeding. Planned as: contract tests from a real qBittorrent 5.0's recorded answers;
    `QbittorrentContractTest`, `@EnabledIf` `qbittorrent-nox` is on the PATH as
    `TransmissionDaemonTest` is, sends the same requests to both and compares the shapes; a manual
    pass with Sonarr and Radarr against a headless Torrenta (grab, import, remove after seeding),

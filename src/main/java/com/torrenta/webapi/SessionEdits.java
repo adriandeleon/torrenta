@@ -141,7 +141,7 @@ final class SessionEdits {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", e.id());
             m.put("message", message(e.event()));
-            m.put("timestamp", e.event().at().toEpochMilli());
+            m.put("timestamp", e.event().at().getEpochSecond());
             m.put("type", type);
             out.add(m);
         }

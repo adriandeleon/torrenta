@@ -1,0 +1,146 @@
+[
+ {
+  "id": 0,
+  "message": "qBittorrent v5.1.0 started. Process ID: 1000",
+  "timestamp": 1792974471,
+  "type": 1
+ },
+ {
+  "id": 1,
+  "message": "Using config directory: /srv/qbittorrent/profile/qBittorrent/config",
+  "timestamp": 1792974471,
+  "type": 1
+ },
+ {
+  "id": 5,
+  "message": "Distributed Hash Table (DHT) support: OFF",
+  "timestamp": 1792974471,
+  "type": 2
+ },
+ {
+  "id": 6,
+  "message": "Local Peer Discovery support: OFF",
+  "timestamp": 1792974471,
+  "type": 2
+ },
+ {
+  "id": 7,
+  "message": "Peer Exchange (PeX) support: OFF",
+  "timestamp": 1792974471,
+  "type": 2
+ },
+ {
+  "id": 8,
+  "message": "Anonymous mode: OFF",
+  "timestamp": 1792974471,
+  "type": 2
+ },
+ {
+  "id": 9,
+  "message": "Encryption support: ON",
+  "timestamp": 1792974471,
+  "type": 2
+ },
+ {
+  "id": 24,
+  "message": "Couldn't load IP geolocation database. Reason: No such file or directory",
+  "timestamp": 1792974471,
+  "type": 4
+ },
+ {
+  "id": 25,
+  "message": "Power management found suitable D-Bus interface. Interface: org.gnome.SessionManager",
+  "timestamp": 1792974471,
+  "type": 1
+ },
+ {
+  "id": 26,
+  "message": "Using built-in WebUI.",
+  "timestamp": 1792974471,
+  "type": 1
+ },
+ {
+  "id": 27,
+  "message": "WebUI translation for selected locale (en_US) has been successfully loaded.",
+  "timestamp": 1792974471,
+  "type": 1
+ },
+ {
+  "id": 29,
+  "message": "IP geolocation database loaded. Type: DBIP-Country-Lite. Build time: Wed Sep 30 19:36:12 2026.",
+  "timestamp": 1792974471,
+  "type": 2
+ },
+ {
+  "id": 30,
+  "message": "Successfully updated IP geolocation database.",
+  "timestamp": 1792974471,
+  "type": 2
+ },
+ {
+  "id": 34,
+  "message": "Added new torrent. Torrent: \"Film.mkv\"",
+  "timestamp": 1792974507,
+  "type": 1
+ },
+ {
+  "id": 35,
+  "message": "Added new torrent. Torrent: \"Episode.Pack\"",
+  "timestamp": 1792974507,
+  "type": 1
+ },
+ {
+  "id": 36,
+  "message": "Added new torrent. Torrent: \"Nobody.Serves.This\"",
+  "timestamp": 1792974507,
+  "type": 1
+ },
+ {
+  "id": 37,
+  "message": "Torrent download finished. Torrent: \"Film.mkv\"",
+  "timestamp": 1792974508,
+  "type": 1
+ },
+ {
+  "id": 38,
+  "message": "Torrent removed. Torrent: \"Film.mkv\"",
+  "timestamp": 1792974514,
+  "type": 1
+ },
+ {
+  "id": 39,
+  "message": "Torrent removed. Torrent: \"Nobody.Serves.This\"",
+  "timestamp": 1792974514,
+  "type": 1
+ },
+ {
+  "id": 40,
+  "message": "Torrent removed. Torrent: \"Episode.Pack\"",
+  "timestamp": 1792974514,
+  "type": 1
+ },
+ {
+  "id": 43,
+  "message": "Added new torrent. Torrent: \"Film.mkv\"",
+  "timestamp": 1792974573,
+  "type": 1
+ },
+ {
+  "id": 44,
+  "message": "Added new torrent. Torrent: \"Episode.Pack\"",
+  "timestamp": 1792974573,
+  "type": 1
+ },
+ {
+  "id": 45,
+  "message": "Added new torrent. Torrent: \"Nobody.Serves.This\"",
+  "timestamp": 1792974573,
+  "type": 1
+ },
+ {
+  "id": 46,
+  "message": "Torrent download finished. Torrent: \"Film.mkv\"",
+  "timestamp": 1792974574,
+  "type": 1
+ }
+]
