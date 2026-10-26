@@ -1518,6 +1518,10 @@ public final class MainWindow {
             String[] parts = action.substring("files-rename:".length()).split(":", 2);
             showDetail();
             detail.renameFileForCapture(Integer.parseInt(parts[0]), parts[1].replace('~', ' '));
+        } else if (action.startsWith("files-stream:")) {
+            // files-stream:<row>: Stream in Player on that visible row of the Files tab.
+            showDetail();
+            detail.streamFileForCapture(Integer.parseInt(action.substring("files-stream:".length())));
         } else if (action.startsWith("files-menu")) {
             // files-menu or files-menu:<row>: the Files tab's context menu on that visible row.
             int colon = action.indexOf(':');
@@ -2817,6 +2821,7 @@ public final class MainWindow {
         if (!detailWanted) return;
         if (shown != null && shown.general().id().equals(detailId)) {
             TorrentRow row = rows.get(detailId);
+            detail.showStreamWindow(session.streamWindow(detailId).orElse(null));
             detail.show(shown, row == null ? null : row.torrent(), row == null ? 0 : row.quietSeconds(), nowSeconds);
             detail.showSpeed(session.followed(detailId), nowSeconds);
         } else if (detailId == null) detail.clear();
@@ -4643,6 +4648,8 @@ public final class MainWindow {
             if (t != null)
                 opener.accept(Path.of(t.savePath()).resolve(row.path()).toUri().toString());
         });
+        detail.setOnStream(row -> streamFile(row, true));
+        detail.setOnCopyStream(row -> streamFile(row, false));
         detail.setOnOpenFolder(row -> {
             Torrent t = detailTorrent();
             if (t == null || t.savePath() == null || t.savePath().isBlank()) return;
@@ -6083,6 +6090,50 @@ public final class MainWindow {
         if (freeStatus.isVisible()) parts.add(freeStatus.getText());
         if (errorBadge.isVisible()) parts.add(errorBadge.getText());
         return String.join(" | ", parts);
+    }
+
+    /**
+     * FX thread. A file of the torrent shown, served while it downloads: handed to the player
+     * ({@code stream.player}, else mpv or VLC wherever they are), or its URL put on the clipboard.
+     * The URL and the player are found off the FX thread: the first starts a server, the second
+     * may ask the registry.
+     */
+    private void streamFile(FileRows.Row row, boolean play) {
+        String id = detailId;
+        if (id == null) return;
+        String name = row.name();
+        String chosen = settings.get(Settings.STREAM_PLAYER, "");
+        Thread.ofVirtual().name("stream").start(() -> {
+            String url;
+            try {
+                url = session.streamUrl(id, row.index(), name);
+            } catch (java.io.IOException e) {
+                Platform.runLater(() -> setStatus(e.getMessage(), EngineEvent.Level.WARNING));
+                return;
+            }
+            if (!play) {
+                Platform.runLater(() -> {
+                    javafx.scene.input.ClipboardContent content = new javafx.scene.input.ClipboardContent();
+                    content.putString(url);
+                    javafx.scene.input.Clipboard.getSystemClipboard().setContent(content);
+                    setStatus(tr("status.streamCopied", name));
+                });
+                return;
+            }
+            Optional<Path> player = com.torrenta.stream.Player.forThisMachine(chosen);
+            if (player.isEmpty()) {
+                Platform.runLater(() -> setStatus(tr("status.noPlayer"), EngineEvent.Level.WARNING));
+                return;
+            }
+            try {
+                com.torrenta.stream.Player.launch(player.get(), url);
+                String which = com.torrenta.stream.Player.nameOf(player.get());
+                Platform.runLater(() -> setStatus(tr("status.streaming", name, which)));
+            } catch (java.io.IOException e) {
+                Platform.runLater(
+                        () -> setStatus(tr("status.playerFailed", e.getMessage()), EngineEvent.Level.WARNING));
+            }
+        });
     }
 
     private void setStatus(String text) {

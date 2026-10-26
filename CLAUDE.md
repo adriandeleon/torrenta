@@ -40,6 +40,9 @@ selected torrent, `select-first`, `message-log` / `message-log:<query>` (the sta
   space) to fill and confirm the Rename dialog, `files-rename:<row>:<name>` for a Files-tab row,
   `web-seeds-add:<urls>` (`~` between URLs) and `web-seed-remove:<row>` for the Trackers tab's web
   seeds (a `web-seeds=` line, with `editable=`, while that tab shows),
+  `files-stream:<row>` for Stream in Player on that visible row (back to the tab that showed
+  before, so `detail:overview,files-stream:2` shows the strip's `N in the read-ahead`; a stand-in
+  player in `stream.player` is a script that curls its one argument),
   `files-menu[:<row>]` for the Files tab's context menu on that visible row (it waits for the
   rows, which arrive with the first detail poll; on the Files tab a `file=` line per row shown
   names its `FileKind`, the glyph's rule by extension), `welcome-clipboard:<text>` (the welcome's
@@ -147,7 +150,17 @@ file on disk under its recorded name (`onDisk`, `.part` and all), the file opene
 piece since it is renamed and moved under the stream. The wait is sliced (250 ms) so a close does
 not wait out `PIECE_TIMEOUT` (60 s), after which the answer is cut short and a player asks again.
 A skipped file's pieces go into libtorrent's part file, not the file, so `Engine.stream` raises a
-skipped file to low priority: a file played is a file wanted.
+skipped file to low priority: a file played is a file wanted. The read-ahead is the server's: a
+`Playback` per file (its connections counted, a player opens several) follows the playhead (each
+range's first byte, then each piece written), plans `Readahead` again at most once a second or at
+once on a seek, sets the deadlines through `StreamFile.deadlines`, and clears them
+(`clearDeadlines`, libtorrent's `reset_piece_deadline`) when the last connection closes;
+`Session.streamWindow(id)` is the strip's mark (`PieceStrip.marks`, a ring in the text's ink: the
+accent was too close to the pieces' green). The Files tab's Stream in Player and Copy Stream URL
+go through `MainWindow.streamFile`, the URL and the player found off the FX thread;
+`stream.Player` (the setting, else mpv then VLC on the `PATH`, the app bundles, the registry's
+`InstallDir` and Program Files on Windows, Flatpak's exports on Linux) runs the player with the URL
+as its one argument and no shell.
 
 **The session is the window's toolkit-free half** (roadmap 1.2, item 1, in steps). `Session` owns
 the poll thread, the share limits and the minute's speed refresh; its `Host` hears a share limit

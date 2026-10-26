@@ -37,6 +37,7 @@ public final class SyncKeys {
             "download.dir",
             "download.incompleteDir",
             "download.curl",
+            "stream.player",
             "connection.interface",
             "ipfilter.file",
             "ipfilter.lastRefreshEpochMs",

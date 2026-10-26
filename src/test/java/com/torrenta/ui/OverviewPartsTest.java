@@ -23,6 +23,21 @@ class OverviewPartsTest {
         return out;
     }
 
+    /** A player's read-ahead marks the cells whose runs hold a piece of its window, by the same runs. */
+    @Test
+    void theReadaheadMarksTheCellsItsPiecesFallIn() {
+        // 10 pieces over 5 cells: two a cell; pieces 3 to 6 fall in cells 1, 2 and 3.
+        assertArrayEquals(
+                new boolean[] {false, true, true, true, false},
+                PieceStrip.marks(new com.torrenta.engine.PieceMath.Span(3, 6), 10, 5));
+        assertArrayEquals(new boolean[5], PieceStrip.marks(null, 10, 5), "nobody plays it");
+        assertArrayEquals(
+                new boolean[] {false, false, true},
+                PieceStrip.marks(new com.torrenta.engine.PieceMath.Span(2, 2), 3, 9),
+                "fewer pieces than cells: one a piece");
+        assertEquals(0, PieceStrip.marks(new com.torrenta.engine.PieceMath.Span(0, 0), 0, 5).length);
+    }
+
     @Test
     void fewerPiecesThanCellsIsOneCellEach() {
         assertArrayEquals(new PieceStrip.Cell[] {H, M, H}, PieceStrip.cells(bits("101"), new int[0], 100));

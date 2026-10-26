@@ -381,6 +381,11 @@ public final class Session {
         return streams.url(id, fileIndex, name);
     }
 
+    /** The pieces of torrent {@code id} a player's read-ahead covers now; empty while none plays it. */
+    public java.util.Optional<com.torrenta.engine.PieceMath.Span> streamWindow(String id) {
+        return streams.window(id);
+    }
+
     /** Hears every poll, on the poll thread, after the share limits have been applied. */
     public void addListener(Consumer<Poll> listener) {
         listeners.add(listener);

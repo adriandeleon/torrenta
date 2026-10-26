@@ -2263,6 +2263,50 @@ public final class LibtorrentEngine implements Engine {
         public Path path() throws EngineException {
             return streamPath(id, index, original);
         }
+
+        @Override
+        public long offset() {
+            return offset;
+        }
+
+        @Override
+        public long pieceLength() {
+            return pieceLength;
+        }
+
+        @Override
+        public java.util.BitSet have(int first, int last) throws EngineException {
+            return streamHave(id, first, last);
+        }
+
+        @Override
+        public void deadlines(Map<Integer, Integer> millisByPiece) throws EngineException {
+            streamDeadlines(id, millisByPiece);
+        }
+
+        @Override
+        public void clearDeadlines(int first, int last) throws EngineException {
+            streamClear(id, first, last);
+        }
+    }
+
+    private synchronized java.util.BitSet streamHave(String id, int first, int last) throws EngineException {
+        TorrentHandle h = handle(id);
+        java.util.BitSet out = new java.util.BitSet();
+        for (int p = Math.max(0, first); p <= last; p++) if (h.havePiece(p)) out.set(p);
+        return out;
+    }
+
+    private synchronized void streamDeadlines(String id, Map<Integer, Integer> millisByPiece) throws EngineException {
+        TorrentHandle h = handle(id);
+        millisByPiece.forEach((piece, millis) -> {
+            if (!h.havePiece(piece)) h.setPieceDeadline(piece, millis);
+        });
+    }
+
+    private synchronized void streamClear(String id, int first, int last) throws EngineException {
+        TorrentHandle h = handle(id);
+        for (int p = Math.max(0, first); p <= last; p++) h.resetPieceDeadline(p);
     }
 
     /**

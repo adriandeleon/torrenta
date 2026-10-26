@@ -7,6 +7,13 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Play a file while it downloads.** The Files tab's Stream in Player opens a file in mpv or VLC
+  (wherever they are installed, or the player chosen in Settings → Adding torrents) as it
+  downloads; Copy Stream URL gives the address for any other player on this computer. The pieces
+  the player is about to reach come first, the file's first and last at the start (where a
+  video's index sits), and a jump ahead waits for its piece rather than plays garbage. The
+  Overview's pieces map rings the pieces being read ahead.
+
 - **Slower, or paused, on battery and on a metered network.** Settings → Speed → Battery and
   network: while the computer runs on its battery, or the network is one paid by the byte (a
   phone's hotspot), use the alternative speed limits or pause the torrents, resumed when it ends.
