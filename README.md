@@ -92,7 +92,13 @@ answer landing in the results as it arrives with a line per provider saying how 
 why it could not answer; the same torrent from two servers is shown once, the better-seeded copy
 first, sorted by seeds unless a column is clicked. `Enter` on a result opens the Add dialog for it,
 a `.torrent` link fetched first. The results table's columns are remembered like the transfer
-list's.
+list's. Once there are results a Filter box above them narrows them in the omnibox's language:
+words match the name, `provider:jack`, `cat:movies` (the category the indexer filed it under),
+`size>1g`, `seeds>=10`, `leechers<5`, `date<7d` or `date>=2026-01-01` (a range is two terms), a
+`-` in front for "not"; each term is a chip (red when it does not read, a click removes it) and
+the box says how many of the results it shows. The row menu's Show Only and Hide put a
+provider's or a category's term in it. `/` in the results (or `Ctrl+K`) goes to it, `Enter`
+returns to the results, `Esc` empties it; it stays across searches until Clear.
 
 RSS (`Ctrl+R`) is a third tab: feeds on the left (All feeds first, each with its unread count and
 a glyph while it refreshes or after it failed), the articles of the chosen feed on the right (bold
@@ -156,7 +162,8 @@ TORRENTA_CAPTURE=/tmp/torrenta.png ./mvnw javafx:run
 
 Renders the real window, writes it to a PNG, prints a few `capture:` facts (size, title, focus owner,
 engine, status bar) and exits. CI runs the first form under Xvfb on Linux as a smoke test.
-`-Dtorrenta.captureAction=search:debian,search-keys:DOWN+ENTER` drives the Search tab; a stand-in
+`-Dtorrenta.captureAction=search:debian,search-keys:DOWN+ENTER` drives the Search tab
+(`search-filter:size>1g~seeds>=10` types a results filter once the search ends); a stand-in
 Torznab server for it is `java scripts/torznab-stub.java 9696 <search.xml> [caps.xml]` with the
 fixtures under `src/test/resources/com/torrenta/search`, and a provider at
 `http://127.0.0.1:9696/api` in the config folder's `search-providers.json`. For a definition file,

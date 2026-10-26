@@ -7,6 +7,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Filter search results.** Once a search has results, a Filter box above them narrows the table
+  by its columns in the omnibox's language: `provider:jack`, `cat:movies`, `size>1g`, `seeds>=10`,
+  `leechers<5`, `date<7d` or `date>=2026-01-01` (a range is two terms), words for the name, `-`
+  for "not". Each term shows as a chip, a red one saying why when it does not read, and the box
+  says how many results it lets through. The results' menu has Show Only and Hide for a
+  provider and Show Only for a category; `/` in the results or `Ctrl+K` goes to the box. Results
+  from a Torznab server now carry their category, in a new Category column.
+
 - **Updatable torrents.** A `magnet:?xs=urn:btpk:…` link (BEP 46) is looked up in the DHT and
   its current version added; from then on Torrenta looks for a newer version every six hours
   (Settings → Adding torrents → Updatable torrents) and adds it into the same folder, filed the

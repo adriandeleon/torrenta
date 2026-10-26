@@ -57,7 +57,7 @@ public final class FilterQuery {
     /** Matches everything. */
     public static final FilterQuery EMPTY = new FilterQuery(List.of(), List.of());
 
-    private static final Pattern KEYED = Pattern.compile("([A-Za-z]+)(<=|>=|<|>|=|:)(.*)", Pattern.DOTALL);
+    static final Pattern KEYED = Pattern.compile("([A-Za-z]+)(<=|>=|<|>|=|:)(.*)", Pattern.DOTALL);
     private static final Pattern COMPARISON = Pattern.compile("(<=|>=|<|>|=)?(.*)", Pattern.DOTALL);
     private static final Pattern NUMBER = Pattern.compile("\\d+(\\.\\d+)?|\\.\\d+");
     private static final Pattern SIZE = Pattern.compile("(\\d+(?:\\.\\d+)?|\\.\\d+)\\s*([kmgt]?)(?:i?b)?");
@@ -196,7 +196,7 @@ public final class FilterQuery {
 
     // ---- comparisons
 
-    private enum Op {
+    enum Op {
         LT("under"),
         LE("atMost"),
         GT("over"),
@@ -237,9 +237,9 @@ public final class FilterQuery {
     }
 
     /** The operator and the operand: {@code size>4g}, or {@code size:>4g}, or {@code size:4g} for equal. */
-    private record Comparison(Op op, String operand) {}
+    record Comparison(Op op, String operand) {}
 
-    private static Comparison comparison(String op, String value) {
+    static Comparison comparison(String op, String value) {
         if (!op.equals(":")) return new Comparison(Op.of(op), value);
         Matcher m = COMPARISON.matcher(value);
         m.matches();
@@ -332,10 +332,10 @@ public final class FilterQuery {
     }
 
     /** A length of time: seconds, and the words for it in the UI language. */
-    private record Span(long seconds, String words) {}
+    record Span(long seconds, String words) {}
 
     /** {@code 30m}, {@code 6h}, {@code 2d}, {@code 3w}; null if it does not read or is too long. */
-    private static Span span(String operand) {
+    static Span span(String operand) {
         Matcher m = DURATION.matcher(operand.toLowerCase(Locale.ROOT));
         if (!m.matches()) return null;
         String unit =
@@ -421,9 +421,9 @@ public final class FilterQuery {
      * @param negated it began with a minus (and had more after it)
      * @param quotedKey a quote came before any colon or operator, so it is a phrase, not a key
      */
-    private record Token(String raw, String text, boolean negated, boolean quotedKey) {}
+    record Token(String raw, String text, boolean negated, boolean quotedKey) {}
 
-    private static List<Token> tokens(String text) {
+    static List<Token> tokens(String text) {
         List<Token> out = new ArrayList<>();
         int i = 0;
         int n = text.length();

@@ -28,7 +28,7 @@ public final class ResultRanker {
 
     /**
      * One result per {@link SearchResult#identity()}; of two copies the one with more seeds is
-     * kept (the first one on a tie), and it borrows a size or a date the other knew.
+     * kept (the first one on a tie), and it borrows a size, a date or a category the other knew.
      */
     public static List<SearchResult> dedupe(List<SearchResult> results) {
         Map<String, SearchResult> byIdentity = new LinkedHashMap<>();
@@ -45,10 +45,12 @@ public final class ResultRanker {
         Instant published = winner.published() != null ? winner.published() : loser.published();
         String detail = !winner.detailUrl().isEmpty() ? winner.detailUrl() : loser.detailUrl();
         int leechers = winner.leechers() >= 0 ? winner.leechers() : loser.leechers();
+        SearchCategory category = winner.category() != null ? winner.category() : loser.category();
         if (size == winner.size()
                 && published == winner.published()
                 && detail.equals(winner.detailUrl())
-                && leechers == winner.leechers()) return winner;
+                && leechers == winner.leechers()
+                && category == winner.category()) return winner;
         return new SearchResult(
                 winner.name(),
                 size,
@@ -58,7 +60,8 @@ public final class ResultRanker {
                 winner.link(),
                 winner.infoHash(),
                 winner.provider(),
-                detail);
+                detail,
+                category);
     }
 
     /** Sorted copy: seeds, then query coverage, then recency, then name. */
