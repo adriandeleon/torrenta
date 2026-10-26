@@ -628,9 +628,10 @@ remote caller's behalf.
    `Response.Ranged` is the plumbing's third body, written range by range; `Engine.stream` hands a
    `StreamFile` whose `await` registers a future per missing piece before its second look and sets
    the deadline, the `piece_finished_alert` completing it; found: a skipped file's pieces go into
-   the part file, not the file, so streaming a skipped file makes it wanted, at low priority; the
-   engine test runs on all three CI platforms, Windows' reading beside libtorrent's writes
-   included): `com.torrenta.stream.StreamServer` on 1.2's plumbing, loopback only,
+   the part file, not the file, so streaming a skipped file makes it wanted, at low priority; and
+   Windows' "measured": the file read zeros right after the piece's alert, the bytes still in
+   libtorrent's write buffer, so every read is `read_piece`, the roadmap's fallback, on every
+   platform): `com.torrenta.stream.StreamServer` on 1.2's plumbing, loopback only,
    a random port, `/s/<token>/<id>/<fileIndex>/<name>` with a token per file and launch, no
    listing, `206` and `Content-Range`. `PieceMath.span`, pure, gives the pieces a range needs; a
    piece the torrent has is read from the file under its recorded name (`onDisk`), a missing one
