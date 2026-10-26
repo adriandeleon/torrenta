@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.torrenta.engine.Engine.QueueMove;
+import com.torrenta.engine.QueueOrder;
 import com.torrenta.engine.Torrent;
 import org.junit.jupiter.api.Test;
 

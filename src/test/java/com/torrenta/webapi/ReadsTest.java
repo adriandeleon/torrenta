@@ -355,7 +355,7 @@ class ReadsTest {
         assertEquals(404, dispatch("GET", "torrents/nothing", "").status());
         assertEquals(
                 404,
-                dispatch("POST", "torrents/setLocation", "hashes=all&location=/x")
+                dispatch("POST", "torrents/setDownloadPath", "hashes=all&path=/x")
                         .status(),
                 "not 405");
         backend.rootFolder = null;

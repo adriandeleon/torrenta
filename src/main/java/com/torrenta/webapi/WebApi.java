@@ -8,7 +8,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.LongSupplier;
 
@@ -106,6 +108,12 @@ public final class WebApi {
 
         /** Adds tags to the store's list. */
         void addTags(Collection<String> tags) throws IOException;
+
+        /** Takes a category out of the store; the torrents filed under it are the caller's to clear. */
+        void removeCategory(String name) throws IOException;
+
+        /** Takes a tag out of the store's list. */
+        void removeTag(String name) throws IOException;
 
         /** A torrent's own share limit; null drops it, so the global one applies. */
         void setShareOverride(String id, ShareLimit limit);
@@ -224,6 +232,9 @@ public final class WebApi {
         read(router, "transfer/info", reads::transfer);
         read(router, "sync/maindata", reads::maindata);
         read(router, "sync/torrentPeers", reads::torrentPeers);
+        read(router, "torrents/trackers", reads::trackers);
+        read(router, "torrents/webseeds", reads::webseeds);
+        read(router, "torrents/pieceStates", reads::pieceStates);
         router.route("POST", PREFIX + "torrents/add", writes::add);
         router.route("POST", PREFIX + "torrents/delete", writes::delete);
         for (String path : List.of("torrents/pause", "torrents/stop"))
@@ -237,6 +248,33 @@ public final class WebApi {
         router.route("POST", PREFIX + "torrents/setShareLimits", writes::setShareLimits);
         router.route("POST", PREFIX + "torrents/topPrio", writes::topPrio);
         router.route("POST", PREFIX + "torrents/setForceStart", writes::setForceStart);
+        Edits edits = new Edits(backend, clock, reads);
+        Map<String, Router.Handler> posts = new LinkedHashMap<>();
+        posts.put("torrents/filePrio", edits::filePrio);
+        posts.put("torrents/setLocation", edits::setLocation);
+        posts.put("torrents/rename", edits::rename);
+        posts.put("torrents/renameFile", edits::renamePath);
+        posts.put("torrents/renameFolder", edits::renamePath);
+        posts.put("torrents/addTrackers", edits::addTrackers);
+        posts.put("torrents/removeTrackers", edits::removeTrackers);
+        posts.put("torrents/editTracker", edits::editTracker);
+        posts.put("torrents/setDownloadLimit", edits::setDownloadLimit);
+        posts.put("torrents/setUploadLimit", edits::setUploadLimit);
+        posts.put("torrents/downloadLimit", edits::downloadLimit);
+        posts.put("torrents/uploadLimit", edits::uploadLimit);
+        posts.put("torrents/toggleSequentialDownload", edits::toggleSequentialDownload);
+        posts.put("torrents/toggleFirstLastPiecePrio", edits::toggleFirstLastPiecePrio);
+        posts.put("torrents/setSuperSeeding", edits::setSuperSeeding);
+        posts.put("torrents/setAutoManagement", edits::setAutoManagement);
+        posts.put("torrents/increasePrio", r -> edits.queue(r, Engine.QueueMove.UP));
+        posts.put("torrents/decreasePrio", r -> edits.queue(r, Engine.QueueMove.DOWN));
+        posts.put("torrents/bottomPrio", r -> edits.queue(r, Engine.QueueMove.BOTTOM));
+        posts.put("torrents/editCategory", edits::editCategory);
+        posts.put("torrents/removeCategories", edits::removeCategories);
+        posts.put("torrents/createTags", edits::createTags);
+        posts.put("torrents/deleteTags", edits::deleteTags);
+        posts.put("torrents/removeTags", edits::removeTags);
+        posts.forEach((path, handler) -> router.route("POST", PREFIX + path, handler));
         StaticFiles files = new StaticFiles(
                 backend::rootFolder, r -> sessions.valid(r.cookies().get(COOKIE), clock.getAsLong()));
         router.prefix("GET", "/", files::serve);

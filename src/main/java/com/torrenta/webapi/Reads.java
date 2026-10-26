@@ -94,6 +94,78 @@ final class Reads {
         return Response.json(JsonOut.write(TorrentQuery.apply(rows, params(request))));
     }
 
+    /** {@code t}'s kept facts are stale: an edit through the API changed its limits. */
+    void forget(Torrent t) {
+        facts.forget(t.id());
+    }
+
+    /** The hash a client knows {@code t} by. */
+    String hashOf(Torrent t, long now) {
+        return QbitTorrent.hash(t, facts.get(t, now).facts());
+    }
+
+    /** One torrent's detail by the request's {@code hash}, or the answer qBittorrent gives instead. */
+    private record Detailed(Torrent torrent, TorrentDetail detail, Response refusal) {}
+
+    private Detailed detailed(Request request) {
+        long now = clock.getAsLong();
+        Found f = found(request, now);
+        if (f.refusal() != null) return new Detailed(null, null, f.refusal());
+        Optional<TorrentDetail> d = backend.detail(f.torrent().id());
+        return d.map(detail -> new Detailed(f.torrent(), detail, null))
+                .orElseGet(() -> new Detailed(null, null, Response.text(404, "Not Found")));
+    }
+
+    /**
+     * {@code torrents/trackers}: qBittorrent's status numbers (0 disabled, 1 not contacted, 2
+     * working, 3 updating, 4 not working); the swarm counts are -1, which a tracker's announce
+     * here does not keep.
+     */
+    Response trackers(Request request) {
+        Detailed d = detailed(request);
+        if (d.refusal() != null) return d.refusal();
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (TorrentDetail.Tracker tr : d.detail().trackers()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("msg", tr.message());
+            m.put("num_downloaded", -1);
+            m.put("num_leeches", -1);
+            m.put("num_peers", -1);
+            m.put("num_seeds", -1);
+            m.put("status", trackerStatus(tr.status()));
+            m.put("tier", tr.tier());
+            m.put("url", tr.url());
+            out.add(m);
+        }
+        return Response.json(JsonOut.write(out));
+    }
+
+    static int trackerStatus(String status) {
+        return switch (status) {
+            case "working" -> 2;
+            case "updating" -> 3;
+            case "error" -> 4;
+            default -> 1;
+        };
+    }
+
+    Response webseeds(Request request) {
+        Detailed d = detailed(request);
+        if (d.refusal() != null) return d.refusal();
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (String url : d.detail().webSeeds()) out.add(Map.of("url", url));
+        return Response.json(JsonOut.write(out));
+    }
+
+    /** {@code torrents/pieceStates}: 2 for a piece that is here, 0 for one that is not. */
+    Response pieceStates(Request request) {
+        Detailed d = detailed(request);
+        if (d.refusal() != null) return d.refusal();
+        List<Integer> out = new ArrayList<>();
+        for (boolean have : d.detail().pieces()) out.add(have ? 2 : 0);
+        return Response.json(JsonOut.write(out));
+    }
+
     /** The torrent a client means by {@code hash}; empty for none. */
     private Optional<Torrent> find(String hash, long now) {
         String h = hash.trim();

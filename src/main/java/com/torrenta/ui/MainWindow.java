@@ -75,6 +75,7 @@ import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.Inputs;
 import com.torrenta.engine.LinkRequest;
+import com.torrenta.engine.QueueOrder;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.SwarmPreview;
 import com.torrenta.engine.Torrent;

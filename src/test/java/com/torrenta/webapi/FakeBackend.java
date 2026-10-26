@@ -55,6 +55,8 @@ final class FakeBackend implements WebApi.Backend {
     final Map<String, byte[]> served = new HashMap<>();
     ShareLimit global = ShareLimit.NONE;
     boolean engineUp = true;
+    Engine.Capabilities capabilities = Engine.Capabilities.ALL;
+    final Map<String, TorrentLimits> engineLimits = new HashMap<>();
     final Map<String, List<String>> engineTags = new HashMap<>();
 
     /** An engine that records what it is asked and answers the little the routes read back. */
@@ -65,7 +67,13 @@ final class FakeBackend implements WebApi.Backend {
                 calls.add(call.toString());
                 return switch (method.getName()) {
                     case "torrents" -> List.copyOf(torrents);
-                    case "capabilities" -> Engine.Capabilities.ALL;
+                    case "capabilities" -> capabilities;
+                    case "detail" -> details.get((String) args[0]);
+                    case "limits" -> engineLimits.getOrDefault((String) args[0], TorrentLimits.NONE);
+                    case "setLimits" -> {
+                        engineLimits.put((String) args[0], (TorrentLimits) args[1]);
+                        yield null;
+                    }
                     case "tags" -> engineTags.getOrDefault((String) args[0], List.of());
                     case "setTags" -> {
                         engineTags.put((String) args[0], List.copyOf((List<String>) args[1]));
@@ -156,7 +164,7 @@ final class FakeBackend implements WebApi.Backend {
 
     @Override
     public TorrentLimits limits(String id) {
-        return TorrentLimits.NONE;
+        return engineLimits.getOrDefault(id, TorrentLimits.NONE);
     }
 
     @Override
@@ -226,6 +234,16 @@ final class FakeBackend implements WebApi.Backend {
     @Override
     public void addTags(Collection<String> more) {
         for (String t : more) if (!tags.contains(t)) tags.add(t);
+    }
+
+    @Override
+    public void removeCategory(String name) {
+        categories.removeIf(c -> c.name().equals(name));
+    }
+
+    @Override
+    public void removeTag(String name) {
+        tags.remove(name);
     }
 
     @Override
