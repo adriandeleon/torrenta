@@ -151,6 +151,7 @@ class TorznabProviderTest {
         assertEquals("", netinst.infoHash());
         assertEquals("Prowlarr", netinst.provider());
         assertEquals("https://example.test/details/42", netinst.detailUrl());
+        assertEquals(SearchCategory.SOFTWARE, netinst.category(), "the category attribute's Newznab number");
 
         SearchResult dvd = results.get(1);
         assertEquals(
@@ -177,6 +178,7 @@ class TorznabProviderTest {
         assertTrue(desktop.link() instanceof SearchResult.Link.Magnet);
         assertEquals("https://example-indexer.test/torrent/123", desktop.detailUrl());
         assertEquals("127.0.0.1", desktop.provider());
+        assertEquals(SearchCategory.SOFTWARE, desktop.category(), "the indexer's own 100001 names nothing");
 
         SearchResult server = results.get(1);
         assertTrue(server.link() instanceof SearchResult.Link.Magnet, "a <link> that is a magnet");

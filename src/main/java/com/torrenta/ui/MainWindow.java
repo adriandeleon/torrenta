@@ -1372,6 +1372,11 @@ public final class MainWindow {
         } else if (action.equals("search-clear")) {
             // After the running search, if any, so the shot is of a tab that had rows.
             searchPane.afterSearchForCapture(() -> command("search-clear").run().run());
+        } else if (action.startsWith("search-filter:")) {
+            // The results filter typed once the search has ended, '~' for a space.
+            showSearch();
+            searchPane.setFilterForCapture(
+                    action.substring("search-filter:".length()).replace('~', ' '), this::printSearchForCapture);
         } else if (action.startsWith("search-keys:")) {
             // Keys pressed in the results table (DOWN+ENTER): the keyboard path to the Add dialog.
             showSearch();
@@ -1661,13 +1666,7 @@ public final class MainWindow {
         System.out.println("capture: view=" + view.id() + " focus=" + focusForCapture());
         System.out.println("capture: view-strip=" + viewStrip.describe());
         System.out.println("capture: search-tab=" + (searchShowing() ? "showing" : "hidden"));
-        if (searchShowing()) {
-            System.out.println("capture: search-query=" + searchPane.queryText());
-            System.out.println("capture: search-chips=" + searchPane.chipsForCapture());
-            System.out.println("capture: search-status=" + searchPane.statusText()
-                    + (searchPane.searching() ? " (searching)" : ""));
-            for (String row : searchPane.rowsForCapture()) System.out.println("capture: search-row=" + row);
-        }
+        if (searchShowing()) printSearchForCapture();
         System.out.println("capture: rss-tab=" + (rssShowing() ? "showing" : "hidden"));
         if (rssShowing()) {
             System.out.println("capture: rss-status=" + rssPane.statusText());
@@ -1681,6 +1680,16 @@ public final class MainWindow {
             System.out.println("capture: rss-settings=" + settingsWindow.rssStatus());
         if (settingsWindow.isShowing())
             for (String row : settingsWindow.rulesForCapture()) System.out.println("capture: rss-rule=" + row);
+    }
+
+    /** The Search tab's lines: after every action, and again once a filter typed by one applies. */
+    private void printSearchForCapture() {
+        System.out.println("capture: search-query=" + searchPane.queryText());
+        System.out.println("capture: search-chips=" + searchPane.chipsForCapture());
+        System.out.println(
+                "capture: search-status=" + searchPane.statusText() + (searchPane.searching() ? " (searching)" : ""));
+        System.out.println("capture: search-filter=" + searchPane.filterForCapture());
+        for (String row : searchPane.rowsForCapture()) System.out.println("capture: search-row=" + row);
     }
 
     /**
@@ -5182,7 +5191,9 @@ public final class MainWindow {
                 .orElse(FilterQuery.EMPTY);
     }
 
+    /** The filter of what shows: the Search tab's results filter once it has results, else the omnibox. */
     private void focusFilter() {
+        if (searchShowing() && searchPane.focusFilter()) return;
         filter.requestFocus();
         filter.selectAll();
     }

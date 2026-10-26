@@ -1,11 +1,13 @@
 package com.torrenta.search;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -73,6 +75,24 @@ class TorznabEndpointTest {
     }
 
     @Test
+    void aResultsNewznabNumbersNameItsCategory() {
+        assertEquals(SearchCategory.MOVIES, SearchCategory.ofNewznab(List.of(2040)));
+        assertEquals(
+                SearchCategory.TV, SearchCategory.ofNewznab(List.of(100_001, 5000)), "an indexer's own is skipped");
+        assertEquals(SearchCategory.ANIME, SearchCategory.ofNewznab(List.of(5000, 5070)), "anime wins over TV");
+        assertEquals(SearchCategory.GAMES, SearchCategory.ofNewznab(List.of(1000, 4000)), "else the first");
+        assertEquals(SearchCategory.OTHER, SearchCategory.ofNewznab(List.of(8010)));
+        assertNull(SearchCategory.ofNewznab(List.of(6000)), "a block with no chip");
+        assertNull(SearchCategory.ofNewznab(List.of(0, 999, 9000)));
+        assertNull(SearchCategory.ofNewznab(List.of()));
+
+        assertEquals(SearchCategory.TV, SearchCategory.named("tv"));
+        assertEquals(SearchCategory.BOOKS, SearchCategory.named("Books"));
+        assertNull(SearchCategory.named("all"), "All is not a category a result has");
+        assertNull(SearchCategory.named("podcasts"));
+    }
+
+    @Test
     void aResultNormalisesItsHashAndReadsOneOffAMagnet() {
         SearchResult.Link.Magnet magnet =
                 new SearchResult.Link.Magnet("magnet:?xt=urn:btih:2AA4F5A7E209E54B32803D43670971C4C8CAAA05&dn=x");
@@ -90,5 +110,9 @@ class TorznabEndpointTest {
         assertThrows(IllegalArgumentException.class, () -> new SearchResult.Link.Magnet("https://not-a-magnet"));
         assertThrows(IllegalArgumentException.class, () -> new SearchResult.Link.TorrentUrl(" "));
         assertThrows(IllegalArgumentException.class, () -> new SearchResult("z", 1, 1, 1, null, null, "", "P", ""));
+        assertNull(given.category(), "unknown unless given");
+        assertNull(
+                new SearchResult("y", 1, 1, 1, null, given.link(), "", "P", "", SearchCategory.ALL).category(),
+                "All is no category of a result's");
     }
 }

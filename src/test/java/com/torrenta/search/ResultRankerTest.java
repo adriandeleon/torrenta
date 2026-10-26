@@ -59,7 +59,8 @@ class ResultRankerTest {
                 new SearchResult.Link.Magnet("magnet:?xt=urn:btih:" + hash),
                 hash,
                 "A",
-                "https://a.test/1");
+                "https://a.test/1",
+                SearchCategory.SOFTWARE);
         SearchResult fromB = new SearchResult(
                 "ubuntu.iso",
                 -1,
@@ -80,6 +81,7 @@ class ResultRankerTest {
         assertEquals(when, kept.published());
         assertEquals(2, kept.leechers());
         assertEquals("https://a.test/1", kept.detailUrl());
+        assertEquals(SearchCategory.SOFTWARE, kept.category());
         assertEquals(fromB.link(), kept.link(), "the winner's own link");
         assertEquals(other, merged.get(1));
     }

@@ -19,6 +19,8 @@ import com.torrenta.engine.WatchFolder;
  *     magnet when the indexer gave none
  * @param provider the provider's {@link SearchProvider#name()}
  * @param detailUrl the indexer's page for it, or empty
+ * @param category what the indexer files it under ({@link SearchCategory#ofNewznab}), or null
+ *     when it did not say or said something none of ours is; never {@link SearchCategory#ALL}
  */
 public record SearchResult(
         String name,
@@ -29,7 +31,8 @@ public record SearchResult(
         Link link,
         String infoHash,
         String provider,
-        String detailUrl) {
+        String detailUrl,
+        SearchCategory category) {
 
     /** Where a result leads: one of the two things the Add dialog accepts. */
     public sealed interface Link {
@@ -76,6 +79,21 @@ public record SearchResult(
         }
         provider = provider == null ? "" : provider.trim();
         detailUrl = detailUrl == null ? "" : detailUrl.trim();
+        if (category == SearchCategory.ALL) category = null;
+    }
+
+    /** A result whose category is not known. */
+    public SearchResult(
+            String name,
+            long size,
+            int seeds,
+            int leechers,
+            Instant published,
+            Link link,
+            String infoHash,
+            String provider,
+            String detailUrl) {
+        this(name, size, seeds, leechers, published, link, infoHash, provider, detailUrl, null);
     }
 
     /**

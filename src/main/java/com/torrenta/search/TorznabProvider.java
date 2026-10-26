@@ -246,6 +246,7 @@ public final class TorznabProvider implements SearchProvider {
         int seeders = -1;
         int leechers = -1;
         int peers = -1;
+        List<Integer> categories = new ArrayList<>();
         int depth = 1;
         while (depth > 0 && r.hasNext()) {
             int event = r.next();
@@ -261,6 +262,7 @@ public final class TorznabProvider implements SearchProvider {
                 case "guid" -> guid = r.getElementText();
                 case "comments" -> comments = r.getElementText();
                 case "pubDate" -> pubDate = r.getElementText();
+                case "category" -> addCategory(categories, r.getElementText());
                 case "size" -> {
                     sizeElement = parseLong(r.getElementText());
                 }
@@ -279,6 +281,7 @@ public final class TorznabProvider implements SearchProvider {
                         case "size" -> size = parseLong(v);
                         case "infohash" -> infoHash = v;
                         case "magneturl" -> magnet = v;
+                        case "category" -> addCategory(categories, v);
                         default -> {}
                     }
                     depth++;
@@ -296,7 +299,22 @@ public final class TorznabProvider implements SearchProvider {
         if (leechers < 0 && peers >= 0 && seeders >= 0) leechers = Math.max(0, peers - seeders);
         String detail = isHttp(comments) ? comments : isHttp(guid) && !guid.equals(where.value()) ? guid : "";
         return new SearchResult(
-                title, size, seeders, leechers, parseDate(pubDate), where, infoHash, provider, detail.trim());
+                title,
+                size,
+                seeders,
+                leechers,
+                parseDate(pubDate),
+                where,
+                infoHash,
+                provider,
+                detail.trim(),
+                SearchCategory.ofNewznab(categories));
+    }
+
+    /** A {@code <category>} element's or a {@code category} attribute's number; anything else is skipped. */
+    private static void addCategory(List<Integer> categories, String text) {
+        int n = parseInt(text.trim());
+        if (n > 0) categories.add(n);
     }
 
     private static SearchException torznabError(XMLStreamReader r) {
