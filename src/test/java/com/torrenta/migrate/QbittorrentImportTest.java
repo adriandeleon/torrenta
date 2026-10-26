@@ -18,7 +18,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -102,31 +101,33 @@ class QbittorrentImportTest {
                 .filter(c -> c.metainfo() == null)
                 .findFirst()
                 .orElseThrow();
+        // The proof that nothing was checked: a byte changed in each file, its size kept. Trusted, the
+        // resume data's progress stands; checked, that piece would fail and the torrent drop below it.
+        flipAByte(downloads.resolve("Seed.bin"));
+        flipAByte(downloads.resolve("Pack/a.bin"));
         try (LibtorrentEngine engine = new LibtorrentEngine(downloads, store)) {
             engine.start();
             assertTrue(engine.capabilities().has(Engine.Capability.IMPORT_RESUME));
             for (ImportCandidate c : candidates) assertEquals(c.id(), engine.adopt(adoption(c, downloads)), c.name());
 
-            // Straight from the resume data: the first look already has the progress, no check ran.
+            await(
+                    "the seed whole and the pack half done, from the resume data",
+                    () -> progress(engine, seed) == 1.0 && progress(engine, pack) == 0.5);
+            Thread.sleep(1000);
+            assertEquals(1.0, progress(engine, seed), 1e-9, "still whole: no check found the changed byte");
+            assertEquals(0.5, progress(engine, pack), 1e-9, "still half");
             Torrent s = byId(engine, seed.id());
-            assertEquals(1.0, s.progress(), 1e-9, "the seed is whole at once");
             assertTrue(
                     s.state() == TorrentState.SEEDING || s.state() == TorrentState.FINISHED,
                     s.state().name());
             assertEquals("tv", s.category());
             assertEquals(List.of("keep"), s.tags());
             Torrent p = byId(engine, pack.id());
-            assertEquals(0.5, p.progress(), 1e-9, "half: its first file of two");
             assertTrue(p.paused(), "stopped in qBittorrent, stopped here");
             assertEquals("Pack Renamed", p.name(), "the name a person gave it");
             Torrent m = byId(engine, magnet.id());
             assertEquals("Nobody.Serves.This", m.name());
             assertTrue(m.paused());
-            for (int i = 0; i < 20; i++) {
-                assertFalse(
-                        engine.torrents().stream().anyMatch(t -> t.state() == TorrentState.CHECKING), "never checked");
-                Thread.sleep(25);
-            }
             assertTrue(engine.adopt(adoption(seed, downloads)) == null, "unreachable");
         } catch (com.torrenta.engine.EngineException expected) {
             assertTrue(
@@ -134,15 +135,26 @@ class QbittorrentImportTest {
                     "a second import of the same torrent is refused by name");
         }
 
-        // Written as this engine's own: a restart brings them back as they were.
+        // Written as this engine's own: a restart brings them back as they were, still unchecked.
         try (LibtorrentEngine again = new LibtorrentEngine(downloads, store)) {
             again.start();
             assertEquals(3, again.torrents().size());
-            assertEquals(1.0, byId(again, seed.id()).progress(), 1e-9);
-            assertEquals(0.5, byId(again, pack.id()).progress(), 1e-9);
+            await("back as they were", () -> progress(again, seed) == 1.0 && progress(again, pack) == 0.5);
             assertEquals("Pack Renamed", byId(again, pack.id()).name());
             assertEquals("tv", byId(again, seed.id()).category());
         }
+    }
+
+    private static double progress(Engine engine, ImportCandidate c) {
+        Torrent t = byId(engine, c.id());
+        return t == null ? -1 : t.progress();
+    }
+
+    /** One byte of the file's first piece changed, its size kept: only a check can tell. */
+    private static void flipAByte(Path file) throws Exception {
+        byte[] bytes = Files.readAllBytes(file);
+        bytes[100] ^= 0x5a;
+        Files.write(file, bytes);
     }
 
     /** The resume data says whole; the disk says otherwise: libtorrent checks, and it comes up short. */
