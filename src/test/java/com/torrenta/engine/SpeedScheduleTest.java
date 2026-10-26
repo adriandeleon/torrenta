@@ -42,18 +42,17 @@ class SpeedScheduleTest {
         assertFalse(s.scheduleActive(at(19, 3, 0)), "Monday 03:00 would be Sunday's window, which is off");
     }
 
+    /** The pair in force is the session's decision (session.SpeedMode); the record gives each pair's limits. */
     @Test
-    void offMeansNeverAndTheHandSwitchWins() {
+    void offMeansNeverAndEachPairHasItsLimits() {
         EngineSettings.Speed off = speed(false, 0, 24 * 60 - 1, EnumSet.allOf(DayOfWeek.class));
         assertFalse(off.scheduleActive(at(19, 12, 0)));
-        assertFalse(off.alternativeActive(at(19, 12, 0)));
-        assertTrue(off.withAlternativeOn(true).alternativeActive(at(19, 12, 0)));
-        assertEquals(1000 * 1024, off.effectiveDownloadBytes(at(19, 12, 0)));
-        assertEquals(200 * 1024, off.withAlternativeOn(true).effectiveDownloadBytes(at(19, 12, 0)));
+        assertEquals(1000 * 1024, off.downloadBytes(false));
+        assertEquals(200 * 1024, off.downloadBytes(true));
         assertEquals(
                 0,
                 new EngineSettings.Speed(0, 0, 0, 0, false, false, 0, 0, EnumSet.noneOf(DayOfWeek.class), false)
-                        .effectiveUploadBytes(at(19, 12, 0)),
+                        .uploadBytes(false),
                 "0 is none");
     }
 }

@@ -7,6 +7,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Slower, or paused, on battery and on a metered network.** Settings → Speed → Battery and
+  network: while the computer runs on its battery, or the network is one paid by the byte (a
+  phone's hotspot), use the alternative speed limits or pause the torrents, resumed when it ends.
+  The status bar's pill says why ("Alt speed: on battery"). Turning the alternative limits on or
+  off by hand now holds until the schedule, the battery or the network next changes, as in
+  qBittorrent, where before the schedule kept them on whatever the pill said. The switch is this
+  machine's and no longer travels with Settings sync. Read from UPower and NetworkManager on
+  Linux, `pmset` on macOS (which has no way to tell a metered network) and the system on Windows.
+
 - **Files you already have are not downloaded again.** When a new torrent holds a file that
   another torrent in the list has complete (v2 and hybrid torrents, matched by content, whatever
   the names), the Add dialog offers to link it into place: no bytes written, the two torrents

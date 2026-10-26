@@ -117,18 +117,14 @@ public record EngineSettings(
                     || (scheduleDays.contains(today.minus(1)) && minute < scheduleTo);
         }
 
-        /** The alternative pair is in force now, by hand or by schedule. */
-        public boolean alternativeActive(java.time.LocalDateTime now) {
-            return alternativeOn || scheduleActive(now);
+        /** A pair's download limit, bytes per second, 0 for none. */
+        public int downloadBytes(boolean alternative) {
+            return (alternative ? alternativeDownload : download) * 1024;
         }
 
-        /** The download limit in force now, bytes per second, 0 for none. */
-        public int effectiveDownloadBytes(java.time.LocalDateTime now) {
-            return (alternativeActive(now) ? alternativeDownload : download) * 1024;
-        }
-
-        public int effectiveUploadBytes(java.time.LocalDateTime now) {
-            return (alternativeActive(now) ? alternativeUpload : upload) * 1024;
+        /** A pair's upload limit, bytes per second, 0 for none. */
+        public int uploadBytes(boolean alternative) {
+            return (alternative ? alternativeUpload : upload) * 1024;
         }
 
         public Speed withAlternativeOn(boolean on) {

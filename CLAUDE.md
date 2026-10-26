@@ -425,10 +425,27 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   (`DefinitionStore.remove`). An endpoints file that does not parse fails the round: read as empty
   it would remove every server everywhere. The URL is the identity, so a URL edited on one machine
   is a removal and an addition elsewhere, and the key is typed again there.
-- **Speed limits are re-evaluated every minute** (`Engine.refreshLimits(now)`, from the window's
-  poller) and after any settings change; the pair in force is `Speed.alternativeActive(now)`,
-  a pure rule with the overnight case tested. Limits are KiB/s in settings and bytes/s in the
-  pack; 0 is "none" on both sides.
+- **The session decides the speed pair; the engines only apply it.** `Session.refreshLimits()`
+  runs every minute, after any settings change and when a condition changes
+  (`Conditions.Source.onChange`), under a lock of its own (`start`/`stop` hold the session's, and
+  `stop` waits for the poll thread). `session.SpeedMode` is the rule: `auto` (the battery's, then
+  the network's, then the schedule's alternative pair, and a condition's pause apart), `next` (the
+  one switch `speed.altOn`, flipped to the decision only when the decision differs from
+  `speed.autoWas`, so a person's flip holds until the next change, as qBittorrent's does, and a
+  boundary passed while closed is caught up at start; nothing recorded is "none", so an upgrade
+  mid-schedule keeps the old behaviour), `shown` (the pill's reason). `Engine.refreshLimits(boolean)`
+  puts the pair in force (libtorrent keeps it for `toPack`; `WithDownloads` shares its download
+  limit among the links); the Transmission daemon keeps its own schedule and answers with its own.
+  `ConditionPause` pauses what runs when a condition starts and resumes exactly those when it ends,
+  held ids in `speed.conditionHeld`; unlike the leak check's pause, nothing is paused again while it
+  holds. `os.SystemConditions`: UPower `OnBattery` and NetworkManager `Metered` (1 or 3) on the
+  system bus with `PropertiesChanged`, `pmset -g batt` on macOS (no metered there:
+  `Conditions.seesMetered`), `GetSystemPowerStatus` through FFM and Windows PowerShell 5.1's
+  `NetworkCostType` every five minutes on Windows; created on a virtual thread. `Capability.SPEED_CONDITIONS`
+  is libtorrent's. `-Dtorrenta.conditions=battery,metered` fixes them for a capture; the pill is
+  in `status-bar=`. `speed.altOn`, `speed.autoWas` and the pause's keys are this machine's
+  (`SyncKeys.LOCAL_KEYS`). Limits are KiB/s in settings and bytes/s in the pack; 0 is "none" on
+  both sides.
 - **libtorrent's share limits pause nothing.** `share_ratio_limit` and `seed_time_limit` only rank
   seeds for the queue (`seed_rank`); the pausing or removing is `ShareLimit.decide` in the session's
   poll (`Session.enforceShareLimits`), once a second, against `Torrent.seedingTime` (`finished_duration`, so a torrent with files

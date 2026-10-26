@@ -1441,12 +1441,13 @@ class LibtorrentEngineTest {
             engine.start();
             assertEquals(1000 * 1024, engine.rateLimitsForTest()[0], "normal pair at start");
             assertEquals(100 * 1024, engine.rateLimitsForTest()[1]);
-            engine.applySettings(settings.withSpeed(speed.withAlternativeOn(true)));
-            assertTrue(engine.refreshLimits(java.time.LocalDateTime.now()), "alternative in force");
+            // The session decides the pair; the engine puts it in force and keeps it through a settings change.
+            assertTrue(engine.refreshLimits(true), "alternative in force");
             assertEquals(200 * 1024, engine.rateLimitsForTest()[0]);
             assertEquals(20 * 1024, engine.rateLimitsForTest()[1]);
-            engine.applySettings(settings.withSpeed(speed.withAlternativeOn(false)));
-            assertFalse(engine.refreshLimits(java.time.LocalDateTime.now()));
+            engine.applySettings(settings);
+            assertEquals(200 * 1024, engine.rateLimitsForTest()[0], "a settings change keeps the pair in force");
+            assertFalse(engine.refreshLimits(false));
             assertEquals(1000 * 1024, engine.rateLimitsForTest()[0], "back to normal");
         }
     }

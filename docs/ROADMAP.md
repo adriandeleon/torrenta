@@ -609,7 +609,13 @@ remote caller's behalf.
 
 ### 1.4 — Protocol extras
 
-1. **Battery and metered networks** (1–2 PRs): `os.PowerState` and `os.NetworkCost` behind a pure
+1. **Battery and metered networks** (done, in one PR: `os.Conditions` and `os.SystemConditions`,
+   the decision moved into the session, which tells the engines the pair through
+   `Engine.refreshLimits(alternative)`; the person's switch and the decision share `speed.altOn`,
+   flipped by the decision only when it changes (`speed.autoWas`), which also catches up a change
+   made while the app was closed; a condition's pause is `session.ConditionPause`, which pauses at
+   the start only, so a torrent resumed by hand stays resumed; `speed.altOn` became this
+   machine's): `os.PowerState` and `os.NetworkCost` behind a pure
    `Conditions(onBattery, metered)`: UPower's `OnBattery` and NetworkManager's `Metered` on the
    system bus through dbus-java, with their `PropertiesChanged`; `pmset -g batt` on macOS, which
    has no command for Low Data Mode, so that row is hidden there rather than faked;

@@ -329,11 +329,12 @@ public interface Engine extends AutoCloseable {
     default void rebind() throws EngineException {}
 
     /**
-     * Re-evaluates the speed limits for this moment: the alternative pair if its schedule says so
-     * or it is on by hand, the normal pair otherwise. Called every minute by the window and after
-     * any change. Returns whether the alternative pair is in force.
+     * Puts the speed pair the session decided in force ({@code session.SpeedMode}: the person's
+     * switch, the schedule, the battery and the network's cost): the alternative pair when {@code
+     * alternative}, the normal one otherwise. Called every minute and after any change. Returns
+     * the pair in force, which a daemon that keeps its own schedule decides itself.
      */
-    boolean refreshLimits(java.time.LocalDateTime now) throws EngineException;
+    boolean refreshLimits(boolean alternative) throws EngineException;
 
     /** Replaces the IP filter: peers in these ranges are refused. Empty clears it. */
     void setIpFilter(List<IpRange> ranges) throws EngineException;
@@ -486,6 +487,11 @@ public interface Engine extends AutoCloseable {
         SWARM_PREVIEW,
         /** Another client's torrents brought over from their resume data, without a check. */
         IMPORT_RESUME,
+        /**
+         * The speed pair and a pause decided by this machine's battery and network cost, as rules
+         * of the session's; a daemon keeps its own schedule.
+         */
+        SPEED_CONDITIONS,
         /**
          * A new torrent's files found complete on disk in another torrent ({@link #contentIndex})
          * and linked or copied into place before the add, rather than downloaded again. A daemon's

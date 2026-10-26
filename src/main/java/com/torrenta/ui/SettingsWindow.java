@@ -1109,6 +1109,8 @@ final class SettingsWindow {
     private Spinner<Integer> altDown;
     private Spinner<Integer> altUp;
     private CheckBox altOn;
+    private ChoiceBox<com.torrenta.session.SpeedMode.Rule> onBattery;
+    private ChoiceBox<com.torrenta.session.SpeedMode.Rule> onMetered;
     private CheckBox scheduleOn;
     private TextField scheduleFrom;
     private TextField scheduleTo;
@@ -4099,6 +4101,29 @@ final class SettingsWindow {
         }
         row(Category.SPEED, schedule, tr("settings.speed.days"), "", days, tr("settings.speed.days.keywords"));
 
+        // What the machine runs on: the battery everywhere, a metered network where it can be read.
+        VBox conditions = section(page, tr("settings.speed.conditions"));
+        onBattery = ruleChoice(Settings.SPEED_ON_BATTERY);
+        row(
+                Category.SPEED,
+                conditions,
+                tr("settings.speed.onBattery"),
+                tr("settings.speed.onBattery.desc"),
+                onBattery,
+                tr("settings.speed.onBattery.keywords"),
+                Engine.Capability.SPEED_CONDITIONS);
+        onMetered = ruleChoice(Settings.SPEED_ON_METERED);
+        if (com.torrenta.os.Conditions.seesMetered(System.getProperty("os.name", ""))) {
+            row(
+                    Category.SPEED,
+                    conditions,
+                    tr("settings.speed.onMetered"),
+                    tr("settings.speed.onMetered.desc"),
+                    onMetered,
+                    tr("settings.speed.onMetered.keywords"),
+                    Engine.Capability.SPEED_CONDITIONS);
+        }
+
         VBox options = section(page, tr("settings.speed.options"));
         countOverhead = bool(Settings.SPEED_COUNT_OVERHEAD);
         row(
@@ -4109,6 +4134,18 @@ final class SettingsWindow {
                 countOverhead,
                 tr("settings.speed.countOverhead.keywords"),
                 Engine.Capability.OVERHEAD_IN_LIMITS);
+    }
+
+    /** A condition's rule: nothing, the alternative pair, or a pause; applied at once. */
+    private ChoiceBox<com.torrenta.session.SpeedMode.Rule> ruleChoice(String key) {
+        ChoiceBox<com.torrenta.session.SpeedMode.Rule> box = new ChoiceBox<>();
+        box.getItems().addAll(com.torrenta.session.SpeedMode.Rule.values());
+        box.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.set(key, now.name());
+            changed();
+        });
+        return box;
     }
 
     private void buildQueue(VBox page) {
@@ -4374,6 +4411,8 @@ final class SettingsWindow {
             scheduleTo.setText(Settings.formatMinutes(sp.scheduleTo()));
             scheduleDays.forEach((day, box) -> box.setSelected(sp.scheduleDays().contains(day)));
             countOverhead.setSelected(sp.countOverhead());
+            onBattery.setValue(com.torrenta.session.SpeedMode.Rule.byName(settings.get(Settings.SPEED_ON_BATTERY, "")));
+            onMetered.setValue(com.torrenta.session.SpeedMode.Rule.byName(settings.get(Settings.SPEED_ON_METERED, "")));
             EngineSettings.Queue q = e.queue();
             activeDownloads.getValueFactory().setValue(q.activeDownloads());
             activeSeeds.getValueFactory().setValue(q.activeSeeds());

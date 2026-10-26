@@ -42,7 +42,13 @@ public final class SyncKeys {
             "ipfilter.lastRefreshEpochMs",
             "updates.lastCheckEpochMs",
             "updates.dismissedVersion",
-            "proxy.password");
+            "proxy.password",
+            // The switch follows this machine's battery and network now: one unplugged laptop
+            // must not slow the others down.
+            "speed.altOn",
+            "speed.autoWas",
+            "speed.conditionPausing",
+            "speed.conditionHeld");
 
     private SyncKeys() {}
 

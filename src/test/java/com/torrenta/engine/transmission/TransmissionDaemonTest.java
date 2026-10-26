@@ -316,7 +316,7 @@ class TransmissionDaemonTest {
                     sp.scheduleTo(),
                     sp.scheduleDays(),
                     sp.countOverhead())));
-            assertTrue(e.refreshLimits(java.time.LocalDateTime.now()), "the alternative pair is on in the daemon");
+            assertTrue(e.refreshLimits(false), "the alternative pair is on in the daemon, whatever is asked");
             assertEquals(2, e.torrents().size());
             assertTrue(e.stats().sessionSeconds() >= 0);
 

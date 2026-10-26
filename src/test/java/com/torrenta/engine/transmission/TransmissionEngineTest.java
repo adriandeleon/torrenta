@@ -896,7 +896,7 @@ class TransmissionEngineTest {
     void refreshLimitsAsksTheDaemonWhetherItsAlternativePairIsOn() throws Exception {
         TransmissionEngine e = engine();
         server.answer("session-get", StubRpcServer.success(Map.of("alt-speed-enabled", true)));
-        assertTrue(e.refreshLimits(java.time.LocalDateTime.now()));
+        assertTrue(e.refreshLimits(false), "the daemon keeps its own schedule");
         assertEquals(
                 List.of("alt-speed-enabled"),
                 server.last("session-get").arguments().get("fields"));

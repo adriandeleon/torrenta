@@ -3,7 +3,6 @@ package com.torrenta.webapi;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
-import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -141,12 +140,17 @@ public final class SessionBackend implements WebApi.Backend {
     }
 
     @Override
+    public boolean alternativeInForce() {
+        return session.alternativeInForce();
+    }
+
+    @Override
     public WebApi.Transfer transfer() {
         Engine e = session.engine();
         EngineSettings.Speed speed = settings.engineSettings().speed();
-        LocalDateTime now = LocalDateTime.now();
-        long down = speed.effectiveDownloadBytes(now);
-        long up = speed.effectiveUploadBytes(now);
+        boolean alternative = alternativeInForce();
+        long down = speed.downloadBytes(alternative);
+        long up = speed.uploadBytes(alternative);
         if (e == null) return new WebApi.Transfer(0, 0, 0, 0, down, up, 0, "disconnected");
         Engine.Rates rates = e.rates();
         SessionStats stats = e.stats();
@@ -164,7 +168,7 @@ public final class SessionBackend implements WebApi.Backend {
                 Math.max(0, stats.allTimeUpload()),
                 Math.max(0, stats.peersConnected()),
                 e.capabilities().has(Engine.Capability.LOCAL_FILES) ? freeSpace(settings.downloadDir()) : -1,
-                speed.alternativeActive(now),
+                alternative,
                 queue.activeDownloads() > 0 || queue.activeSeeds() > 0 || queue.activeLimit() > 0,
                 e.connectivity().externalAddress(),
                 Math.max(0, stats.queuedDiskJobs()),

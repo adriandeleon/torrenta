@@ -228,6 +228,24 @@ public final class Settings {
     public static final String SPEED_SCHEDULE_DAYS = "speed.schedule.days";
     public static final String SPEED_COUNT_OVERHEAD = "speed.countOverhead";
 
+    /** What being on battery does: {@code NONE}, {@code ALTERNATIVE} or {@code PAUSE} ({@code session.SpeedMode.Rule}). */
+    public static final String SPEED_ON_BATTERY = "speed.onBattery";
+
+    /** What a metered network does: as {@link #SPEED_ON_BATTERY}. */
+    public static final String SPEED_ON_METERED = "speed.onMetered";
+
+    /**
+     * The automatic decision last applied to {@link #SPEED_ALT_ON} ({@code session.SpeedMode}), so
+     * the switch is flipped only when that decision changes; this machine's.
+     */
+    public static final String SPEED_AUTO_WAS = "speed.autoWas";
+
+    /** A condition's pause holds the torrents now; this machine's. */
+    public static final String SPEED_CONDITION_PAUSING = "speed.conditionPausing";
+
+    /** The torrents a condition's pause holds, comma-separated ids, to resume exactly those; this machine's. */
+    public static final String SPEED_CONDITION_HELD = "speed.conditionHeld";
+
     public static final String[] SPEED_KEYS = {
         SPEED_DOWNLOAD,
         SPEED_UPLOAD,
@@ -238,7 +256,9 @@ public final class Settings {
         SPEED_SCHEDULE_FROM,
         SPEED_SCHEDULE_TO,
         SPEED_SCHEDULE_DAYS,
-        SPEED_COUNT_OVERHEAD
+        SPEED_COUNT_OVERHEAD,
+        SPEED_ON_BATTERY,
+        SPEED_ON_METERED
     };
 
     /** Queue and share limits page. Active counts are 0 for none; the ratio is a decimal, 0 for none. */
