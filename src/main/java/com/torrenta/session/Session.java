@@ -30,6 +30,7 @@ import com.torrenta.content.ContentCheck;
 import com.torrenta.content.UnsafeContent;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
+import com.torrenta.engine.CreatedTorrent;
 import com.torrenta.engine.DedupFiles;
 import com.torrenta.engine.DedupMode;
 import com.torrenta.engine.DedupPlan;
@@ -44,6 +45,7 @@ import com.torrenta.engine.Inputs;
 import com.torrenta.engine.LinkRequest;
 import com.torrenta.engine.MutableSource;
 import com.torrenta.engine.Priority;
+import com.torrenta.engine.Publication;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
@@ -195,6 +197,9 @@ public final class Session {
     private volatile Conditions.Source conditions = Conditions.Source.NONE;
 
     private volatile ScheduledExecutorService poller;
+    /** The updatable torrents this machine publishes, {@code keys/<name>.key}. */
+    private final com.torrenta.store.KeyStore keys;
+
     private volatile ShareLimit globalShareLimit = ShareLimit.NONE;
     private volatile Map<String, ShareLimit> shareOverrides = Map.of();
 
@@ -215,6 +220,7 @@ public final class Session {
         this.watchStore = watchStore;
         this.host = host;
         this.ipFilter = new IpFilterController(settings, configDir);
+        this.keys = new com.torrenta.store.KeyStore(configDir);
         this.rss = new RssService(
                 rssStore,
                 new FeedFetcher(),
@@ -423,6 +429,12 @@ public final class Session {
                 FOLLOW_TICK_MINUTES,
                 TimeUnit.MINUTES);
         p.scheduleAtFixedRate(this::letGoOfOldVersions, 30, 30, TimeUnit.SECONDS);
+        // What this machine publishes, put back in the DHT when it is no longer found there.
+        p.scheduleAtFixedRate(
+                () -> Thread.ofVirtual().name("republish").start(this::republish),
+                REPUBLISH_FIRST_MINUTES,
+                REPUBLISH_MINUTES,
+                TimeUnit.MINUTES);
         engineUp.countDown();
         startIpFilter(engine);
         watcher = new WatchFolders(engine, new Watching());
@@ -1365,6 +1377,149 @@ public final class Session {
             }
         } catch (EngineException | RuntimeException ex) {
             LOG.log(Level.WARNING, "Letting go of an older version", ex);
+        }
+    }
+
+    // ---- publishing updatable torrents (BEP 46) ----------------------------------------------------
+
+    /** How long a put is given: libtorrent looks the address up before it stores. */
+    static final java.time.Duration PUT = java.time.Duration.ofSeconds(90);
+
+    /** The first republish after a start, and then how often: items leave the DHT in about two hours. */
+    static final long REPUBLISH_FIRST_MINUTES = 1;
+
+    static final long REPUBLISH_MINUTES = 60;
+
+    /** One publishing round at a time: two would read the same number and climb past each other. */
+    private final Object publishing = new Object();
+
+    private final java.util.concurrent.atomic.AtomicBoolean republishing =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /**
+     * What a round did.
+     *
+     * @param publication as saved after it
+     * @param nodes the DHT nodes the last put reached, -1 when nothing had to be put
+     * @param reached whether followers will take it: the number is above any they had seen
+     */
+    public record Published(Publication publication, int nodes, boolean reached) {}
+
+    /** What this machine publishes, by name. */
+    public List<Publication> publications() {
+        return keys.list();
+    }
+
+    /** The publication whose current version is torrent {@code id}. */
+    public java.util.Optional<Publication> publicationOf(String id) {
+        return keys.ofTorrent(id);
+    }
+
+    /** Why {@code name} cannot name a new publication, or empty. */
+    public String publicationProblem(String name) {
+        return keys.problem(name);
+    }
+
+    /** Where the keys are, for the dialog's warning. */
+    public Path keysDir() {
+        return keys.dir();
+    }
+
+    /**
+     * Any thread but a toolkit's, and blocking: a new key pair under {@code name}, saved before
+     * anything is put, and the torrent just made published as its first version.
+     */
+    public Published publish(Engine e, String name, CreatedTorrent made) throws EngineException, IOException {
+        String why = keys.problem(name);
+        if (!why.isEmpty()) throw new EngineException(why);
+        if (!e.capabilities().has(Engine.Capability.MUTABLE)) throw new EngineException(tr("engine.error.noMutable"));
+        Publication p = new Publication(
+                name.trim(),
+                e.newMutableKey(),
+                new byte[0],
+                PublishRules.infoHashOf(made.v1(), made.v2()),
+                0,
+                idOf(made));
+        keys.save(p);
+        return announced(putVersion(e, p));
+    }
+
+    /** Any thread but a toolkit's, and blocking: the torrent just made as {@code name}'s next version. */
+    public Published newVersion(Engine e, String name, CreatedTorrent made) throws EngineException, IOException {
+        Publication p = keys.load(name).orElseThrow(() -> new EngineException(tr("publish.problem.noKey", name)));
+        p = p.withVersion(PublishRules.infoHashOf(made.v1(), made.v2()), idOf(made));
+        keys.save(p);
+        return announced(putVersion(e, p));
+    }
+
+    private static String idOf(CreatedTorrent made) {
+        return made.seeding().map(Torrent::id).orElse(made.id());
+    }
+
+    private Published announced(Published done) {
+        Publication p = done.publication();
+        String torrent = p.torrentId();
+        if (done.reached()) {
+            tellEvent(EngineEvent.info(torrent, p.name(), tr("publish.event.published", p.name(), p.seq(), p.uri())));
+        } else {
+            tellReport(EngineEvent.warning(torrent, p.name(), tr("publish.event.notYet", p.name())));
+        }
+        return done;
+    }
+
+    /**
+     * The publication's current version put in the DHT, as many times as it takes to go above the
+     * recorded number ({@link PublishRules}), the record saved after each put. A put no node took
+     * ends the round: the next one would find nothing either.
+     */
+    Published putVersion(Engine e, Publication p) throws EngineException, IOException {
+        synchronized (publishing) {
+            try {
+                int needed = PublishRules.putsNeeded(p, e.lookupMutable(p.source(), LOOKUP));
+                long before = p.seq();
+                int nodes = -1;
+                for (int i = 0; i < needed; i++) {
+                    Engine.MutablePut put = e.putMutable(p.key(), p.salt(), PublishRules.item(p), PUT);
+                    nodes = put.nodes();
+                    p = p.published(put.seq());
+                    keys.save(p);
+                    if (put.nodes() == 0 || put.seq() > before) break;
+                }
+                return new Published(p, nodes, needed == 0 || (p.seq() > before && nodes != 0));
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new EngineException(ex.getMessage(), ex);
+            }
+        }
+    }
+
+    /**
+     * A virtual thread, hourly: each publication looked up, and put again when the DHT no longer
+     * holds its current version at its number. Quiet unless it had to climb or could not.
+     */
+    void republish() {
+        Engine e = engine;
+        if (e == null || !e.capabilities().has(Engine.Capability.MUTABLE)) return;
+        if (!republishing.compareAndSet(false, true)) return;
+        try {
+            for (Publication p : keys.list()) {
+                if (p.infoHash().isEmpty()) continue;
+                try {
+                    Published done = putVersion(e, p);
+                    if (!done.reached()) {
+                        tellReport(EngineEvent.warning(p.torrentId(), p.name(), tr("publish.event.notYet", p.name())));
+                    } else if (done.nodes() >= 0) {
+                        LOG.log(
+                                Level.FINE,
+                                "Republished " + p.name() + " as "
+                                        + done.publication().seq());
+                    }
+                } catch (EngineException | IOException ex) {
+                    LOG.log(Level.INFO, "Republishing " + p.name() + ": " + ex.getMessage());
+                }
+            }
+        } finally {
+            republishing.set(false);
         }
     }
 

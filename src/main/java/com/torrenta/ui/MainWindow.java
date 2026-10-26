@@ -363,6 +363,12 @@ public final class MainWindow {
     /** The engine could not start: the empty state says why and offers Retry and another profile. */
     private final javafx.beans.property.BooleanProperty engineDown = new javafx.beans.property.SimpleBooleanProperty();
     /** Bumped on the FX thread whenever a "pick files when ready" mark is set or cleared. */
+    /** What this machine publishes, by the current version's id; FX thread. */
+    private Map<String, com.torrenta.engine.Publication> publishedById = Map.of();
+    /** Bumped when {@link #publishedById} changes, for the commands' bindings. */
+    private final javafx.beans.property.IntegerProperty publicationMarks =
+            new javafx.beans.property.SimpleIntegerProperty();
+
     private final javafx.beans.property.IntegerProperty pickFilesMarks =
             new javafx.beans.property.SimpleIntegerProperty();
 
@@ -1368,6 +1374,10 @@ public final class MainWindow {
                             action.substring("search-keys:".length()).split("\\+"))
                     .map(key -> KeyCode.valueOf(key.trim().toUpperCase(java.util.Locale.ROOT)))
                     .toList());
+        } else if (action.startsWith("create-publish:")) {
+            // Publish as updatable ticked and the key's name typed, in the dialog create opened.
+            createTorrent();
+            if (createDialog != null) createDialog.publishForCapture(action.substring("create-publish:".length()));
         } else if (action.startsWith("create")) {
             // create, create:<path> (the dialog with the source filled in), create-run:<path> (and
             // created into a temporary file with seeding on, the Save As chooser skipped).
@@ -1687,6 +1697,7 @@ public final class MainWindow {
         this.engine = engine;
         this.engineDescription = engine.description();
         applyCapabilities(engine.capabilities());
+        refreshPublications();
         showEngineProblem(null);
         applyTitle();
         engineUp.countDown();
@@ -2671,8 +2682,89 @@ public final class MainWindow {
             setStatus(tr("status.engineStarting"));
             return;
         }
-        if (createDialog == null || !createDialog.isShowing()) createDialog = new CreateDialog(stage, e, settings);
+        if (createDialog == null || !createDialog.isShowing())
+            createDialog = new CreateDialog(
+                    stage, e, settings, capabilities.has(Engine.Capability.MUTABLE) ? publisher(e) : null);
         createDialog.show();
+    }
+
+    /** The session's publishing, for the Create dialog; each round refreshes what the commands know. */
+    private CreateDialog.Publisher publisher(Engine e) {
+        return new CreateDialog.Publisher() {
+            @Override
+            public String problem(String name) {
+                return session.publicationProblem(name);
+            }
+
+            @Override
+            public Path keysDir() {
+                return session.keysDir();
+            }
+
+            @Override
+            public Session.Published publish(String name, com.torrenta.engine.CreatedTorrent made)
+                    throws EngineException, IOException {
+                try {
+                    return session.publish(e, name, made);
+                } finally {
+                    refreshPublications();
+                }
+            }
+
+            @Override
+            public Session.Published newVersion(String name, com.torrenta.engine.CreatedTorrent made)
+                    throws EngineException, IOException {
+                try {
+                    return session.newVersion(e, name, made);
+                } finally {
+                    refreshPublications();
+                }
+            }
+        };
+    }
+
+    /** Any thread: what this machine publishes, by the current version's id, read off the FX thread. */
+    private void refreshPublications() {
+        Thread.ofVirtual().name("publications").start(() -> {
+            Map<String, com.torrenta.engine.Publication> byId = new java.util.HashMap<>();
+            for (com.torrenta.engine.Publication p : session.publications())
+                if (!p.torrentId().isEmpty()) byId.put(p.torrentId(), p);
+            Platform.runLater(() -> {
+                publishedById = Map.copyOf(byId);
+                publicationMarks.set(publicationMarks.get() + 1);
+            });
+        });
+    }
+
+    /** The publication of the one torrent selected, if it is a published one's current version. */
+    private java.util.Optional<com.torrenta.engine.Publication> selectedPublication() {
+        List<Torrent> selected = selectedTorrents();
+        return selected.size() == 1
+                ? java.util.Optional.ofNullable(
+                        publishedById.get(selected.getFirst().id()))
+                : java.util.Optional.empty();
+    }
+
+    /**
+     * Torrent → New Version…: the Create dialog on the published torrent's content, publishing what
+     * it makes under the same key as the next version.
+     */
+    private void newVersion() {
+        java.util.Optional<com.torrenta.engine.Publication> p = selectedPublication();
+        if (p.isEmpty()) return;
+        Torrent t = selectedTorrents().getFirst();
+        createTorrent();
+        if (createDialog != null)
+            createDialog.forNewVersion(p.get(), Path.of(t.savePath()).resolve(t.name()));
+    }
+
+    private void copyUpdatableLink() {
+        selectedPublication().ifPresent(p -> {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(p.uri());
+            Clipboard.getSystemClipboard().setContent(content);
+            setStatus(tr("status.copied.updatableLink"));
+        });
     }
 
     private void addTorrentFile() {
@@ -3920,7 +4012,25 @@ public final class MainWindow {
                         settings::filesToPick),
                 table.getSelectionModel().getSelectedItems(),
                 pickFilesMarks);
+        BooleanBinding published = Bindings.createBooleanBinding(
+                () -> selectedPublication().isPresent(),
+                table.getSelectionModel().getSelectedItems(),
+                publicationMarks);
         List<Command> all = new ArrayList<>(List.of(
+                new Command(
+                        "new-version",
+                        tr("command.newVersion"),
+                        null,
+                        null,
+                        gate("new-version", published),
+                        this::newVersion),
+                new Command(
+                        "copy-updatable-link",
+                        tr("command.copyUpdatableLink"),
+                        null,
+                        null,
+                        gate("copy-updatable-link", published),
+                        this::copyUpdatableLink),
                 new Command(
                         "create",
                         tr("command.create"),
@@ -4547,7 +4657,14 @@ public final class MainWindow {
         items.add(categoryMenu());
         items.add(menuItem("edit-tags"));
         items.add(new SeparatorMenuItem());
-        for (String id : List.of("copy-name", "copy-hash", "copy-magnet", "export-torrent", "open-folder")) {
+        for (String id : List.of(
+                "copy-name",
+                "copy-hash",
+                "copy-magnet",
+                "copy-updatable-link",
+                "export-torrent",
+                "new-version",
+                "open-folder")) {
             items.add(menuItem(id));
         }
         items.add(new SeparatorMenuItem());

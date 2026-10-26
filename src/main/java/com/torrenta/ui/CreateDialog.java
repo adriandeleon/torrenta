@@ -47,6 +47,7 @@ import com.torrenta.engine.CreatedTorrent;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.PieceSize;
+import com.torrenta.session.Session;
 import com.torrenta.store.Settings;
 
 import static com.torrenta.i18n.Messages.tr;
@@ -63,8 +64,25 @@ import static com.torrenta.i18n.Messages.tr;
  * worker stops at the next piece, and a generation counter drops whatever a stale run still
  * reports. The file is written beside its final name and moved into place, so an interrupted
  * write leaves no half torrent.
+ *
+ * <p>With a {@link Publisher} (an engine with {@code Capability.MUTABLE}) the torrent can be
+ * published as updatable (BEP 46): a key made under a name, the torrent seeded and put in the
+ * DHT, and the link that follows it shown with the hashes. Opened {@link #forNewVersion} on a
+ * published torrent, the same key publishes what is created as its next version.
  */
 final class CreateDialog {
+
+    /** What publishing needs of the session, run off the toolkit thread. */
+    interface Publisher {
+        /** Why a new key cannot have this name, or empty. */
+        String problem(String name);
+
+        Path keysDir();
+
+        Session.Published publish(String name, CreatedTorrent made) throws EngineException, IOException;
+
+        Session.Published newVersion(String name, CreatedTorrent made) throws EngineException, IOException;
+    }
 
     private final Stage stage = new Stage();
     private final Engine engine;
@@ -84,6 +102,13 @@ final class CreateDialog {
     private final TextArea webSeeds = new TextArea();
     private final TextField comment = new TextField();
     private final TextField sourceTag = new TextField();
+    private final CheckBox publish = new CheckBox(tr("dialog.create.publish"));
+    private final TextField publishName = new TextField();
+    private final Label publishNote = new Label();
+    private final Publisher publisher;
+    /** The publication this creates the next version of, or null for a torrent of its own. */
+    private String newVersionOf;
+
     private final VBox form;
 
     private final ProgressBar bar = new ProgressBar();
@@ -92,6 +117,9 @@ final class CreateDialog {
     private final TextField v1 = value();
     private final TextField v2 = value();
     private final TextField magnet = value();
+    private final TextField updatable = value();
+    private final Label updatableLabel = muted(tr("dialog.create.updatableLink"));
+    private final Button updatableCopy = copyButton(updatable);
     private final Label outcome = new Label();
     private final GridPane resultBox = new GridPane();
     private final Label problem = new Label();
@@ -111,12 +139,16 @@ final class CreateDialog {
     private volatile int hashGeneration;
 
     private CreatedTorrent made;
+    /** What publishing said, for the capture: empty before, else a line. */
+    private String publishedLine = "";
+
     private Path savedTo;
     private boolean seedAsked;
 
-    CreateDialog(Window owner, Engine engine, Settings settings) {
+    CreateDialog(Window owner, Engine engine, Settings settings, Publisher publisher) {
         this.engine = engine;
         this.settings = settings;
+        this.publisher = publisher;
         stage.initOwner(owner);
         stage.initModality(Modality.NONE);
         stage.setTitle(tr("dialog.create.title"));
@@ -159,6 +191,20 @@ final class CreateDialog {
         HBox flags = new HBox(18, isPrivate, seed, align);
         flags.setAlignment(Pos.CENTER_LEFT);
 
+        // ---- publishing as updatable ----
+        publishName.setPromptText(tr("dialog.create.publish.prompt"));
+        publishName.setPrefColumnCount(18);
+        publishName.disableProperty().bind(publish.selectedProperty().not());
+        publishNote.getStyleClass().add("dialog-hint");
+        publishNote.setWrapText(true);
+        publish.selectedProperty().addListener((o, was, now) -> publishChanged());
+        HBox publishRow = new HBox(10, publish, publishName);
+        publishRow.setAlignment(Pos.CENTER_LEFT);
+        VBox publishBox = new VBox(4, publishRow, publishNote);
+        publishBox.setVisible(publisher != null);
+        publishBox.setManaged(publisher != null);
+        publishChanged();
+
         // ---- trackers and web seeds ----
         trackers.setPromptText(tr("dialog.create.trackers.prompt"));
         trackers.setPrefRowCount(5);
@@ -187,6 +233,7 @@ final class CreateDialog {
                 new VBox(4, muted(tr("dialog.create.fileOrFolder")), sourceRow, drop),
                 options,
                 flags,
+                publishBox,
                 lists,
                 texts);
         VBox.setVgrow(form, Priority.ALWAYS);
@@ -209,9 +256,14 @@ final class CreateDialog {
         resultBox.addRow(0, muted(tr("dialog.create.infoHashV1")), v1, copyButton(v1));
         resultBox.addRow(1, muted(tr("dialog.create.infoHashV2")), v2, copyButton(v2));
         resultBox.addRow(2, muted(tr("dialog.create.magnet")), magnet, copyButton(magnet));
+        resultBox.addRow(3, updatableLabel, updatable, updatableCopy);
+        for (javafx.scene.Node n : List.of(updatableLabel, updatable, updatableCopy)) {
+            n.visibleProperty().bind(updatable.textProperty().isNotEmpty());
+            n.managedProperty().bind(n.visibleProperty());
+        }
         outcome.getStyleClass().add("dialog-hint");
         outcome.setWrapText(true);
-        resultBox.add(outcome, 0, 3, 3, 1);
+        resultBox.add(outcome, 0, 4, 3, 1);
         resultBox.setVisible(false);
         resultBox.managedProperty().bind(resultBox.visibleProperty());
 
@@ -270,6 +322,22 @@ final class CreateDialog {
         stage.show();
         source.requestFocus();
         source.end();
+    }
+
+    /**
+     * The next version of {@code p}: its content as the source, publishing on and fixed to its
+     * key. A run already showing its result starts over.
+     */
+    void forNewVersion(com.torrenta.engine.Publication p, Path content) {
+        if (hashing.get()) return;
+        newVersionOf = p.name();
+        publishName.setText(p.name());
+        publish.setSelected(true);
+        publish.setDisable(true);
+        publishName.setEditable(false);
+        resultBox.setVisible(false);
+        publishChanged();
+        setSource(content);
     }
 
     /** Fills the source in, as a drop or the capture hook does; the rest stays as it is. */
@@ -336,6 +404,20 @@ final class CreateDialog {
                 updateSummary();
             });
         });
+    }
+
+    /** Publishing needs a seed: someone has to have the torrent the link names. */
+    private void publishChanged() {
+        boolean on = publish.isSelected();
+        if (on) seed.setSelected(true);
+        seed.setDisable(on);
+        if (publisher == null) return;
+        publishNote.setText(
+                newVersionOf != null
+                        ? tr("dialog.create.publish.newVersion", newVersionOf)
+                        : tr("dialog.create.publish.note", publisher.keysDir().toString()));
+        publishNote.setVisible(on);
+        publishNote.setManaged(on);
     }
 
     private void formatChanged() {
@@ -439,6 +521,13 @@ final class CreateDialog {
             problem.setText(why);
             return;
         }
+        if (publish.isSelected() && publisher != null && newVersionOf == null) {
+            String name = publisher.problem(publishName.getText());
+            if (!name.isEmpty()) {
+                problem.setText(name);
+                return;
+            }
+        }
         Path path = Path.of(source.getText().trim());
         FileChooser chooser = new FileChooser();
         chooser.setTitle(tr("dialog.create.saveAs"));
@@ -464,8 +553,13 @@ final class CreateDialog {
         CreateRequest request = request(path);
         int generation = ++hashGeneration;
         seedAsked = request.startSeeding();
+        boolean publishing = publish.isSelected() && publisher != null;
+        String name = publishName.getText().trim();
+        String nextOf = newVersionOf;
         made = null;
         savedTo = null;
+        publishedLine = "";
+        updatable.setText("");
         resultBox.setVisible(false);
         problem.setText("");
         bar.setProgress(-1);
@@ -484,6 +578,13 @@ final class CreateDialog {
                     return true;
                 });
                 write(target, result.bytes());
+                if (publishing) {
+                    Platform.runLater(() -> {
+                        if (generation != hashGeneration) return;
+                        bar.setProgress(-1);
+                        progressLine.setText(tr("dialog.create.publishing"));
+                    });
+                }
             } catch (EngineException | IOException | RuntimeException e) {
                 String message = e.getMessage() == null ? e.toString() : e.getMessage();
                 Platform.runLater(() -> {
@@ -493,12 +594,39 @@ final class CreateDialog {
                 });
                 return;
             }
+            // The torrent is made and saved whatever publishing says: the key is kept either way.
+            Session.Published published = null;
+            String publishProblem = "";
+            if (publishing) {
+                try {
+                    published = nextOf != null ? publisher.newVersion(nextOf, result) : publisher.publish(name, result);
+                } catch (EngineException | IOException | RuntimeException e) {
+                    publishProblem = e.getMessage() == null ? e.toString() : e.getMessage();
+                }
+            }
+            Session.Published done = published;
+            String why = publishProblem;
             Platform.runLater(() -> {
                 if (generation != hashGeneration) return;
                 hashing.set(false);
                 show(result, target);
+                if (publishing) showPublished(done, why);
             });
         });
+    }
+
+    private void showPublished(Session.Published done, String why) {
+        String line;
+        if (done == null) {
+            line = tr("dialog.create.notPublished", why);
+        } else {
+            updatable.setText(done.publication().uri());
+            line = done.reached()
+                    ? CreateText.published(done.publication().seq(), done.nodes())
+                    : tr("dialog.create.notPublishedYet");
+        }
+        publishedLine = line;
+        outcome.setText(outcome.getText() + " " + line);
     }
 
     private void show(CreatedTorrent result, Path target) {
@@ -540,6 +668,12 @@ final class CreateDialog {
 
     // ---- the capture hook ------------------------------------------------------------------------
 
+    /** Publishing on under {@code name}, as a person would tick it and type. */
+    void publishForCapture(String name) {
+        publish.setSelected(true);
+        publishName.setText(name);
+    }
+
     /** Creates into {@code target} with seeding on, the Save As chooser skipped. */
     void createForCapture(Path target) {
         seed.setSelected(true);
@@ -547,6 +681,13 @@ final class CreateDialog {
         if (!why.isEmpty()) {
             problem.setText(why);
             return;
+        }
+        if (publish.isSelected() && publisher != null && newVersionOf == null) {
+            String name = publisher.problem(publishName.getText());
+            if (!name.isEmpty()) {
+                problem.setText(name);
+                return;
+            }
         }
         start(Path.of(source.getText().trim()), target);
     }
@@ -563,6 +704,10 @@ final class CreateDialog {
             out.add("create-v2=" + made.v2());
             out.add("create-magnet=" + made.magnet());
             out.add("create-file=" + savedTo);
+        }
+        if (publish.isSelected()) {
+            out.add("create-publish=" + (newVersionOf != null ? "next of " + newVersionOf : publishName.getText())
+                    + " | " + updatable.getText() + " | " + publishedLine);
         }
         return out;
     }

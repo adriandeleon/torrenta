@@ -360,6 +360,18 @@ public final class WithDownloads implements Engine {
     }
 
     @Override
+    public com.torrenta.engine.MutableKey newMutableKey() throws EngineException {
+        return torrents.newMutableKey();
+    }
+
+    @Override
+    public MutablePut putMutable(
+            com.torrenta.engine.MutableKey key, byte[] salt, byte[] value, java.time.Duration timeout)
+            throws EngineException, InterruptedException {
+        return torrents.putMutable(key, salt, value, timeout);
+    }
+
+    @Override
     public java.util.Map<String, com.torrenta.engine.Following> followings() {
         return torrents.followings();
     }

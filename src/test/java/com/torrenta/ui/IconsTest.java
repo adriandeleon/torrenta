@@ -105,6 +105,8 @@ class IconsTest {
                 "copy-name",
                 "copy-hash",
                 "copy-magnet",
+                "copy-updatable-link",
+                "new-version",
                 "rename",
                 "export-torrent",
                 "open-folder",
