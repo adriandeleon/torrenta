@@ -868,6 +868,31 @@ public final class LibtorrentEngine implements Engine {
     }
 
     /**
+     * A DHT on loopback, for the updatable-torrent tests: libtorrent keeps loopback and same-/24
+     * nodes out of its routing table and searches unless told otherwise, and expects node ids that
+     * match an address; then the other session's DHT as the one node to start from.
+     */
+    synchronized void dhtOnLoopbackForTest(int otherPort) throws EngineException {
+        SessionManager s = running();
+        SettingsPack pack = new SettingsPack();
+        for (settings_pack.bool_types key : new settings_pack.bool_types[] {
+            settings_pack.bool_types.dht_restrict_routing_ips,
+            settings_pack.bool_types.dht_restrict_search_ips,
+            settings_pack.bool_types.dht_enforce_node_id,
+            settings_pack.bool_types.dht_prefer_verified_node_ids,
+            settings_pack.bool_types.dht_ignore_dark_internet
+        }) pack.setBoolean(key.swigValue(), false);
+        s.applySettings(pack);
+        if (otherPort > 0) new SessionHandle(s.swig()).addDhtNode(new org.libtorrent4j.Pair<>("127.0.0.1", otherPort));
+    }
+
+    /** Puts an updatable item in the DHT, for the test of following one; publishing is roadmap 1.4.5. */
+    synchronized void putMutableForTest(byte[] publicKey, byte[] secretKey, byte[] salt, org.libtorrent4j.Entry value)
+            throws EngineException {
+        new SessionHandle(running().swig()).dhtPutItem(publicKey, secretKey, value, salt);
+    }
+
+    /**
      * Retries a failed peer connection after a second instead of libtorrent's minute, for the
      * loopback tests: {@code connect_peer} only adds the address to the peer list, and an address
      * whose last attempt failed is not dialled again for {@code min_reconnect_time}, so one early
@@ -929,6 +954,95 @@ public final class LibtorrentEngine implements Engine {
     @Override
     public synchronized void rename(String id, String name) throws EngineException {
         writeLabels(id, labelsOf(id).withName(name));
+    }
+
+    @Override
+    public Map<String, com.torrenta.engine.Following> followings() {
+        Map<String, com.torrenta.engine.Following> out = new java.util.TreeMap<>();
+        labels.forEach((id, l) -> {
+            if (l.following() != null) out.put(id, l.following());
+        });
+        return out;
+    }
+
+    @Override
+    public synchronized void setFollowing(String id, com.torrenta.engine.Following following) throws EngineException {
+        writeLabels(id, labelsOf(id).withFollowing(following));
+    }
+
+    /** A DHT get of an updatable address in flight: the best answer so far, and whether it is final. */
+    private static final class MutableLookup {
+        volatile long seq = -1;
+        volatile byte[] value;
+        final java.util.concurrent.CompletableFuture<Void> done = new java.util.concurrent.CompletableFuture<>();
+    }
+
+    /** By key and salt in hex: what the {@code dht_mutable_item_alert} handler fills in. */
+    private final Map<String, MutableLookup> mutableLookups = new ConcurrentHashMap<>();
+
+    private static String lookupKey(byte[] key, byte[] salt) {
+        return java.util.HexFormat.of().formatHex(key) + ":"
+                + java.util.HexFormat.of().formatHex(salt);
+    }
+
+    /**
+     * Posted under the lock (a get in flight for the same address is joined), waited for outside
+     * it: a DHT get takes seconds. libtorrent answers with each better item it meets and marks the
+     * last one authoritative; the highest sequence number is kept.
+     */
+    @Override
+    public java.util.Optional<MutableItem> lookupMutable(
+            com.torrenta.engine.MutableSource source, java.time.Duration timeout)
+            throws EngineException, InterruptedException {
+        String key = lookupKey(source.publicKey(), source.salt());
+        MutableLookup lookup;
+        synchronized (this) {
+            SessionManager s = running();
+            // Off by the setting is said; a DHT still starting finds nothing, and is asked again.
+            if (!engineSettings.protocol().dht()) throw new EngineException(tr("engine.error.dhtOff"));
+            boolean[] fresh = {false};
+            lookup = mutableLookups.computeIfAbsent(key, k -> {
+                fresh[0] = true;
+                return new MutableLookup();
+            });
+            if (fresh[0]) new SessionHandle(s.swig()).dhtGetItem(source.publicKey(), source.salt());
+        }
+        try {
+            lookup.done.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            // What came in so far is the answer.
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw new EngineException(e.getMessage(), e);
+        } finally {
+            mutableLookups.remove(key, lookup);
+        }
+        byte[] value = lookup.value;
+        if (value == null) return java.util.Optional.empty();
+        try {
+            return java.util.Optional.of(
+                    new MutableItem(lookup.seq, com.torrenta.engine.transmission.Bencode.decode(value)));
+        } catch (IOException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    /** Alert thread: an item met under an address being looked up. */
+    private void onMutableItem(org.libtorrent4j.alerts.DhtMutableItemAlert alert) {
+        MutableLookup lookup = mutableLookups.get(lookupKey(alert.key(), alert.salt()));
+        if (lookup == null) return;
+        long seq = alert.seq();
+        byte[] value;
+        try {
+            value = alert.item().bencode();
+        } catch (RuntimeException e) {
+            value = null;
+        }
+        // An empty answer (nobody had it) bencodes to nothing worth keeping.
+        if (value != null && value.length > 1 && seq > lookup.seq) {
+            lookup.value = value;
+            lookup.seq = seq;
+        }
+        if (alert.swig().getAuthoritative()) lookup.done.complete(null);
     }
 
     /** The torrent's labels, none if it has none; an id the session lacks is an error. */
@@ -3149,6 +3263,7 @@ public final class LibtorrentEngine implements Engine {
             AlertType.TORRENT_ERROR.swig(),
             AlertType.FILE_COMPLETED.swig(),
             AlertType.PIECE_FINISHED.swig(),
+            AlertType.DHT_MUTABLE_ITEM.swig(),
             AlertType.FILE_ERROR.swig(),
             AlertType.FILE_RENAMED.swig(),
             AlertType.FILE_RENAME_FAILED.swig(),
@@ -3415,6 +3530,7 @@ public final class LibtorrentEngine implements Engine {
                     case SAVE_RESUME_DATA -> onSaved((SaveResumeDataAlert) alert);
                     case SAVE_RESUME_DATA_FAILED -> onSaveFailed((SaveResumeDataFailedAlert) alert);
                     case READ_PIECE -> onPieceRead((ReadPieceAlert) alert);
+                    case DHT_MUTABLE_ITEM -> onMutableItem((org.libtorrent4j.alerts.DhtMutableItemAlert) alert);
                     default -> {}
                 }
             } catch (RuntimeException e) {

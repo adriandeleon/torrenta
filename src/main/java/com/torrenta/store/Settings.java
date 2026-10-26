@@ -46,6 +46,12 @@ public final class Settings {
     /** Downloads from links running at once; the rest wait their turn. */
     public static final String DIRECT_ACTIVE = "download.linksAtOnce";
 
+    /** Hours between looks for an updatable torrent's newer version (BEP 46), 1 to 168; 0 never. */
+    public static final String FOLLOW_HOURS = "follow.hours";
+
+    /** Whether an updatable torrent's older version leaves the list once the new one is complete. */
+    public static final String FOLLOW_REMOVE_OLD = "follow.removeOld";
+
     /** The media player a stream is handed to; empty for mpv or VLC wherever they are. This machine's. */
     public static final String STREAM_PLAYER = "stream.player";
 
@@ -57,7 +63,9 @@ public final class Settings {
         PREALLOCATE,
         DIRECT_CURL,
         DIRECT_ACTIVE,
-        STREAM_PLAYER
+        STREAM_PLAYER,
+        FOLLOW_HOURS,
+        FOLLOW_REMOVE_OLD
     };
     /** The transfer list's columns: order, widths, visibility. See {@code ui.ColumnLayout}. */
     public static final String TABLE_COLUMNS = "table.columns";
@@ -375,12 +383,14 @@ public final class Settings {
 
     public static final String AUTOMATION_ON_FINISHED = "automation.onFinished";
     public static final String AUTOMATION_ON_SEEDING_DONE = "automation.onSeedingDone";
+    public static final String AUTOMATION_ON_UPDATED = "automation.onUpdated";
     /** Desktop notifications, one switch per event; only {@code notify.finished} is on by default. */
     public static final String NOTIFY_ADDED = "notify.added";
 
     public static final String NOTIFY_FINISHED = "notify.finished";
     public static final String NOTIFY_SEEDING_DONE = "notify.seedingDone";
     public static final String NOTIFY_ERROR = "notify.error";
+    public static final String NOTIFY_UPDATED = "notify.updated";
 
     /** Minutes between feed refreshes, 5 to 1440, 30 by default; syncs (the feeds and articles do not). */
     public static final String RSS_REFRESH_MINUTES = "rss.refreshMinutes";
@@ -398,7 +408,9 @@ public final class Settings {
         NOTIFY_ADDED,
         NOTIFY_FINISHED,
         NOTIFY_SEEDING_DONE,
-        NOTIFY_ERROR
+        NOTIFY_ERROR,
+        AUTOMATION_ON_UPDATED,
+        NOTIFY_UPDATED
     };
 
     private final Path file;
@@ -980,6 +992,23 @@ public final class Settings {
         properties.setProperty(ADD_UNSAFE_CONTENT, value);
     }
 
+    public int followHours() {
+        try {
+            return Math.clamp(
+                    Integer.parseInt(properties.getProperty(FOLLOW_HOURS, "6").trim()), 0, 168);
+        } catch (NumberFormatException e) {
+            return 6;
+        }
+    }
+
+    public void setFollowRemoveOld(boolean on) {
+        properties.setProperty(FOLLOW_REMOVE_OLD, String.valueOf(on));
+    }
+
+    public boolean followRemoveOld() {
+        return readBoolean(FOLLOW_REMOVE_OLD, false);
+    }
+
     public String addDedup() {
         return properties.getProperty(ADD_DEDUP, "ASK").trim();
     }
@@ -1382,7 +1411,9 @@ public final class Settings {
                 readBoolean(NOTIFY_ADDED, d.notifyAdded()),
                 readBoolean(NOTIFY_FINISHED, d.notifyFinished()),
                 readBoolean(NOTIFY_SEEDING_DONE, d.notifySeedingDone()),
-                readBoolean(NOTIFY_ERROR, d.notifyError()));
+                readBoolean(NOTIFY_ERROR, d.notifyError()),
+                properties.getProperty(AUTOMATION_ON_UPDATED, ""),
+                readBoolean(NOTIFY_UPDATED, d.notifyUpdated()));
     }
 
     /** The command line run on an event, or empty; only the three kinds that run one have a key. */
@@ -1410,6 +1441,7 @@ public final class Settings {
             case ADDED -> AUTOMATION_ON_ADDED;
             case FINISHED -> AUTOMATION_ON_FINISHED;
             case SEEDING_DONE -> AUTOMATION_ON_SEEDING_DONE;
+            case UPDATED -> AUTOMATION_ON_UPDATED;
             default -> throw new IllegalArgumentException("no command runs on " + kind);
         };
     }
@@ -1420,6 +1452,7 @@ public final class Settings {
             case FINISHED -> NOTIFY_FINISHED;
             case SEEDING_DONE -> NOTIFY_SEEDING_DONE;
             case ERROR -> NOTIFY_ERROR;
+            case UPDATED -> NOTIFY_UPDATED;
             default -> throw new IllegalArgumentException("no notification for " + kind);
         };
     }

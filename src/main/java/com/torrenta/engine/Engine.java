@@ -320,6 +320,33 @@ public interface Engine extends AutoCloseable {
         throw new EngineException(com.torrenta.i18n.Messages.tr("engine.error.noStreaming"));
     }
 
+    /**
+     * An updatable address's item in the DHT ({@link Capability#MUTABLE}): the highest version
+     * found within {@code timeout}, empty when none answered. Blocking; never under a lock.
+     */
+    default java.util.Optional<MutableItem> lookupMutable(MutableSource source, java.time.Duration timeout)
+            throws EngineException, InterruptedException {
+        throw new EngineException(com.torrenta.i18n.Messages.tr("engine.error.noMutable"));
+    }
+
+    /**
+     * An item found under an updatable address.
+     *
+     * @param seq its sequence number: higher is newer
+     * @param value its value as {@code Bencode} decodes it (a map whose strings are bytes)
+     */
+    record MutableItem(long seq, Object value) {}
+
+    /** The torrents followed from an updatable address, by id. */
+    default java.util.Map<String, Following> followings() {
+        return java.util.Map.of();
+    }
+
+    /** Follows torrent {@code id} from an updatable address; null stops following. */
+    default void setFollowing(String id, Following following) throws EngineException {
+        throw new EngineException(com.torrenta.i18n.Messages.tr("engine.error.noMutable"));
+    }
+
     default ContentIndex contentIndex() {
         return ContentIndex.EMPTY;
     }
@@ -510,7 +537,12 @@ public interface Engine extends AutoCloseable {
          * A file read while it downloads ({@link #stream}): its pieces asked for with a deadline and
          * served from the disk to a player on this machine. A daemon's disk is not this machine's.
          */
-        STREAMING;
+        STREAMING,
+        /**
+         * Updatable torrents (BEP 46): an address looked up in the DHT for the torrent's current
+         * version, followed for newer ones.
+         */
+        MUTABLE;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

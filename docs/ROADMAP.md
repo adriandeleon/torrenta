@@ -649,7 +649,18 @@ remote caller's behalf.
    when the last connection closes. Files tab → Stream in player runs `stream.player` (mpv or VLC
    found on the PATH, the app bundles, the registry) with the URL as an argument and no shell;
    Copy stream URL beside it; the Overview's strip marks the window.
-4. **BEP 46, following**: `Inputs` reads `magnet:?xs=urn:btpk:<key>&s=<salt>` as a
+4. **BEP 46, following** (done: `engine.MutableSource` is the address, read in `Session.resolve`
+   before `Inputs.classify`, so the dialog, the command line, a second instance and headless all
+   take it; a watch folder's `.magnet` lines and RSS do not yet. `Engine.lookupMutable` is
+   libtorrent's `dht_get_item`, the highest `seq` kept until the authoritative answer or 30 s;
+   `Following` (address, `seq`, the id it `replaces`) rides in the `.labels` sidecar. The follower
+   is the session's, not a class of its own: every ten minutes it looks up whatever has not been
+   looked up for `follow.hours` (6; 0 never), and `FollowRules.step` decides; a new version's file
+   list is fetched first so the add goes through the dedup. Every thirty seconds a complete new
+   version lets go of the old one, removed (files kept) only with `follow.removeOld`. A hybrid
+   named by its v1 hash is matched by either hash. The loopback DHT needed libtorrent's five
+   address rules off (routing, search, node id, verified ids, dark internet) and a put only once
+   both tables know a node: `MutableDhtTest`, about 45 s, in the normal run): `Inputs` reads `magnet:?xs=urn:btpk:<key>&s=<salt>` as a
    `MutableSource`, `dhtGetItem` resolves its `ih`, which is added as a magnet with the source in
    the `.labels` sidecar. A `MutableFollower` asks again every 6 h (a setting); a higher `seq` adds
    the new torrent into the same save path (1.3's dedup makes an update cost the changed files) and
