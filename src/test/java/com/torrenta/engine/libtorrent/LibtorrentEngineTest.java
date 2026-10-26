@@ -1628,6 +1628,83 @@ class LibtorrentEngineTest {
     }
 
     /**
+     * Streaming's engine half: a range of a file is waited on until its piece is there, asked for
+     * with a deadline; the wait ends on the piece's finished alert, and the bytes on disk are the
+     * seeder's. The file was skipped: streaming it makes it wanted, since a skipped file's pieces
+     * go into the part file and not the file a player is served from (measured: the wait ended and
+     * the file was not there).
+     */
+    @Test
+    void aStreamedRangeWaitsForItsPieceWhichTheDeadlineFetchesEvenFromASkippedFile(@TempDir Path dir) throws Exception {
+        Path root = Files.createDirectories(dir.resolve("seed").resolve("pair"));
+        byte[] content = new byte[300 * 1024];
+        new Random(5).nextBytes(content);
+        Files.write(root.resolve("film.bin"), content);
+        NativeLibrary.ensureAvailable();
+        byte[] torrent =
+                new TorrentBuilder().path(root.toFile()).generate().entry().bencode();
+        try (LibtorrentEngine seed = seeder(dir, torrent);
+                LibtorrentEngine engine = downloader(dir)) {
+            engine.start();
+            int film = engine.inspect(torrent).files().stream()
+                    .filter(f -> f.path().endsWith("film.bin"))
+                    .findFirst()
+                    .orElseThrow()
+                    .index();
+            Torrent t = engine.add(new AddRequest(
+                    new AddRequest.TorrentFile(torrent, "pair.torrent"),
+                    dir.resolve("downloads"),
+                    false,
+                    false,
+                    false,
+                    AddRequest.StopCondition.NONE,
+                    Map.of(film, Priority.IGNORE),
+                    TorrentLabels.NONE));
+            com.torrenta.engine.StreamFile file = engine.stream(t.id(), film);
+            assertEquals(content.length, file.size());
+            assertEquals("film.bin", file.name());
+            await(
+                    "the played file wanted",
+                    () -> engine.detail(t.id()).files().stream()
+                                    .filter(f -> f.index() == film)
+                                    .findFirst()
+                                    .orElseThrow()
+                                    .priority()
+                            == Priority.LOW);
+            long from = 150 * 1024 + 7;
+            long to = from + 999;
+            assertFalse(file.await(from, to, java.time.Duration.ofMillis(300)), "no peer yet: the range waits");
+            java.util.concurrent.CompletableFuture<Boolean> got =
+                    java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                        try {
+                            return file.await(from, to, java.time.Duration.ofSeconds(LOOPBACK_SECONDS));
+                        } catch (Exception e) {
+                            throw new IllegalStateException(e);
+                        }
+                    });
+            awaitDownload("the range's piece, asked with a deadline", engine, t.id(), seed, got::isDone);
+            assertTrue(got.get(), "there before the wait ran out");
+            // Read through libtorrent, the moment its alert says the piece is there: on Windows the
+            // file still had zeros there (CI, the first run of this test), the bytes in its buffer.
+            assertArrayEquals(java.util.Arrays.copyOfRange(content, (int) from, (int) to + 1), file.read(from, to));
+            assertTrue(file.await(from, to, java.time.Duration.ofMillis(10)), "there now: no wait");
+
+            // And as a player has it: a range over loopback HTTP from the stream server.
+            try (com.torrenta.stream.StreamServer server = new com.torrenta.stream.StreamServer(() -> engine)) {
+                String url = server.url(t.id(), film, "film.bin");
+                java.net.http.HttpResponse<byte[]> answer = java.net.http.HttpClient.newHttpClient()
+                        .send(
+                                java.net.http.HttpRequest.newBuilder(java.net.URI.create(url))
+                                        .header("Range", "bytes=" + from + "-" + to)
+                                        .build(),
+                                java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+                assertEquals(206, answer.statusCode());
+                assertArrayEquals(java.util.Arrays.copyOfRange(content, (int) from, (int) to + 1), answer.body());
+            }
+        }
+    }
+
+    /**
      * A torrent downloaded over loopback from a second engine: the one way to see the engine
      * write files, rather than find them. The seeder has the data under {@code dir/seed/pair}.
      */

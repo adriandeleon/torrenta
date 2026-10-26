@@ -312,6 +312,14 @@ public interface Engine extends AutoCloseable {
      * they are downloaded again. {@link ContentIndex#EMPTY} from an engine that keeps none (a
      * daemon, whose disk is not this machine's).
      */
+    /**
+     * File {@code fileIndex} of torrent {@code id}, to be read while it downloads ({@link
+     * Capability#STREAMING}). Needs the torrent's metadata.
+     */
+    default StreamFile stream(String id, int fileIndex) throws EngineException {
+        throw new EngineException(com.torrenta.i18n.Messages.tr("engine.error.noStreaming"));
+    }
+
     default ContentIndex contentIndex() {
         return ContentIndex.EMPTY;
     }
@@ -497,7 +505,12 @@ public interface Engine extends AutoCloseable {
          * and linked or copied into place before the add, rather than downloaded again. A daemon's
          * disk is not this machine's.
          */
-        DEDUP;
+        DEDUP,
+        /**
+         * A file read while it downloads ({@link #stream}): its pieces asked for with a deadline and
+         * served from the disk to a player on this machine. A daemon's disk is not this machine's.
+         */
+        STREAMING;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

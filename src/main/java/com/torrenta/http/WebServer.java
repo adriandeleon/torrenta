@@ -139,12 +139,55 @@ public final class WebServer implements AutoCloseable {
             writeFile(exchange, response);
             return;
         }
+        if (response.ranged() != null) {
+            writeRanged(exchange, response);
+            return;
+        }
         byte[] body = response.body();
         exchange.sendResponseHeaders(response.status(), body.length == 0 ? -1 : body.length);
         if (body.length > 0) {
             try (OutputStream out = exchange.getResponseBody()) {
                 out.write(body);
             }
+        }
+    }
+
+    /**
+     * A {@link Response.Ranged} body, whole or the part {@code Range} asks for, as a file is; HEAD
+     * has the headers alone. A write that throws leaves the response short, and the exchange is
+     * closed by the caller.
+     */
+    private static void writeRanged(HttpExchange exchange, Response response) throws IOException {
+        Response.Ranged body = response.ranged();
+        long size = body.size();
+        exchange.getResponseHeaders().set("Accept-Ranges", "bytes");
+        Ranges.Plan plan = Ranges.plan(exchange.getRequestHeaders().getFirst("Range"), size);
+        long first = 0;
+        long length = size;
+        int status = response.status();
+        switch (plan) {
+            case Ranges.Whole w -> {}
+            case Ranges.Part p -> {
+                first = p.first();
+                length = p.length();
+                status = 206;
+                exchange.getResponseHeaders().set("Content-Range", p.contentRange(size));
+            }
+            case Ranges.Unsatisfiable u -> {
+                exchange.getResponseHeaders().set("Content-Range", u.contentRange(size));
+                exchange.sendResponseHeaders(416, -1);
+                return;
+            }
+        }
+        if (exchange.getRequestMethod().equals("HEAD")) {
+            exchange.getResponseHeaders().set("Content-Length", Long.toString(length));
+            exchange.sendResponseHeaders(status, -1);
+            return;
+        }
+        exchange.sendResponseHeaders(status, length == 0 ? -1 : length);
+        if (length == 0) return;
+        try (OutputStream out = exchange.getResponseBody()) {
+            body.write(first, length, out);
         }
     }
 

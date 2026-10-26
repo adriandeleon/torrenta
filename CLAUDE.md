@@ -136,7 +136,19 @@ over loopback with the JDK's client, HTTPS included from a PKCS#12 that `keytool
 roots come with `torrents/add`. A test of the API goes through `router().dispatch` with a built
 `Request`, since the JDK's client will not send a forged `Host`; `WebApiTest` adds one real
 socket for the service. Port 8080 is often taken on a developer's machine, which is the offer's
-case, not a failure.
+case, not a failure. Its second user is `stream.StreamServer` (roadmap 1.4), on loopback and a
+port of the system's, started by the session's first `streamUrl`: `/s/<token>/<id>/<fileIndex>/<name>`,
+a new token per URL handed out, everything else 404. Its body is `Response.Ranged` (a size and a
+writer of any range, planned by `Ranges` as a file is, HEAD answered with the length alone), and
+the writer goes a piece at a time: `StreamFile.await` (the engine's: a future per missing piece,
+registered before a second `havePiece`, then `set_piece_deadline`, completed by
+`piece_finished_alert`, failed when the torrent goes or the engine stops), then the bytes through
+`StreamFile.read`, libtorrent's `read_piece` (a future per piece, completed in `onPieceRead` before
+the archive probe's reading), never the file on disk: a piece is announced once it is verified,
+which can be before its bytes reach the file (Windows CI read zeros right after the alert). The wait is sliced (250 ms) so a close does
+not wait out `PIECE_TIMEOUT` (60 s), after which the answer is cut short and a player asks again.
+A skipped file's pieces go into libtorrent's part file, not the file, so `Engine.stream` raises a
+skipped file to low priority: a file played is a file wanted.
 
 **The session is the window's toolkit-free half** (roadmap 1.2, item 1, in steps). `Session` owns
 the poll thread, the share limits and the minute's speed refresh; its `Host` hears a share limit

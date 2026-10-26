@@ -363,6 +363,22 @@ public final class Session {
         stop();
         rss.stop();
         closeConditions();
+        streams.close();
+    }
+
+    /** Serves files to a player on this machine while they download; started by the first URL. */
+    private final com.torrenta.stream.StreamServer streams = new com.torrenta.stream.StreamServer(() -> engine);
+
+    /**
+     * Any thread. A URL a player on this machine can open for file {@code fileIndex} of torrent
+     * {@code id}, served while it downloads ({@link Engine.Capability#STREAMING}); a new one each
+     * time, good for as long as the app runs.
+     */
+    public String streamUrl(String id, int fileIndex, String name) throws IOException {
+        Engine e = engine;
+        if (e == null || !e.capabilities().has(Engine.Capability.STREAMING))
+            throw new IOException(tr("engine.error.noStreaming"));
+        return streams.url(id, fileIndex, name);
     }
 
     /** Hears every poll, on the poll thread, after the share limits have been applied. */
