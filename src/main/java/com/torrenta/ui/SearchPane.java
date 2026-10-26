@@ -1,5 +1,7 @@
 package com.torrenta.ui;
 
+import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -13,6 +15,8 @@ import javafx.beans.binding.Bindings;
 import javafx.beans.binding.BooleanBinding;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.SimpleBooleanProperty;
+import javafx.collections.ListChangeListener;
+import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -57,13 +61,20 @@ import static com.torrenta.i18n.Messages.tr;
  * provider's answer landing in the table as it arrives; a new search cancels the running one.
  * Enter or a double-click on a result hands it to the host, which opens the Add dialog. Clear
  * (Escape in the query, the button beside it, the results' menu, the palette) empties the
- * results, the status line and the query, and drops a search still running.
+ * results, the status line, the query and the filter, and drops a search still running.
  *
- * <p>Driveable without the mouse: Tab walks the query, the chips and the table; Space toggles a
- * chip; Escape in the query clears the tab when there is anything to clear and leaves it when
- * there is not, Escape on a chip leaves it, Escape in the table returns to the query, Down from
- * the query enters the table. The pane is hidden while Transfers shows, so its
- * traversable controls never take the first keystroke of a fresh launch.
+ * <p>Once there are results a filter row shows above them: {@link SearchFilter}'s {@code key:value}
+ * language over the table's columns, a chip per term (a click removes it), and how many of the
+ * results it lets through. It holds across searches until Clear. The row menu's Show Only and Hide
+ * put a provider's or a category's term into it.
+ *
+ * <p>Driveable without the mouse: Tab walks the query, the chips, the filter and the table; Space
+ * toggles a chip; Escape in the query clears the tab when there is anything to clear and leaves it
+ * when there is not, Escape on a chip leaves it, Escape in the table returns to the query, Down
+ * from the query enters the table. {@code /} in the table, or the window's filter chord, goes to
+ * the filter; Enter or Down there returns to the table, Escape empties it and then returns. The
+ * pane is hidden while Transfers shows, so its traversable controls never take the first
+ * keystroke of a fresh launch.
  */
 final class SearchPane extends VBox {
 
@@ -101,6 +112,17 @@ final class SearchPane extends VBox {
     private final Label status = new Label();
     private final ProgressIndicator spinner = new ProgressIndicator();
     private final SearchRows rows = new SearchRows();
+    /** The rows the filter lets through; the table sorts these. */
+    private final FilteredList<SearchRow> filtered = new FilteredList<>(rows.list());
+
+    private final TextField filter = new TextField();
+    private final FlowPane filterChips = new FlowPane(6, 4);
+    private final Label shown = new Label();
+    private final HBox filterRow;
+    private SearchFilter filterQuery = SearchFilter.EMPTY;
+    /** The table's placeholder when the filter is not what hides every row. */
+    private String placeholder = tr("search.placeholder.none");
+
     private final TableView<SearchRow> table;
     private final SearchService service = new SearchService();
     /** The providers switched off by hand, by name; see {@link SearchChips}. */
@@ -184,18 +206,48 @@ final class SearchPane extends VBox {
         HBox statusRow = new HBox(8, spinner, status);
         statusRow.setAlignment(Pos.CENTER_LEFT);
 
+        filter.setPromptText(tr("search.filter.prompt"));
+        filter.getStyleClass().add("search-filter");
+        filter.textProperty().addListener((o, was, now) -> applyFilter());
+        filter.setOnKeyPressed(e -> {
+            if (e.getCode() == KeyCode.ENTER || e.getCode() == KeyCode.DOWN) {
+                focusResults();
+                e.consume();
+            } else if (e.getCode() == KeyCode.ESCAPE) {
+                // One layer at a time, as in the omnibox: a filter empties, an empty one gives the
+                // results back; never past them out of the tab.
+                if (filter.getText().isEmpty()) focusResults();
+                else filter.clear();
+                e.consume();
+            }
+        });
+        HBox.setHgrow(filter, Priority.ALWAYS);
+        shown.getStyleClass().add("search-status");
+        shown.setMinWidth(Label.USE_PREF_SIZE);
+        Label filterTitle = new Label(tr("search.filter"));
+        filterTitle.getStyleClass().add("search-row-title");
+        filterTitle.setMinWidth(70);
+        filterRow = new HBox(8, filterTitle, filter, shown);
+        filterRow.setAlignment(Pos.CENTER_LEFT);
+        filterChips.setPrefWrapLength(4000);
+        filterChips.setPadding(new Insets(0, 0, 0, 78));
+        filtered.addListener((ListChangeListener<SearchRow>) c -> refreshFilterRow());
+
         VBox top = new VBox(
                 8,
                 queryRow,
                 row(tr("search.category"), categoryChips),
                 row(tr("search.providers"), providerChips),
                 noProviders,
-                statusRow);
+                statusRow,
+                filterRow,
+                filterChips);
         top.setPadding(new Insets(10, 12, 8, 12));
         top.getStyleClass().add("search-head");
         getChildren().addAll(top, table);
         setVisible(false);
         setManaged(false);
+        refreshFilterRow();
 
         // Escape from anything but the table (which handles its own) leaves the tab.
         addEventHandler(KeyEvent.KEY_PRESSED, e -> {
@@ -286,9 +338,37 @@ final class SearchPane extends VBox {
         if (table.getSelectionModel().isEmpty()) table.getSelectionModel().select(0);
     }
 
+    /**
+     * The filter, when it shows (there are results, or a filter is typed); false otherwise, so the
+     * window's chord can fall back to its own box.
+     */
+    boolean focusFilter() {
+        if (!filterRow.isVisible()) return false;
+        filter.requestFocus();
+        filter.selectAll();
+        return true;
+    }
+
     /** Which of the pane's controls has the focus, for the capture's {@code view=} line. */
     String focusForCapture(javafx.scene.Node owner) {
-        return owner == query ? "query" : owner == table ? "results" : "other";
+        return owner == query ? "query" : owner == table ? "results" : owner == filter ? "filter" : "other";
+    }
+
+    /** The filter typed, its chips and its count, for the capture's {@code search-filter=} line. */
+    String filterForCapture() {
+        return "\"" + filter.getText() + "\" chips=" + filterQuery.chips() + " shown=" + filtered.size() + "/"
+                + rows.list().size() + (filterRow.isVisible() ? "" : " (hidden)");
+    }
+
+    /**
+     * Types {@code text} into the filter once the running search has ended, then runs {@code then}
+     * (the capture's lines), for the capture.
+     */
+    void setFilterForCapture(String text, Runnable then) {
+        afterSearchForCapture(() -> {
+            filter.setText(text);
+            then.run();
+        });
     }
 
     void setQuery(String text) {
@@ -331,14 +411,16 @@ final class SearchPane extends VBox {
         for (SearchRow row : table.getItems()) {
             SearchResult r = row.result();
             out.add(r.name() + " | " + sizeText(r.size()) + " | " + r.seeds() + "/" + r.leechers() + " | "
-                    + r.provider());
+                    + r.provider() + " | "
+                    + (r.category() == null ? "—" : r.category().id()));
         }
         return out;
     }
 
     /**
      * Keys pressed where the focus is (the query field at first, the table after a Down), for the
-     * capture, once the running search (if any) has ended, so the rows are there to walk.
+     * capture, once the running search (if any) has ended, so the rows are there to walk. SLASH is
+     * also typed, so the table's {@code /} reaches the filter.
      */
     void pressForCapture(List<KeyCode> codes) {
         Runnable press = () -> {
@@ -348,6 +430,10 @@ final class SearchPane extends VBox {
                 while (target != null && target != this) target = target.getParent();
                 if (owner == null || target == null) owner = query;
                 owner.fireEvent(new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false));
+                // '/' is read as the character typed, as a real keyboard follows its press with one.
+                if (code == KeyCode.SLASH)
+                    owner.fireEvent(
+                            new KeyEvent(KeyEvent.KEY_TYPED, "/", "", KeyCode.UNDEFINED, false, false, false, false));
             }
         };
         afterSearchForCapture(press);
@@ -379,7 +465,7 @@ final class SearchPane extends VBox {
         Map<String, String> failures = new LinkedHashMap<>();
         status.setText(SearchStatus.line(names, counts, failures, false));
         spinner.setVisible(true);
-        table.setPlaceholder(new Label(tr("search.placeholder.searching")));
+        setPlaceholder(tr("search.placeholder.searching"));
 
         running = Thread.ofVirtual().name("search").start(() -> {
             Map<String, List<SearchResult>> answers = new LinkedHashMap<>();
@@ -411,7 +497,7 @@ final class SearchPane extends VBox {
                 rows.apply(outcome.results());
                 spinner.setVisible(false);
                 status.setText(SearchStatus.line(names, counts, failures, true));
-                table.setPlaceholder(new Label(tr("search.status.nothingFound")));
+                setPlaceholder(tr("search.status.nothingFound"));
                 running = null;
                 Runnable then = whenDone;
                 whenDone = null;
@@ -434,8 +520,9 @@ final class SearchPane extends VBox {
         whenDone = null;
         rows.clear();
         query.clear();
+        filter.clear();
         searched.set(false);
-        table.setPlaceholder(new Label(tr("search.placeholder.none")));
+        setPlaceholder(tr("search.placeholder.none"));
         List<SearchProvider> enabled = host.enabledProviders();
         showProblem(SearchStatus.cannotSearch(
                 !enabled.isEmpty(), !SearchChips.chosen(enabled, providersOff).isEmpty(), false));
@@ -450,10 +537,62 @@ final class SearchPane extends VBox {
         spinner.setVisible(false);
     }
 
+    // ---- the filter -----------------------------------------------------------------------------
+
+    /** The filter's text read again: the rows it lets through, its chips, the count. */
+    private void applyFilter() {
+        filterQuery = SearchFilter.parse(filter.getText(), Instant.now(), ZoneId.systemDefault());
+        SearchFilter q = filterQuery;
+        filtered.setPredicate(q.isEmpty() ? null : row -> q.matches(row.result()));
+        filterChips.getChildren().clear();
+        for (FilterQuery.Chip chip : q.chips()) {
+            Label label = new Label(chip.label());
+            label.getStyleClass().add("filter-chip");
+            if (!chip.valid()) label.getStyleClass().add("invalid");
+            label.setTooltip(new javafx.scene.control.Tooltip(
+                    chip.valid() ? chip.term() : tr("omnibox.chip.notUnderstood", chip.term())));
+            label.setOnMouseClicked(e -> filter.setText(SearchFilter.without(filter.getText(), chip.term())));
+            filterChips.getChildren().add(label);
+        }
+        refreshFilterRow();
+    }
+
+    /**
+     * The row shows once there are results (or a filter is typed, so a new search keeps showing
+     * what hides its rows); the count only while the filter hides something or could.
+     */
+    private void refreshFilterRow() {
+        boolean show = !rows.list().isEmpty() || !filter.getText().isEmpty();
+        filterRow.setVisible(show);
+        filterRow.setManaged(show);
+        boolean chips = show && !filterChips.getChildren().isEmpty();
+        filterChips.setVisible(chips);
+        filterChips.setManaged(chips);
+        shown.setText(
+                filterQuery.isEmpty() || rows.list().isEmpty()
+                        ? ""
+                        : tr("search.filter.shown", filtered.size(), rows.list().size()));
+        boolean hidden = filtered.isEmpty() && !rows.list().isEmpty();
+        String text = hidden ? tr("search.placeholder.filtered") : placeholder;
+        if (table != null
+                && !(table.getPlaceholder() instanceof Label l && l.getText().equals(text)))
+            table.setPlaceholder(new Label(text));
+    }
+
+    private void setPlaceholder(String text) {
+        placeholder = text;
+        refreshFilterRow();
+    }
+
+    /** Adds {@code term} to the filter (the row menu's Show Only and Hide). */
+    private void addFilterTerm(String term) {
+        filter.setText(SearchFilter.with(filter.getText(), term));
+    }
+
     // ---- the table ------------------------------------------------------------------------------
 
     private TableView<SearchRow> buildTable() {
-        SortedList<SearchRow> sorted = new SortedList<>(rows.list());
+        SortedList<SearchRow> sorted = new SortedList<>(filtered);
         TableView<SearchRow> t = new TableView<>(sorted);
         sorted.comparatorProperty().bind(t.comparatorProperty());
         t.getSelectionModel().setSelectionMode(SelectionMode.SINGLE);
@@ -483,7 +622,13 @@ final class SearchPane extends VBox {
                                 150,
                                 r -> r.published() == null ? -1L : r.published().getEpochSecond(),
                                 Format::dateTime),
-                        column("provider", tr("search.column.provider"), 120, SearchResult::provider, s -> s)));
+                        column("provider", tr("search.column.provider"), 120, SearchResult::provider, s -> s),
+                        column(
+                                "category",
+                                tr("search.column.category"),
+                                90,
+                                r -> r.category() == null ? "" : r.category().label(),
+                                s -> s.isEmpty() ? "—" : s)));
         Headers.uppercase(t);
         // Seeds first by default; a click cycles the column, and no sort at all is the ranked order.
         seeds.setSortType(TableColumn.SortType.DESCENDING);
@@ -508,6 +653,10 @@ final class SearchPane extends VBox {
                 e.consume();
             }
         });
+        // The character, not the key: '/' is Shift+7 on a German keyboard.
+        t.addEventHandler(KeyEvent.KEY_TYPED, e -> {
+            if ("/".equals(e.getCharacter()) && !e.isShortcutDown() && focusFilter()) e.consume();
+        });
         t.setRowFactory(v -> {
             javafx.scene.control.TableRow<SearchRow> row = new javafx.scene.control.TableRow<>();
             row.setOnMouseClicked(e -> {
@@ -527,6 +676,21 @@ final class SearchPane extends VBox {
         copy.setGraphic(Icons.copy().at(Icons.MENU_SIZE));
         MenuItem detail = new MenuItem(tr("search.menu.openDetail"));
         detail.setGraphic(Icons.external().at(Icons.MENU_SIZE));
+        MenuItem onlyProvider = new MenuItem();
+        onlyProvider.setGraphic(Icons.find().at(Icons.MENU_SIZE));
+        MenuItem hideProvider = new MenuItem();
+        hideProvider.setGraphic(Icons.ban().at(Icons.MENU_SIZE));
+        MenuItem onlyCategory = new MenuItem();
+        onlyCategory.setGraphic(Icons.tag().at(Icons.MENU_SIZE));
+        SeparatorMenuItem filterGroup = new SeparatorMenuItem();
+        onlyProvider.setOnAction(
+                e -> selected(t).ifPresent(r -> addFilterTerm(SearchFilter.providerTerm(r.provider()))));
+        hideProvider.setOnAction(e ->
+                selected(t).ifPresent(r -> addFilterTerm("-" + SearchFilter.providerTerm(r.provider()))));
+        onlyCategory.setOnAction(e -> selected(t).ifPresent(r -> {
+            SearchCategory category = r.category();
+            if (category != null) addFilterTerm(SearchFilter.categoryTerm(category));
+        }));
         MenuItem clear = new MenuItem(tr("command.searchClear"));
         clear.setGraphic(Icons.trash().at(Icons.MENU_SIZE));
         clear.setOnAction(e -> {
@@ -536,13 +700,33 @@ final class SearchPane extends VBox {
         add.setOnAction(e -> selected(t).ifPresent(host::add));
         copy.setOnAction(e -> selected(t).ifPresent(r -> host.copy(r.link().value())));
         detail.setOnAction(e -> selected(t).ifPresent(r -> host.openDetail(r.detailUrl())));
-        ContextMenu menu = new ContextMenu(add, copy, new SeparatorMenuItem(), detail, new SeparatorMenuItem(), clear);
+        ContextMenu menu = new ContextMenu(
+                add,
+                copy,
+                new SeparatorMenuItem(),
+                detail,
+                filterGroup,
+                onlyProvider,
+                hideProvider,
+                onlyCategory,
+                new SeparatorMenuItem(),
+                clear);
         menu.setOnShowing(e -> {
             var r = selected(t);
             add.setDisable(r.isEmpty());
             copy.setDisable(r.isEmpty());
             copy.setText(r.map(SearchAdd::copyLabel).orElse(tr("search.menu.copyLink")));
             detail.setDisable(r.map(x -> x.detailUrl().isEmpty()).orElse(true));
+            // A provider with no name, a result with no category: nothing to filter on, so no item.
+            String provider = r.map(SearchResult::provider).orElse("");
+            onlyProvider.setText(tr("search.menu.onlyProvider", provider));
+            hideProvider.setText(tr("search.menu.hideProvider", provider));
+            onlyProvider.setVisible(!provider.isEmpty());
+            hideProvider.setVisible(!provider.isEmpty());
+            SearchCategory category = r.map(SearchResult::category).orElse(null);
+            onlyCategory.setText(category == null ? "" : tr("search.menu.onlyCategory", category.label()));
+            onlyCategory.setVisible(category != null);
+            filterGroup.setVisible(!provider.isEmpty() || category != null);
             clear.setDisable(!clearable.get());
         });
         return menu;
@@ -580,6 +764,6 @@ final class SearchPane extends VBox {
 
     /** The results' column ids, in their default order; the layout test holds them. */
     static List<String> columnIds() {
-        return List.of("name", "size", "seeds", "leechers", "date", "provider");
+        return List.of("name", "size", "seeds", "leechers", "date", "provider", "category");
     }
 }
