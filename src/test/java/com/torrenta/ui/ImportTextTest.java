@@ -86,6 +86,24 @@ class ImportTextTest {
                 "running, but nothing held back: nothing to say");
     }
 
+    /** The recorded fixtures' folders: each client known by what its folder holds. */
+    @Test
+    void eachFolderIsKnownByWhatItHolds(@org.junit.jupiter.api.io.TempDir Path dir) throws Exception {
+        Path migrate = Path.of(
+                ImportTextTest.class.getResource("/com/torrenta/migrate").toURI());
+        assertEquals("Deluge", ImportText.clientOf(migrate.resolve("deluge-2.2")));
+        assertEquals("Transmission", ImportText.clientOf(migrate.resolve("transmission-4.1")));
+        assertEquals("qBittorrent", ImportText.clientOf(migrate.resolve("qbittorrent-5.1")));
+        Path home = dir.resolve("home");
+        java.nio.file.Files.createDirectories(home.resolve(".config/deluge/state"));
+        java.nio.file.Files.writeString(home.resolve(".config/deluge/state/torrents.state"), "");
+        java.nio.file.Files.createDirectories(home.resolve(".config/transmission"));
+        assertEquals(
+                List.of(home.resolve(".config/deluge")),
+                ImportText.found("Linux", home, java.util.Map.of()),
+                "a Transmission folder without its resume folder is not one; Deluge's with its state is");
+    }
+
     @Test
     void theButtonCounts() {
         assertTrue(ImportText.importButton(3).contains("3"));

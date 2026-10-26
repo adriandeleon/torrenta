@@ -2230,6 +2230,19 @@ public final class MainWindow {
                     found.unreadable(),
                     com.torrenta.migrate.TransmissionReader.CLIENT);
         }
+        if (com.torrenta.migrate.DelugeReader.isConfigFolder(folder)) {
+            com.torrenta.migrate.DelugeReader.Found found = com.torrenta.migrate.DelugeReader.read(folder);
+            for (String line : found.unreadable()) LOG.warning("Import: not readable in " + folder + ": " + line);
+            boolean running = com.torrenta.migrate.DelugeReader.running(folder);
+            return new ImportText.Loaded(
+                    folder,
+                    com.torrenta.migrate.ImportPlan.of(
+                            found.candidates(), ids, com.torrenta.migrate.ImportPlan::sizeOnDisk, running),
+                    false,
+                    running,
+                    found.unreadable(),
+                    com.torrenta.migrate.DelugeReader.CLIENT);
+        }
         com.torrenta.migrate.QbittorrentReader.Found found =
                 com.torrenta.migrate.QbittorrentReader.read(folder, home, env);
         // The dialog's note counts them; which ones is here, in the debug log.

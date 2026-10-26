@@ -557,10 +557,14 @@ remote caller's behalf.
    still writing, cannot be ticked), the SQLite and running notes. Found on the way: libtorrent 2 keeps no file sizes in resume
    data and believes a truncated file whole, so the plan compares sizes for the files whose pieces
    are claimed and a torrent that does not match is adopted without its pieces, checked on the add.
-2. **Import from Deluge**, also libtorrent: `state/torrents.fastresume` is one bencoded dict of
-   hash to resume bytes, `state/<hash>.torrent` beside it, labels from `label.conf` (Deluge's two
-   concatenated JSON objects). `torrents.state` is a Python pickle and is not read; the save path
-   is in the resume data.
+2. **Import from Deluge**, also libtorrent (done: `migrate.DelugeReader`, fixtures from a real
+   Deluge 2.2.0 in a container with no network; `torrents.state` is read after all, through
+   `migrate.Pickle`, which builds nothing, since a magnet without metadata has no resume data and
+   only its link is there, and the paused flag, the ratio and the name a person gave live there
+   too; renamed files from `mapped_files` into the `.storage` sidecar, qBittorrent's as well,
+   since libtorrent 2.1 showed them under the old name): `state/torrents.fastresume` is one
+   bencoded dict of hash to resume bytes, `state/<hash>.torrent` beside it, labels from
+   `label.conf` (Deluge's two concatenated JSON objects).
 3. **Import from Transmission**, which is not (done before item 2, since a real Transmission was
    at hand to write the fixtures and Deluge was not: `migrate.TransmissionReader`, its resume data
    converted into libtorrent's and adopted like qBittorrent's, renames into the `.storage` sidecar,

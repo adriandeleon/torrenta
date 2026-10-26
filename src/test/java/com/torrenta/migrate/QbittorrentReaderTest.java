@@ -56,11 +56,33 @@ class QbittorrentReaderTest {
                 pack.files(),
                 "the second file holds none of the pieces that are there");
         assertEquals(-2.0, pack.ratioLimit(), 1e-9);
+        assertEquals(Map.of(), pack.renamed(), "no file renamed");
 
         ImportCandidate magnet = named(found.candidates(), "Nobody.Serves.This");
         assertNull(magnet.metainfo(), "no .torrent: the metadata never arrived");
         assertEquals(0, magnet.pieces());
         assertTrue(magnet.files().isEmpty());
+    }
+
+    /**
+     * A file renamed in qBittorrent is in libtorrent's {@code mapped_files}, which libtorrent 2.1
+     * shows under the old name and loses at a restart: it is handed over as a rename for Torrenta's
+     * own sidecar too, as Deluge's are (the same key, proven end to end in DelugeImportTest).
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aFileRenamedInQbittorrentIsHandedOverAsARename() throws IOException {
+        ImportCandidate pack = named(
+                QbittorrentReader.read(QbittorrentImportTest.fixture(), NO_HOME, Map.of())
+                        .candidates(),
+                "Pack");
+        Map<String, Object> resume = new java.util.HashMap<>(
+                (Map<String, Object>) com.torrenta.engine.transmission.Bencode.decode(pack.resume()));
+        resume.put("mapped_files", List.of("", "Pack\\bee.bin"));
+        ImportCandidate renamed = QbittorrentReader.candidate(BencodeWriter.encode(resume), pack.metainfo(), Map.of());
+        assertEquals(Map.of(1, "Pack/bee.bin"), renamed.renamed(), "forward slashes, as the sidecar keeps them");
+        assertEquals("Pack/bee.bin", renamed.files().get(1).path(), "looked for under the name it has on disk");
+        assertEquals("Pack/a.bin", renamed.files().get(0).path(), "an empty entry is the file's own name");
     }
 
     @Test
