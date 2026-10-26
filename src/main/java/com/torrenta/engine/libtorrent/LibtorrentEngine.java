@@ -1531,6 +1531,9 @@ public final class LibtorrentEngine implements Engine {
             try {
                 store.save(id, blob);
                 if (!a.labels().isEmpty()) store.saveLabels(id, a.labels().encode());
+                // The other client's renames, where this engine keeps them: put back before the add.
+                if (!a.renamed().isEmpty())
+                    store.saveStorage(id, new TorrentStorage("", false, Set.of(), a.renamed()).encode());
             } catch (IOException e) {
                 throw new EngineException(tr("engine.error.importUnreadable", a.name(), e.getMessage()), e);
             }
@@ -3120,15 +3123,22 @@ public final class LibtorrentEngine implements Engine {
                         tr("engine.event.addFailed", name, alert.error().getMessage())));
                 return;
             }
-            write(alert.params());
-            // The add params carry the trackers only for a magnet; for a .torrent they live inside
-            // the info and the params' own list is empty, so a blob written from the params alone
-            // would bring the torrent back without its trackers. libtorrent's own resume data has
-            // them: ask for it now, and it replaces the blob shortly after.
-            requestSave(alert.handle(), false);
             String id = alert.params().getInfoHashes().getBest().toHex();
             // A torrent restored at start is not new to the person; nothing runs on it.
             boolean restored = restoring.remove(id);
+            // One from the store (a start, an import, an undo) has its blob there already, and asking
+            // for resume data now would replace it: libtorrent answers a request made before its
+            // resume check is done with no pieces at all, and a paused torrent, never modified
+            // again, kept that blob, so the next start found files and no resume data and wanted
+            // a full check that a paused torrent never runs (one import in thirty on Linux).
+            if (!restored) {
+                write(alert.params());
+                // The add params carry the trackers only for a magnet; for a .torrent they live
+                // inside the info and the params' own list is empty, so a blob written from the
+                // params alone would bring the torrent back without its trackers. libtorrent's own
+                // resume data has them: ask for it now, and it replaces the blob shortly after.
+                requestSave(alert.handle(), false);
+            }
             if (restored) broughtBack.add(id);
             if (restored) torrentEvent(alert, EngineEvent.Level.INFO, "engine.event.restored");
             else torrentEvent(alert, EngineEvent.Level.INFO, EngineEvent.Kind.ADDED, "engine.event.added");

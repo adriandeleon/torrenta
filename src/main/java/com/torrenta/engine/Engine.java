@@ -2,6 +2,7 @@ package com.torrenta.engine;
 
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
 
@@ -158,7 +159,24 @@ public interface Engine extends AutoCloseable {
      *     whole and seed it
      */
     record Adoption(
-            byte[] resume, byte[] metainfo, String savePath, TorrentLabels labels, String name, boolean check) {}
+            byte[] resume,
+            byte[] metainfo,
+            String savePath,
+            TorrentLabels labels,
+            String name,
+            boolean check,
+            Map<Integer, String> renamed) {
+
+        public Adoption {
+            renamed = renamed == null ? Map.of() : Map.copyOf(renamed);
+        }
+
+        /** No file renamed. */
+        public Adoption(
+                byte[] resume, byte[] metainfo, String savePath, TorrentLabels labels, String name, boolean check) {
+            this(resume, metainfo, savePath, labels, name, check, Map.of());
+        }
+    }
 
     default Detached detach(String id) throws EngineException {
         throw new EngineException(tr("engine.error.noUndo"));

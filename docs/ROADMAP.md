@@ -561,7 +561,12 @@ remote caller's behalf.
    hash to resume bytes, `state/<hash>.torrent` beside it, labels from `label.conf` (Deluge's two
    concatenated JSON objects). `torrents.state` is a Python pickle and is not read; the save path
    is in the resume data.
-3. **Import from Transmission**, which is not: `torrents/<hash>.torrent` (3.x:
+3. **Import from Transmission**, which is not (done before item 2, since a real Transmission was
+   at hand to write the fixtures and Deluge was not: `migrate.TransmissionReader`, its resume data
+   converted into libtorrent's and adopted like qBittorrent's, renames into the `.storage` sidecar,
+   the dialog listing both clients' folders; found: Transmission 4.1 keeps the progress in
+   `progress.blocks`, and its `pieces` there is the check state, `all` for a stopped half-downloaded
+   torrent): `torrents/<hash>.torrent` (3.x:
    `<name>.<hash16>.torrent`) and `resume/*.resume`, bencoded (`destination`, `name`, `paused`,
    `labels`, dates, totals, per-file `priority`/`dnd`, renamed names, and `progress` as
    `have: all`, a 4.x `pieces` bitfield or 3.x 16 KiB `blocks`, a piece only when all its blocks
