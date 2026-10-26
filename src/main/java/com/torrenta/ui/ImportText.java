@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import com.torrenta.migrate.DelugeReader;
 import com.torrenta.migrate.ImportCandidate;
 import com.torrenta.migrate.ImportPlan;
 import com.torrenta.migrate.QbittorrentReader;
@@ -45,19 +46,25 @@ final class ImportText {
 
     /**
      * The other clients' folders that exist on this machine, Flatpak's included: qBittorrent's,
-     * then Transmission's (the daemon's, the app's); none when there are none.
+     * then Transmission's (the daemon's, the app's), then Deluge's; none when there are none.
      */
     static List<Path> found(String osName, Path home, Map<String, String> env) {
         List<Path> out = new ArrayList<>();
         for (Path p : QbittorrentReader.knownLocations(osName, home, env)) if (Files.isDirectory(p)) out.add(p);
         for (Path p : TransmissionReader.knownLocations(osName, home, env))
             if (TransmissionReader.isConfigFolder(p)) out.add(p);
+        for (Path p : DelugeReader.knownLocations(osName, home, env)) if (DelugeReader.isConfigFolder(p)) out.add(p);
         return out;
     }
 
-    /** Whose folder this is: Transmission's has {@code resume} beside {@code torrents}; else qBittorrent's. */
+    /**
+     * Whose folder this is: Transmission's has {@code resume} beside {@code torrents}, Deluge's a
+     * {@code state} folder with its torrents' state; else qBittorrent's.
+     */
     static String clientOf(Path folder) {
-        return TransmissionReader.isConfigFolder(folder) ? TransmissionReader.CLIENT : QbittorrentReader.CLIENT;
+        if (TransmissionReader.isConfigFolder(folder)) return TransmissionReader.CLIENT;
+        if (DelugeReader.isConfigFolder(folder)) return DelugeReader.CLIENT;
+        return QbittorrentReader.CLIENT;
     }
 
     /** A source in the picker: the client and where. */

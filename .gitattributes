@@ -1,0 +1,3 @@
+# Files other clients wrote, kept byte for byte: a Windows checkout must not turn a pickle's or a
+# resume file's line feeds into CR LF.
+src/test/resources/com/torrenta/migrate/** -text

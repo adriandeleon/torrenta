@@ -236,13 +236,16 @@ public final class QbittorrentReader {
         boolean seedMode = number(r.get("seed_mode"), 0) == 1;
         long have = seedMode ? total : countSet(pieceBytes);
         List<ImportCandidate.FileEntry> files = new ArrayList<>();
+        Map<Integer, String> renamed = new java.util.LinkedHashMap<>();
         if (preview != null) {
             List<Object> mapped = r.get("mapped_files") instanceof List<?> m ? (List<Object>) m : List.of();
             Layout layout = layout(torrent);
             for (TorrentPreview.FileEntry f : preview.files()) {
                 String path = f.path();
                 if (f.index() < mapped.size() && mapped.get(f.index()) instanceof byte[] b && b.length > 0)
-                    path = new String(b, StandardCharsets.UTF_8);
+                    path = new String(b, StandardCharsets.UTF_8).replace('\\', '/');
+                // Kept in Torrenta's own sidecar too: libtorrent 2.1 loses a rename at a restart.
+                if (!path.equals(f.path())) renamed.put(f.index(), path);
                 files.add(
                         new ImportCandidate.FileEntry(path, f.size(), layout.claimed(f.index(), pieceBytes, seedMode)));
             }
@@ -263,7 +266,8 @@ public final class QbittorrentReader {
                 have,
                 total,
                 limit(number(r.get("qBt-ratioLimit"), -2000) / 1000.0),
-                (long) limit(number(r.get("qBt-seedingTimeLimit"), -2)));
+                (long) limit(number(r.get("qBt-seedingTimeLimit"), -2)),
+                renamed);
     }
 
     /** qBittorrent's -2 (the global limit) and -1 (none) as they are; anything below as -1. */
