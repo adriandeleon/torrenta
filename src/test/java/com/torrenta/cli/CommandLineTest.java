@@ -71,4 +71,14 @@ class CommandLineTest {
         assertTrue(usage.contains("--version"));
         assertTrue(usage.contains("--config-dir"));
     }
+
+    @Test
+    void reportStopsBeforeStartingAndKeepsTheConfigFolder() {
+        CommandLine cli = CommandLine.parse("--report", "--config-dir", "/tmp/c");
+        assertTrue(cli.report());
+        assertFalse(cli.shouldRun());
+        assertEquals("/tmp/c", cli.configDir());
+        assertFalse(CommandLine.parse().report());
+        assertTrue(CommandLine.usage("torrenta").contains("--report"));
+    }
 }

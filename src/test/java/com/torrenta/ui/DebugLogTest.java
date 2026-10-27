@@ -1,9 +1,13 @@
 package com.torrenta.ui;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -57,5 +61,21 @@ class DebugLogTest {
         assertEquals(DebugLog.MAX_ENTRIES, text.lines().count());
         DebugLog.clear();
         assertEquals("", DebugLog.text());
+    }
+
+    @Test
+    void theLastSessionsLogIsKeptForAReport(@TempDir Path dir) throws IOException {
+        // A crash is reported from the launch after it; that launch must not erase its record.
+        Path current = Files.writeString(DebugLog.fileIn(dir), "the crash\n");
+        Path previous = DebugLog.previousIn(dir);
+        DebugLog.keepPrevious(current, previous);
+        assertEquals("the crash\n", Files.readString(previous));
+        assertFalse(Files.exists(current));
+
+        // A quiet session does not push the useful one out.
+        Files.writeString(current, "");
+        DebugLog.keepPrevious(current, previous);
+        assertEquals("the crash\n", Files.readString(previous));
+        assertEquals("torrenta-session.prev.log", previous.getFileName().toString());
     }
 }

@@ -6,6 +6,7 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -25,8 +26,10 @@ import java.util.logging.Logger;
  *
  * <p>Two destinations, for two situations. A bounded in-memory buffer backs the window, which
  * covers "it is misbehaving right now". A file beside the settings covers "it died", since a
- * crashed process cannot show its own window; it is truncated per session, so it stays the story of
- * this run rather than growing without limit.
+ * crashed process cannot show its own window; it starts afresh each session, so it stays the story of
+ * this run rather than growing without limit. The one before is kept beside it ({@value
+ * #PREVIOUS_FILE_NAME}): a crash is reported from the launch after it, and that launch must not erase
+ * the log that recorded it. Both go into a problem report (Help → Report a Problem, {@code --report}).
  *
  * <p>This is the whole application's record and takes every logger at WARNING and above; the
  * {@link EventLog}'s bridge takes the same records from {@code com.torrenta} alone into the event
@@ -39,6 +42,9 @@ public final class DebugLog {
 
     /** The file's name under the config folder. */
     public static final String FILE_NAME = "torrenta-session.log";
+
+    /** The session before this one's file, kept for a problem report. */
+    public static final String PREVIOUS_FILE_NAME = "torrenta-session.prev.log";
 
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
 
@@ -75,11 +81,15 @@ public final class DebugLog {
         });
     }
 
-    /** Also mirror to {@code <configDir>/torrenta-session.log}, truncated for this run. */
+    /**
+     * Also mirror to {@code <configDir>/torrenta-session.log}, started afresh for this run once the last
+     * run's is moved aside to {@value #PREVIOUS_FILE_NAME}.
+     */
     public static synchronized void attachFile(Path configDir) {
         try {
             Files.createDirectories(configDir);
             file = configDir.resolve(FILE_NAME);
+            keepPrevious(file, configDir.resolve(PREVIOUS_FILE_NAME));
             Files.writeString(file, "", StandardCharsets.UTF_8);
             // What was captured before the folder was known (the command line, the toolkit) goes first.
             for (String line : ENTRIES) write(line);
@@ -87,6 +97,27 @@ public final class DebugLog {
             // A log that cannot be written is not worth failing a launch over.
             file = null;
         }
+    }
+
+    /** Moves a non-empty last session's log aside; an empty one (a quiet session) would push out a useful one. */
+    static void keepPrevious(Path current, Path previous) {
+        try {
+            if (Files.isRegularFile(current) && Files.size(current) > 0) {
+                Files.move(current, previous, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException | RuntimeException e) {
+            // This session is still logged; only the last one is lost, as it always was.
+        }
+    }
+
+    /** This session's log file under {@code configDir}, whether or not it is being written. */
+    public static Path fileIn(Path configDir) {
+        return configDir.resolve(FILE_NAME);
+    }
+
+    /** The last session's log file under {@code configDir}. */
+    public static Path previousIn(Path configDir) {
+        return configDir.resolve(PREVIOUS_FILE_NAME);
     }
 
     static synchronized void append(String line) {

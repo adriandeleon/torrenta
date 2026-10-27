@@ -22,7 +22,8 @@ import com.torrenta.AppInfo;
 import static com.torrenta.i18n.Messages.tr;
 
 /**
- * Shows what {@link DebugLog} has captured, with a button to copy it into a bug report. Termina's.
+ * Shows what {@link DebugLog} has captured, with a button to copy it and one to turn it into a
+ * problem report (Help → Report a Problem). Termina's.
  * Non-modal and reusable, like the event log's window: closing hides it, the next opening shows it
  * again, refreshed.
  */
@@ -32,7 +33,8 @@ final class DebugLogWindow {
     private final TextArea text = new TextArea();
     private final Label path = new Label();
 
-    DebugLogWindow(Window owner) {
+    /** {@code onReport} opens Report a Problem, the way to take this log to an issue. */
+    DebugLogWindow(Window owner, Runnable onReport) {
         text.setEditable(false);
         text.setWrapText(false);
         text.getStyleClass().add("debug-log-text");
@@ -54,12 +56,14 @@ final class DebugLogWindow {
             DebugLog.clear();
             refresh();
         });
+        Button report = new Button(tr("debugLog.report"));
+        report.setOnAction(e -> onReport.run());
         Button close = new Button(tr("common.close"));
         close.setOnAction(e -> stage.hide());
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        HBox buttons = new HBox(8, refresh, copy, clear, spacer, close);
+        HBox buttons = new HBox(8, refresh, copy, clear, report, spacer, close);
         buttons.setAlignment(Pos.CENTER_LEFT);
 
         VBox root = new VBox(10, text, path, buttons);

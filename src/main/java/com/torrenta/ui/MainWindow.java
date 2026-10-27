@@ -91,6 +91,8 @@ import com.torrenta.os.BadgeState;
 import com.torrenta.os.Badges;
 import com.torrenta.os.Handlers;
 import com.torrenta.os.MacHandlers;
+import com.torrenta.report.ProblemReport;
+import com.torrenta.report.Redactor;
 import com.torrenta.rss.Article;
 import com.torrenta.rss.Feed;
 import com.torrenta.rss.FeedFetcher;
@@ -198,6 +200,14 @@ public final class MainWindow {
     private final MessageLogPopup messagePopup;
     /** Built on first use: most sessions never open it. */
     private DebugLogWindow debugLogWindow;
+    /** Help → Report a Problem, built on first use like the debug log's. */
+    private ReportProblemWindow reportWindow;
+    /** The list's names and the engine when the report was asked for, read by its worker; FX-written. */
+    private volatile List<String> reportNames = List.of();
+
+    private volatile String reportEngine = "";
+    /** Where the session logs are, for the problem report. */
+    private final Path configDir;
 
     private final Label errorBadge = new Label();
     private TableView<TorrentRow> table;
@@ -376,6 +386,7 @@ public final class MainWindow {
         this.stage = stage;
         this.settings = settings;
         this.opener = opener;
+        this.configDir = configDir;
         this.ipFilter = new IpFilterController(settings, configDir);
         for (Engine.Capability c : Engine.Capability.values()) {
             capabilityOn.put(c, new javafx.beans.property.SimpleBooleanProperty(true));
@@ -987,6 +998,7 @@ public final class MainWindow {
         if (logWindow.isShowing()) return logWindow.scene();
         javafx.stage.PopupWindow popup = shownPopup();
         if (popup != null) return popup.getScene();
+        if (reportWindow != null && reportWindow.isShowing()) return reportWindow.scene();
         if (debugLogWindow != null && debugLogWindow.isShowing()) return debugLogWindow.scene();
         return stage.getScene();
     }
@@ -1066,6 +1078,11 @@ public final class MainWindow {
             out.add("link-dialog=" + linkDialog.describe());
         }
         // After the shot: the window and the tab have had their ticks by then.
+        // After the shot: the report is read and redacted on a worker, which has finished by then.
+        if (reportWindow != null && reportWindow.isShowing()) {
+            out.add("report=" + reportWindow.summaryForCapture());
+            for (String line : reportWindow.textForCapture().lines().limit(60).toList()) out.add("report-line=" + line);
+        }
         if (statsWindow.isShowing()) {
             out.add("stats=" + statsWindow.summaryForCapture());
             out.add("stats-graph=" + statsWindow.graph().summaryForCapture());
@@ -1443,6 +1460,7 @@ public final class MainWindow {
         if (logWindow.isShowing()) System.out.println("capture: log-window=showing");
         if (messagePopup.isShowing()) System.out.println("capture: message-log=" + messagePopup.visibleLines());
         if (debugLogWindow != null && debugLogWindow.isShowing()) System.out.println("capture: debug-log=showing");
+        if (reportWindow != null && reportWindow.isShowing()) System.out.println("capture: report=showing");
         if (currentDialog != null && currentDialog.isShowing()) {
             System.out.println("capture: dialog=" + currentDialog.title());
             System.out.println("capture: add-dialog=" + currentDialog.summaryForCapture());
@@ -3612,6 +3630,7 @@ public final class MainWindow {
                         always,
                         () -> messagePopup.toggle()),
                 new Command("debug-log", tr("command.debugLog"), null, null, always, this::showDebugLog),
+                new Command("report-problem", tr("command.reportProblem"), null, null, always, this::showReportProblem),
                 new Command(
                         "toggle-toolbar",
                         tr("command.toggleToolbar"),
@@ -3914,6 +3933,7 @@ public final class MainWindow {
                         downloadUpdateItem,
                         skipUpdateItem,
                         new SeparatorMenuItem(),
+                        menuItem("report-problem"),
                         menuItem("about"));
 
         MenuBar bar = new MenuBar(file, torrent, view, help);
@@ -5188,7 +5208,29 @@ public final class MainWindow {
 
     /** The debug log's window, built the first time it is asked for. */
     private void showDebugLog() {
-        if (debugLogWindow == null) debugLogWindow = new DebugLogWindow(stage);
+        if (debugLogWindow == null) debugLogWindow = new DebugLogWindow(stage, this::showReportProblem);
         debugLogWindow.show();
+    }
+
+    /**
+     * Help → Report a Problem: the two session logs and the system details, redacted on a worker,
+     * shown for reading before anything goes to GitHub. The list's names are taken here, on the FX
+     * thread, so the worker can replace them without touching the rows.
+     */
+    private void showReportProblem() {
+        reportNames = rows.list().stream().map(r -> r.torrent().name()).toList();
+        reportEngine = profile.isLocal() ? "libtorrent (local)" : "Transmission (remote)";
+        if (reportWindow == null) {
+            reportWindow = new ReportProblemWindow(
+                    stage,
+                    () -> ProblemReport.assemble(
+                            DebugLog.fileIn(configDir),
+                            DebugLog.previousIn(configDir),
+                            reportEngine,
+                            DebugLog.text(),
+                            Redactor.forThisMachine(reportNames)),
+                    opener);
+        }
+        reportWindow.show();
     }
 }
