@@ -12,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -398,6 +399,33 @@ class SettingsTest {
         read.setShareOverride("abc", null);
         assertTrue(read.shareOverride("abc").isEmpty(), "forgotten");
         assertEquals(1, read.shareOverrides().size());
+    }
+
+    @Test
+    void theShareOverridesFollowEveryWayAShareKeyChanges(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve(Settings.FILE_NAME);
+        var own = new com.torrenta.engine.ShareLimit(3, 0, com.torrenta.engine.ShareLimit.Action.PAUSE);
+        Files.writeString(file, "torrent.abc.share=" + own.format() + "\ntorrent.abc.pickFiles=true\n");
+        Settings settings = new Settings(file);
+        assertTrue(settings.shareOverrides().isEmpty(), "nothing before a load");
+        settings.load();
+        assertEquals(java.util.Map.of("abc", own), settings.shareOverrides(), "load");
+        var cached = settings.shareOverrides();
+        settings.set("ui.theme", "dark");
+        settings.setFilesToPick("abc", false);
+        assertSame(cached, settings.shareOverrides(), "other keys leave the map as it was");
+        settings.set("torrent.def.share", com.torrenta.engine.ShareLimit.NONE.format());
+        assertEquals(
+                java.util.Map.of("abc", own, "def", com.torrenta.engine.ShareLimit.NONE), settings.shareOverrides());
+        settings.reset("torrent.def.share");
+        assertEquals(java.util.Map.of("abc", own), settings.shareOverrides(), "reset");
+        settings.setShareOverride("abc", null);
+        assertTrue(settings.shareOverrides().isEmpty(), "forgotten");
+        assertThrows(
+                UnsupportedOperationException.class,
+                () -> settings.shareOverrides().put("x", own));
+        settings.load();
+        assertEquals(java.util.Map.of("abc", own), settings.shareOverrides(), "a reload reads the file again");
     }
 
     @Test
