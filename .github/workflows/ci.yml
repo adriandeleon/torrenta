@@ -217,7 +217,9 @@ jobs:
             echo "::error::the package has no engine library"; exit 1; }
           rm -rf "$RUNNER_TEMP/deb" && mkdir -p "$RUNNER_TEMP/deb"
           dpkg-deb -x "$deb" "$RUNNER_TEMP/deb"
-          entry=$(find "$RUNNER_TEMP/deb" -type f -name "*.desktop" -print -quit)
+          # The window launcher's entry by name: the headless torrenta-nox launcher ships one too, and
+          # the first *.desktop find met was either, by the file system's order.
+          entry=$(find "$RUNNER_TEMP/deb" -type f -name "torrenta-Torrenta.desktop" -print -quit)
           [ -n "$entry" ] || { echo "::error::the package installs no desktop entry"; exit 1; }
           echo "--- shipped desktop entry ---"; cat "$entry"
           desktop-file-validate "$entry"
