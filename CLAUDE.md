@@ -29,7 +29,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `dialog-add` to press Add on an open Add dialog (`dialog-press:now|wait|paused`
 for the others, `dialog-key:<KeyCode>` for a key in its file tree, `content-skip` for its content
 card's Skip these files; after any action a `content-check=` line has the card's severity and lines), `choose-files` for the
-selected torrent, `select-first`, `message-log` / `message-log:<query>` (the status bar's history card; its visible
+selected torrent, `select-first`, `select-rows:<i>+<j>…`, `sort:<column id>[:desc]` (a `table=` line
+after every shot has the sort, the shown rows in order with `*` on the selected ones, and the focused
+one), `message-log` / `message-log:<query>` (the status bar's history card; its visible
   lines are printed), `report-problem` (Help → Report a Problem; the PNG is of it, and after the shot a
   `report=` line has what was replaced, whether it fits the link, and `report-line=`s its first 60 lines), `debug-log` (the Debug Log window; `-Dtorrenta.captureLogProbe=true` pushes a warning and an
   uncaught exception through the real path before the shot and prints what the log caught),
@@ -770,8 +772,11 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   command shows which glyph; `MainWindow.menuItem(id)` applies it, so a command added to a menu
   through `command(id).menuItem()` directly would be the one item without an icon (`IconsTest`
   lists the menus' ids). macOS's system menu bar takes only `ImageView` graphics, so it shows none.
-- **Rows are `TorrentRow` objects, never `Torrent` snapshots.** The list has an extractor on the
-  row's torrent property, which is what makes the `SortedList` re-sort on an in-place update.
+- **Rows are `TorrentRow` objects, never `Torrent` snapshots, and a tick is one update change.**
+  `TorrentRows.apply` sets each row's torrent property (the cells observe it themselves), then fires
+  a single update over every row it kept, which is what makes the `FilteredList` re-test and the
+  `SortedList` re-sort, once each. Never an extractor on that list: it fired one change per row and
+  the sorted list re-sorted everything for each (N² compares, 442 ms a tick at 5,000 rows).
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
   write under `~/.torrenta`. `LibtorrentEngineTest` starts a real session on purpose: it is the one
   test that proves the native loads on each CI platform.
