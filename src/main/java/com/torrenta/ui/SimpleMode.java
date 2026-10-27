@@ -3,6 +3,8 @@ package com.torrenta.ui;
 import java.util.List;
 import java.util.Set;
 
+import com.torrenta.store.Settings;
+
 /**
  * Simple mode, Editora's Simple UI mode for a torrent client: one switch that leaves the list, the
  * ways a torrent arrives and the few actions a person new to it needs, and hides the rest. The pure
@@ -70,6 +72,15 @@ final class SimpleMode {
     /** The detail pane's tabs the mode keeps: what is happening, and which files. */
     static final List<String> DETAIL_TABS = List.of("overview", "files");
 
+    /**
+     * The list's columns in the mode, until the person moves them: the name (comfortable rows
+     * carry the progress bar and the status sentence inside it), the size, the two rates and the
+     * time left. Every other column is hidden, not dropped, so the table's column menu still has
+     * it.
+     */
+    static final String COLUMNS = "name:520,size:80,down:96,up:96,eta:80,-progress,-state,-done,-seeds,-peers,"
+            + "-ratio,-added,-completed,-tracker,-category,-tags,-path,-queue";
+
     private SimpleMode() {}
 
     /** Whether the mode is on: the saved switch, or {@code --simple} for this session. */
@@ -99,6 +110,23 @@ final class SimpleMode {
     /** The commands to offer, in the given order. */
     static List<Command> commands(List<Command> all, boolean simple) {
         return all.stream().filter(c -> keeps(c.id(), simple)).toList();
+    }
+
+    /**
+     * The rows the list draws: comfortable in the mode, whose name cell says what compact rows
+     * need two columns for; the saved density outside it. The saved density is left as it is.
+     */
+    static Density density(Density saved, boolean simple) {
+        return simple ? Density.COMFORTABLE : saved;
+    }
+
+    /**
+     * The settings key the list's columns are remembered under: the mode's own, else the shown
+     * density's, so a column moved in one never moves in the others.
+     */
+    static String columnsKey(Density shown, boolean simple) {
+        if (simple) return Settings.TABLE_COLUMNS_SIMPLE;
+        return shown == Density.COMFORTABLE ? Settings.TABLE_COLUMNS_COMFORTABLE : Settings.TABLE_COLUMNS;
     }
 
     /** Whether a view can show: the transfers always, Search and RSS outside the mode. */
