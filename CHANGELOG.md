@@ -19,6 +19,11 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Fixed
 
+- **Hidden to the tray or minimised, Torrenta stops drawing a window nobody sees.** The
+  once-a-second poll used to fetch the detail pane's torrent (pieces, files, peers) and redraw the
+  list, the sidebar and the status bar even with the window out of sight; now it keeps only what
+  goes on without one (share limits, speed history, the tray icon and badge, the port and leak
+  checks) and draws the latest state at once when the window comes back.
 - **The log of a session that crashed survives the next launch.** Each launch emptied
   `torrenta-session.log`, so the record of a crash was gone by the time Torrenta was reopened to
   report it; the last session's is now kept as `torrenta-session.prev.log`.
