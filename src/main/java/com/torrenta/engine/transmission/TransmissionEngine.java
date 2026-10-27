@@ -9,6 +9,7 @@ import java.time.DayOfWeek;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -53,8 +54,10 @@ import static com.torrenta.i18n.Messages.tr;
  * seedbox or a NAS over its RPC.
  *
  * <p>Everything the window asks is one call to the daemon ({@link RpcClient}), on the caller's
- * worker thread; the poll is one {@code torrent-get} with the fields the list needs, and {@link
- * #detail} alone asks for files, peers, trackers and the pieces bitfield of its one torrent. The
+ * worker thread; the poll is one {@code torrent-get} with the fields the list needs, of the
+ * recently active torrents most seconds and of every torrent every half minute ({@link
+ * #torrents}), and {@link #detail} alone asks for peers, trackers and the pieces bitfield of its
+ * one torrent, its file list once. The
  * RPC has no push, so {@link EngineEvent}s are made by comparing one poll with the last: a torrent
  * that appeared (added from another client), one that is gone, one that finished, one that fell
  * into an error. What the daemon cannot do is a missing {@link Capability}, which the window hides;
@@ -74,13 +77,32 @@ public final class TransmissionEngine implements Engine {
     static final int RPC_SEQUENTIAL = 18;
     /** The RPC version that knows {@code trackerList}; older ones take {@code trackerAdd}/{@code trackerRemove}. */
     static final int RPC_TRACKER_LIST = 17;
+    /**
+     * The RPC version (Transmission 1.60) that knows {@code ids: "recently-active"} and answers it
+     * with the {@code removed} ids; an older daemon is polled whole every time.
+     */
+    static final int RPC_RECENTLY_ACTIVE = 5;
+    /** The RPC version (Transmission 3.00) that takes {@code format: "table"}. */
+    static final int RPC_TABLE = 16;
     /** Transmission's speed unit: kilobytes of 1000, as its {@code units} say. */
     static final int KBPS = 1000;
     /** How many polls between two {@code session-stats} readings. */
     private static final int STATS_EVERY = 5;
+    /**
+     * How long the list may go on incremental polls before a full one. The full poll is what
+     * brings the trackers, and whatever another client changed without the daemon counting the
+     * torrent as active: a label set from the web UI does not put it in {@code recently-active}.
+     */
+    static final long FULL_POLL_EVERY_MILLIS = 30_000;
+    /** How many torrents' file lists {@link #detail} keeps; the pane shows one at a time. */
+    private static final int FILE_LISTS_KEPT = 8;
 
-    /** The fields of every poll, lean on purpose: the list's columns and the diff's needs. */
+    /**
+     * The fields of a full poll, lean on purpose: the list's columns and the diff's needs. The
+     * numeric {@code id} is there because {@code removed} names torrents by it.
+     */
     static final List<String> LIST_FIELDS = List.of(
+            "id",
             "hashString",
             "name",
             "totalSize",
@@ -106,7 +128,17 @@ public final class TransmissionEngine implements Engine {
             "metadataPercentComplete",
             "trackers");
 
-    /** What {@link #detail} asks, for the one torrent shown. */
+    /**
+     * The fields of an incremental poll: the full poll's without {@code trackers}, each torrent's
+     * whole tracker array, which changes only by an edit; the last ones known are kept.
+     */
+    static final List<String> ACTIVE_FIELDS =
+            LIST_FIELDS.stream().filter(f -> !f.equals("trackers")).toList();
+
+    /**
+     * What {@link #detail} asks, for the one torrent shown, every time: {@code fileStats} is the
+     * files' progress, wanted and priority; {@code files} (every path) is asked once and kept.
+     */
     static final List<String> DETAIL_FIELDS = List.of(
             "hashString",
             "downloadDir",
@@ -123,7 +155,7 @@ public final class TransmissionEngine implements Engine {
             "secondsDownloading",
             "secondsSeeding",
             "peersConnected",
-            "files",
+            "name",
             "fileStats",
             "peers",
             "trackerStats",
@@ -144,6 +176,26 @@ public final class TransmissionEngine implements Engine {
     private final Set<String> announced = new HashSet<>();
     /** Ids we removed ourselves, so the next poll does not say "removed" again. */
     private final Set<String> removedByUs = new HashSet<>();
+    /** The daemon's numeric id of each torrent, which is how {@code removed} names them. */
+    private final Map<Long, String> numbers = new HashMap<>();
+    /** When the last full poll answered, on {@link System#nanoTime} in milliseconds; -1 for never. */
+    private long lastFullPoll = -1;
+    /** An action of ours changed something an incremental poll might not show: poll whole next. */
+    private boolean fullPollWanted;
+
+    /**
+     * The file lists {@link #detail} has read, by id, the least recently shown dropped first:
+     * each file's name and length, which change only by a rename or the metadata arriving.
+     */
+    private final Map<String, FileList> fileLists = new LinkedHashMap<>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, FileList> eldest) {
+            return size() > FILE_LISTS_KEPT;
+        }
+    };
+
+    /** One torrent's {@code files} as read, and the torrent's name then (a root rename changes it). */
+    record FileList(String name, List<Object> files) {}
 
     private volatile boolean started;
     private volatile boolean stopped;
@@ -285,6 +337,7 @@ public final class TransmissionEngine implements Engine {
         String name = Json.str(added, "name", id);
         synchronized (pollLock) {
             announced.add(id);
+            fullPollWanted = true;
         }
         emit(EngineEvent.of(EngineEvent.Kind.ADDED, EngineEvent.Level.INFO, id, name, tr("engine.event.added", name)));
         Torrent fresh = one(id);
@@ -412,7 +465,9 @@ public final class TransmissionEngine implements Engine {
         rpc.call("torrent-remove", args);
         synchronized (pollLock) {
             removedByUs.add(id);
+            fullPollWanted = true;
         }
+        forgetFiles(id);
         emit(EngineEvent.info(
                 id, name, deleteFiles ? tr("engine.event.removedWithFiles", name) : tr("engine.event.removed", name)));
     }
@@ -445,6 +500,17 @@ public final class TransmissionEngine implements Engine {
     private void action(String method, String id) throws EngineException {
         checkRunning();
         rpc.call(method, Map.of("ids", List.of(id)));
+        wantFullPoll();
+    }
+
+    /**
+     * The next poll is a full one: what an action of ours changed may not count as activity to
+     * the daemon (a label does not), and the window should not wait for the half minute to see it.
+     */
+    private void wantFullPoll() {
+        synchronized (pollLock) {
+            fullPollWanted = true;
+        }
     }
 
     @Override
@@ -502,6 +568,7 @@ public final class TransmissionEngine implements Engine {
         args.put("location", destination.trim());
         args.put("move", moveFiles);
         rpc.call("torrent-set-location", args);
+        wantFullPoll();
         emit(EngineEvent.info(
                 id,
                 name,
@@ -515,6 +582,7 @@ public final class TransmissionEngine implements Engine {
         args.put("ids", List.of(id));
         args.putAll(fields);
         rpc.call("torrent-set", args);
+        wantFullPoll();
     }
 
     @Override
@@ -633,6 +701,8 @@ public final class TransmissionEngine implements Engine {
         args.put("path", path);
         args.put("name", name.strip());
         rpc.call("torrent-rename-path", args);
+        forgetFiles(id);
+        wantFullPoll();
         emit(EngineEvent.info(id, torrentName, tr("engine.event.pathRenamed", torrentName, path, name.strip())));
     }
 
@@ -748,46 +818,257 @@ public final class TransmissionEngine implements Engine {
     }
 
     private List<String> listFields() {
+        return withSequential(LIST_FIELDS);
+    }
+
+    private List<String> withSequential(List<String> fields) {
         if (capabilities.has(Capability.SEQUENTIAL_DOWNLOAD)) {
-            List<String> f = new ArrayList<>(LIST_FIELDS);
+            List<String> f = new ArrayList<>(fields);
             f.add("sequential_download");
             return f;
         }
-        return LIST_FIELDS;
+        return fields;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Most polls ask only for the torrents the daemon counts as recently active, without their
+     * trackers, and fold the answer into the last list ({@link #merge}); a full poll replaces the
+     * list at start, every {@link #FULL_POLL_EVERY_MILLIS}, after an action of ours, and on every
+     * poll of a daemon too old to answer incrementally ({@link #fullPollDue}). At thousands of
+     * torrents that is the difference between the whole list a second and the few that move.
+     */
     @Override
     public List<Torrent> torrents() {
         if (!started || stopped) return List.of();
-        List<Object> raw;
+        long nowMillis = System.nanoTime() / 1_000_000;
+        boolean full;
+        synchronized (pollLock) {
+            full = fullPollDue(rpcVersion, nowMillis, lastFullPoll, fullPollWanted);
+            if (full) fullPollWanted = false;
+        }
+        Map<String, Torrent> now;
         try {
-            raw = Json.list(rpc.call("torrent-get", Map.of("fields", listFields())), "torrents");
+            now = full ? fullPoll(nowMillis) : activePoll();
         } catch (EngineException e) {
             LOG.log(Level.FINE, "Poll failed: " + e.getMessage());
             synchronized (pollLock) {
+                if (full) fullPollWanted = true;
                 return new ArrayList<>(last.values());
             }
-        }
-        List<Torrent> out = new ArrayList<>(raw.size());
-        Map<String, Torrent> now = new LinkedHashMap<>();
-        for (Object o : raw) {
-            Torrent t = snapshot(Json.obj(o));
-            out.add(t);
-            now.put(t.id(), t);
         }
         List<EngineEvent> events;
         boolean statsDue;
         synchronized (pollLock) {
             events = polledOnce ? diff(last, now, announced, removedByUs) : List.of();
             announced.retainAll(now.keySet());
-            removedByUs.removeIf(id -> !last.containsKey(id) || !now.containsKey(id));
+            Map<String, Torrent> before = last;
+            removedByUs.removeIf(id -> !before.containsKey(id) || !now.containsKey(id));
             last = now;
             polledOnce = true;
             statsDue = polls++ % STATS_EVERY == 0;
         }
         for (EngineEvent e : events) emit(e);
         if (statsDue) readStats();
+        return new ArrayList<>(now.values());
+    }
+
+    /** Every torrent with every list field, trackers included: the list as it is. */
+    private Map<String, Torrent> fullPoll(long nowMillis) throws EngineException {
+        Map<String, Object> answer = rpc.call("torrent-get", pollArguments(listFields(), false, rpcVersion));
+        Map<String, Torrent> now = new LinkedHashMap<>();
+        Map<Long, String> byNumber = new HashMap<>();
+        for (Map<String, Object> row : rows(Json.list(answer, "torrents"))) {
+            Torrent t = snapshot(row);
+            now.put(t.id(), t);
+            long number = Json.lng(row, "id", -1);
+            if (number >= 0) byNumber.put(number, t.id());
+        }
+        synchronized (pollLock) {
+            numbers.clear();
+            numbers.putAll(byNumber);
+            lastFullPoll = nowMillis;
+        }
+        return now;
+    }
+
+    /**
+     * The recently active torrents, without trackers, folded into the last list. A torrent new to
+     * the list is read again whole, so its tracker host shows at once rather than at the next full
+     * poll; a removed one is confirmed gone first, since the numbers {@code removed} names them by
+     * are the daemon's of this run and a daemon restarted under us numbers its torrents afresh.
+     */
+    private Map<String, Torrent> activePoll() throws EngineException {
+        Map<String, Object> answer =
+                rpc.call("torrent-get", pollArguments(withSequential(ACTIVE_FIELDS), true, rpcVersion));
+        List<Torrent> active = new ArrayList<>();
+        Map<Long, String> byNumber = new HashMap<>();
+        for (Map<String, Object> row : rows(Json.list(answer, "torrents"))) {
+            Torrent t = snapshot(row);
+            active.add(t);
+            long number = Json.lng(row, "id", -1);
+            if (number >= 0) byNumber.put(number, t.id());
+        }
+        Map<String, Torrent> before;
+        Set<String> removed;
+        synchronized (pollLock) {
+            numbers.putAll(byNumber);
+            removed = removedIds(Json.list(answer, "removed"), numbers);
+            before = last;
+        }
+        List<String> fresh = active.stream()
+                .map(Torrent::id)
+                .filter(id -> !before.containsKey(id))
+                .toList();
+        if (!fresh.isEmpty()) {
+            Map<String, Torrent> whole = byId(fresh, listFields());
+            active.replaceAll(t -> whole.getOrDefault(t.id(), t));
+        }
+        if (!removed.isEmpty()) {
+            Set<String> still =
+                    byId(List.copyOf(removed), List.of("id", "hashString")).keySet();
+            if (!still.isEmpty()) {
+                removed = new HashSet<>(removed);
+                removed.removeAll(still);
+                wantFullPoll();
+            }
+        }
+        synchronized (pollLock) {
+            numbers.values().removeAll(removed);
+        }
+        return merge(before, active, removed);
+    }
+
+    /** Some torrents by hash with these fields, as snapshots by id; the ones the daemon lacks are absent. */
+    private Map<String, Torrent> byId(List<String> ids, List<String> fields) throws EngineException {
+        Map<String, Object> args = pollArguments(fields, false, rpcVersion);
+        args.put("ids", ids);
+        Map<String, Torrent> out = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows(Json.list(rpc.call("torrent-get", args), "torrents"))) {
+            Torrent t = snapshot(row);
+            out.put(t.id(), t);
+        }
         return out;
+    }
+
+    /**
+     * Whether this poll asks for every torrent: always for a daemon older than {@link
+     * #RPC_RECENTLY_ACTIVE}, for the first poll, when an action of ours wants it, and once {@link
+     * #FULL_POLL_EVERY_MILLIS} have passed since the last full one. The times are one monotonic
+     * clock's milliseconds; {@code lastFullMillis} is -1 before the first. Pure.
+     */
+    static boolean fullPollDue(int rpcVersion, long nowMillis, long lastFullMillis, boolean wanted) {
+        return rpcVersion < RPC_RECENTLY_ACTIVE
+                || wanted
+                || lastFullMillis < 0
+                || nowMillis - lastFullMillis >= FULL_POLL_EVERY_MILLIS;
+    }
+
+    /**
+     * The {@code torrent-get} arguments of a poll: the fields, {@code recently-active} for an
+     * incremental one, and the table format where the daemon has it, which names each field once
+     * instead of once per torrent. Pure.
+     */
+    static Map<String, Object> pollArguments(List<String> fields, boolean recentlyActive, int rpcVersion) {
+        Map<String, Object> args = new LinkedHashMap<>();
+        args.put("fields", fields);
+        if (recentlyActive) args.put("ids", "recently-active");
+        if (rpcVersion >= RPC_TABLE) args.put("format", "table");
+        return args;
+    }
+
+    /**
+     * {@code torrents} in either format as one map per torrent: a table's first row names the
+     * columns and every later row is one torrent; objects are taken as they are. Pure.
+     */
+    static List<Map<String, Object>> rows(List<Object> torrents) {
+        List<Map<String, Object>> out = new ArrayList<>(Math.max(0, torrents.size() - 1));
+        if (torrents.isEmpty()) return out;
+        if (!(torrents.get(0) instanceof List<?> header)) {
+            for (Object o : torrents) out.add(Json.obj(o));
+            return out;
+        }
+        for (int r = 1; r < torrents.size(); r++) {
+            List<Object> values = Json.list(torrents.get(r));
+            Map<String, Object> row = new LinkedHashMap<>();
+            for (int c = 0; c < header.size() && c < values.size(); c++) {
+                if (header.get(c) instanceof String key) row.put(key, values.get(c));
+            }
+            out.add(row);
+        }
+        return out;
+    }
+
+    /** The {@code removed} numbers as the ids this engine knows them by; a number it never saw is skipped. Pure. */
+    static Set<String> removedIds(List<Object> removed, Map<Long, String> numbers) {
+        Set<String> out = new HashSet<>();
+        for (Object o : removed) {
+            if (o instanceof Number n) {
+                String id = numbers.get(n.longValue());
+                if (id != null) out.add(id);
+            }
+        }
+        return out;
+    }
+
+    /**
+     * An incremental answer folded into the last list. The removed ones go; an active one takes
+     * its old place, with the trackers it was asked without kept from before (a new one is
+     * appended as it came); every other torrent stays as it was, except that its rates read zero:
+     * the daemon leaves out a torrent that has moved nothing for a minute, and its last answer
+     * may be older than that when a poll was missed. Pure.
+     */
+    static Map<String, Torrent> merge(Map<String, Torrent> last, List<Torrent> active, Set<String> removed) {
+        Map<String, Torrent> fresh = new HashMap<>();
+        for (Torrent t : active) fresh.put(t.id(), t);
+        Map<String, Torrent> out = new LinkedHashMap<>();
+        for (Torrent was : last.values()) {
+            if (removed.contains(was.id())) continue;
+            Torrent now = fresh.remove(was.id());
+            if (now != null)
+                out.put(was.id(), relisted(now, was.tracker(), was.trackers(), now.downloadRate(), now.uploadRate()));
+            else if (was.downloadRate() != 0 || was.uploadRate() != 0)
+                out.put(was.id(), relisted(was, was.tracker(), was.trackers(), 0, 0));
+            else out.put(was.id(), was);
+        }
+        for (Torrent t : active) {
+            if (fresh.containsKey(t.id()) && !removed.contains(t.id())) out.put(t.id(), t);
+        }
+        return out;
+    }
+
+    /** A copy with these trackers and rates. */
+    private static Torrent relisted(Torrent t, String tracker, List<String> trackers, long down, long up) {
+        return new Torrent(
+                t.id(),
+                t.name(),
+                t.size(),
+                t.done(),
+                t.progress(),
+                t.state(),
+                down,
+                up,
+                t.peers(),
+                t.seeds(),
+                t.uploaded(),
+                t.downloaded(),
+                t.added(),
+                t.completed(),
+                tracker,
+                t.savePath(),
+                t.paused(),
+                t.sequential(),
+                t.seedingTime(),
+                t.category(),
+                t.tags(),
+                t.error(),
+                trackers,
+                t.trackerError(),
+                t.queued(),
+                t.queuePosition(),
+                t.moving(),
+                t.superSeeding());
     }
 
     /**
@@ -1017,10 +1298,65 @@ public final class TransmissionEngine implements Engine {
         throw new EngineException(tr("engine.error.transmissionWebSeeds"));
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The file list ({@code files}: every path and length) is read the first time a torrent is
+     * shown and kept; each later call asks only {@code fileStats}, and reads the list again when
+     * the count no longer matches (a magnet's metadata arrived) or the name changed (its root was
+     * renamed from elsewhere). A rename of ours drops the kept list.
+     */
     @Override
     public TorrentDetail detail(String id) throws EngineException {
         checkRunning();
-        return detailOf(get(id, DETAIL_FIELDS), System.currentTimeMillis() / 1000);
+        FileList known;
+        synchronized (fileLists) {
+            known = fileLists.get(id);
+        }
+        List<String> fields = DETAIL_FIELDS;
+        if (known == null) {
+            fields = new ArrayList<>(DETAIL_FIELDS);
+            fields.add("files");
+        }
+        Map<String, Object> t = get(id, fields);
+        String name = Json.str(t, "name", "");
+        List<Object> files;
+        if (known != null && !filesStale(known, Json.list(t, "fileStats").size(), name)) {
+            files = known.files();
+        } else {
+            files = constantPart(Json.list(known == null ? t : get(id, List.of("files")), "files"));
+            synchronized (fileLists) {
+                fileLists.put(id, new FileList(name, files));
+            }
+        }
+        Map<String, Object> whole = new LinkedHashMap<>(t);
+        whole.put("files", files);
+        return detailOf(whole, System.currentTimeMillis() / 1000);
+    }
+
+    private void forgetFiles(String id) {
+        synchronized (fileLists) {
+            fileLists.remove(id);
+        }
+    }
+
+    /**
+     * Whether a kept file list no longer fits the torrent: the daemon's {@code fileStats} has as
+     * many entries as there are files, so a different count is the metadata having arrived; a
+     * different name is a root folder renamed. Pure.
+     */
+    static boolean filesStale(FileList known, int fileStatsCount, String name) {
+        return known.files().size() != fileStatsCount || !known.name().equals(name);
+    }
+
+    /** The {@code files} entries with only what does not change as the download runs: name and length. Pure. */
+    static List<Object> constantPart(List<Object> files) {
+        List<Object> out = new ArrayList<>(files.size());
+        for (Object o : files) {
+            Map<String, Object> f = Json.obj(o);
+            out.add(Map.of("name", Json.str(f, "name", ""), "length", Json.lng(f, "length", 0)));
+        }
+        return List.copyOf(out);
     }
 
     /** One {@code torrent-get} entry with the detail fields as the pane's record. Pure. */
@@ -1065,7 +1401,7 @@ public final class TransmissionEngine implements Engine {
                     i,
                     Json.str(f, "name", "").replace('\\', '/'),
                     Json.lng(f, "length", 0),
-                    Json.lng(f, "bytesCompleted", 0),
+                    Json.lng(s, "bytesCompleted", Json.lng(f, "bytesCompleted", 0)),
                     priority));
         }
 

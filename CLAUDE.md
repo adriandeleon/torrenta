@@ -689,8 +689,15 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   and the daemon's port and limits are never overwritten by local defaults. Speeds are KB (1000) on
   the daemon and KiB on the pages; `kibToKb`/`kbps` convert. The poll is one `torrent-get` with
   `LIST_FIELDS` (plus `sequential_download` from RPC 18, which is the field's name; `sequentialDownload`
-  is silently ignored by 4.1.0-beta.2); `detail()` alone asks for files, peers, `trackerStats` and
-  the base64 `pieces` bitfield (first piece in the high bit). Events are `diff(before, after,
+  is silently ignored by 4.1.0-beta.2), `format: "table"` from RPC 16 (`rows`); most polls are
+  `ids: "recently-active"` with `ACTIVE_FIELDS` (no `trackers`), folded into the last list by
+  `merge` (trackers kept, a quiet torrent's rates zeroed), `removed` read by numeric `id` and
+  confirmed gone by hash, a torrent new to the list read whole; a full poll replaces the list at
+  start, every 30 s, after any action of ours and always below RPC 5 (`fullPollDue`). Measured on
+  4.1: a label set by another client does not make a torrent recently active, a stop does.
+  `detail()` alone asks for `fileStats`, peers, `trackerStats` and the base64 `pieces` bitfield
+  (first piece in the high bit); `files` is read once per id and kept (`FileList`, re-read on our
+  rename or when the `fileStats` count or the name changes). Events are `diff(before, after,
   announced, removedByUs)`: the engine's own add and remove are announced by the action, the poll
   announces what another client did. A save path equal to this machine's default download folder
   means "the daemon's own" and is not sent (`addArguments`); the Add dialog defaults to

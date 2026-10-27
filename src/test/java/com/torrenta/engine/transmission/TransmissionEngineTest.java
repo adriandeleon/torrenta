@@ -260,17 +260,39 @@ class TransmissionEngineTest {
         e.torrents();
         assertTrue(events.isEmpty(), "the first poll restores, it announces nothing");
 
-        // Another client removed the magnet and added a torrent; the seed fell into an error.
+        // Another client removed the magnet and added a torrent; the seed fell into an error. The
+        // next poll is incremental: the active two in the table format without their trackers, and
+        // the magnet's number (2) in removed. Asked by hash, the daemon has the trackers.
         Map<String, Object> answer = Json.obj(Json.parse(fixture("torrent-get.json")));
         List<Object> torrents = new ArrayList<>(Json.list(Json.obj(answer, "arguments"), "torrents"));
         Map<String, Object> seed = new LinkedHashMap<>(Json.obj(torrents.get(0)));
         seed.put("error", 3L);
         seed.put("errorString", "No data found! Ensure your drives are connected");
         Map<String, Object> fresh = new LinkedHashMap<>(Json.obj(torrents.get(1)));
+        fresh.put("id", 3L);
         fresh.put("hashString", "ffffffffffffffffffffffffffffffffffffffff");
         fresh.put("name", "From the web UI");
-        server.answer("torrent-get", StubRpcServer.success(Map.of("torrents", List.of(seed, fresh))));
+        fresh.put("trackers", List.of(Map.of("announce", "udp://web.example.org:1/announce", "tier", 0L)));
+        var byHash = byIds(StubRpcServer.success(Map.of("torrents", List.of(seed, fresh))));
+        String active = table(List.of(seed, fresh), TransmissionEngine.ACTIVE_FIELDS, List.of(2L));
+        server.answer("torrent-get", args -> "recently-active".equals(args.get("ids")) ? active : byHash.apply(args));
+        server.clearCalls();
         e.torrents();
+
+        StubRpcServer.Call poll = server.calls("torrent-get").get(0);
+        assertEquals("recently-active", poll.arguments().get("ids"));
+        assertEquals("table", poll.arguments().get("format"), "RPC 16 and up answer as a table");
+        @SuppressWarnings("unchecked")
+        List<Object> fields = (List<Object>) poll.arguments().get("fields");
+        assertFalse(fields.contains("trackers"), "the incremental poll leaves the tracker arrays out");
+        Map<String, Torrent> listed = new LinkedHashMap<>();
+        for (Torrent t : e.torrents()) listed.put(t.id(), t);
+        assertEquals(List.of(PAYLOAD, "ffffffffffffffffffffffffffffffffffffffff"), List.copyOf(listed.keySet()));
+        assertEquals(List.of("tracker.example.org"), listed.get(PAYLOAD).trackers(), "kept from the full poll");
+        assertEquals(
+                List.of("web.example.org"),
+                listed.get("ffffffffffffffffffffffffffffffffffffffff").trackers(),
+                "a torrent new to the list is read whole once");
 
         List<String> lines = events.stream().map(EngineEvent::message).toList();
         assertTrue(lines.contains("Removed Torrenta test"), lines.toString());
@@ -288,10 +310,140 @@ class TransmissionEngineTest {
                 .orElseThrow();
         assertEquals("ffffffffffffffffffffffffffffffffffffffff", added.torrentId());
 
-        // The same answer again: nothing new.
+        // The same answer again: nothing new, and the number already removed is not asked about.
         events.clear();
+        server.clearCalls();
         e.torrents();
         assertTrue(events.isEmpty(), events.toString());
+        assertEquals(1, server.calls("torrent-get").size(), "one call for the incremental poll");
+    }
+
+    /** A {@code torrent-get} answer in the table format: the field names, then a row per torrent. */
+    static String table(List<Map<String, Object>> torrents, List<String> fields, List<Long> removed) {
+        List<Object> rows = new ArrayList<>();
+        rows.add(fields);
+        for (Map<String, Object> t : torrents) {
+            List<Object> row = new ArrayList<>();
+            for (String f : fields) row.add(t.getOrDefault(f, ""));
+            rows.add(row);
+        }
+        return StubRpcServer.success(Map.of("torrents", rows, "removed", removed));
+    }
+
+    @Test
+    void aPollAfterAnActionOfOursIsWhole() throws Exception {
+        TransmissionEngine e = engine();
+        server.answer("torrent-stop", StubRpcServer.success());
+        e.torrents();
+        e.torrents();
+        assertEquals("recently-active", server.last("torrent-get").arguments().get("ids"));
+        e.pause(PAYLOAD);
+        e.torrents();
+        StubRpcServer.Call poll = server.last("torrent-get");
+        assertNull(poll.arguments().get("ids"), "what a pause changed may not count as activity");
+        @SuppressWarnings("unchecked")
+        List<Object> fields = (List<Object>) poll.arguments().get("fields");
+        assertTrue(fields.contains("trackers"));
+        e.torrents();
+        assertEquals("recently-active", server.last("torrent-get").arguments().get("ids"), "and once only");
+    }
+
+    @Test
+    void aFullPollIsDueAtStartEveryHalfMinuteOnRequestAndAlwaysForAnOldDaemon() {
+        long half = TransmissionEngine.FULL_POLL_EVERY_MILLIS;
+        assertTrue(TransmissionEngine.fullPollDue(18, 5_000, -1, false), "the first poll");
+        assertFalse(TransmissionEngine.fullPollDue(18, 5_000 + half - 1, 5_000, false));
+        assertTrue(TransmissionEngine.fullPollDue(18, 5_000 + half, 5_000, false));
+        assertTrue(TransmissionEngine.fullPollDue(18, 5_001, 5_000, true), "an action of ours");
+        assertTrue(
+                TransmissionEngine.fullPollDue(TransmissionEngine.RPC_RECENTLY_ACTIVE - 1, 5_001, 5_000, false),
+                "a daemon without recently-active");
+        assertFalse(TransmissionEngine.fullPollDue(TransmissionEngine.RPC_RECENTLY_ACTIVE, 5_001, 5_000, false));
+
+        Map<String, Object> incremental = TransmissionEngine.pollArguments(List.of("id"), true, 18);
+        assertEquals("recently-active", incremental.get("ids"));
+        assertEquals("table", incremental.get("format"));
+        Map<String, Object> old =
+                TransmissionEngine.pollArguments(List.of("id"), false, TransmissionEngine.RPC_TABLE - 1);
+        assertNull(old.get("ids"));
+        assertNull(old.get("format"), "objects before RPC 16");
+    }
+
+    @Test
+    void aTableAnswerReadsAsOneMapPerTorrent() {
+        List<Map<String, Object>> rows =
+                TransmissionEngine.rows(List.of(List.of("id", "hashString"), List.of(1L, "aa"), List.of(2L, "bb")));
+        assertEquals(List.of(Map.of("id", 1L, "hashString", "aa"), Map.of("id", 2L, "hashString", "bb")), rows);
+        assertTrue(TransmissionEngine.rows(List.of(List.of("id"))).isEmpty(), "a header alone is no torrent");
+        assertTrue(TransmissionEngine.rows(List.of()).isEmpty());
+        assertEquals(
+                List.of(Map.of("id", 1L)), TransmissionEngine.rows(List.of(Map.of("id", 1L))), "objects as they are");
+        assertEquals(
+                Set.of("a"),
+                TransmissionEngine.removedIds(List.of(1L, 9L, "x"), Map.of(1L, "a", 2L, "b")),
+                "a number never seen is skipped");
+    }
+
+    @Test
+    void anIncrementalAnswerIsFoldedIntoTheLastList() {
+        Torrent a = tracked(torrent("a", 100, 40, false, ""), 500, 20);
+        Torrent b = tracked(torrent("b", 100, 100, false, ""), 0, 7);
+        Torrent c = tracked(torrent("c", 100, 10, false, ""), 0, 0);
+        Map<String, Torrent> last = new LinkedHashMap<>();
+        last.put("a", a);
+        last.put("b", b);
+        last.put("c", c);
+        // a changed (and came without trackers), b went quiet, c was removed, d is new.
+        Torrent aNow = torrent("a", 100, 60, false, "");
+        Torrent d = torrent("d", 50, 0, false, "");
+        Map<String, Torrent> now = TransmissionEngine.merge(last, List.of(d, aNow), Set.of("c"));
+
+        assertEquals(List.of("a", "b", "d"), List.copyOf(now.keySet()), "old places kept, the new one last");
+        assertEquals(60, now.get("a").done(), "the change");
+        assertEquals("udp://t.example.org/announce", now.get("a").tracker(), "trackers kept from before");
+        assertEquals(List.of("t.example.org"), now.get("a").trackers());
+        Torrent quiet = now.get("b");
+        assertEquals(100, quiet.done(), "a quiet torrent keeps its last values");
+        assertEquals(List.of("t.example.org"), quiet.trackers());
+        assertEquals(0, quiet.uploadRate(), "but moves nothing");
+        assertEquals(d, now.get("d"));
+        assertFalse(now.containsKey("c"));
+
+        // Unchanged and already idle: the same record, not a copy.
+        assertTrue(TransmissionEngine.merge(Map.of("c", c), List.of(), Set.of()).get("c") == c);
+        // The full poll is not merged: the list it read replaces the last one outright, so a
+        // torrent missed by every incremental answer still goes when the daemon no longer has it.
+        assertEquals(
+                List.of(),
+                List.copyOf(TransmissionEngine.diff(last, Map.of("a", a, "b", b, "c", c), Set.of(), Set.of())));
+    }
+
+    private static Torrent tracked(Torrent t, long down, long up) {
+        return new Torrent(
+                t.id(),
+                t.name(),
+                t.size(),
+                t.done(),
+                t.progress(),
+                t.state(),
+                down,
+                up,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                "udp://t.example.org/announce",
+                t.savePath(),
+                t.paused(),
+                false,
+                0,
+                "",
+                List.of(),
+                "",
+                List.of("t.example.org"),
+                false);
     }
 
     @Test
@@ -688,6 +840,52 @@ class TransmissionEngineTest {
         assertEquals(0, t.tier());
         assertEquals("updating", t.status(), "recorded mid-announce: announceState 3, nothing answered yet");
         assertTrue(detail.peers().isEmpty());
+    }
+
+    @Test
+    void detailReadsTheFileListOnceAndAgainWhenItChanges() throws Exception {
+        TransmissionEngine e = engine();
+        e.detail(PAYLOAD);
+        assertTrue(detailFields().contains("files"), "the first look reads the list");
+        TorrentDetail again = e.detail(PAYLOAD);
+        assertFalse(detailFields().contains("files"), "later ones only the stats");
+        assertTrue(detailFields().contains("fileStats"));
+        assertEquals("payload.bin", again.files().get(0).path());
+        assertEquals(307200, again.files().get(0).done(), "progress from fileStats");
+
+        // A rename of ours drops the kept list.
+        server.answer("torrent-rename-path", StubRpcServer.success());
+        e.renamePath(PAYLOAD, "payload.bin", "renamed.bin");
+        e.detail(PAYLOAD);
+        assertTrue(detailFields().contains("files"));
+
+        // The count changed under it (a magnet's metadata): the list is read again, alone.
+        Map<String, Object> answer = Json.obj(Json.parse(fixture("torrent-get.json")));
+        Map<String, Object> seed = new LinkedHashMap<>(
+                Json.obj(Json.list(Json.obj(answer, "arguments"), "torrents").get(0)));
+        seed.put("fileStats", List.of(Map.of("bytesCompleted", 1L), Map.of("bytesCompleted", 2L)));
+        seed.put("files", List.of(Map.of("name", "a", "length", 5L), Map.of("name", "b", "length", 6L)));
+        server.answer("torrent-get", byIds(StubRpcServer.success(Map.of("torrents", List.of(seed)))));
+        TorrentDetail grown = e.detail(PAYLOAD);
+        assertEquals(List.of("files"), server.last("torrent-get").arguments().get("fields"));
+        assertEquals(2, grown.files().size());
+        assertEquals("b", grown.files().get(1).path());
+        assertEquals(2, grown.files().get(1).done());
+
+        TransmissionEngine.FileList kept = new TransmissionEngine.FileList("n", List.of(Map.of()));
+        assertFalse(TransmissionEngine.filesStale(kept, 1, "n"));
+        assertTrue(TransmissionEngine.filesStale(kept, 2, "n"), "the metadata arrived");
+        assertTrue(TransmissionEngine.filesStale(kept, 1, "m"), "the root renamed from elsewhere");
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Object> detailFields() {
+        List<StubRpcServer.Call> gets = server.calls("torrent-get");
+        for (int i = gets.size() - 1; i >= 0; i--) {
+            List<Object> fields = (List<Object>) gets.get(i).arguments().get("fields");
+            if (fields.contains("fileStats")) return fields;
+        }
+        throw new AssertionError("no detail call");
     }
 
     @Test

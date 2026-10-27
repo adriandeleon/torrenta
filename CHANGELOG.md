@@ -19,6 +19,13 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Changed
 
+- **A Transmission daemon with thousands of torrents is polled lightly.** Most seconds the list
+  asks only for the torrents the daemon counts as recently active, without their tracker lists,
+  in the daemon's table format, and keeps the rest as they were; the whole list is read every
+  half minute and after anything Torrenta does. The detail pane reads a torrent's file names once
+  and only their progress after that. Adds and removes from another client still show within a
+  second.
+
 - **The Sync page waits for its switch.** Until "Keep settings in sync" is ticked, the URL,
   branch, interval and buttons are disabled; ticking it with no URL puts the cursor in the URL
   field. Enter (or leaving the field) connects. Create on GitHub is offered only while no
