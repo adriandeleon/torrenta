@@ -293,6 +293,15 @@ public final class LibtorrentEngine implements Engine {
      */
     private final Set<String> endedFetches = ConcurrentHashMap.newKeySet();
 
+    /**
+     * The session's own handle of every torrent the last {@link #handles} saw, by id, so the
+     * once-a-second poll asks {@code find_torrent} (a round trip to the network thread) only for
+     * a torrent it has not met. Read and written under the engine's monitor only; the alert
+     * thread never touches it. A torrent whose id changed (a v1 magnet of a hybrid, once its
+     * metadata is in) is met again under the new one and the old entry goes with the next poll.
+     */
+    private final Map<String, TorrentHandle> known = new java.util.HashMap<>();
+
     /** Category and tags by id; absent means none. The sidecar in the store is the durable copy. */
     private final Map<String, TorrentLabels> labels = new ConcurrentHashMap<>();
 
@@ -378,6 +387,7 @@ public final class LibtorrentEngine implements Engine {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             throw new EngineException(tr("engine.error.load", cause.getMessage()), e);
         }
+        known.clear();
         session = s;
         nativeLoaded = true;
         // The counters' places in a stats alert are the library's to say, and asking is native.
@@ -1717,6 +1727,7 @@ public final class LibtorrentEngine implements Engine {
         String name = nameOf(handle);
         if (deleteFiles) s.remove(handle, SessionHandle.DELETE_FILES);
         else s.remove(handle);
+        known.remove(id);
         emit(EngineEvent.info(
                 id, name, deleteFiles ? tr("engine.event.removedWithFiles", name) : tr("engine.event.removed", name)));
         // Forgotten before libtorrent confirms: a crash in between loses nothing worse than a
@@ -3078,6 +3089,7 @@ public final class LibtorrentEngine implements Engine {
         for (String id : streamed) failWaits(id, tr("engine.error.stopped"));
         s.stop();
         session = null;
+        known.clear();
         connectivity.set(Connectivity.NONE);
         emit(EngineEvent.session(EngineEvent.Level.INFO, tr("engine.event.stopped")));
     }
@@ -3101,41 +3113,67 @@ public final class LibtorrentEngine implements Engine {
      * <p>A SWIG vector's {@code get(i)} is a pointer into the vector, and the vector's finalizer
      * frees it: a handle kept past the vector is a use-after-free that crashed the JVM on CI. So
      * each element is only read for its hash, and the handle handed out is the session's own copy
-     * from {@code find_torrent}; the vector is kept reachable until that is done. Metadata fetches
-     * are left out.
+     * from {@code find_torrent}; the vector is kept reachable until that is done. That copy is kept
+     * in {@link #known} from one poll to the next, so {@code find_torrent} (a round trip to the
+     * network thread per torrent, every second) is asked only for a torrent not met before, or one
+     * whose kept handle went invalid or now has another id. Metadata fetches are left out.
      */
     private List<TorrentHandle> handles(SessionManager s) {
+        assert Thread.holdsLock(this) : "the handle map is the monitor's";
         session_handle session = s.swig();
         torrent_handle_vector vector = session.get_torrents();
         try {
-            List<TorrentHandle> out = new ArrayList<>(vector.size());
-            for (int i = 0; i < vector.size(); i++) {
+            int size = vector.size();
+            List<TorrentHandle> out = new ArrayList<>(size);
+            Set<String> seen = new java.util.HashSet<>(size * 2);
+            for (int i = 0; i < size; i++) {
+                torrent_handle raw = vector.get(i);
                 // A magnet the Add dialog is fetching, or one on its way out, is not the person's.
-                sha1_hash best = bestHash(vector.get(i));
-                if (fetchOf(vector.get(i)) != null || endedFetches.contains(best.to_hex())) continue;
-                TorrentHandle handle = new TorrentHandle(session.find_torrent(best));
-                if (handle.isValid()) out.add(handle);
+                sha1_hash best = bestHash(raw);
+                String id = best.to_hex();
+                if (fetchOf(raw) != null || endedFetches.contains(id)) continue;
+                // is_valid and info_hashes read the handle's own torrent; no round trip.
+                TorrentHandle handle = known.get(id);
+                if (handle == null || !handle.isValid() || !id(handle).equals(id)) {
+                    handle = new TorrentHandle(session.find_torrent(best));
+                    if (!handle.isValid()) continue;
+                    known.put(id, handle);
+                }
+                seen.add(id);
+                out.add(handle);
             }
+            known.keySet().retainAll(seen);
             return out;
         } finally {
             Reference.reachabilityFence(vector);
         }
     }
 
+    /**
+     * The torrent whose id this is, as the session's own handle: one {@code find_torrent} on the
+     * hash the id spells, no walk of the list. libtorrent finds a torrent by its v1 hash or its
+     * truncated v2 one, so a hybrid's v1 hash would find it too; only its id does here, as before.
+     * Metadata fetches are found like any torrent, as they always were.
+     */
     private static @Nullable TorrentHandle find(SessionManager s, String id) {
-        session_handle session = s.swig();
-        torrent_handle_vector vector = session.get_torrents();
-        try {
-            for (int i = 0; i < vector.size(); i++) {
-                sha1_hash best = bestHash(vector.get(i));
-                if (!best.to_hex().equals(id)) continue;
-                TorrentHandle handle = new TorrentHandle(session.find_torrent(best));
-                return handle.isValid() ? handle : null;
-            }
-            return null;
-        } finally {
-            Reference.reachabilityFence(vector);
+        if (!isHashHex(id)) return null;
+        TorrentHandle handle = new TorrentHandle(s.swig().find_torrent(sha1_hash.from_hex(id)));
+        return handle.isValid() && id(handle).equals(id) ? handle : null;
+    }
+
+    /** Forty lower-case hex digits, the only shape {@code to_hex} writes and so the only id. */
+    private static boolean isHashHex(String id) {
+        if (id.length() != 40) return false;
+        for (int i = 0; i < 40; i++) {
+            char c = id.charAt(i);
+            if ((c < '0' || c > '9') && (c < 'a' || c > 'f')) return false;
         }
+        return true;
+    }
+
+    /** The ids the poll's handle map holds, for the test that it keeps none that went. */
+    synchronized Set<String> knownHandlesForTest() {
+        return Set.copyOf(known.keySet());
     }
 
     /**
