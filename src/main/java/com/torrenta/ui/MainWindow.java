@@ -4127,11 +4127,23 @@ public final class MainWindow {
         settings.saveQuietly();
     }
 
+    /** The query, sidebar choice and saved views the list was last filtered by. */
+    private @Nullable List<Object> appliedFilter;
+
     private void applyFilters() {
         // The sidebar's choice narrows the list only where it can be seen: not in Simple mode.
         SidebarSelection chosen = SimpleMode.chrome(simpleOn.get()) ? sidebarSelection : SidebarSelection.ALL;
-        filtered.setPredicate(rowFilter(omnibox.query(), chosen, settings.savedViews()));
-        filterSaveable.set(!omnibox.query().isBlank());
+        String query = omnibox.query();
+        List<com.torrenta.store.SavedView> views = settings.savedViews();
+        // A new predicate replaces every row, and the table keeps one selected row through that:
+        // typing '>' (the query unchanged) took a multiple selection down to one, so a typed
+        // command reached one torrent. The same filter again is left alone.
+        List<Object> applied = List.of(query, chosen, views);
+        if (!applied.equals(appliedFilter)) {
+            appliedFilter = applied;
+            filtered.setPredicate(rowFilter(query, chosen, views));
+        }
+        filterSaveable.set(!query.isBlank());
     }
 
     /**
