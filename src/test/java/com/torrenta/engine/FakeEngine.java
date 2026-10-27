@@ -14,7 +14,10 @@ import java.util.function.Consumer;
  * change it the way a real engine would at its next snapshot. For tests that drive a window, which
  * polls an engine off the FX thread: every method is synchronized, the listeners are told on the
  * caller's thread. What the fake cannot do (inspect, create, probe) fails the way an engine
- * without the capability would, with an {@link EngineException}.
+ * without the capability would, with an {@link EngineException}, unless a test hands it the
+ * answer: {@link #withPreview} for inspect, {@link #withCreate} for create. A torrent's detail is
+ * a minimal record unless one is given with {@link #withDetail} ({@link #richDetail} builds one
+ * with files, peers, trackers and pieces).
  */
 public class FakeEngine implements Engine {
 
@@ -24,6 +27,9 @@ public class FakeEngine implements Engine {
     private final List<Consumer<EngineEvent>> listeners = new CopyOnWriteArrayList<>();
     private Capabilities capabilities = Capabilities.ALL;
     private String downloadDir = System.getProperty("java.io.tmpdir");
+    private final Map<String, TorrentDetail> details = new LinkedHashMap<>();
+    private TorrentPreview preview;
+    private Creator creator;
     private boolean started;
     private boolean stopped;
     private int added;
@@ -78,6 +84,76 @@ public class FakeEngine implements Engine {
     public synchronized FakeEngine withDownloadDir(String dir) {
         this.downloadDir = dir;
         return this;
+    }
+
+    /** What {@link #create} does in a test: hash (or not), report progress, answer or fail. */
+    @FunctionalInterface
+    public interface Creator {
+        CreatedTorrent create(CreateRequest request, CreateProgress progress) throws EngineException;
+    }
+
+    /** {@link #inspect} answers this for any bytes; null (the default) fails as an engine without it. */
+    public synchronized FakeEngine withPreview(TorrentPreview preview) {
+        this.preview = preview;
+        return this;
+    }
+
+    /** {@link #create} runs this; null (the default) fails as an engine without it. */
+    public synchronized FakeEngine withCreate(Creator creator) {
+        this.creator = creator;
+        return this;
+    }
+
+    /**
+     * The detail {@link #detail} answers for {@code id}, cut to the parts asked for, as a real
+     * engine reads only those; its web seeds are also {@link #webSeeds}'.
+     */
+    public synchronized FakeEngine withDetail(String id, TorrentDetail detail) {
+        details.put(id, detail);
+        return this;
+    }
+
+    /**
+     * A detail with something in every part: two wanted files over eight pieces of which five are
+     * here, the second file's three missing pieces on no peer (so a stalled torrent's Overview
+     * offers to skip it), two peers, two trackers and a web seed.
+     */
+    public static TorrentDetail richDetail(Torrent torrent) {
+        String id = torrent.id();
+        TorrentDetail.General general = new TorrentDetail.General(
+                id,
+                torrent.savePath(),
+                false,
+                8,
+                1 << 20,
+                5,
+                0.62,
+                torrent.downloaded(),
+                torrent.uploaded(),
+                4096,
+                3600,
+                0,
+                90,
+                torrent.peers(),
+                torrent.tracker(),
+                id,
+                "");
+        List<TorrentDetail.FileStatus> files = List.of(
+                new TorrentDetail.FileStatus(
+                        0, torrent.name() + "/part 1.mkv", 4 << 20, 4 << 20, Priority.NORMAL, 0, 3),
+                new TorrentDetail.FileStatus(
+                        1, torrent.name() + "/extras/part 2.mkv", 4 << 20, 1 << 20, Priority.NORMAL, 4, 7));
+        List<TorrentDetail.Peer> peers = List.of(
+                new TorrentDetail.Peer("10.0.0.2:6881", "qBittorrent 5.1.0", "D", 0.6, 0, 0, 1 << 20, 0),
+                new TorrentDetail.Peer("10.0.0.3:51413", "Transmission 4.1", "u", 0.6, 0, 0, 0, 0));
+        List<TorrentDetail.Tracker> trackers = List.of(
+                new TorrentDetail.Tracker("https://tracker.example.org/announce", 0, "working", "", 0),
+                new TorrentDetail.Tracker("udp://backup.example.org:1337", 1, "error", "timed out", 3));
+        boolean[] pieces = new boolean[8];
+        for (int i = 0; i < 5; i++) pieces[i] = true;
+        int[] availability = {2, 2, 2, 2, 2, 0, 0, 0};
+        return new TorrentDetail(
+                general, files, peers, trackers, pieces, availability, List.of("https://seed.example.org/files/"));
     }
 
     /** Every action in the order it was asked, {@code "<verb> <id> [<argument>…]"}. */
@@ -215,13 +291,22 @@ public class FakeEngine implements Engine {
     }
 
     @Override
-    public TorrentPreview inspect(byte[] torrent) throws EngineException {
-        throw new EngineException("the fake engine reads no .torrent");
+    public synchronized TorrentPreview inspect(byte[] torrent) throws EngineException {
+        call("inspect", torrent.length);
+        if (preview == null) throw new EngineException("the fake engine reads no .torrent");
+        return preview;
     }
 
+    /** Not synchronized: a creator may wait on the test, and the window's poll must go on meanwhile. */
     @Override
     public CreatedTorrent create(CreateRequest request, CreateProgress progress) throws EngineException {
-        throw new EngineException("the fake engine creates no torrent");
+        Creator run;
+        synchronized (this) {
+            call("create", request.path());
+            run = creator;
+        }
+        if (run == null) throw new EngineException("the fake engine creates no torrent");
+        return run.create(request, progress);
     }
 
     @Override
@@ -349,6 +434,21 @@ public class FakeEngine implements Engine {
     @Override
     public synchronized TorrentDetail detail(String id, Set<TorrentDetail.Part> parts) throws EngineException {
         Torrent torrent = existing(id);
+        TorrentDetail given = details.get(id);
+        if (given != null) {
+            return new TorrentDetail(
+                    given.general(),
+                    parts.contains(TorrentDetail.Part.FILES) ? given.files() : List.of(),
+                    parts.contains(TorrentDetail.Part.PEERS) ? given.peers() : List.of(),
+                    parts.contains(TorrentDetail.Part.TRACKERS) ? given.trackers() : List.of(),
+                    parts.contains(TorrentDetail.Part.PIECES) ? given.pieces() : new boolean[0],
+                    parts.contains(TorrentDetail.Part.PIECES) ? given.availability() : new int[0],
+                    parts.contains(TorrentDetail.Part.WEB_SEEDS) ? given.webSeeds() : List.of(),
+                    parts.contains(TorrentDetail.Part.FILES) ? given.encryptedArchives() : Set.of(),
+                    given.command(),
+                    parts,
+                    given.files().size());
+        }
         TorrentDetail.General general = new TorrentDetail.General(
                 id,
                 torrent.savePath(),
@@ -399,7 +499,8 @@ public class FakeEngine implements Engine {
     @Override
     public synchronized List<String> webSeeds(String id) throws EngineException {
         existing(id);
-        return List.of();
+        TorrentDetail given = details.get(id);
+        return given == null ? List.of() : given.webSeeds();
     }
 
     @Override
