@@ -72,6 +72,8 @@ public final class Settings {
     public static final String TABLE_COLUMNS = "table.columns";
     /** The same for comfortable rows, which want different columns: each density keeps its own. */
     public static final String TABLE_COLUMNS_COMFORTABLE = "table.columns.comfortable";
+    /** The same for Simple mode, which shows fewer columns and keeps them apart from both. */
+    public static final String TABLE_COLUMNS_SIMPLE = "table.columns.simple";
     /** Row density, {@code comfortable} or {@code compact}; the UI maps it and falls back. */
     public static final String UI_DENSITY = "ui.density";
     /**

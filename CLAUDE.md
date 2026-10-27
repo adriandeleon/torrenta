@@ -957,7 +957,12 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   saved switch is `ui.simple`; `--simple` is `simpleForSession`, OR'd with it, and any toggle in
   the window (View, toolbar, palette, the Settings box) ends the session flag and saves the
   opposite of what showed (`SimpleMode.toggled`), so one toggle always does something. A new
-  dialog that a newcomer meets gets an `applySimple` like `AddDialog`'s.
+  dialog that a newcomer meets gets an `applySimple` like `AddDialog`'s. The list's rows and columns are
+  `MainWindow.applyRows` (called from `applySimple` and `chooseDensity`): `SimpleMode.density`
+  draws comfortable rows in the mode without touching `ui.density`, and `SimpleMode.columnsKey`
+  picks one of three layout keys (`table.columns`, `.comfortable`, `.simple`, whose default is
+  `SimpleMode.COLUMNS`); the columns showing are saved under the key being left before the next
+  one's are applied. Every capture prints `columns=` (rows, key, shown ids).
 
 ## Conventions (carried from Termina)
 
