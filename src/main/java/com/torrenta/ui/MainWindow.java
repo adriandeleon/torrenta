@@ -1199,6 +1199,7 @@ public final class MainWindow {
      */
     public List<String> lateLinesForCapture() {
         List<String> out = new ArrayList<>();
+        if (settingsWindow.isShowing()) out.add("sync=" + settingsWindow.syncStateForCapture());
         out.add("statusbar-fit=" + statusBarFit());
         out.add("window=" + windowLine());
         // Every other window showing: is its footer in view?
@@ -1353,6 +1354,18 @@ public final class MainWindow {
         } else if (action.equals("settings-search-test")) {
             settingsWindow.show(stage);
             settingsWindow.testSearchProviderForCapture();
+        } else if (action.startsWith("settings-sync-switch:")) {
+            // settings-sync-switch:on|off: the Sync page's switch, as a click.
+            settingsWindow.show(stage);
+            settingsWindow.syncSwitchForCapture(action.endsWith(":on"));
+        } else if (action.startsWith("settings-sync-url:")) {
+            // settings-sync-url:<url>: typed into the Sync page's field, then Enter.
+            settingsWindow.show(stage);
+            settingsWindow.syncUrlForCapture(action.substring("settings-sync-url:".length()));
+        } else if (action.startsWith("settings-sync-create:")) {
+            // settings-sync-create:<name>: Create on GitHub pressed, the name typed, OK pressed.
+            settingsWindow.show(stage);
+            settingsWindow.createSyncRepositoryForCapture(action.substring("settings-sync-create:".length()));
         } else if (action.equals("settings-definitions-reload")) {
             settingsWindow.show(stage);
             settingsWindow.reloadDefinitionsForCapture();

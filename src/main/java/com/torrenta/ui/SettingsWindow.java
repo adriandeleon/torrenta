@@ -68,7 +68,6 @@ import com.torrenta.store.ProfileStore;
 import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
-import com.torrenta.sync.SyncEngine;
 import com.torrenta.webapi.Passwords;
 import com.torrenta.webapi.WebApiConfig;
 import com.torrenta.webapi.WebApiService;
@@ -585,6 +584,11 @@ final class SettingsWindow {
     private TextField syncBranch;
     private Spinner<Integer> syncInterval;
     private Label syncStatus;
+    private Button syncCreate;
+    /** A Create on GitHub in flight: the button waits for it. */
+    private final javafx.beans.property.BooleanProperty syncCreating =
+            new javafx.beans.property.SimpleBooleanProperty();
+
     private Button syncNow;
     private Button syncDisconnect;
 
@@ -629,8 +633,23 @@ final class SettingsWindow {
             settings.saveQuietly();
             if (sync != null) sync.settingsChanged();
         });
+        // The URL is committed by Enter or by leaving the field; until then it is only saved.
+        syncUrl.setOnAction(e -> commitSyncUrl());
+        syncUrl.focusedProperty().addListener((o, was, now) -> {
+            if (!now) commitSyncUrl();
+        });
+        // Everything on the page waits for the switch; Create also for an empty URL.
+        javafx.beans.binding.BooleanBinding off = syncEnabled.selectedProperty().not();
+        syncUrl.disableProperty().bind(off);
         Button create = new Button(tr("settings.sync.createOnGitHub"));
         create.setOnAction(e -> createSyncRepository());
+        create.disableProperty()
+                .bind(javafx.beans.binding.Bindings.createBooleanBinding(
+                        () -> !SyncPage.canCreate(syncEnabled.isSelected(), syncUrl.getText(), syncCreating.get()),
+                        syncEnabled.selectedProperty(),
+                        syncUrl.textProperty(),
+                        syncCreating));
+        syncCreate = create;
         row(
                 Category.SYNC,
                 repository,
@@ -641,6 +660,7 @@ final class SettingsWindow {
         syncBranch = new TextField();
         syncBranch.setPrefColumnCount(10);
         syncBranch.setPromptText("main");
+        syncBranch.disableProperty().bind(off);
         syncBranch.textProperty().addListener((o, was, now) -> {
             if (loading) return;
             settings.setSyncBranch(now);
@@ -657,6 +677,7 @@ final class SettingsWindow {
         syncInterval.setEditable(true);
         Spinners.commitOnBlur(syncInterval);
         syncInterval.setPrefWidth(90);
+        syncInterval.disableProperty().bind(off);
         syncInterval.valueProperty().addListener((o, was, now) -> {
             if (loading || now == null) return;
             settings.setSyncIntervalMinutes(now);
@@ -681,23 +702,41 @@ final class SettingsWindow {
         });
         syncDisconnect = new Button(tr("settings.sync.disconnect"));
         syncDisconnect.setOnAction(e -> disconnectSync());
-        VBox statusBox = new VBox(8, syncStatus, new HBox(8, syncNow, syncDisconnect));
+        HBox syncButtons = new HBox(8, syncNow, syncDisconnect);
+        syncButtons.disableProperty().bind(off);
+        VBox statusBox = new VBox(8, syncStatus, syncButtons);
         status.getChildren().add(statusBox);
         rows.add(new Row(Category.SYNC, statusBox, tr("settings.sync.status.keywords"), status));
     }
 
-    /** The switch went on: refuse a URL with a secret, show what connecting brings, then sync. */
+    /** Enter in the URL field, or leaving it: connect, when the switch is on and nothing is connected yet. */
+    private void commitSyncUrl() {
+        // sync.enabled is set from the start of a connect, so one in flight is not started again.
+        if (loading || !syncEnabled.isSelected() || settings.syncEnabled()) return;
+        // Leaving an empty field is not a request; the switch already said what to do.
+        if (SyncPage.connect(syncUrl.getText()) == SyncPage.Connect.NEED_URL) return;
+        connectSync();
+    }
+
+    /**
+     * Connects to the URL in the field: refuses one with a secret, shows what connecting brings, then
+     * syncs. The switch stays on whatever happens, so the URL can be put right; {@code sync.enabled}
+     * is set only while connecting and kept only once that worked.
+     */
     private void connectSync() {
         String url = syncUrl.getText().trim();
-        if (!SyncEngine.isUsableUrl(url)) {
-            syncEnabled.setSelected(false);
-            syncStatus.setText(tr("settings.sync.enterUrl"));
-            return;
-        }
-        if (SyncEngine.hasCredentials(url)) {
-            syncEnabled.setSelected(false);
-            syncStatus.setText(tr("settings.sync.urlHasSecret"));
-            return;
+        switch (SyncPage.connect(url)) {
+            case NEED_URL -> {
+                syncStatus.setText(tr("settings.sync.enterUrl"));
+                // On the next pulse: the field is enabled by the same switch that called this.
+                javafx.application.Platform.runLater(syncUrl::requestFocus);
+                return;
+            }
+            case HAS_SECRET -> {
+                syncStatus.setText(tr("settings.sync.urlHasSecret"));
+                return;
+            }
+            case CONNECT -> {}
         }
         settings.setSyncUrl(url);
         settings.setSyncEnabled(true);
@@ -708,7 +747,6 @@ final class SettingsWindow {
             if (!report.ok()) {
                 settings.setSyncEnabled(false);
                 settings.saveQuietly();
-                reload();
                 syncStatus.setText(report.summary());
                 return;
             }
@@ -727,7 +765,6 @@ final class SettingsWindow {
                 if (!StockButtons.confirmed(ask.showAndWait())) {
                     settings.setSyncEnabled(false);
                     settings.saveQuietly();
-                    reload();
                     syncStatus.setText(tr("settings.sync.notConnected"));
                     return;
                 }
@@ -740,6 +777,11 @@ final class SettingsWindow {
     }
 
     private void createSyncRepository() {
+        createSyncRepository(null);
+    }
+
+    /** The Create on GitHub prompt; with a {@code typed} name, that name is entered and OK pressed, for a capture. */
+    private void createSyncRepository(@Nullable String typed) {
         TextInputDialog ask = new TextInputDialog("torrenta-settings");
         ask.initOwner(stage);
         ask.setTitle(tr("settings.sync.create.title"));
@@ -747,13 +789,22 @@ final class SettingsWindow {
         ask.setContentText(tr("settings.sync.create.name"));
         StockButtons.translate(ask);
         Fonts.installUiFont(ask.getDialogPane());
+        if (typed != null)
+            javafx.application.Platform.runLater(() -> {
+                ask.getEditor().setText(typed);
+                StockButtons.okButton(ask).fire();
+            });
         ask.showAndWait().map(String::trim).filter(n -> !n.isEmpty()).ifPresent(name -> {
-            if (sync == null) return;
+            SettingsSync s = sync;
+            if (s == null) return;
+            syncCreating.set(true);
             syncStatus.setText(tr("settings.sync.creating", name));
-            sync.createOnGitHub(name, created -> {
+            s.createOnGitHub(name, created -> {
+                syncCreating.set(false);
                 if (created.ok()) {
+                    // Made to be used: connect at once rather than ask for the switch again.
                     syncUrl.setText(created.url());
-                    syncStatus.setText(tr("settings.sync.created"));
+                    connectSync();
                 } else {
                     syncStatus.setText(tr("settings.sync.ghError", created.error()));
                 }
@@ -1432,6 +1483,36 @@ final class SettingsWindow {
     }
 
     /** The search box's text and the page shown, for a capture. */
+    /** Turns the Sync page's switch on or off, as a click does; for a capture. */
+    void syncSwitchForCapture(boolean on) {
+        selectPageForCapture("SYNC");
+        syncEnabled.setSelected(on);
+    }
+
+    /** Types {@code url} into the Sync page's field and presses Enter; for a capture. */
+    void syncUrlForCapture(String url) {
+        selectPageForCapture("SYNC");
+        syncUrl.setText(url);
+        syncUrl.fireEvent(new javafx.event.ActionEvent());
+    }
+
+    /** Opens the Sync page and presses Create on GitHub with {@code name}, on the next pulse; for a capture. */
+    void createSyncRepositoryForCapture(String name) {
+        selectPageForCapture("SYNC");
+        javafx.application.Platform.runLater(() -> createSyncRepository(name));
+    }
+
+    /** The Sync page as it stands: the switch, what is enabled, the URL, the status line; for a capture. */
+    String syncStateForCapture() {
+        if (syncUrl == null) return "";
+        return "on=" + syncEnabled.isSelected() + " connected=" + settings.syncEnabled() + " url-field="
+                + (syncUrl.isDisabled() ? "disabled" : "enabled") + " create="
+                + (syncCreate.isDisabled() ? "disabled" : "enabled") + " sync-now="
+                + (syncNow.isDisabled() ? "disabled" : "enabled") + " url-focused=" + syncUrl.isFocused() + " url=\""
+                + syncUrl.getText() + "\" status=\""
+                + syncStatus.getText().replace('\n', ' ') + "\"";
+    }
+
     String searchStateForCapture() {
         Object page = sidebar.getSelectionModel().getSelectedItem();
         return "query=\"" + search.getText() + "\" page=" + (page instanceof Category c ? c.name() : "none");

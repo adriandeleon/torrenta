@@ -5,6 +5,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Changed
+
+- **The Sync page waits for its switch.** Until "Keep settings in sync" is ticked, the URL,
+  branch, interval and buttons are disabled; ticking it with no URL puts the cursor in the URL
+  field. Enter (or leaving the field) connects. Create on GitHub is offered only while no
+  repository is named, and the one it makes is filled in and connected at once. A failed
+  connect leaves the box ticked and says why.
+
 ## 0.3.0 — 2026-10-26
 
 ### Added
