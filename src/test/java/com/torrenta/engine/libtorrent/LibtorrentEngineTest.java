@@ -167,6 +167,77 @@ class LibtorrentEngineTest {
     }
 
     /**
+     * The same torrent removed and added again in one session is stored like any other add and
+     * comes back after a restart. The remove's mark was by id alone and kept every later write of
+     * that id out of the store, so the torrent added again was gone at the next start.
+     */
+    @Test
+    void aTorrentAddedAgainAfterItsRemoveComesBackAfterARestart(@TempDir Path dir) throws Exception {
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        Path elsewhere = dir.resolve("elsewhere");
+        try (LibtorrentEngine engine = engine(dir, store)) {
+            engine.start();
+            engine.add(MAGNET);
+            await("stored", () -> store.contains(MAGNET_ID));
+            engine.remove(MAGNET_ID, false);
+            await("gone from the session", () -> engine.torrents().isEmpty());
+            engine.add(AddRequest.defaults(new AddRequest.Magnet(MAGNET), elsewhere));
+            await("stored again", () -> store.contains(MAGNET_ID));
+        }
+        try (LibtorrentEngine again = engine(dir, store)) {
+            again.start();
+            List<Torrent> back = again.torrents();
+            assertEquals(1, back.size());
+            assertEquals(MAGNET_ID, back.get(0).id());
+            assertEquals("Torrenta test", back.get(0).name());
+            assertEquals(elsewhere, Path.of(back.get(0).savePath()), "the second add's, not the first's");
+        }
+    }
+
+    /**
+     * A resume-data answer about the removed torrent that arrives late (its request was in flight)
+     * is dropped, before the torrent is added again and after: written, it would bring the removed
+     * torrent back, or put its save path and pieces over the blob of the one added again. The
+     * alert cannot be made late on cue, so the test hands the engine's write path the removed
+     * torrent's handle and blob as the alert thread would.
+     */
+    @Test
+    void aLateAnswerAboutTheRemovedTorrentIsNeverStored(@TempDir Path dir) throws Exception {
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        Path elsewhere = dir.resolve("elsewhere");
+        try (LibtorrentEngine engine = engine(dir, store)) {
+            engine.start();
+            engine.add(MAGNET);
+            await("stored", () -> store.contains(MAGNET_ID));
+            byte[] first = store.load(MAGNET_ID).orElseThrow();
+            assertEquals(dir.resolve("downloads"), savePathStored(store));
+            Object removedOne = engine.handleForTest(MAGNET_ID);
+            engine.remove(MAGNET_ID, false);
+            await("gone from the session", () -> engine.torrents().isEmpty());
+
+            engine.answerForTest(removedOne, first);
+            assertFalse(store.contains(MAGNET_ID), "a late answer does not bring the removed torrent back");
+
+            engine.add(AddRequest.defaults(new AddRequest.Magnet(MAGNET), elsewhere));
+            await(
+                    "the one added again stored",
+                    () -> store.contains(MAGNET_ID) && elsewhere.equals(savePathStored(store)));
+            engine.answerForTest(removedOne, first);
+            assertEquals(elsewhere, savePathStored(store), "the removed torrent's answer is not put over it");
+        }
+    }
+
+    /** The save path in the store's blob for {@link #MAGNET_ID}, read as libtorrent reads it. */
+    private static Path savePathStored(TorrentStore store) throws Exception {
+        byte[] blob = store.load(MAGNET_ID).orElseThrow();
+        org.libtorrent4j.swig.error_code ec = new org.libtorrent4j.swig.error_code();
+        org.libtorrent4j.swig.add_torrent_params read = org.libtorrent4j.swig.libtorrent.read_resume_data_ex(
+                org.libtorrent4j.Vectors.bytes2byte_vector(blob), ec);
+        assertEquals(0, ec.value(), ec.message());
+        return Path.of(new org.libtorrent4j.AddTorrentParams(read).getSavePath());
+    }
+
+    /**
      * A per-id call looks the torrent up by the hash its id spells, and the poll keeps the
      * session's handles between ticks: v1-only, v2-only and hybrid torrents are each found by
      * their id and by nothing else (a hybrid's v1 hash finds it in libtorrent, but is not its

@@ -256,10 +256,15 @@ public final class LibtorrentEngine implements Engine {
     private final Set<String> stopAfterMetadata = ConcurrentHashMap.newKeySet();
 
     /**
-     * Removed in this session. A resume-data answer can arrive after the torrent is gone — the
-     * request was in flight — and writing it would bring the torrent back at the next start.
+     * Removed in this session, with the removed torrent's own handle. A resume-data answer can
+     * arrive after the torrent is gone — the request was in flight — and writing it would bring
+     * the torrent back at the next start. Matched by handle, not by id alone: the same torrent
+     * added again is a new torrent to libtorrent, whose alerts carry its own handle and are
+     * written (an id-only mark kept a re-added torrent out of the store for good, so it was gone
+     * after a restart), while a late answer about the one removed is still dropped rather than
+     * put over the new one's blob. Read and written under the store's lock.
      */
-    private final Set<String> removed = ConcurrentHashMap.newKeySet();
+    private final Map<String, torrent_handle> removed = new ConcurrentHashMap<>();
 
     /**
      * Magnets the Add dialog is fetching the metadata of, by id: in the session, but in no
@@ -783,7 +788,7 @@ public final class LibtorrentEngine implements Engine {
             // Under the store's lock, against remove(): an alert that came in just before the
             // torrent went must not put it back.
             synchronized (store) {
-                if (!removed.contains(id)) contentIndex.put(id, complete);
+                if (!removedOne(id, h.swig())) contentIndex.put(id, complete);
             }
         } catch (RuntimeException e) {
             // An index that misses a torrent costs a download, never the alert thread.
@@ -1715,7 +1720,7 @@ public final class LibtorrentEngine implements Engine {
         // under the store's lock, the same lock the alert thread's write takes around its check,
         // so a write that already passed the check cannot land after this delete.
         synchronized (store) {
-            removed.add(id);
+            removed.put(id, handle.swig());
             labels.remove(id);
             storage.remove(id);
             contentIndex.remove(id);
@@ -1832,7 +1837,6 @@ public final class LibtorrentEngine implements Engine {
         if (find(s, id) != null) throw new EngineException(tr("engine.error.importAlreadyHere", a.name()));
         byte[] blob = AddTorrentParams.writeResumeDataBuf(params);
         synchronized (store) {
-            removed.remove(id);
             try {
                 store.save(id, blob);
                 if (!a.labels().isEmpty()) store.saveLabels(id, a.labels().encode());
@@ -1858,7 +1862,6 @@ public final class LibtorrentEngine implements Engine {
         String id = torrent.id();
         if (find(s, id) != null) throw new EngineException(tr("engine.error.alreadyBack", torrent.name()));
         synchronized (store) {
-            removed.remove(id);
             try {
                 store.save(id, torrent.resume());
                 if (torrent.labels().length > 0) store.saveLabels(id, torrent.labels());
@@ -3092,6 +3095,33 @@ public final class LibtorrentEngine implements Engine {
         return true;
     }
 
+    /**
+     * Whether {@code about} is a torrent removed under {@code id}, so what an alert says of it is
+     * not stored. Store's lock held. libtorrent compares handles by the torrent they point at, so
+     * one that outlived its torrent still matches the handle kept at the remove, and never the
+     * torrent added again under the same id.
+     */
+    private boolean removedOne(String id, torrent_handle about) {
+        torrent_handle gone = removed.get(id);
+        return gone != null && gone.eq(about);
+    }
+
+    /** The session's own handle of a torrent, kept by a test to answer for it after its remove. */
+    synchronized Object handleForTest(String id) throws EngineException {
+        return handle(id).swig();
+    }
+
+    /**
+     * Writes {@code resume} as the alert thread would a resume-data answer about {@code handle}:
+     * the late answer of a torrent that was removed, which libtorrent cannot be made to send on cue.
+     */
+    void answerForTest(Object handle, byte[] resume) {
+        error_code ec = new error_code();
+        add_torrent_params read = libtorrent.read_resume_data_ex(Vectors.bytes2byte_vector(resume), ec);
+        if (ec.value() != 0) throw new IllegalArgumentException(ec.message());
+        new Listener().write(new AddTorrentParams(read), (torrent_handle) handle);
+    }
+
     /** The ids the poll's handle map holds, for the test that it keeps none that went. */
     synchronized Set<String> knownHandlesForTest() {
         return Set.copyOf(known.keySet());
@@ -3747,7 +3777,7 @@ public final class LibtorrentEngine implements Engine {
             // again, kept that blob, so the next start found files and no resume data and wanted
             // a full check that a paused torrent never runs (one import in thirty on Linux).
             if (!restored) {
-                write(alert.params());
+                write(alert.params(), alert.handle().swig());
                 // The add params carry the trackers only for a magnet; for a .torrent they live
                 // inside the info and the params' own list is empty, so a blob written from the
                 // params alone would bring the torrent back without its trackers. libtorrent's own
@@ -3832,7 +3862,7 @@ public final class LibtorrentEngine implements Engine {
 
         private void onSaved(SaveResumeDataAlert alert) {
             pendingSaves.decrementAndGet();
-            write(alert.params());
+            write(alert.params(), alert.handle().swig());
             savedFor(alert.params().getInfoHashes().getBest().toHex());
         }
 
@@ -3851,12 +3881,12 @@ public final class LibtorrentEngine implements Engine {
             }
         }
 
-        private void write(AddTorrentParams params) {
+        private void write(AddTorrentParams params, torrent_handle about) {
             String id = params.getInfoHashes().getBest().toHex();
             // Check and write under one lock: see remove(). Without it CI saw the remove test's
             // blob come back, written by a save that had passed the check before the delete.
             synchronized (store) {
-                if (removed.contains(id)) return;
+                if (removedOne(id, about)) return;
                 try {
                     store.save(id, AddTorrentParams.writeResumeDataBuf(params));
                 } catch (IOException e) {
