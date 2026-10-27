@@ -588,10 +588,11 @@ public final class MainWindow {
             syncBadge.setVisible(problem);
             syncBadge.setManaged(problem);
         });
-        // Every save (a Settings change, a column drag) is a reason to sync soon; the service
-        // ignores its own. Saves happen on the FX thread, but the listener does not assume it.
+        // A save that changed what travels (a Settings change, a column drag) is a reason to sync
+        // soon; the service ignores its own, and those of this machine's keys alone. Saves happen
+        // on the FX thread, but the listener does not assume it.
         settings.setOnSaved(() -> Platform.runLater(() -> {
-            sync.markDirty();
+            sync.settingsSaved();
             // The download folder may have moved in Settings; the welcome's footer names it.
             showDownloadFolder(welcome);
         }));
@@ -965,6 +966,8 @@ public final class MainWindow {
      * plainly open, else the last normal ones.
      */
     public void rememberWindow() {
+        // App.stop's way out may skip the hide that saves the divider: a drag just ended is kept.
+        if (dividerSettle.getStatus() == javafx.animation.Animation.Status.RUNNING) rememberDivider();
         boolean maximized = stage.isMaximized();
         WindowGeometry.Bounds normal = maximized || stage.isIconified() || stage.isFullScreen() || normalBounds == null
                 ? normalBounds
@@ -1267,6 +1270,10 @@ public final class MainWindow {
         if (settingsWindow.isShowing()) out.add("sync=" + settingsWindow.syncStateForCapture());
         out.add("statusbar-fit=" + statusBarFit());
         out.add("window=" + windowLine());
+        // After the shot, so a drag's debounced save has had its moment.
+        if (!split.getDividers().isEmpty())
+            out.add("divider=" + String.format(java.util.Locale.ROOT, "%.3f", split.getDividerPositions()[0])
+                    + " saved=" + settings.get(dividerKey(detailPlace), "") + " saves=" + dividerSaves);
         // Every other window showing: is its footer in view?
         for (javafx.stage.Window w : javafx.stage.Window.getWindows()) {
             if (w == stage || !w.isShowing() || !(w instanceof Stage s) || s.getScene() == null) continue;
@@ -1354,6 +1361,8 @@ public final class MainWindow {
      * {@code sidebar-keys:<KEY+KEY+…>} (focus the sidebar and press them),
      * {@code sidebar-click:<section>} (a click on a heading folds it), {@code sidebar-drag:<px>}
      * (the edge facing the list dragged that far; a {@code sidebar-width=} line),
+     * {@code divider-drag:<fraction>} (the detail pane's divider walked there a step at a time, as
+     * a drag moves it; a {@code divider=} line with what is saved and how many saves it took),
      * {@code dialog-category:<name>} on an open Add dialog, or a command id. Prints what a
      * screenshot cannot show.
      */
@@ -1600,6 +1609,13 @@ public final class MainWindow {
         } else if (action.startsWith("sidebar-drag:")) {
             // A drag of the edge that faces the list by this many px (negative is leftwards).
             sidebar.dragForCapture(Double.parseDouble(action.substring("sidebar-drag:".length())));
+        } else if (action.startsWith("divider-drag:")) {
+            if (!split.getDividers().isEmpty()) {
+                double from = split.getDividerPositions()[0];
+                double to = Double.parseDouble(action.substring("divider-drag:".length()));
+                int steps = 40;
+                for (int i = 1; i <= steps; i++) split.setDividerPosition(0, from + (to - from) * i / steps);
+            }
         } else if (action.startsWith("sidebar-keys:")) {
             // Focus the sidebar and press these keys in turn (DOWN+DOWN+SPACE; the comma is the hook's own separator):
             // the keyboard path.
@@ -3293,14 +3309,41 @@ public final class MainWindow {
      * state stands in for it, the position is the layout's, not the person's (see DetailSplit).
      */
     private void rememberDivider() {
+        dividerSettle.stop(); // a drag's pending save is this one
         if (split.getDividers().isEmpty() || !detailWanted) return;
+        boolean changed = false;
         if (!rows.list().isEmpty()) {
-            settings.set(
+            changed |= setIfChanged(
                     dividerKey(detailPlace),
                     String.format(java.util.Locale.ROOT, "%.3f", split.getDividerPositions()[0]));
         }
-        settings.set(Settings.DETAIL_TAB, detail.rememberedTab());
-        settings.saveQuietly();
+        changed |= setIfChanged(Settings.DETAIL_TAB, detail.rememberedTab());
+        if (changed) {
+            settings.saveQuietly();
+            dividerSaves++;
+        }
+    }
+
+    private boolean setIfChanged(String key, String value) {
+        if (value.equals(settings.raw(key))) return false;
+        settings.set(key, value);
+        return true;
+    }
+
+    /**
+     * A drag moves the divider every pixel, and each save is a file written on the FX thread: one
+     * save once it has held still, as {@link ColumnMemory#watch} does for the columns. A quit, a
+     * hide or a change of place saves at once and cancels it.
+     */
+    private final javafx.animation.PauseTransition dividerSettle = settle(this::rememberDivider);
+
+    /** Saves {@link #rememberDivider} made, for the capture hook's {@code divider=} line. */
+    private int dividerSaves;
+
+    private static javafx.animation.PauseTransition settle(Runnable then) {
+        var pause = new javafx.animation.PauseTransition(javafx.util.Duration.millis(500));
+        pause.setOnFinished(e -> then.run());
+        return pause;
     }
 
     /**
@@ -5092,7 +5135,7 @@ public final class MainWindow {
         split.getDividers().addListener((javafx.collections.ListChangeListener<SplitPane.Divider>) c -> {
             while (c.next()) {
                 for (SplitPane.Divider d : c.getAddedSubList())
-                    d.positionProperty().addListener(o -> rememberDivider());
+                    d.positionProperty().addListener(o -> dividerSettle.playFromStart());
             }
         });
 
