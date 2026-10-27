@@ -42,6 +42,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   field. Enter (or leaving the field) connects. Create on GitHub is offered only while no
   repository is named, and the one it makes is filled in and connected at once. A failed
   connect leaves the box ticked and says why.
+- **A large IP blocklist costs a fraction of what it did.** A 300,000-line list parses in about
+  70 ms instead of most of a second, is read from disk line by line, and is parsed again only
+  when the file changes, so a peer ban or a settings edit no longer re-reads it. What stays in
+  memory between uses is about 3 MiB instead of 40, and building the filter no longer holds up
+  the list's once-a-second refresh. An out-of-range address such as `1.2.3.256` is no longer
+  looked up as a host name.
 
 ### Fixed
 

@@ -253,8 +253,20 @@ public final class LibtorrentEngine implements Engine {
      */
     private final ContentIndex contentIndex = new ContentIndex();
 
-    /** The filter in force, kept so a start after a set applies it; empty means none. */
-    private volatile List<IpRange> ipFilter = List.of();
+    /**
+     * A filter set before {@link #start()}, which applies it and lets it go: once a session has
+     * one, libtorrent holds it, and a blocklist kept here as well was 40 MiB for the process's life.
+     */
+    private @Nullable List<IpRange> pendingIpFilter;
+    /** Whether the session has a non-empty filter, so clearing one is news and clearing none is not. */
+    private boolean ipFilterInForce;
+    /** Each set's turn, so a filter built late (outside the lock) never replaces a newer one. */
+    private final java.util.concurrent.atomic.AtomicLong ipFilterRequests =
+            new java.util.concurrent.atomic.AtomicLong();
+    /** The newest turn set or held, under the lock. */
+    private long ipFilterApplied;
+    /** Set once a session has started: native types may be built from then on, on any thread. */
+    private volatile boolean nativeLoaded;
 
     private final java.util.concurrent.atomic.AtomicLong blockedPeers = new java.util.concurrent.atomic.AtomicLong();
 
@@ -418,12 +430,20 @@ public final class LibtorrentEngine implements Engine {
         }
         known.clear();
         session = s;
+        nativeLoaded = true;
         // The counters' places in a stats alert are the library's to say, and asking is native.
         counterIndex = Counter.resolve();
         counters = new long[Counter.values().length];
         baseline = statsStore.load();
         startedAtMs = System.currentTimeMillis();
-        if (!ipFilter.isEmpty()) s.swig().set_ip_filter(toFilter(ipFilter));
+        List<IpRange> pending = pendingIpFilter;
+        pendingIpFilter = null;
+        if (pending != null && !pending.isEmpty()) {
+            ip_filter filter = toFilter(pending);
+            s.swig().set_ip_filter(filter);
+            filter.delete();
+            ipFilterInForce = true;
+        }
         emit(EngineEvent.session(EngineEvent.Level.INFO, tr("engine.event.started", description())));
         restore(s);
 
@@ -3067,20 +3087,43 @@ public final class LibtorrentEngine implements Engine {
         return new int[] {current.downloadRateLimit(), current.uploadRateLimit()};
     }
 
+    /**
+     * Not {@code synchronized} as a whole: building the native filter (two address parses and a
+     * rule per range, 300,000 ranges for a common list) touches nothing of the session's, and
+     * holding the lock for it stalled the once-a-second poll. Only the set itself takes the lock.
+     */
     @Override
-    public synchronized void setIpFilter(List<IpRange> ranges) throws EngineException {
-        boolean had = !ipFilter.isEmpty();
-        ipFilter = List.copyOf(ranges);
-        SessionManager s = session;
-        if (s == null || !s.isRunning()) return;
-        s.swig().set_ip_filter(toFilter(ipFilter));
-        // Clearing a filter that was never set (the start, with the filter off) is not news.
-        if (had || !ipFilter.isEmpty())
-            emit(EngineEvent.session(
-                    EngineEvent.Level.INFO,
-                    ipFilter.isEmpty()
-                            ? tr("engine.event.ipFilterCleared")
-                            : tr("engine.event.ipFilter", ipFilter.size())));
+    public void setIpFilter(List<IpRange> ranges) throws EngineException {
+        long turn = ipFilterRequests.incrementAndGet();
+        ip_filter built = nativeLoaded ? toFilter(ranges) : null;
+        try {
+            synchronized (this) {
+                if (turn < ipFilterApplied) return;
+                ipFilterApplied = turn;
+                SessionManager s = session;
+                if (s == null || !s.isRunning()) {
+                    pendingIpFilter = List.copyOf(ranges);
+                    return;
+                }
+                pendingIpFilter = null;
+                // The session came up while this one was waiting for the lock.
+                if (built == null) built = toFilter(ranges);
+                s.swig().set_ip_filter(built);
+                // Clearing a filter that was never set (the start, with the filter off) is not news.
+                boolean had = ipFilterInForce;
+                ipFilterInForce = !ranges.isEmpty();
+                if (had || ipFilterInForce)
+                    emit(EngineEvent.session(
+                            EngineEvent.Level.INFO,
+                            ranges.isEmpty()
+                                    ? tr("engine.event.ipFilterCleared")
+                                    : tr("engine.event.ipFilter", ranges.size())));
+            }
+        } finally {
+            // set_ip_filter copies it; the native copy is libtorrent's, this one goes now rather
+            // than whenever its finalizer runs.
+            if (built != null) built.delete();
+        }
     }
 
     @Override
@@ -3088,19 +3131,55 @@ public final class LibtorrentEngine implements Engine {
         return blockedPeers.get();
     }
 
+    /** Whether the engine holds a list of ranges of its own; for the test. */
+    synchronized boolean holdsIpFilterForTest() {
+        return pendingIpFilter != null;
+    }
+
     /** Whether the session's filter refuses the address; for the test. */
     boolean isBlockedForTest(String ip) throws EngineException {
         return running().swig().get_ip_filter().access(Address.parseIp(ip).swig()) != 0;
     }
 
+    /**
+     * The native filter for the ranges. Straight to SWIG's {@code from_string} with one error code,
+     * and each address deleted once {@code add_rule} has copied it: {@link Address#parseIp} made
+     * two finalizable objects per end, 1.2 million of them for a common list.
+     */
     private static ip_filter toFilter(List<IpRange> ranges) {
         ip_filter filter = new ip_filter();
         long blocked = ip_filter.access_flags.blocked.swigValue();
-        for (IpRange r : ranges) {
-            filter.add_rule(
-                    Address.parseIp(r.first()).swig(), Address.parseIp(r.last()).swig(), blocked);
+        error_code ec = new error_code();
+        try {
+            for (IpRange r : ranges) {
+                address first = parseAddress(r.first(), ec);
+                try {
+                    address last = parseAddress(r.last(), ec);
+                    try {
+                        filter.add_rule(first, last, blocked);
+                    } finally {
+                        last.delete();
+                    }
+                } finally {
+                    first.delete();
+                }
+            }
+        } catch (RuntimeException e) {
+            filter.delete();
+            throw e;
+        } finally {
+            ec.delete();
         }
         return filter;
+    }
+
+    private static address parseAddress(String literal, error_code ec) {
+        address parsed = address.from_string(literal, ec);
+        if (ec.value() != 0) {
+            parsed.delete();
+            throw new IllegalArgumentException(literal + ": " + ec.message());
+        }
+        return parsed;
     }
 
     /** Whether DHT is on in the session; for the test. */
