@@ -62,4 +62,42 @@ class BlocklistTest {
         assertFalse(IpRange.isLiteral("localhost"));
         assertFalse(IpRange.isLiteral("1.2.3.256"));
     }
+
+    @Test
+    void emulePaddingAndSpacingAsTheOldUnpaddingReadThem() {
+        assertEquals(
+                new IpRange("1.2.3.0", "1.2.3.255"),
+                Blocklist.parseLine("001.002.003.000 - 001.002.003.255 , 000 , x"));
+        assertEquals(
+                new IpRange("10.0.0.0", "10.0.0.9"),
+                Blocklist.parseLine("0010.0.0.0-10.0.0.009"),
+                "more zeros than three digits");
+        assertEquals(new IpRange("1.2.3.4", "1.2.3.5"), Blocklist.parseLine("  1.2.3.4   -   1.2.3.5  "));
+        assertEquals(new IpRange("1.2.3.4", "1.2.3.5"), Blocklist.parseLine("1.2.3.4-1.2.3.5,0,no spaces"));
+        assertEquals(IpRange.single("255.255.255.255"), Blocklist.parseLine("255.255.255.255"));
+        assertEquals(IpRange.single("1.2.3.4"), Blocklist.parseLine("1.2.3.4."), "split() dropped a trailing dot");
+        assertNull(Blocklist.parseLine("1.2.3.256"));
+        assertNull(Blocklist.parseLine("1.2.3.0-1.2.3.256"));
+        assertNull(Blocklist.parseLine("1.2.3-1.2.3.255"), "a missing octet");
+        assertNull(Blocklist.parseLine("1.2.3.9-1.2.3.1"), "out of order");
+        assertNull(Blocklist.parseLine("1.2.3.4 - ::1"), "mixed families");
+    }
+
+    @Test
+    void peerGuardianNamesWithColons() {
+        assertEquals(new IpRange("5.6.7.8", "5.6.7.9"), Blocklist.parseLine("A: B: C, D:5.6.7.8-5.6.7.9"));
+        assertEquals(new IpRange("5.6.7.8", "5.6.7.9"), Blocklist.parseLine("http://x.example:5.6.7.8-5.6.7.9"));
+        assertEquals(new IpRange("5.6.7.0", "5.6.7.255"), Blocklist.parseLine("Name:005.006.007.000-005.006.007.255"));
+        assertEquals(
+                new IpRange("2001:db8::", "2001:db8::ff"),
+                Blocklist.parseLine("2001:db8::-2001:db8::ff"),
+                "an IPv6 range is not a name");
+    }
+
+    @Test
+    void cidrAtBothEnds() {
+        assertEquals(new IpRange("0.0.0.0", "255.255.255.255"), Blocklist.parseLine("0.0.0.0/0"));
+        assertEquals(IpRange.single("9.9.9.9"), Blocklist.parseLine("9.9.9.9/32"));
+        assertNull(Blocklist.parseLine("9.9.9.9/33"));
+    }
 }

@@ -1,7 +1,9 @@
 package com.torrenta.net;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
@@ -63,5 +65,28 @@ class BlocklistFetchTest {
     @Test
     void errorsAreExceptions() {
         assertThrows(IOException.class, () -> new BlocklistFetch().fetch(base.resolve("/missing")));
+    }
+
+    @Test
+    void aStreamIsGunzippedByMagicAndBounded() throws IOException {
+        byte[] gz;
+        try (ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+                GZIPOutputStream out = new GZIPOutputStream(bytes)) {
+            out.write(LIST);
+            out.finish();
+            gz = bytes.toByteArray();
+        }
+        try (InputStream in = BlocklistFetch.gunzipIfNeeded(new ByteArrayInputStream(gz))) {
+            assertArrayEquals(LIST, in.readAllBytes());
+        }
+        try (InputStream in = BlocklistFetch.gunzipIfNeeded(new ByteArrayInputStream(LIST))) {
+            assertArrayEquals(LIST, in.readAllBytes(), "plain text passes through");
+        }
+        try (InputStream in = BlocklistFetch.gunzipIfNeeded(new ByteArrayInputStream(new byte[] {0x1f}))) {
+            assertArrayEquals(new byte[] {0x1f}, in.readAllBytes(), "one byte is not a magic number");
+        }
+        try (InputStream in = BlocklistFetch.gunzipIfNeeded(new ByteArrayInputStream(gz), LIST.length - 1)) {
+            assertThrows(IOException.class, in::readAllBytes, "a list that unpacks past the cap");
+        }
     }
 }

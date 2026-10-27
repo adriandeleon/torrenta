@@ -1429,10 +1429,13 @@ class LibtorrentEngineTest {
     @Test
     void ipFilterRefusesTheRangesItIsGiven(@TempDir Path dir) throws Exception {
         try (LibtorrentEngine engine = engine(dir)) {
+            engine.setIpFilter(List.of(com.torrenta.engine.IpRange.single("172.16.0.1")));
             engine.setIpFilter(List.of(new com.torrenta.engine.IpRange("10.0.0.0", "10.255.255.255")));
             engine.start();
             assertTrue(engine.isBlockedForTest("10.1.2.3"), "set before start, applied at start");
+            assertFalse(engine.isBlockedForTest("172.16.0.1"), "the later set before start won");
             assertFalse(engine.isBlockedForTest("192.168.1.1"));
+            assertFalse(engine.holdsIpFilterForTest(), "the session has it; the engine keeps no copy");
 
             List<EngineEvent> events = new CopyOnWriteArrayList<>();
             engine.addListener(events::add);
@@ -1442,6 +1445,7 @@ class LibtorrentEngineTest {
             assertTrue(engine.isBlockedForTest("192.168.1.1"));
             assertTrue(engine.isBlockedForTest("1.2.3.4"));
             assertTrue(events.stream().anyMatch(ev -> ev.message().equals("IP filter: 2 ranges")));
+            assertFalse(engine.holdsIpFilterForTest());
             engine.setIpFilter(List.of());
             assertFalse(engine.isBlockedForTest("1.2.3.4"), "cleared");
             assertEquals(0, engine.blockedPeers());

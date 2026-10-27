@@ -507,6 +507,12 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
 - **The IP filter is replaced whole, never merged**: `set_ip_filter` takes a complete
   `ip_filter`, so the controller rebuilds it from cache + local file + bans every time. A filter
   set before `start()` is applied at start, so no peer slips in while the first download runs.
+  The engine keeps no copy once a session has it (40 MiB for a common list), and builds the native
+  filter outside its lock (half a second for 300k ranges), setting it under the lock; a turn
+  counter stops a late build from replacing a newer one. The controller parses a list file once
+  per change (`Stamp`: path, size, mtime, file key; `fresh` is the rule) and keeps it packed
+  (`engine.PackedRanges`, a `long` per IPv4 range), so a ban rebuilds without parsing. Dotted
+  quads are read by hand (`IpRange.v4`): `InetAddress` sent `1.2.3.256` to the resolver.
 - **PEX has no session switch in libtorrent**, only the per-torrent `disable_pex` flag, and there
   is no session-wide default tracker list: `applySettings` walks the handles for both, and `add`
   sets the flag and appends the trackers on their own tier. `EngineSettings.Protocol` is nested so
