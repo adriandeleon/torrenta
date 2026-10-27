@@ -23,7 +23,9 @@ import org.jspecify.annotations.Nullable;
  * folders whose progress is the sum of their files'. The tree is rebuilt only when the set of
  * files changes (the metadata arrived, a different torrent was selected, a file was renamed);
  * otherwise the rows
- * keep their identity so the selection and the expanded folders survive.
+ * keep their identity so the selection and the expanded folders survive. An update touches only
+ * the files whose status changed, and moves only the folders above them by the difference: a
+ * torrent of 50,000 files mostly has a few changing at a time.
  */
 public final class FileRows {
 
@@ -36,6 +38,10 @@ public final class FileRows {
         private final LongProperty done = new SimpleLongProperty(this, "done");
         private final ObjectProperty<Priority> priority = new SimpleObjectProperty<>(this, "priority", Priority.NORMAL);
         private final List<Row> children = new ArrayList<>();
+        /** The folder it is in; null for the root. */
+        private @Nullable Row parent;
+        /** What the engine said last, for a file: an update with the same changes nothing. */
+        private TorrentDetail.@Nullable FileStatus status;
         /** Found on disk in another torrent and put in place at the add; null when downloaded. */
         private com.torrenta.engine.@Nullable FoundFile found;
 
@@ -122,15 +128,36 @@ public final class FileRows {
             rebuild(files);
             return true;
         }
+        changed = 0;
         for (TorrentDetail.FileStatus f : files) {
             Row row = Objects.requireNonNull(byIndex.get(f.index()), "sameSet");
-            row.size.set(f.size());
-            row.done.set(f.done());
-            row.priority.set(f.priority());
-            row.found = f.found();
+            if (f.equals(row.status)) continue;
+            changed++;
+            long size = f.size() - row.size.get();
+            long done = f.done() - row.done.get();
+            set(row, f);
+            if (size == 0 && done == 0) continue;
+            for (Row folder = row.parent; folder != null; folder = folder.parent) {
+                folder.size.set(folder.size.get() + size);
+                folder.done.set(folder.done.get() + done);
+            }
         }
-        refreshFolders(root);
         return false;
+    }
+
+    /** How many files the last in-place {@link #apply} updated; for the tests. */
+    int changedLastTime() {
+        return changed;
+    }
+
+    private int changed;
+
+    private static void set(Row row, TorrentDetail.FileStatus f) {
+        row.status = f;
+        row.size.set(f.size());
+        row.done.set(f.done());
+        row.priority.set(f.priority());
+        row.found = f.found();
     }
 
     /**
@@ -165,16 +192,15 @@ public final class FileRows {
                 Row folder = folders.get(key.toString());
                 if (folder == null) {
                     folder = new Row(-1, parts[i], key.substring(1));
+                    folder.parent = parent;
                     folders.put(key.toString(), folder);
                     parent.children.add(folder);
                 }
                 parent = folder;
             }
             Row row = new Row(f.index(), parts[parts.length - 1], f.path());
-            row.size.set(f.size());
-            row.done.set(f.done());
-            row.priority.set(f.priority());
-            row.found = f.found();
+            row.parent = parent;
+            set(row, f);
             parent.children.add(row);
             byIndex.put(f.index(), row);
         }

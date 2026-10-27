@@ -22,8 +22,11 @@ import static com.torrenta.i18n.Messages.tr;
  *
  * @param kind which rule
  * @param value the status key, category, tag or host for the kinds that take one; empty otherwise
+ * @param parsed the status the key names, read once here so {@link #matches} does not parse it
+ *     per torrent; null for every other kind. Derived from {@code value}, whatever is passed.
  */
-public record SidebarFilter(Kind kind, String value) {
+public record SidebarFilter(
+        Kind kind, String value, @Nullable SidebarStatus parsed) {
 
     public enum Kind {
         ALL,
@@ -65,14 +68,19 @@ public record SidebarFilter(Kind kind, String value) {
     public static final SidebarFilter TRACKER_ERROR = new SidebarFilter(Kind.TRACKER_ERROR, "");
 
     public SidebarFilter {
+        parsed = kind == Kind.STATUS ? SidebarStatus.parse(value).orElse(null) : null;
         value = switch (kind) {
             case CATEGORY, TAG, VIEW -> value == null ? "" : value.trim();
             case TRACKER -> value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
-            case STATUS -> SidebarStatus.parse(value).map(SidebarStatus::key).orElse("");
+            case STATUS -> parsed == null ? "" : parsed.key();
             default -> "";
         };
         // A status that is not one is no filter at all; the record stays total.
         if ((kind == Kind.STATUS || kind == Kind.VIEW) && value.isEmpty()) kind = Kind.ALL;
+    }
+
+    public SidebarFilter(Kind kind, String value) {
+        this(kind, value, null);
     }
 
     public static SidebarFilter status(SidebarStatus status) {
@@ -109,7 +117,8 @@ public record SidebarFilter(Kind kind, String value) {
 
     /** The status this names; only for {@link Kind#STATUS}. */
     public SidebarStatus status() {
-        return SidebarStatus.parse(value).orElseThrow();
+        if (parsed == null) throw new java.util.NoSuchElementException("not a status: " + this);
+        return parsed;
     }
 
     public boolean matches(Torrent t) {

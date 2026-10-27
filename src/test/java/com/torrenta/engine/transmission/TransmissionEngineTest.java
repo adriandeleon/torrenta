@@ -998,6 +998,38 @@ class TransmissionEngineTest {
         assertEquals(20, p.upRate());
     }
 
+    /** A tab's parts ask the daemon for their fields alone, and the rest reads as not read. */
+    @Test
+    void detailAsksOnlyForThePartsWanted() {
+        List<String> files = TransmissionEngine.detailFields(Set.of(TorrentDetail.Part.FILES));
+        assertTrue(files.containsAll(List.of("files", "fileStats", "hashString", "pieceCount")));
+        assertFalse(files.contains("peers") || files.contains("pieces") || files.contains("trackerStats"));
+        List<String> none = TransmissionEngine.detailFields(TorrentDetail.Part.NONE);
+        assertEquals(TransmissionEngine.DETAIL_FIELDS, none);
+        assertTrue(TransmissionEngine.detailFields(TorrentDetail.Part.ALL)
+                .containsAll(
+                        List.of("files", "fileStats", "peers", "trackerStats", "pieces", "availability", "webseeds")));
+
+        Map<String, Object> t = new LinkedHashMap<>();
+        t.put("hashString", "ABCD");
+        t.put("pieceCount", 4L);
+        t.put("pieceSize", 16384L);
+        t.put("haveValid", 3 * 16384L);
+        t.put("peers", List.of(Map.of("address", "10.0.0.5", "port", 51413L)));
+        TorrentDetail d = TransmissionEngine.detailOf(t, Set.of(TorrentDetail.Part.PEERS), 1_000_000L);
+        assertTrue(d.has(TorrentDetail.Part.PEERS));
+        assertFalse(d.has(TorrentDetail.Part.FILES));
+        assertEquals(1, d.peers().size());
+        assertEquals(0, d.pieces().length, "not read");
+        assertEquals(3, d.general().piecesHave(), "from the verified bytes when the bitfield is not read");
+        assertEquals(-1, d.fileCount(), "unknown without the files");
+        assertTrue(d.general().availability() < 0, "unknown without the pieces");
+        assertEquals(
+                2,
+                TransmissionEngine.detailOf(Map.of("files", List.of(Map.of(), Map.of())), 0)
+                        .fileCount());
+    }
+
     // ---- session settings -------------------------------------------------------------------------
 
     @Test

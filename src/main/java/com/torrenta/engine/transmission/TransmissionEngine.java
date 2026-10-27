@@ -136,8 +136,8 @@ public final class TransmissionEngine implements Engine {
             LIST_FIELDS.stream().filter(f -> !f.equals("trackers")).toList();
 
     /**
-     * What {@link #detail} asks, for the one torrent shown, every time: {@code fileStats} is the
-     * files' progress, wanted and priority; {@code files} (every path) is asked once and kept.
+     * What {@link #detail} asks every time, for the one torrent shown: the general facts, and the
+     * name, which says whether a kept file list still fits.
      */
     static final List<String> DETAIL_FIELDS = List.of(
             "hashString",
@@ -145,8 +145,6 @@ public final class TransmissionEngine implements Engine {
             "isPrivate",
             "pieceCount",
             "pieceSize",
-            "pieces",
-            "availability",
             "haveValid",
             "haveUnchecked",
             "downloadedEver",
@@ -155,11 +153,22 @@ public final class TransmissionEngine implements Engine {
             "secondsDownloading",
             "secondsSeeding",
             "peersConnected",
-            "name",
-            "fileStats",
-            "peers",
-            "trackerStats",
-            "webseeds");
+            "name");
+
+    /** The fields each part adds; {@code files} alone is a list as long as the torrent's. */
+    static final Map<TorrentDetail.Part, List<String>> PART_FIELDS = Map.of(
+            TorrentDetail.Part.FILES, List.of("files", "fileStats"),
+            TorrentDetail.Part.PEERS, List.of("peers"),
+            TorrentDetail.Part.TRACKERS, List.of("trackerStats"),
+            TorrentDetail.Part.PIECES, List.of("pieces", "availability"),
+            TorrentDetail.Part.WEB_SEEDS, List.of("webseeds"));
+
+    /** The {@code torrent-get} fields for a detail of {@code parts}. Pure. */
+    static List<String> detailFields(Set<TorrentDetail.Part> parts) {
+        List<String> out = new ArrayList<>(DETAIL_FIELDS);
+        for (TorrentDetail.Part p : TorrentDetail.Part.values()) if (parts.contains(p)) out.addAll(PART_FIELDS.get(p));
+        return List.copyOf(out);
+    }
 
     private final EngineProfile profile;
     private final RpcClient rpc;
@@ -1307,18 +1316,20 @@ public final class TransmissionEngine implements Engine {
      * renamed from elsewhere). A rename of ours drops the kept list.
      */
     @Override
-    public TorrentDetail detail(String id) throws EngineException {
+    public TorrentDetail detail(String id, Set<TorrentDetail.Part> parts) throws EngineException {
         checkRunning();
         FileList known;
         synchronized (fileLists) {
             known = fileLists.get(id);
         }
-        List<String> fields = DETAIL_FIELDS;
-        if (known == null) {
-            fields = new ArrayList<>(DETAIL_FIELDS);
-            fields.add("files");
+        boolean withFiles = parts.contains(TorrentDetail.Part.FILES);
+        List<String> fields = detailFields(parts);
+        if (withFiles && known != null) {
+            fields = new ArrayList<>(fields);
+            fields.remove("files");
         }
         Map<String, Object> t = get(id, fields);
+        if (!withFiles) return detailOf(t, parts, System.currentTimeMillis() / 1000);
         String name = Json.str(t, "name", "");
         List<Object> files;
         if (known != null && !filesStale(known, Json.list(t, "fileStats").size(), name)) {
@@ -1331,7 +1342,7 @@ public final class TransmissionEngine implements Engine {
         }
         Map<String, Object> whole = new LinkedHashMap<>(t);
         whole.put("files", files);
-        return detailOf(whole, System.currentTimeMillis() / 1000);
+        return detailOf(whole, parts, System.currentTimeMillis() / 1000);
     }
 
     private void forgetFiles(String id) {
@@ -1359,18 +1370,30 @@ public final class TransmissionEngine implements Engine {
         return List.copyOf(out);
     }
 
-    /** One {@code torrent-get} entry with the detail fields as the pane's record. Pure. */
+    /** One {@code torrent-get} entry with every detail field as the pane's record. Pure. */
     static TorrentDetail detailOf(Map<String, Object> t, long nowSeconds) {
+        return detailOf(t, TorrentDetail.Part.ALL, nowSeconds);
+    }
+
+    /**
+     * One {@code torrent-get} entry with the fields of {@code parts} ({@link #detailFields}) as the
+     * pane's record. Without the pieces the count is the daemon's verified bytes over the piece
+     * size; without the trackers there is no next announce or current tracker. Pure.
+     */
+    static TorrentDetail detailOf(Map<String, Object> t, Set<TorrentDetail.Part> parts, long nowSeconds) {
         String id = Json.str(t, "hashString", "").toLowerCase(Locale.ROOT);
         int pieceCount = Json.integer(t, "pieceCount", 0);
-        boolean[] pieces = pieces(Json.str(t, "pieces", ""), pieceCount);
+        boolean withPieces = parts.contains(TorrentDetail.Part.PIECES);
+        boolean[] pieces = withPieces ? pieces(Json.str(t, "pieces", ""), pieceCount) : new boolean[0];
         int have = 0;
         for (boolean p : pieces) if (p) have++;
+        int pieceSize = Json.integer(t, "pieceSize", 0);
+        if (!withPieces && pieceSize > 0) have = (int) Math.min(pieceCount, Json.lng(t, "haveValid", 0) / pieceSize);
 
         // Distributed copies, as libtorrent counts them: whole copies among the peers, plus the
         // fraction of pieces one more copy covers; Transmission says how many peers have each
         // missing piece (-1 for ones we have).
-        double availability = 0;
+        double availability = withPieces ? 0 : -1;
         List<Object> perPiece = Json.list(t, "availability");
         if (pieceCount > 0 && !perPiece.isEmpty()) {
             int min = Integer.MAX_VALUE;
@@ -1440,7 +1463,7 @@ public final class TransmissionEngine implements Engine {
                 Json.str(t, "downloadDir", ""),
                 Json.bool(t, "isPrivate", false),
                 pieceCount,
-                Json.integer(t, "pieceSize", 0),
+                pieceSize,
                 have,
                 availability,
                 Json.lng(t, "downloadedEver", 0),
@@ -1453,7 +1476,8 @@ public final class TransmissionEngine implements Engine {
                 current,
                 id,
                 "");
-        return new TorrentDetail(general, files, peers, trackers, pieces, new int[0], webSeedsOf(t));
+        return new TorrentDetail(
+                general, files, peers, trackers, pieces, new int[0], webSeedsOf(t), Set.of(), "", parts, -1);
     }
 
     /** Transmission's -1/0/1 as the dialog's ladder. */

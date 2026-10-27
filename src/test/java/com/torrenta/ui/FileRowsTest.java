@@ -50,6 +50,49 @@ class FileRowsTest {
         assertEquals(0.7, a.progress(), 1e-9);
     }
 
+    /** Only the files whose status moved are touched, and their folders move by the difference. */
+    @Test
+    void anUpdateTouchesOnlyWhatChangedAndKeepsTheFolderSums() {
+        FileRows rows = new FileRows();
+        rows.apply(List.of(
+                f(0, "top/a/one.bin", 100, 0),
+                f(1, "top/a/two.bin", 50, 0),
+                f(2, "top/b/three.bin", 30, 0),
+                f(3, "four.bin", 10, 0)));
+        assertFalse(rows.apply(List.of(
+                f(0, "top/a/one.bin", 100, 0),
+                f(1, "top/a/two.bin", 50, 20),
+                f(2, "top/b/three.bin", 30, 0),
+                f(3, "four.bin", 10, 0))));
+        assertEquals(1, rows.changedLastTime(), "one file moved");
+        var top = rows.rootItem().getChildren().get(0);
+        var a = top.getChildren().get(0).getValue();
+        var b = top.getChildren().get(1).getValue();
+        assertEquals(20, a.doneProperty().get());
+        assertEquals(150, a.sizeProperty().get());
+        assertEquals(0, b.doneProperty().get());
+        assertEquals(20, top.getValue().doneProperty().get());
+        assertEquals(180, top.getValue().sizeProperty().get());
+
+        // A priority alone changes the row, not the sums; the same status again changes nothing.
+        rows.apply(List.of(
+                f(0, "top/a/one.bin", 100, 0),
+                new FileStatus(1, "top/a/two.bin", 50, 20, Priority.HIGH),
+                f(2, "top/b/three.bin", 30, 30),
+                f(3, "four.bin", 10, 0)));
+        assertEquals(2, rows.changedLastTime());
+        assertEquals(Priority.HIGH, rows.get(1).priorityProperty().get());
+        assertEquals(50, top.getValue().doneProperty().get());
+        assertEquals(30, b.doneProperty().get());
+        rows.apply(List.of(
+                f(0, "top/a/one.bin", 100, 0),
+                new FileStatus(1, "top/a/two.bin", 50, 20, Priority.HIGH),
+                f(2, "top/b/three.bin", 30, 30),
+                f(3, "four.bin", 10, 0)));
+        assertEquals(0, rows.changedLastTime());
+        assertEquals(50, top.getValue().doneProperty().get());
+    }
+
     @Test
     void aDifferentSetRebuilds() {
         FileRows rows = new FileRows();

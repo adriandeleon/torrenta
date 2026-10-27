@@ -89,6 +89,11 @@ final class DetailPane extends VBox {
     private final Tab filesTab;
     private final Tab peersTab;
     private final Tab trackersTab;
+    /** Every tab, in {@link #TABS}' order, shown or not: Simple mode takes some out of the strip. */
+    private final List<Tab> allTabs;
+    /** Simple mode: only {@link SimpleMode#DETAIL_TABS} in the strip. */
+    private boolean simple;
+
     private final Label filesCount = new Label();
     private final Label peersCount = new Label();
     private final Label trackersCount = new Label();
@@ -162,7 +167,8 @@ final class DetailPane extends VBox {
     // ---- the other tabs
     private final FileRows fileRows = new FileRows();
     private final TreeTableView<FileRows.Row> files = new TreeTableView<>();
-    private final ObservableList<TorrentDetail.Peer> peerItems = FXCollections.observableArrayList();
+    private final PeerRows peerRows = new PeerRows();
+    private final ObservableList<PeerRows.Row> peerItems = peerRows.items();
     private final ObservableList<TorrentDetail.Tracker> trackerItems = FXCollections.observableArrayList();
     private final TableView<TorrentDetail.Tracker> trackers = new TableView<>(trackerItems);
     private final ListView<EventLog.Line> logList = new ListView<>();
@@ -186,6 +192,11 @@ final class DetailPane extends VBox {
     private boolean steering;
 
     private Function<String, Optional<Command>> commands = id -> Optional.empty();
+    /** The tab showing changed: the window asks the engine for its parts ({@link DetailParts}). */
+    private Consumer<String> onTabShown = tab -> {};
+    /** The shown torrent's file count as last read, for a tick that did not read it. */
+    private int shownFileCount;
+
     private BiConsumer<Integer, com.torrenta.engine.Priority> onFilePriority = (i, p) -> {};
     private Consumer<FileRows.Row> onOpenFile = r -> {};
     private Consumer<FileRows.Row> onOpenFolder = r -> {};
@@ -213,14 +224,18 @@ final class DetailPane extends VBox {
     private Consumer<String> onCopyPeer = address -> {};
     private Consumer<String> onCopyCommand = command -> {};
     private MenuItem banItem;
-    private TableView<TorrentDetail.Peer> peerTable;
+    private TableView<PeerRows.Row> peerTable;
     private ContextMenu peerMenu;
-    /** The peer the open context menu is about, read when it shows: the list is replaced every tick. */
+    /** The peer the open context menu is about, read when it shows. */
     private @Nullable String peerTarget;
     /** The files are on this machine (not a remote daemon's): Open File and the folder actions show. */
     private boolean localFiles = true;
     /** Whether a torrent waits for its files to be chosen: a mark in the settings, the window's. */
     private java.util.function.Predicate<String> filesToChoose = id -> false;
+
+    void setOnTabShown(Consumer<String> handler) {
+        onTabShown = handler;
+    }
 
     void setFilesToChoose(java.util.function.Predicate<String> marked) {
         filesToChoose = marked;
@@ -238,17 +253,19 @@ final class DetailPane extends VBox {
         filesTab = tab(tr("detail.tab.files"), Icons.files(), filesCount, buildFiles());
         peersTab = tab(tr("detail.tab.peers"), Icons.peers(), peersCount, buildPeers());
         trackersTab = tab(tr("detail.tab.trackers"), Icons.broadcast(), trackersCount, buildTrackers());
-        tabs.getTabs()
-                .addAll(
-                        tab(tr("detail.tab.overview"), Icons.info(), null, buildOverview()),
-                        filesTab,
-                        peersTab,
-                        trackersTab,
-                        tab(tr("detail.tab.log"), Icons.history(), null, buildLog()),
-                        tab(tr("detail.tab.speed"), Icons.gauge(), null, speed));
-        tabs.getSelectionModel().selectedIndexProperty().addListener(o -> {
+        allTabs = List.of(
+                tab(tr("detail.tab.overview"), Icons.info(), null, buildOverview()),
+                filesTab,
+                peersTab,
+                trackersTab,
+                tab(tr("detail.tab.log"), Icons.history(), null, buildLog()),
+                tab(tr("detail.tab.speed"), Icons.gauge(), null, speed));
+        tabs.getTabs().addAll(allTabs);
+        tabs.getSelectionModel().selectedItemProperty().addListener(o -> {
             if (!steering) wantedTab = activeTab();
             if (speedShowing()) speed.show(speedHistory, speedNow);
+            if (overviewShowing()) drawOverviewSpeed();
+            onTabShown.accept(activeTab());
         });
         VBox.setVgrow(tabs, Priority.ALWAYS);
         empty.getStyleClass().add("empty-hint");
@@ -393,25 +410,34 @@ final class DetailPane extends VBox {
 
     /**
      * FX thread. The selected torrent's history as of {@code nowSeconds}, with each snapshot: the
-     * Overview's half hour is drawn every tick (a few shapes), the Speed tab's graph only while it
-     * is the one showing, and when it becomes so.
+     * Overview's half hour and the Speed tab's graph are each drawn only while their tab is the
+     * one showing, and when it becomes so.
      */
     void showSpeed(@Nullable SpeedHistory history, long nowSeconds) {
         speedHistory = history;
         speedNow = nowSeconds;
+        if (overviewShowing()) drawOverviewSpeed();
+        if (speedShowing()) speed.show(history, nowSeconds);
+    }
+
+    private void drawOverviewSpeed() {
+        SpeedHistory history = speedHistory;
         if (history == null) {
             overviewSpark.clear();
-        } else {
-            List<SpeedHistory.Sample> samples = history.blended(OVERVIEW_WINDOW, nowSeconds);
-            int window = Sparkline.window(samples, nowSeconds, OVERVIEW_WINDOW);
-            overviewSpark.show(samples, window, nowSeconds);
-            speedCaption.setText(tr("detail.overview.speed", window / 60));
+            return;
         }
-        if (speedShowing()) speed.show(history, nowSeconds);
+        List<SpeedHistory.Sample> samples = history.blended(OVERVIEW_WINDOW, speedNow);
+        int window = Sparkline.window(samples, speedNow, OVERVIEW_WINDOW);
+        overviewSpark.show(samples, window, speedNow);
+        speedCaption.setText(tr("detail.overview.speed", window / 60));
     }
 
     private boolean speedShowing() {
         return "speed".equals(activeTab());
+    }
+
+    private boolean overviewShowing() {
+        return "overview".equals(activeTab());
     }
 
     /** The graph's state, for the capture hook. */
@@ -421,7 +447,8 @@ final class DetailPane extends VBox {
 
     /** The active tab's name, one of {@link #TABS}; remembered by the window. */
     String activeTab() {
-        return TABS.get(tabs.getSelectionModel().getSelectedIndex());
+        int i = allTabs.indexOf(tabs.getSelectionModel().getSelectedItem());
+        return i < 0 ? "overview" : TABS.get(i);
     }
 
     /** The tab to remember: the person's choice, not the Overview a link download stood in with. */
@@ -441,7 +468,38 @@ final class DetailPane extends VBox {
     void selectTab(String name) {
         String n = "general".equals(name) || "pieces".equals(name) ? "overview" : name;
         int i = TABS.indexOf(n);
-        if (i >= 0) tabs.getSelectionModel().select(i);
+        if (i >= 0 && tabs.getTabs().contains(allTabs.get(i)))
+            tabs.getSelectionModel().select(allTabs.get(i));
+    }
+
+    /**
+     * Simple mode: the Overview and Files alone in the strip, or every tab. The tab the person
+     * chose is kept and comes back with the mode's end; meanwhile the Overview stands in for it.
+     */
+    void setSimple(boolean on) {
+        if (on == simple) return;
+        simple = on;
+        List<String> shown = SimpleMode.detailTabs(TABS, on);
+        steering = true;
+        try {
+            tabs.getTabs()
+                    .setAll(allTabs.stream()
+                            .filter(t -> shown.contains(TABS.get(allTabs.indexOf(t))))
+                            .toList());
+            selectTab(shownTab(tabFor(wantedTab, false)));
+        } finally {
+            steering = false;
+        }
+    }
+
+    /** {@code wanted}, or the Overview while Simple mode has that tab out of the strip. */
+    private String shownTab(String wanted) {
+        return SimpleMode.detailTabs(TABS, simple).contains(wanted) ? wanted : "overview";
+    }
+
+    /** The tabs in the strip, for the capture hook. */
+    List<String> shownTabs() {
+        return tabs.getTabs().stream().map(t -> TABS.get(allTabs.indexOf(t))).toList();
     }
 
     /** What the capture hook prints. */
@@ -477,12 +535,16 @@ final class DetailPane extends VBox {
 
     /**
      * FX thread. A fresh snapshot of the selected torrent, with its row's torrent and stall clock
-     * (null when the row has not arrived yet: the header and the facts then wait a tick).
+     * (null when the row has not arrived yet: the header and the facts then wait a tick). Only
+     * the parts it carries ({@link TorrentDetail#parts}) replace what shows; the others keep the
+     * last ones read, or are emptied when the torrent is another.
      */
     void show(TorrentDetail detail, @Nullable Torrent torrent, long quietSeconds, long nowSeconds) {
         TorrentDetail.General g = detail.general();
         boolean another = !g.id().equals(shownId);
         shownId = g.id();
+        if (detail.fileCount() >= 0) shownFileCount = detail.fileCount();
+        else if (another) shownFileCount = 0;
         header.setVisible(true);
         header.setManaged(true);
         tabs.setVisible(true);
@@ -493,7 +555,56 @@ final class DetailPane extends VBox {
             if (!logItems.isEmpty()) logList.scrollTo(logItems.size() - 1);
         }
 
-        if (torrent != null) showHeader(torrent, detail.files().size(), quietSeconds, nowSeconds);
+        if (torrent != null) showHeader(torrent, shownFileCount, quietSeconds, nowSeconds);
+        // A download from a link has no swarm, pieces or announce: those rows go, its link shows.
+        boolean direct = com.torrenta.engine.direct.DirectDownload.isId(g.id());
+        peersTab.setDisable(direct);
+        trackersTab.setDisable(direct);
+        String tab = shownTab(tabFor(wantedTab, direct));
+        if (!tab.equals(activeTab())) {
+            steering = true;
+            selectTab(tab);
+            steering = false;
+        }
+        if (detail.parts().containsAll(DetailParts.OVERVIEW)) showOverview(detail, torrent, quietSeconds, direct);
+        else if (another) blankOverview();
+
+        if (detail.has(TorrentDetail.Part.FILES)) {
+            if (another) fileRows.clear();
+            if (fileRows.apply(detail.files())) files.setRoot(fileRows.rootItem());
+        } else if (another) {
+            fileRows.clear();
+            files.setRoot(null);
+        }
+        if (another) peerRows.clear();
+        if (detail.has(TorrentDetail.Part.PEERS)) peerRows.apply(detail.peers());
+        if (detail.has(TorrentDetail.Part.TRACKERS)) {
+            if (another || trackerItems.size() != detail.trackers().size()) trackerItems.setAll(detail.trackers());
+            else
+                for (int i = 0; i < trackerItems.size(); i++)
+                    if (!trackerItems.get(i).equals(detail.trackers().get(i)))
+                        trackerItems.set(i, detail.trackers().get(i));
+        } else if (another) trackerItems.clear();
+        if (detail.has(TorrentDetail.Part.WEB_SEEDS)) {
+            if (another || !webSeedItems.equals(detail.webSeeds())) webSeedItems.setAll(detail.webSeeds());
+        } else if (another) webSeedItems.clear();
+        if (detail.has(TorrentDetail.Part.PIECES)) lastPieces = detail.pieces();
+        else if (another) lastPieces = new boolean[0];
+        // A count not read this tick: the last one read, or the row's own for a torrent just shown.
+        filesCount.setText(count(shownFileCount));
+        if (detail.has(TorrentDetail.Part.PEERS))
+            peersCount.setText(count(detail.peers().size()));
+        else if (another) peersCount.setText(torrent == null ? "" : count(torrent.peers()));
+        if (detail.has(TorrentDetail.Part.TRACKERS))
+            trackersCount.setText(count(detail.trackers().size()));
+        else if (another)
+            trackersCount.setText(
+                    torrent == null ? "" : count(torrent.trackers().size()));
+    }
+
+    /** The Overview from a detail that carries its parts: card, map, rates, facts. */
+    private void showOverview(TorrentDetail detail, @Nullable Torrent torrent, long quietSeconds, boolean direct) {
+        TorrentDetail.General g = detail.general();
         showDiagnosis(
                 torrent == null
                         ? Optional.empty()
@@ -512,16 +623,6 @@ final class DetailPane extends VBox {
             peersValue.setText(OverviewText.peers(torrent));
             downloadedValue.setText(OverviewText.downloaded(torrent));
             uploadedValue.setText(OverviewText.uploaded(torrent));
-        }
-        // A download from a link has no swarm, pieces or announce: those rows go, its link shows.
-        boolean direct = com.torrenta.engine.direct.DirectDownload.isId(g.id());
-        peersTab.setDisable(direct);
-        trackersTab.setDisable(direct);
-        String tab = tabFor(wantedTab, direct);
-        if (!tab.equals(activeTab())) {
-            steering = true;
-            selectTab(tab);
-            steering = false;
         }
         for (Node n : torrentFacts) shown(n, !direct);
         for (Node n : directFacts) shown(n, direct);
@@ -542,21 +643,6 @@ final class DetailPane extends VBox {
         announceValue.setText(g.nextAnnounceSeconds() <= 0 ? "—" : Format.duration(g.nextAnnounceSeconds()));
         trackerValue.setText(Format.host(g.currentTracker()));
         privateValue.setText(g.isPrivate() ? tr("common.yes") : tr("common.no"));
-
-        if (another) fileRows.clear();
-        if (fileRows.apply(detail.files())) {
-            files.setRoot(fileRows.rootItem());
-        }
-        peerItems.setAll(detail.peers());
-        if (another || trackerItems.size() != detail.trackers().size()) trackerItems.setAll(detail.trackers());
-        else
-            for (int i = 0; i < trackerItems.size(); i++)
-                trackerItems.set(i, detail.trackers().get(i));
-        if (another || !webSeedItems.equals(detail.webSeeds())) webSeedItems.setAll(detail.webSeeds());
-        lastPieces = detail.pieces();
-        filesCount.setText(count(detail.files().size()));
-        peersCount.setText(count(detail.peers().size()));
-        trackersCount.setText(count(detail.trackers().size()));
     }
 
     /** FX thread. No single selection: the pane says so and holds no torrent. */
@@ -564,19 +650,25 @@ final class DetailPane extends VBox {
         shownId = null;
         header.setVisible(false);
         header.setManaged(false);
-        showDiagnosis(Optional.empty());
         fileRows.clear();
         files.setRoot(null);
-        peerItems.clear();
+        peerRows.clear();
         trackerItems.clear();
         webSeedItems.clear();
         lastPieces = new boolean[0];
-        pieceStrip.show(lastPieces, new int[0], new boolean[0], streamWindow);
+        shownFileCount = 0;
         if (logItems != null) logItems.setPredicate(e -> false);
         speedHistory = null;
         speed.clear();
         overviewSpark.clear();
         for (Label l : List.of(filesCount, peersCount, trackersCount)) l.setText("");
+        blankOverview();
+    }
+
+    /** The Overview with nothing in it: no card, an empty map, a dash for every fact. */
+    private void blankOverview() {
+        showDiagnosis(Optional.empty());
+        pieceStrip.show(new boolean[0], new int[0], new boolean[0], streamWindow);
         for (Label l : List.of(
                 piecesValue,
                 overviewDown,
@@ -1300,19 +1392,19 @@ final class DetailPane extends VBox {
 
     @Initializer // from the constructor
     private javafx.scene.Node buildPeers() {
-        TableView<TorrentDetail.Peer> peers = new TableView<>(peerItems);
+        TableView<PeerRows.Row> peers = new TableView<>(peerItems);
         peers.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         peers.setPlaceholder(new Label(tr("detail.peers.empty")));
         peers.getColumns()
                 .addAll(List.of(
-                        column(tr("detail.peers.column.address"), 170, TorrentDetail.Peer::address),
-                        column(tr("detail.peers.column.client"), 170, TorrentDetail.Peer::client),
-                        column(tr("detail.peers.column.flags"), 70, TorrentDetail.Peer::flags),
-                        column(tr("detail.peers.column.progress"), 80, p -> Format.percent(p.progress())),
-                        column(tr("detail.peers.column.down"), 90, p -> Bytes.rate(p.downRate())),
-                        column(tr("detail.peers.column.up"), 90, p -> Bytes.rate(p.upRate())),
-                        column(tr("detail.peers.column.downloaded"), 100, p -> Bytes.human(p.downloaded())),
-                        column(tr("detail.peers.column.uploaded"), 100, p -> Bytes.human(p.uploaded()))));
+                        peerColumn(tr("detail.peers.column.address"), 170, TorrentDetail.Peer::address),
+                        peerColumn(tr("detail.peers.column.client"), 170, TorrentDetail.Peer::client),
+                        peerColumn(tr("detail.peers.column.flags"), 70, TorrentDetail.Peer::flags),
+                        peerColumn(tr("detail.peers.column.progress"), 80, p -> Format.percent(p.progress())),
+                        peerColumn(tr("detail.peers.column.down"), 90, p -> Bytes.rate(p.downRate())),
+                        peerColumn(tr("detail.peers.column.up"), 90, p -> Bytes.rate(p.upRate())),
+                        peerColumn(tr("detail.peers.column.downloaded"), 100, p -> Bytes.human(p.downloaded())),
+                        peerColumn(tr("detail.peers.column.uploaded"), 100, p -> Bytes.human(p.uploaded()))));
         Headers.uppercase(peers);
 
         banItem = new MenuItem(tr("detail.peers.ban"));
@@ -1326,10 +1418,10 @@ final class DetailPane extends VBox {
             if (peerTarget != null) onCopyPeer.accept(peerTarget);
         });
         peerMenu = new ContextMenu(banItem, copy);
-        // A right-click selects the row before the menu shows; the address is taken then, because
-        // the next tick replaces the list (and with it the selection) while the menu is open.
+        // A right-click selects the row before the menu shows; the address is taken then, so a
+        // peer that leaves while the menu is open is still the one it acts on.
         peerMenu.setOnShowing(e -> {
-            TorrentDetail.Peer peer = peers.getSelectionModel().getSelectedItem();
+            PeerRows.Row peer = peers.getSelectionModel().getSelectedItem();
             peerTarget = peer == null ? null : peer.address();
             banItem.setDisable(peerTarget == null);
             copy.setDisable(peerTarget == null);
@@ -1462,6 +1554,14 @@ final class DetailPane extends VBox {
             case "error" -> tr("detail.trackers.status.error");
             default -> status;
         };
+    }
+
+    /** A Peers column: the row's snapshot through {@code text}, redrawn as the row's peer moves. */
+    private static TableColumn<PeerRows.Row, String> peerColumn(
+            String title, double width, Function<TorrentDetail.Peer, String> text) {
+        TableColumn<PeerRows.Row, String> column = column(title, width, r -> text.apply(r.peer()));
+        column.setCellValueFactory(cell -> cell.getValue().peerProperty().map(text));
+        return column;
     }
 
     private static <T> TableColumn<T, String> column(String title, double width, Function<T, String> text) {

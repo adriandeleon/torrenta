@@ -283,8 +283,9 @@ public final class WithDownloads implements Engine {
     }
 
     @Override
-    public TorrentDetail detail(String id) throws EngineException {
-        return DirectDownload.isId(id) ? links.detail(id) : torrents.detail(id);
+    public TorrentDetail detail(String id, java.util.Set<TorrentDetail.Part> parts) throws EngineException {
+        // A download's detail is one file and no swarm: every part, whatever was asked.
+        return DirectDownload.isId(id) ? links.detail(id) : torrents.detail(id, parts);
     }
 
     @Override

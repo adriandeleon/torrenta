@@ -4,6 +4,8 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -42,7 +44,8 @@ import static com.torrenta.i18n.Messages.tr;
  * value does not read is matched against the name as typed (so {@code Wars:} still finds "Star
  * Wars: …") and its chip is marked invalid, for the omnibox to show while it is being typed.
  *
- * <p>Pure and immutable; "added" is measured from the {@code now} passed to {@link #parse}.
+ * <p>Pure and immutable (a term may remember what it worked out, never what it answers); "added"
+ * is measured from the {@code now} passed to {@link #parse}.
  */
 public final class FilterQuery {
 
@@ -169,14 +172,20 @@ public final class FilterQuery {
         return new Term(t -> t.tags().stream().anyMatch(value::equalsIgnoreCase), tr("filter.tag", value));
     }
 
-    /** Any of its tracker hosts, or the one it last announced to (which a snapshot may name alone). */
+    /**
+     * Any of its tracker hosts, or the one it last announced to (which a snapshot may name alone).
+     * That one is a URL, and the list runs the test on every row each poll: each URL's answer is
+     * kept for the life of the query, so it is parsed once, not once a row a second.
+     */
     private static Term tracker(String value) {
         if (value.isEmpty()) return Term.invalid(tr("filter.trackerNeedsHost"));
         String needle = value.toLowerCase(Locale.ROOT);
         Predicate<String> has = host -> host.toLowerCase(Locale.ROOT).contains(needle);
+        Map<String, Boolean> announced = new ConcurrentHashMap<>();
         return new Term(
                 t -> t.trackers().stream().anyMatch(has)
-                        || (!t.tracker().isBlank() && has.test(Format.host(t.tracker()))),
+                        || (!t.tracker().isBlank()
+                                && announced.computeIfAbsent(t.tracker(), url -> has.test(Format.host(url)))),
                 tr("filter.tracker", value));
     }
 
