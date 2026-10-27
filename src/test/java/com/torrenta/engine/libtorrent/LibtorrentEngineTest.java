@@ -151,6 +151,80 @@ class LibtorrentEngineTest {
         }
     }
 
+    /**
+     * A start brings every torrent back from its blob and writes none of them: the blob is the
+     * resume data it came from. The add alert's write and save were for new torrents only, and a
+     * seed's finished alert (posted once its resume data is checked) rewrote every seed in the
+     * store at every start. A new add still writes.
+     */
+    @Test
+    void aRestartRewritesNoStoredTorrent(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        Files.createDirectories(downloads);
+        NativeLibrary.ensureAvailable(); // TorrentBuilder is native too
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        List<String> seeds = new java.util.ArrayList<>();
+        try (LibtorrentEngine engine = new LibtorrentEngine(() -> downloads, store, isolated(ANY_PORT))) {
+            engine.start();
+            for (int i = 0; i < 4; i++) {
+                Path payload = downloads.resolve("payload" + i + ".bin");
+                byte[] bytes = new byte[64 * 1024];
+                new Random(i).nextBytes(bytes);
+                Files.write(payload, bytes);
+                Path torrentFile = dir.resolve("payload" + i + ".torrent");
+                Files.write(
+                        torrentFile,
+                        new TorrentBuilder()
+                                .path(payload.toFile())
+                                .addTracker("udp://tracker.example.org:6969/announce")
+                                .generate()
+                                .entry()
+                                .bencode());
+                seeds.add(engine.add(torrentFile.toString()).id());
+            }
+            engine.add(MAGNET);
+            await(
+                    "all seeding",
+                    () -> engine.torrents().stream()
+                            .filter(t -> seeds.contains(t.id()))
+                            .allMatch(t -> t.state() == TorrentState.SEEDING));
+        }
+        List<String> ids = new java.util.ArrayList<>(seeds);
+        ids.add(MAGNET_ID);
+        java.nio.file.attribute.FileTime old = java.nio.file.attribute.FileTime.fromMillis(1_000_000_000_000L);
+        for (String id : ids) Files.setLastModifiedTime(store.dir().resolve(id + TorrentStore.SUFFIX), old);
+
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        try (LibtorrentEngine again = new LibtorrentEngine(() -> downloads, store, isolated(ANY_PORT))) {
+            again.addListener(events::add);
+            again.start();
+            await(
+                    "all restored",
+                    () -> events.stream()
+                                    .filter(e -> e.message().startsWith("Restored "))
+                                    .count()
+                            == ids.size());
+            // Checked comes after finished on the same thread: every seed's finished alert is handled.
+            await(
+                    "every seed checked",
+                    () -> events.stream()
+                                    .filter(e -> e.message().endsWith(" checked") && seeds.contains(e.torrentId()))
+                                    .count()
+                            == seeds.size());
+            await("every request answered", () -> again.pendingSavesForTest() == 0);
+            for (String id : ids)
+                assertEquals(
+                        old,
+                        Files.getLastModifiedTime(store.dir().resolve(id + TorrentStore.SUFFIX)),
+                        id + " was not rewritten at start");
+
+            // A new torrent is still written on its add.
+            String other = "89abcdef0123456789abcdef0123456789abcdef";
+            again.add("magnet:?xt=urn:btih:" + other + "&dn=Another");
+            await("a new add writes its blob", () -> store.contains(other));
+        }
+    }
+
     @Test
     void removeForgetsTheTorrent(@TempDir Path dir) throws Exception {
         TorrentStore store = new TorrentStore(dir.resolve("store"));
@@ -2490,6 +2564,71 @@ class LibtorrentEngineTest {
         }
     }
 
+    /** A pass over a folder of many files reads the session's list once, not once a file. */
+    @Test
+    void aWatchFolderPassTakesOneSnapshot(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        Path inbox = Files.createDirectories(dir.resolve("inbox"));
+        java.util.concurrent.atomic.AtomicInteger snapshots = new java.util.concurrent.atomic.AtomicInteger();
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            Engine counted = (Engine) java.lang.reflect.Proxy.newProxyInstance(
+                    Engine.class.getClassLoader(), new Class<?>[] {Engine.class}, (proxy, method, args) -> {
+                        if (method.getName().equals("torrents")) snapshots.incrementAndGet();
+                        try {
+                            return method.invoke(engine, args);
+                        } catch (java.lang.reflect.InvocationTargetException e) {
+                            throw e.getCause();
+                        }
+                    });
+            com.torrenta.engine.WatchFolders.Host host = new com.torrenta.engine.WatchFolders.Host() {
+                @Override
+                public Path defaultDownloadDir() {
+                    return downloads;
+                }
+
+                @Override
+                public java.util.Optional<com.torrenta.engine.Category> category(String name) {
+                    return java.util.Optional.empty();
+                }
+
+                @Override
+                public AddRequest.Storage storage(Path destination) {
+                    return AddRequest.Storage.DEFAULT;
+                }
+
+                @Override
+                public void report(EngineEvent event) {}
+            };
+            Random random = new Random(11);
+            for (int f = 0; f < 5; f++) {
+                StringBuilder lines = new StringBuilder();
+                for (int m = 0; m < 3; m++) {
+                    byte[] hash = new byte[20];
+                    random.nextBytes(hash);
+                    lines.append("magnet:?xt=urn:btih:")
+                            .append(java.util.HexFormat.of().formatHex(hash))
+                            .append('\n');
+                }
+                Files.writeString(inbox.resolve("batch" + f + ".magnet"), lines);
+            }
+            try (com.torrenta.engine.WatchFolders watcher = new com.torrenta.engine.WatchFolders(counted, host)) {
+                watcher.configure(List.of(new com.torrenta.engine.WatchFolder(
+                        inbox.toString(),
+                        com.torrenta.engine.WatchFolder.AfterAdd.DELETE,
+                        com.torrenta.engine.WatchFolder.SaveTo.DEFAULT,
+                        "",
+                        "",
+                        false)));
+                watcher.poll(); // first look: sizes noted, nothing handled
+                assertEquals(0, snapshots.get(), "nothing handled, nothing asked");
+                watcher.poll();
+                assertEquals(1, snapshots.get(), "one snapshot for five files");
+            }
+            assertEquals(15, engine.torrents().size(), "every magnet added");
+        }
+    }
+
     /**
      * The application screens a watch folder's add (the content check): the add goes through
      * {@code Host.add}, a refusal there adds nothing, is reported like a failed add, and the file
@@ -3065,6 +3204,97 @@ class LibtorrentEngineTest {
         LibtorrentEngine.Counter[] counters = LibtorrentEngine.Counter.values();
         for (int i = 0; i < counters.length; i++) {
             assertTrue(indices[i] >= 0, counters[i].metric + " is not a session_stats metric of this libtorrent");
+        }
+    }
+
+    @Test
+    void aBlobWithEveryPieceIsASeedAndItsFinishIsNotWrittenAgain() {
+        assertTrue(LibtorrentEngine.holdsEveryPiece(12, 12));
+        assertFalse(LibtorrentEngine.holdsEveryPiece(11, 12), "a piece short");
+        assertFalse(LibtorrentEngine.holdsEveryPiece(0, 0), "no metadata: a magnet's blob");
+
+        assertFalse(LibtorrentEngine.savesOnFinish(true, 0), "brought back whole, nothing since");
+        assertTrue(LibtorrentEngine.savesOnFinish(true, 16_384), "a recheck lost pieces and they came again");
+        assertTrue(LibtorrentEngine.savesOnFinish(false, 0), "a blob without every piece: checked into a seed");
+        assertTrue(LibtorrentEngine.savesOnFinish(false, -1), "a new torrent finishing");
+    }
+
+    @Test
+    void droppedAlertsAreSaidOncePerMinute() {
+        assertTrue(LibtorrentEngine.dropWarningDue(Long.MIN_VALUE, 5), "the first time");
+        assertFalse(LibtorrentEngine.dropWarningDue(1_000, 1_000 + LibtorrentEngine.DROP_WARNING_MS - 1));
+        assertTrue(LibtorrentEngine.dropWarningDue(1_000, 1_000 + LibtorrentEngine.DROP_WARNING_MS));
+    }
+
+    @Test
+    void thePeriodicFlushAsksEveryTorrentOncePerWindow() {
+        Random random = new Random(7);
+        int[] perSlice = new int[LibtorrentEngine.FLUSH_SLICES];
+        for (int n = 0; n < 1200; n++) {
+            byte[] hash = new byte[20];
+            random.nextBytes(hash);
+            String id = java.util.HexFormat.of().formatHex(hash);
+            int asked = 0;
+            // Any window of consecutive ticks, wherever it starts.
+            for (long tick = 37; tick < 37 + LibtorrentEngine.FLUSH_SLICES; tick++) {
+                if (LibtorrentEngine.inFlushSlice(id, tick, LibtorrentEngine.FLUSH_SLICES)) {
+                    asked++;
+                    perSlice[(int) (tick % LibtorrentEngine.FLUSH_SLICES)]++;
+                }
+            }
+            assertEquals(1, asked, id);
+        }
+        // Spread, not bunched: no slice holds more than twice its share.
+        for (int count : perSlice)
+            assertTrue(count > 0 && count < 2 * 1200 / LibtorrentEngine.FLUSH_SLICES, "" + count);
+    }
+
+    @Test
+    void theAlertQueueIsSizedForThousandsOfTorrentsAndAnOverflowIsSaid(@TempDir Path dir) throws Exception {
+        NativeLibrary.ensureAvailable();
+        assertEquals(
+                2000,
+                org.libtorrent4j
+                        .swig
+                        .libtorrent
+                        .default_settings()
+                        .get_int(org.libtorrent4j.swig.settings_pack.int_types.alert_queue_size.swigValue()),
+                "libtorrent's own default, which the engine raises");
+        List<java.util.logging.LogRecord> warnings = new CopyOnWriteArrayList<>();
+        java.util.logging.Logger log = java.util.logging.Logger.getLogger(LibtorrentEngine.class.getName());
+        java.util.logging.Handler handler = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord r) {
+                if (r.getLevel() == java.util.logging.Level.WARNING
+                        && r.getMessage().contains("alert queue")) warnings.add(r);
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+        };
+        log.addHandler(handler);
+        try (LibtorrentEngine engine = new LibtorrentEngine(
+                () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(ANY_PORT))) {
+            engine.start();
+            assertEquals(LibtorrentEngine.ALERT_QUEUE_SIZE, engine.alertQueueSizeForTest());
+            Random random = new Random(3);
+            for (int i = 0; i < 40; i++) {
+                byte[] hash = new byte[20];
+                random.nextBytes(hash);
+                engine.add("magnet:?xt=urn:btih:" + java.util.HexFormat.of().formatHex(hash));
+            }
+            // One a queue cannot hold: forty answers at once overflow it.
+            engine.alertQueueSizeForTest(1);
+            engine.flush();
+            await("the overflow said", () -> !warnings.isEmpty());
+            engine.flush();
+            engine.alertQueueSizeForTest(LibtorrentEngine.ALERT_QUEUE_SIZE);
+            assertEquals(1, warnings.size(), "once per burst: " + warnings);
+        } finally {
+            log.removeHandler(handler);
         }
     }
 
