@@ -106,4 +106,14 @@ class CommandLineTest {
         assertFalse(given.headless(null), "not packaged: dev-run, the tests");
         assertTrue(CommandLine.parse("--headless").headless(null));
     }
+
+    @Test
+    void reportStopsBeforeStartingAndKeepsTheConfigFolder() {
+        CommandLine cli = CommandLine.parse("--report", "--config-dir", "/tmp/c");
+        assertTrue(cli.report());
+        assertFalse(cli.shouldRun());
+        assertEquals("/tmp/c", cli.configDir());
+        assertFalse(CommandLine.parse().report());
+        assertTrue(CommandLine.usage("torrenta").contains("--report"));
+    }
 }

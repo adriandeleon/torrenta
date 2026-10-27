@@ -47,10 +47,27 @@ public final class App extends Application {
             System.exit(0);
         }
 
+        Path configDir = ConfigDir.resolve(cli.configDir());
+        // A problem report from the session logs without starting Torrenta, which may be the
+        // problem; before the lock, so it works beside a running one too.
+        if (cli.report()) {
+            Settings settings = new Settings(configDir.resolve(Settings.FILE_NAME));
+            settings.load();
+            String engine = com.torrenta.engine.EngineProfile.LOCAL_ID.equals(settings.engineProfile())
+                    ? "libtorrent (local)"
+                    : "Transmission (remote)";
+            System.exit(com.torrenta.report.ReportCommand.run(
+                    com.torrenta.ui.DebugLog.fileIn(configDir),
+                    com.torrenta.ui.DebugLog.previousIn(configDir),
+                    engine,
+                    Path.of(""),
+                    true,
+                    System.out));
+        }
+
         // One Torrenta per config folder: a second one hands its command line to the first and is
         // gone before the toolkit would have come up, with nothing printed. A file manager's
         // double-click and a browser's magnet link both arrive this way.
-        Path configDir = ConfigDir.resolve(cli.configDir());
         // Before the claim, which would hand a running one an empty batch (and bring its window
         // up): that one saves its own settings over the file, so it is the one to be told.
         if (cli.setRemotePassword()) {
