@@ -364,6 +364,26 @@ public final class MainWindow {
     /** A {@link #refreshDetailNow} waiting on the poll thread; later requests ride on it. */
     private final java.util.concurrent.atomic.AtomicBoolean detailRefreshQueued =
             new java.util.concurrent.atomic.AtomicBoolean();
+    /**
+     * The main window is showing and not minimised ({@link PollWork#onScreen}); set on the FX
+     * thread from the stage's showing and iconified properties, read by the poll, which draws
+     * nothing while it is false.
+     */
+    private volatile boolean windowOnScreen;
+    /** The last poll's frame, drawn or not, for {@link #drawNow} when the window comes back. */
+    private volatile @Nullable Frame lastFrame;
+    /** A {@link #drawNow} waiting on the poll thread; later requests ride on it. */
+    private final java.util.concurrent.atomic.AtomicBoolean drawQueued =
+            new java.util.concurrent.atomic.AtomicBoolean();
+    /** For the capture hook: ticks drawn and skipped, catch-ups and how long the last one took. */
+    private final java.util.concurrent.atomic.AtomicInteger ticksDrawn =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    private final java.util.concurrent.atomic.AtomicInteger ticksSkipped =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger catchUps = new java.util.concurrent.atomic.AtomicInteger();
+    private volatile long backOnScreenAt;
+    private volatile long catchUpMillis = -1;
     /** The global share limit as the poll thread applies it; refreshed with the engine settings. */
     /** Per-torrent share limits as of the last poll, for the status sentences ("ratio 1.2 of 2"). */
 
@@ -662,6 +682,11 @@ public final class MainWindow {
             if (hiddenToTray) return;
             shutdown();
         });
+        // Every way the window leaves or comes back (to the tray and from it, minimised and
+        // restored, a second instance's hand-off) goes through these two properties.
+        javafx.beans.InvalidationListener onScreen = o -> onScreenChanged();
+        stage.showingProperty().addListener(onScreen);
+        stage.iconifiedProperty().addListener(onScreen);
         setStatus(tr("status.starting"));
         showRates(Engine.Rates.ZERO, 0);
     }
@@ -1280,6 +1305,7 @@ public final class MainWindow {
             for (String line : detail.overviewLines()) out.add("overview-" + line);
         out.add("status-bar=" + statusBarForCapture());
         out.add("simple=" + simpleForCapture());
+        out.add("table=" + tableLineForCapture());
         if (!settingsWindow.profileDialogStatusForCapture().isEmpty()) {
             out.add("dialog=" + settingsWindow.dialogTitle());
             out.add("profile-test=" + settingsWindow.profileDialogStatusForCapture());
@@ -1292,6 +1318,24 @@ public final class MainWindow {
         return out;
     }
 
+    /**
+     * The list as the ticks left it: the sort, the shown rows' names in order with {@code *} on
+     * the selected ones, and the focused row's name.
+     */
+    private String tableLineForCapture() {
+        String sort = table.getSortOrder().stream()
+                .map(c -> c.getId() + (c.getSortType() == TableColumn.SortType.DESCENDING ? ":desc" : ""))
+                .collect(java.util.stream.Collectors.joining("+"));
+        var selected = table.getSelectionModel().getSelectedItems();
+        String shown = table.getItems().stream()
+                .map(r -> (selected.contains(r) ? "*" : "") + r.torrent().name())
+                .collect(java.util.stream.Collectors.joining(","));
+        TorrentRow focused = table.getFocusModel().getFocusedItem();
+        return "sort:" + (sort.isEmpty() ? "none" : sort) + " shown="
+                + table.getItems().size() + " rows=" + shown + " focus="
+                + (focused == null ? "none" : focused.torrent().name());
+    }
+
     /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
     public List<String> eventLines() {
         return log.events().stream()
@@ -1301,7 +1345,9 @@ public final class MainWindow {
 
     /**
      * Drives the window from the capture hook, by name: {@code close-window} (the quit path a
-     * person takes, where the hook itself exits through Platform.exit), {@code select-all}, {@code palette},
+     * person takes, where the hook itself exits through Platform.exit), {@code close-request},
+     * {@code iconify}, {@code deiconify}, {@code tray-show} (the tray icon's activation), {@code
+     * select-all}, {@code palette},
      * {@code palette:<query>}, {@code sidebar:<filter>} (as {@link SidebarFilter#parse} reads it),
      * {@code sidebar-keys:<KEY+KEY+…>} (focus the sidebar and press them),
      * {@code sidebar-click:<section>} (a click on a heading folds it), {@code sidebar-drag:<px>}
@@ -1324,6 +1370,11 @@ public final class MainWindow {
                 stage.setX(Double.parseDouble(p[2]));
                 stage.setY(Double.parseDouble(p[3]));
             }
+        } else if (action.equals("iconify") || action.equals("deiconify")) {
+            stage.setIconified(action.equals("iconify"));
+        } else if (action.equals("tray-show")) {
+            // What the tray icon's activation runs.
+            showFromTray();
         } else if (action.equals("close-request")) {
             // What the title bar's button sends: the close-to-tray rule runs, stage.close() skips it.
             stage.fireEvent(new javafx.stage.WindowEvent(stage, javafx.stage.WindowEvent.WINDOW_CLOSE_REQUEST));
@@ -1622,6 +1673,26 @@ public final class MainWindow {
             export(exportTargets(selectedTorrents(), Path.of(action.substring("export-to:".length()))));
         } else if (action.equals("select-first")) {
             table.getSelectionModel().clearAndSelect(0);
+        } else if (action.startsWith("select-rows:")) {
+            // select-rows:<i>+<j>…: those shown rows selected, the last one focused.
+            table.getSelectionModel().clearSelection();
+            for (String index : action.substring("select-rows:".length()).split("\\+"))
+                table.getSelectionModel().select(Integer.parseInt(index));
+        } else if (action.startsWith("sort:")) {
+            // sort:<column id>[:desc]: the list sorted by that column, as a click on its header.
+            String[] spec = action.substring("sort:".length()).split(":");
+            table.getColumns().stream()
+                    .filter(c -> spec[0].equals(c.getId()))
+                    .findFirst()
+                    .ifPresentOrElse(
+                            c -> {
+                                c.setSortType(
+                                        spec.length > 1 && spec[1].equals("desc")
+                                                ? TableColumn.SortType.DESCENDING
+                                                : TableColumn.SortType.ASCENDING);
+                                table.getSortOrder().setAll(List.of(c));
+                            },
+                            () -> System.err.println("capture: no column " + spec[0]));
         } else if (action.startsWith("detail:")) {
             showDetail();
             detail.selectTab(action.substring("detail:".length()));
@@ -3000,28 +3071,100 @@ public final class MainWindow {
                 Platform.runLater(() -> watch.dialog().showSwarm(swarm));
             }
         }
-        // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
-        com.torrenta.engine.SessionStats stats = statsWanted ? engine.stats() : null;
-        TorrentDetail shown = fetchDetail(engine);
+        PollWork work = PollWork.of(windowOnScreen, detailWanted, statsWanted);
+        // What goes on with no window: the port clock, the interface watch (which rebinds), the
+        // leak check (which pauses while exposed), the tray and the badge. The session has
+        // already applied the share limits and filled the speed histories.
         Connectivity connectivity = engine.connectivity();
         long unproven = portClock.tick(connectivity, NetworkStatus.anyRunning(snapshot), nowSeconds);
         InterfaceWatch.State binding = watchInterface(engine, nowSeconds);
         Optional<NetworkStatus.Port> port = NetworkStatus.port(connectivity, unproven, binding);
         Optional<LeakView> leak = checkLeaks(engine, binding, connectivity.externalAddress(), snapshot, nowSeconds);
-        boolean checking = exitChecking;
         Optional<String> dht = NetworkStatus.dht(connectivity, engine.stats().dhtNodes());
-        Optional<NetworkStatus.Free> space = freeSpace(nowSeconds);
+        Frame frame = new Frame(engine, snapshot, current, nowSeconds, port, dht, leak, exitChecking);
+        lastFrame = frame;
         pushTray(TrayStatus.of(snapshot, current));
         pushBadge(BadgeState.of(snapshot, current.download()));
+        // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
+        com.torrenta.engine.SessionStats stats = work.stats() ? engine.stats() : null;
+        if (work.window()) {
+            ticksDrawn.incrementAndGet();
+            draw(engine, frame, stats, work.detail());
+        } else {
+            ticksSkipped.incrementAndGet();
+            if (stats != null) Platform.runLater(() -> statsWindow.update(stats, session.history(), nowSeconds));
+        }
+    }
+
+    /**
+     * What one poll found, for the window to draw: kept as {@link #lastFrame} while nothing is on
+     * screen, so the window can be drawn from it the moment it comes back.
+     */
+    private record Frame(
+            Engine engine,
+            List<Torrent> snapshot,
+            Engine.Rates rates,
+            long nowSeconds,
+            Optional<NetworkStatus.Port> port,
+            Optional<String> dht,
+            Optional<LeakView> leak,
+            boolean checking) {}
+
+    /**
+     * Poll thread: a frame into the window, with the detail pane's torrent and the free space read
+     * now; both are read only to be drawn, so neither is read while the window is off screen.
+     */
+    private void draw(Engine engine, Frame f, com.torrenta.engine.@Nullable SessionStats stats, boolean withDetail) {
+        TorrentDetail shown = withDetail ? fetchDetail(engine) : null;
+        Optional<NetworkStatus.Free> space = freeSpace(f.nowSeconds());
+        long nowSeconds = f.nowSeconds();
         Platform.runLater(() -> {
-            rows.apply(snapshot, nowSeconds);
-            refreshSidebar(snapshot);
-            showRates(current, nowSeconds);
-            showNetwork(port, dht, space);
-            showLeak(leak, checking);
+            rows.apply(f.snapshot(), nowSeconds);
+            refreshSidebar(f.snapshot());
+            showRates(f.rates(), nowSeconds);
+            showNetwork(f.port(), f.dht(), space);
+            showLeak(f.leak(), f.checking());
             applyDetail(shown, nowSeconds);
             if (stats != null) statsWindow.update(stats, session.history(), nowSeconds);
         });
+    }
+
+    /** FX thread: the stage was shown, hidden, minimised or restored. */
+    private void onScreenChanged() {
+        boolean now = PollWork.onScreen(stage.isShowing(), stage.isIconified());
+        boolean was = windowOnScreen;
+        windowOnScreen = now;
+        if (PollWork.catchUp(was, now)) {
+            backOnScreenAt = System.nanoTime();
+            drawNow();
+        }
+    }
+
+    /**
+     * FX thread. The window is back on screen: the latest poll drawn at once, not up to a second
+     * later at the next one, with a fresh detail fetch. Run on the poll thread like {@link
+     * #refreshDetailNow}, so it never overlaps a poll; requests made while one is queued share it.
+     */
+    private void drawNow() {
+        if (!drawQueued.compareAndSet(false, true)) return;
+        boolean queued = session.execute(() -> {
+            drawQueued.set(false);
+            Frame frame = lastFrame;
+            Engine current = this.engine;
+            // Nothing polled yet, or the poll of an engine a profile switch has since replaced.
+            if (frame == null || current == null || frame.engine() != current) return;
+            catchUps.incrementAndGet();
+            draw(current, frame, statsWanted ? current.stats() : null, detailWanted);
+            long asked = backOnScreenAt;
+            Platform.runLater(() -> catchUpMillis = (System.nanoTime() - asked) / 1_000_000);
+        });
+        if (!queued) drawQueued.set(false); // stopping, or not started: no more polls of any kind
+    }
+
+    /** The poll's drawing as counted, for the capture hook. */
+    public String pollDescription() {
+        return "onScreen=" + windowOnScreen + " drawn=" + ticksDrawn.get() + " skipped=" + ticksSkipped.get()
+                + " catchUps=" + catchUps.get() + " catchUpMs=" + catchUpMillis + " stats=" + statsWanted;
     }
 
     /**
@@ -5486,7 +5629,7 @@ public final class MainWindow {
 
     private TableView<TorrentRow> buildTable() {
         // Sorted over filtered over the live rows: the table's comparator drives the sort, and the
-        // rows list's extractor makes a changed rate re-sort its row without a sort() call.
+        // tick's one update change (TorrentRows) re-filters and re-sorts once, without a sort() call.
         SortedList<TorrentRow> sorted = new SortedList<>(filtered);
         TableView<TorrentRow> table = new TableView<>(sorted);
         sorted.comparatorProperty().bind(table.comparatorProperty());
