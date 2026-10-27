@@ -240,6 +240,127 @@ class LibtorrentEngineTest {
         assertTrue(store.loadAll().isEmpty(), "stop() does not resurrect it");
     }
 
+    /**
+     * A per-id call looks the torrent up by the hash its id spells, and the poll keeps the
+     * session's handles between ticks: v1-only, v2-only and hybrid torrents are each found by
+     * their id and by nothing else (a hybrid's v1 hash finds it in libtorrent, but is not its
+     * id), a removal leaves the poll's map at once, and the map holds only what is listed.
+     */
+    @Test
+    void everyKindOfTorrentIsFoundByItsIdAloneAndNotOnceRemoved(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        Files.createDirectories(downloads);
+        NativeLibrary.ensureAvailable();
+        Map<String, byte[]> torrents = new java.util.LinkedHashMap<>();
+        for (String kind : List.of("v1", "v2", "hybrid")) {
+            Path file = downloads.resolve(kind + ".bin");
+            byte[] data = new byte[48 * 1024];
+            new Random(kind.hashCode()).nextBytes(data);
+            Files.write(file, data);
+            org.libtorrent4j.swig.create_flags_t flags = new org.libtorrent4j.swig.create_flags_t();
+            if (kind.equals("v1")) flags = flags.or_(TorrentBuilder.V1_ONLY);
+            if (kind.equals("v2")) flags = flags.or_(TorrentBuilder.V2_ONLY);
+            torrents.put(
+                    kind,
+                    new TorrentBuilder()
+                            .path(file.toFile())
+                            .pieceSize(16 * 1024)
+                            .flags(flags)
+                            .generate()
+                            .entry()
+                            .bencode());
+        }
+        try (LibtorrentEngine engine = engine(dir)) {
+            engine.start();
+            Map<String, String> ids = new java.util.LinkedHashMap<>();
+            for (var e : torrents.entrySet())
+                ids.put(
+                        e.getKey(),
+                        engine.add(downloadsTorrent(dir, e.getValue())).id());
+            assertEquals(3, Set.copyOf(ids.values()).size(), ids.toString());
+            for (int tick = 0; tick < 3; tick++) {
+                assertEquals(
+                        Set.copyOf(ids.values()),
+                        Set.copyOf(engine.torrents().stream().map(Torrent::id).toList()));
+                assertEquals(Set.copyOf(ids.values()), engine.knownHandlesForTest());
+                for (var e : ids.entrySet()) {
+                    assertEquals(
+                            e.getValue(), engine.detail(e.getValue()).general().id(), e.getKey());
+                }
+            }
+
+            String hybrid = ids.get("hybrid");
+            String hybridV1 = engine.detail(hybrid).general().infoHashV1();
+            assertEquals(40, hybridV1.length());
+            assertNotEquals(hybrid, hybridV1, "a hybrid's id is its truncated v2 hash");
+            assertThrows(EngineException.class, () -> engine.category(hybridV1), "the v1 hash is not its id");
+            assertThrows(EngineException.class, () -> engine.category(hybrid.toUpperCase(java.util.Locale.ROOT)));
+            assertThrows(EngineException.class, () -> engine.category("nope"));
+            assertThrows(EngineException.class, () -> engine.category("0".repeat(40)));
+            assertThrows(EngineException.class, () -> engine.category("ff".repeat(20)));
+
+            for (String id : ids.values()) {
+                engine.remove(id, false);
+                assertFalse(engine.knownHandlesForTest().contains(id), "dropped on remove, before any poll");
+                await("gone from the session", () -> engine.torrents().stream().noneMatch(t -> t.id().equals(id)));
+                assertThrows(EngineException.class, () -> engine.category(id), "a removed id is not found");
+                assertFalse(engine.knownHandlesForTest().contains(id));
+            }
+            assertTrue(engine.torrents().isEmpty());
+            assertTrue(engine.knownHandlesForTest().isEmpty());
+        }
+    }
+
+    /**
+     * A v1 magnet of a hybrid torrent changes id when its metadata arrives (the best hash is the
+     * v2 one then): the list shows the new id, a per-id call finds it by that one, and the poll's
+     * map lets the old one go.
+     */
+    @Test
+    void aV1MagnetOfAHybridIsFoundByItsNewIdOnceTheMetadataIsIn(@TempDir Path dir) throws Exception {
+        byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
+        try (LibtorrentEngine seed = seeder(dir, torrent);
+                LibtorrentEngine engine = downloader(dir)) {
+            String hybrid = seed.torrents().get(0).id();
+            String v1 = seed.detail(hybrid).general().infoHashV1();
+            assertNotEquals(hybrid, v1);
+
+            engine.start();
+            engine.reconnectQuicklyForTest();
+            assertEquals(v1, engine.add("magnet:?xt=urn:btih:" + v1).id());
+            assertEquals(v1, engine.torrents().get(0).id());
+            assertEquals(Set.of(v1), engine.knownHandlesForTest());
+
+            int port = awaitListening("the seeder", seed);
+            long deadline = System.currentTimeMillis() + LOOPBACK_SECONDS * 1000;
+            long nextConnect = 0;
+            while (!engine.torrents().get(0).id().equals(hybrid)) {
+                if (System.currentTimeMillis() > deadline)
+                    throw new AssertionError("no metadata: " + engine.torrents() + "\n  "
+                            + String.join("\n  ", engine.peerLogForTest()));
+                if (System.currentTimeMillis() >= nextConnect) {
+                    try {
+                        engine.connectPeerForTest(v1, port);
+                    } catch (EngineException e) {
+                        // The metadata came in between the list and the dial: the id is the v2 one now.
+                    }
+                    nextConnect = System.currentTimeMillis() + 1000;
+                }
+                Thread.sleep(25);
+            }
+            assertEquals(1, engine.torrents().size());
+            assertEquals(Set.of(hybrid), engine.knownHandlesForTest(), "the old id is not kept");
+            assertEquals("pair", engine.torrents().get(0).name());
+            assertEquals(hybrid, engine.detail(hybrid).general().id());
+            assertThrows(EngineException.class, () -> engine.detail(v1), "the v1 hash is no longer its id");
+
+            engine.remove(hybrid, false);
+            await("gone from the session", () -> engine.torrents().isEmpty());
+            assertThrows(EngineException.class, () -> engine.detail(hybrid));
+            assertTrue(engine.knownHandlesForTest().isEmpty());
+        }
+    }
+
     @Test
     void actionsOnAMagnet(@TempDir Path dir) throws Exception {
         try (LibtorrentEngine engine = engine(dir)) {
