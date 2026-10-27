@@ -233,8 +233,9 @@ class SettingsSyncFxTest {
                 s.sync().markDirty();
             });
 
-            // A repository gone: the round fails and the page says so.
-            deleteTree(dir.resolve("remote.git"));
+            // A repository gone: the round fails and the page says so. Moved, not deleted: git's
+            // object files are read-only on Windows.
+            Files.move(dir.resolve("remote.git"), dir.resolve("moved.git"));
             Fx.run(() -> f.button("settings.sync.syncNow").fire());
             Fx.waitUntil("the failed round", () -> s.sync().state().phase() == SettingsSync.Phase.PROBLEM);
             Fx.waitUntil(
@@ -298,12 +299,6 @@ class SettingsSyncFxTest {
             assertEquals("", f.settings.syncUrl());
         } finally {
             Fx.run(s.sync()::shutdown);
-        }
-    }
-
-    private static void deleteTree(Path root) throws Exception {
-        try (var walk = Files.walk(root)) {
-            for (Path p : walk.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(p);
         }
     }
 }
