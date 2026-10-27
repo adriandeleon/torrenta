@@ -1,13 +1,13 @@
 package com.torrenta.ui;
 
 import java.io.IOException;
+import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
@@ -29,7 +29,8 @@ import org.jspecify.annotations.Nullable;
  * <p>Two destinations, for two situations. A bounded in-memory buffer backs the window, which
  * covers "it is misbehaving right now". A file beside the settings covers "it died", since a
  * crashed process cannot show its own window; it starts afresh each session, so it stays the story of
- * this run rather than growing without limit. The one before is kept beside it ({@value
+ * this run, and one that passes {@link #MAX_FILE_BYTES} starts again with a line saying so, so a
+ * storm of warnings cannot fill the disk. The one before is kept beside it ({@value
  * #PREVIOUS_FILE_NAME}): a crash is reported from the launch after it, and that launch must not erase
  * the log that recorded it. Both go into a problem report (Help → Report a Problem, {@code --report}).
  *
@@ -48,11 +49,23 @@ public final class DebugLog {
     /** The session before this one's file, kept for a problem report. */
     public static final String PREVIOUS_FILE_NAME = "torrenta-session.prev.log";
 
+    /**
+     * The most the file holds before it starts again. A problem report reads the last 200,000
+     * characters, so what a roll drops is nothing a report would have shown.
+     */
+    static final long MAX_FILE_BYTES = 4L << 20;
+
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
 
     private static final Deque<String> ENTRIES = new ArrayDeque<>();
 
     private static @Nullable Path file;
+    /** Open on {@link #file} for the session; each line is one write, so a crash keeps the last. */
+    private static @Nullable OutputStream out;
+    /** Bytes in the file since it was started or last started again. */
+    private static long written;
+
+    private static long maxBytes = MAX_FILE_BYTES;
     private static boolean installed;
 
     private DebugLog() {}
@@ -87,17 +100,40 @@ public final class DebugLog {
      * Also mirror to {@code <configDir>/torrenta-session.log}, started afresh for this run once the last
      * run's is moved aside to {@value #PREVIOUS_FILE_NAME}.
      */
-    public static synchronized void attachFile(Path configDir) {
+    public static void attachFile(Path configDir) {
+        attachFile(configDir, MAX_FILE_BYTES);
+    }
+
+    /** {@link #attachFile(Path)}, starting again past {@code limit} bytes: the test's. */
+    static synchronized void attachFile(Path configDir, long limit) {
+        detachFile();
         try {
             Files.createDirectories(configDir);
-            file = configDir.resolve(FILE_NAME);
-            keepPrevious(file, configDir.resolve(PREVIOUS_FILE_NAME));
-            Files.writeString(file, "", StandardCharsets.UTF_8);
+            Path f = configDir.resolve(FILE_NAME);
+            keepPrevious(f, configDir.resolve(PREVIOUS_FILE_NAME));
+            out = Files.newOutputStream(f); // created, or emptied
+            file = f;
+            written = 0;
+            maxBytes = limit;
             // What was captured before the folder was known (the command line, the toolkit) goes first.
             for (String line : ENTRIES) write(line);
         } catch (IOException e) {
             // A log that cannot be written is not worth failing a launch over.
-            file = null;
+            detachFile();
+        }
+    }
+
+    /** Stops mirroring and closes the file. */
+    static synchronized void detachFile() {
+        OutputStream o = out;
+        out = null;
+        file = null;
+        if (o != null) {
+            try {
+                o.close();
+            } catch (IOException ignored) {
+                // Nothing more is written to it either way.
+            }
         }
     }
 
@@ -130,7 +166,7 @@ public final class DebugLog {
     static synchronized void append(String line) {
         ENTRIES.addLast(line);
         while (ENTRIES.size() > MAX_ENTRIES) ENTRIES.removeFirst();
-        if (file == null) return;
+        if (out == null) return;
         try {
             write(line);
         } catch (IOException ignored) {
@@ -139,12 +175,24 @@ public final class DebugLog {
     }
 
     private static void write(String line) throws IOException {
-        Files.writeString(
-                file,
-                line + System.lineSeparator(),
-                StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.APPEND);
+        OutputStream o = out;
+        Path f = file;
+        if (o == null || f == null) return;
+        byte[] bytes = (line + System.lineSeparator()).getBytes(StandardCharsets.UTF_8);
+        if (written > 0 && written + bytes.length > maxBytes) {
+            // Started again rather than stopped: a report reads the end, and the end is the crash.
+            o.close();
+            o = Files.newOutputStream(f);
+            out = o;
+            byte[] said = (stamp("The log passed " + (maxBytes >> 10)
+                                    + " KiB; this session's earlier lines were dropped.")
+                            + System.lineSeparator())
+                    .getBytes(StandardCharsets.UTF_8);
+            o.write(said);
+            written = said.length;
+        }
+        o.write(bytes); // unbuffered: on disk when this returns
+        written += bytes.length;
     }
 
     /** Everything captured this session, oldest first. */

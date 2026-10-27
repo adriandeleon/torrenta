@@ -1,6 +1,7 @@
 package com.torrenta.rss;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -147,10 +148,20 @@ class RssServiceTest {
         Feed f = Feed.of("https://x/rss", "Mine", 0);
         s.addFeed(f);
         assertEquals("Mine", s.feed(f.id()).name(), "a given name is kept");
+        Path articlesFile =
+                dir.resolve(RssStore.DIR).resolve(RssStore.ARTICLES_DIR).resolve(f.id() + ".json");
+        String written = Files.readString(articlesFile);
+        clocks.now = clocks.now.plusSeconds(60);
         stub.answers.put("https://x/rss", FeedSource.Result.unchanged("\"v1\"", ""));
         s.refresh(f.id());
         assertEquals(1, s.articles(f.id()).size());
         assertEquals("\"v1\"", s.state(f.id()).etag());
+        assertEquals(clocks.now.toEpochMilli(), s.state(f.id()).refreshedEpochMs());
+        assertEquals(written, Files.readString(articlesFile), "a 304 does not write the articles again");
+        assertEquals(
+                clocks.now.toEpochMilli(),
+                service(dir, 30).state(f.id()).refreshedEpochMs(),
+                "but its time is on disk");
 
         stub.failures.put("https://x/rss", "the server answered 404");
         clocks.now = clocks.now.plusSeconds(60);

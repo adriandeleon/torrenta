@@ -41,6 +41,9 @@ public final class SearchService {
     /** How long an answer is reused for the same (provider, query, category). */
     public static final Duration CACHE_LIFETIME = Duration.ofMinutes(5);
 
+    /** The most answers held; past it the oldest goes. */
+    public static final int CACHE_ANSWERS = 200;
+
     /** The clock and the sleep, so the rate limit is tested without waiting. */
     public interface Ticker {
         long nanos();
@@ -76,7 +79,12 @@ public final class SearchService {
     private final Duration minInterval;
     private final Ticker ticker;
     private final Duration lifetime;
-    private final Map<Key, Answer> cache = new ConcurrentHashMap<>();
+    /**
+     * Oldest first, guarded by itself: stale answers are swept on every put and the oldest go past
+     * {@link #CACHE_ANSWERS}, so it holds the last few minutes asked and no more.
+     */
+    private final Map<Key, Answer> cache = new java.util.LinkedHashMap<>();
+
     private final Map<String, Gate> gates = new ConcurrentHashMap<>();
 
     public SearchService() {
@@ -104,11 +112,28 @@ public final class SearchService {
 
     /** The cached answer while it is fresh; a stale one is forgotten on the way. */
     private @Nullable List<SearchResult> cached(Key key) {
-        Answer answer = cache.get(key);
-        if (answer == null) return null;
-        if (fresh(answer.atNanos(), ticker.nanos(), lifetime)) return answer.results();
-        cache.remove(key, answer);
-        return null;
+        synchronized (cache) {
+            Answer answer = cache.get(key);
+            if (answer == null) return null;
+            if (fresh(answer.atNanos(), ticker.nanos(), lifetime)) return answer.results();
+            cache.remove(key);
+            return null;
+        }
+    }
+
+    /** Keeps an answer as the newest, after forgetting the stale ones and, past the cap, the oldest. */
+    private void remember(Key key, List<SearchResult> results) {
+        long now = ticker.nanos();
+        synchronized (cache) {
+            cache.values().removeIf(a -> !fresh(a.atNanos(), now, lifetime));
+            cache.remove(key);
+            cache.put(key, new Answer(results, now));
+            var oldest = cache.keySet().iterator();
+            while (cache.size() > CACHE_ANSWERS) {
+                oldest.next();
+                oldest.remove();
+            }
+        }
     }
 
     /**
@@ -188,7 +213,7 @@ public final class SearchService {
                     SearchProvider provider = Objects.requireNonNull(pending.remove(future), "a future of ours");
                     try {
                         List<SearchResult> results = future.get();
-                        cache.put(new Key(provider.name(), lower, cat), new Answer(results, ticker.nanos()));
+                        remember(new Key(provider.name(), lower, cat), results);
                         answers.add(results);
                         progress.answered(provider.name(), results);
                     } catch (CancellationException e) {
@@ -248,11 +273,15 @@ public final class SearchService {
 
     /** Forgets every cached answer, so the next search asks again. */
     public void clearCache() {
-        cache.clear();
+        synchronized (cache) {
+            cache.clear();
+        }
     }
 
     /** How many (provider, query, category) answers are held. */
     public int cachedAnswers() {
-        return cache.size();
+        synchronized (cache) {
+            return cache.size();
+        }
     }
 }

@@ -179,8 +179,8 @@ public final class Session {
      * so a torrent's graph is not empty the first time it is followed. Gone with the torrent.
      */
     private final ConcurrentMap<String, SpeedHistory> recent = new ConcurrentHashMap<>();
-    /** The rates of every torrent that has been followed ({@link #follow}), by id; gone with the torrent. */
-    private final ConcurrentMap<String, SpeedHistory> followed = new ConcurrentHashMap<>();
+    /** The full rates of the torrents followed last ({@link #follow}), by id; gone with the torrent. */
+    private final FollowedHistories followed = new FollowedHistories();
     /** Inputs that arrived with no engine up, for {@link #inputs} once one is. */
     private final List<String> queuedInputs = new java.util.ArrayList<>();
     /** What an input is given to: the owner's, a dialog or an add without one. */
@@ -421,18 +421,20 @@ public final class Session {
             return t;
         });
         poller = p;
-        p.scheduleAtFixedRate(this::poll, 0, POLL_MS, TimeUnit.MILLISECONDS);
-        p.scheduleAtFixedRate(this::refreshLimits, 0, 60, TimeUnit.SECONDS);
+        // A delay after each run, not a rate: a poll that overran must not be followed by the ones it
+        // missed back to back, each flooding the FX thread with a snapshot. The same for the rest.
+        p.scheduleWithFixedDelay(this::poll, 0, POLL_MS, TimeUnit.MILLISECONDS);
+        p.scheduleWithFixedDelay(this::refreshLimits, 0, 60, TimeUnit.SECONDS);
         // Updatable torrents: a look for newer versions when due (the lookups block, so not on the
         // poll thread), and the old versions let go of once the new ones are complete.
-        p.scheduleAtFixedRate(
+        p.scheduleWithFixedDelay(
                 () -> Thread.ofVirtual().name("follow").start(this::lookForVersions),
                 FOLLOW_FIRST_MINUTES,
                 FOLLOW_TICK_MINUTES,
                 TimeUnit.MINUTES);
-        p.scheduleAtFixedRate(this::letGoOfOldVersions, 30, 30, TimeUnit.SECONDS);
+        p.scheduleWithFixedDelay(this::letGoOfOldVersions, 30, 30, TimeUnit.SECONDS);
         // What this machine publishes, put back in the DHT when it is no longer found there.
-        p.scheduleAtFixedRate(
+        p.scheduleWithFixedDelay(
                 () -> Thread.ofVirtual().name("republish").start(this::republish),
                 REPUBLISH_FIRST_MINUTES,
                 REPUBLISH_MINUTES,
@@ -465,12 +467,12 @@ public final class Session {
         }
     }
 
-    /** Runs {@code task} on the poll thread every {@code period}, never overlapping a poll; false once stopped. */
+    /** Runs {@code task} on the poll thread, {@code period} after each run, never overlapping a poll; false once stopped. */
     public boolean schedule(Runnable task, long initialDelay, long period, TimeUnit unit) {
         ScheduledExecutorService p = poller;
         if (p == null) return false;
         try {
-            p.scheduleAtFixedRate(task, initialDelay, period, unit);
+            p.scheduleWithFixedDelay(task, initialDelay, period, unit);
             return true;
         } catch (RejectedExecutionException e) {
             return false;
@@ -630,9 +632,9 @@ public final class Session {
     }
 
     /**
-     * Poll thread. One snapshot, the share limits applied to it, then every listener. A task of a
-     * {@code scheduleAtFixedRate} that throws is never run again, so nothing may escape: a failing
-     * listener is logged and the next one, and the next poll, still run.
+     * Poll thread. One snapshot, the share limits applied to it, then every listener. A periodic task
+     * that throws is never run again, so nothing may escape: a failing listener is logged and the
+     * next one, and the next poll, still run.
      */
     private void poll() {
         Engine e = engine;
@@ -1182,11 +1184,10 @@ public final class Session {
             present.add(t.id());
             recent.computeIfAbsent(t.id(), k -> SpeedHistory.recent())
                     .add(nowSeconds, t.downloadRate(), t.uploadRate());
-            SpeedHistory h = followed.get(t.id());
-            if (h != null) h.add(nowSeconds, t.downloadRate(), t.uploadRate());
+            followed.add(t.id(), nowSeconds, t.downloadRate(), t.uploadRate());
         }
         recent.keySet().retainAll(present);
-        followed.keySet().retainAll(present);
+        followed.retainAll(present);
     }
 
     /** The session's rates over time. */
@@ -1196,16 +1197,17 @@ public final class Session {
 
     /**
      * Any thread. A torrent's full history from now, started from the short one every torrent
-     * keeps, so its graph has the last two minutes at once. Kept until the torrent goes.
+     * keeps, so its graph has the last two minutes at once. Kept while it is among the {@link
+     * FollowedHistories#KEPT} followed last, and the torrent is there.
      */
     public void follow(String id) {
-        followed.computeIfAbsent(id, k -> {
-            SpeedHistory r = recent.get(k);
+        followed.follow(id, () -> {
+            SpeedHistory r = recent.get(id);
             return r == null ? new SpeedHistory() : r.widened();
         });
     }
 
-    /** A followed torrent's history; null for one never followed, or gone. */
+    /** A followed torrent's history; null for one never followed, followed too long ago, or gone. */
     public @Nullable SpeedHistory followed(String id) {
         return followed.get(id);
     }
