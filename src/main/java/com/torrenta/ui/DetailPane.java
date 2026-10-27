@@ -89,6 +89,11 @@ final class DetailPane extends VBox {
     private final Tab filesTab;
     private final Tab peersTab;
     private final Tab trackersTab;
+    /** Every tab, in {@link #TABS}' order, shown or not: Simple mode takes some out of the strip. */
+    private final List<Tab> allTabs;
+    /** Simple mode: only {@link SimpleMode#DETAIL_TABS} in the strip. */
+    private boolean simple;
+
     private final Label filesCount = new Label();
     private final Label peersCount = new Label();
     private final Label trackersCount = new Label();
@@ -238,15 +243,15 @@ final class DetailPane extends VBox {
         filesTab = tab(tr("detail.tab.files"), Icons.files(), filesCount, buildFiles());
         peersTab = tab(tr("detail.tab.peers"), Icons.peers(), peersCount, buildPeers());
         trackersTab = tab(tr("detail.tab.trackers"), Icons.broadcast(), trackersCount, buildTrackers());
-        tabs.getTabs()
-                .addAll(
-                        tab(tr("detail.tab.overview"), Icons.info(), null, buildOverview()),
-                        filesTab,
-                        peersTab,
-                        trackersTab,
-                        tab(tr("detail.tab.log"), Icons.history(), null, buildLog()),
-                        tab(tr("detail.tab.speed"), Icons.gauge(), null, speed));
-        tabs.getSelectionModel().selectedIndexProperty().addListener(o -> {
+        allTabs = List.of(
+                tab(tr("detail.tab.overview"), Icons.info(), null, buildOverview()),
+                filesTab,
+                peersTab,
+                trackersTab,
+                tab(tr("detail.tab.log"), Icons.history(), null, buildLog()),
+                tab(tr("detail.tab.speed"), Icons.gauge(), null, speed));
+        tabs.getTabs().addAll(allTabs);
+        tabs.getSelectionModel().selectedItemProperty().addListener(o -> {
             if (!steering) wantedTab = activeTab();
             if (speedShowing()) speed.show(speedHistory, speedNow);
         });
@@ -421,7 +426,8 @@ final class DetailPane extends VBox {
 
     /** The active tab's name, one of {@link #TABS}; remembered by the window. */
     String activeTab() {
-        return TABS.get(tabs.getSelectionModel().getSelectedIndex());
+        int i = allTabs.indexOf(tabs.getSelectionModel().getSelectedItem());
+        return i < 0 ? "overview" : TABS.get(i);
     }
 
     /** The tab to remember: the person's choice, not the Overview a link download stood in with. */
@@ -441,7 +447,38 @@ final class DetailPane extends VBox {
     void selectTab(String name) {
         String n = "general".equals(name) || "pieces".equals(name) ? "overview" : name;
         int i = TABS.indexOf(n);
-        if (i >= 0) tabs.getSelectionModel().select(i);
+        if (i >= 0 && tabs.getTabs().contains(allTabs.get(i)))
+            tabs.getSelectionModel().select(allTabs.get(i));
+    }
+
+    /**
+     * Simple mode: the Overview and Files alone in the strip, or every tab. The tab the person
+     * chose is kept and comes back with the mode's end; meanwhile the Overview stands in for it.
+     */
+    void setSimple(boolean on) {
+        if (on == simple) return;
+        simple = on;
+        List<String> shown = SimpleMode.detailTabs(TABS, on);
+        steering = true;
+        try {
+            tabs.getTabs()
+                    .setAll(allTabs.stream()
+                            .filter(t -> shown.contains(TABS.get(allTabs.indexOf(t))))
+                            .toList());
+            selectTab(shownTab(tabFor(wantedTab, false)));
+        } finally {
+            steering = false;
+        }
+    }
+
+    /** {@code wanted}, or the Overview while Simple mode has that tab out of the strip. */
+    private String shownTab(String wanted) {
+        return SimpleMode.detailTabs(TABS, simple).contains(wanted) ? wanted : "overview";
+    }
+
+    /** The tabs in the strip, for the capture hook. */
+    List<String> shownTabs() {
+        return tabs.getTabs().stream().map(t -> TABS.get(allTabs.indexOf(t))).toList();
     }
 
     /** What the capture hook prints. */
@@ -517,7 +554,7 @@ final class DetailPane extends VBox {
         boolean direct = com.torrenta.engine.direct.DirectDownload.isId(g.id());
         peersTab.setDisable(direct);
         trackersTab.setDisable(direct);
-        String tab = tabFor(wantedTab, direct);
+        String tab = shownTab(tabFor(wantedTab, direct));
         if (!tab.equals(activeTab())) {
             steering = true;
             selectTab(tab);

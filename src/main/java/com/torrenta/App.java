@@ -134,6 +134,7 @@ public final class App extends Application {
         MainWindow window = new MainWindow(
                 stage, settings, configDir, uri -> getHostServices().showDocument(uri));
         this.window = window;
+        if (cli.simple()) window.useSimpleForSession();
         window.show();
         cli.inputs().forEach(window::addInput);
         // What a second instance sends from here on, and what arrived while the window was being

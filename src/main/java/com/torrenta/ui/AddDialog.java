@@ -169,6 +169,9 @@ final class AddDialog {
     private final ChoiceBox<String> category = new ChoiceBox<>();
     private final TextField tags = new TextField();
     private final CheckBox withoutAsking = new CheckBox(tr("dialog.add.withoutAsking"));
+    /** Category, stop condition, layout, tags and the options: what Simple mode leaves to Settings. */
+    private List<javafx.scene.Node> beyondSimple = List.of();
+
     private final List<Category> categories;
     private final AddDefaults defaults;
     /** Enter adds paused and Shift+Enter starts, rather than the other way round. */
@@ -368,6 +371,10 @@ final class AddDialog {
         dedupBox.setPadding(new Insets(12, 0, 0, 0));
         shown(dedupBox, false);
 
+        javafx.scene.Node filingBox = spaced(filing, 12);
+        javafx.scene.Node tagsHeading = spaced(muted(tr("dialog.common.tags")), 12);
+        javafx.scene.Node optionsHeading = spaced(muted(tr("dialog.add.options")), 12);
+        beyondSimple = List.of(filingBox, tagsHeading, tags, optionsHeading, options);
         VBox right = new VBox(
                 4,
                 muted(tr("dialog.common.saveTo")),
@@ -376,10 +383,10 @@ final class AddDialog {
                 diskText,
                 dedupBox,
                 swarmBox,
-                spaced(filing, 12),
-                spaced(muted(tr("dialog.common.tags")), 12),
+                filingBox,
+                tagsHeading,
                 tags,
-                spaced(muted(tr("dialog.add.options")), 12),
+                optionsHeading,
                 options);
         right.setPrefWidth(300);
         right.setMinWidth(300);
@@ -593,6 +600,15 @@ final class AddDialog {
         shown(browse, local);
         shown(diskBar, local);
         shown(diskText, local);
+    }
+
+    /**
+     * Simple mode: the files, the folder and the buttons. What it hides keeps the defaults from
+     * Settings, as an add without asking has them. After {@link #applyCapabilities}, which shows
+     * a choice inside the boxes this hides.
+     */
+    void applySimple(boolean on) {
+        for (javafx.scene.Node n : beyondSimple) shown(n, !on);
     }
 
     private static void shown(javafx.scene.Node node, boolean on) {
