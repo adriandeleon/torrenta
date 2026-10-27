@@ -69,8 +69,9 @@ class ReportCommandTest {
         assertEquals(List.of("open", url), ReportCommand.openUrlArgv("Mac OS X", url));
         assertEquals(
                 List.of("rundll32", "url.dll,FileProtocolHandler", url), ReportCommand.openUrlArgv("Windows 11", url));
-        Path file = Path.of("/tmp/r/report.txt");
-        assertEquals(List.of("xdg-open", "/tmp/r"), ReportCommand.revealArgv("Linux", file));
+        // Absolute the platform's way: /tmp/r on Linux would be D:\tmp\r on Windows.
+        Path file = dir.resolve("r").resolve("report.txt");
+        assertEquals(List.of("xdg-open", dir.resolve("r").toString()), ReportCommand.revealArgv("Linux", file));
         assertEquals(List.of("open", "-R", file.toString()), ReportCommand.revealArgv("Mac OS X", file));
         assertEquals(List.of("explorer", "/select," + file), ReportCommand.revealArgv("Windows 11", file));
     }

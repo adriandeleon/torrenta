@@ -46,6 +46,8 @@ class ProblemReportTest {
                         "--- torrenta-session.prev.log (the session before it) ---\n11:00  UNCAUGHT on poll: boom in <torrent 1>\n"),
                 text);
         assertEquals(2, report.redacted());
+        // The JVM's own properties, as they are: a four-part Java version is not an address.
+        assertEquals(ProblemReport.systemDetails("libtorrent (local)"), report.systemDetails());
         assertTrue(report.systemDetails().startsWith("Torrenta "), report.systemDetails());
     }
 

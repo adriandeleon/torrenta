@@ -79,7 +79,8 @@ public final class ProblemReport {
     /**
      * The report over two session logs — {@code latestLog} ({@code fallbackLog}, the in-memory
      * capture, when that file cannot be read) and {@code previousLog}, the session before it —
-     * redacted by {@code redactor}.
+     * redacted by {@code redactor}. The system block is not: it is the JVM's own properties, none of
+     * them private, and a rule would only damage it (a Java of 25.0.4.1 read as an address).
      */
     public static Assembled assemble(
             Path latestLog, Path previousLog, String engine, @Nullable String fallbackLog, Redactor redactor) {
@@ -87,10 +88,9 @@ public final class ProblemReport {
         List<Log> logs = List.of(
                 new Log(latestLog.getFileName() + " (the latest session)", latest != null ? latest : fallbackLog),
                 new Log(previousLog.getFileName() + " (the session before it)", readLog(previousLog)));
-        Redactor.Result details = redactor.redact(systemDetails(engine));
+        String details = systemDetails(engine);
         Redactor.Result body = redactor.redact(logSections(logs));
-        return new Assembled(
-                details.text(), header(details.text()) + body.text(), details.replaced() + body.replaced());
+        return new Assembled(details, header(details) + body.text(), body.replaced());
     }
 
     /** The whole report: a title, the system block, then each log under its heading. */

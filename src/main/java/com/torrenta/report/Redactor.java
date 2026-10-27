@@ -86,9 +86,12 @@ public final class Redactor {
                             "(?<![A-Za-z0-9._%+-])(?!git@)[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}"),
                     "<email>"));
 
-    /** Four dotted numbers that are not part of a longer dotted run (a version such as 1.2.3.4.5). */
+    /**
+     * Four dotted numbers that are not part of a longer dotted run (1.2.3.4.5) nor glued to a word
+     * ({@code v1.2.3.4}, {@code java.base@25.0.4.1}): those are versions.
+     */
     private static final Pattern IPV4 =
-            Pattern.compile("(?<![0-9.])(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})(?![0-9]|\\.[0-9])");
+            Pattern.compile("(?<![0-9.A-Za-z@_-])(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})(?![0-9]|\\.[0-9])");
 
     /** The redacted text and how many values were replaced. */
     public record Result(String text, int replaced) {}

@@ -112,6 +112,8 @@ class RedactorTest {
         assertEquals("on <ip>", redact("on 172.32.0.1"));
         // A version with more parts is not an address.
         assertEquals("libtorrent 2.1.0.39.1", redact("libtorrent 2.1.0.39.1"));
+        // Nor is one written against a name: CI's Java was 25.0.4.1.
+        assertEquals("at java.base@25.0.4.1/x and v1.2.3.4", redact("at java.base@25.0.4.1/x and v1.2.3.4"));
     }
 
     @Test
