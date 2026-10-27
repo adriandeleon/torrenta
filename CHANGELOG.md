@@ -17,6 +17,14 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   start: it writes the report to the current folder and opens the issue. Torrenta sends nothing
   itself.
 
+### Changed
+
+- **The Sync page waits for its switch.** Until "Keep settings in sync" is ticked, the URL,
+  branch, interval and buttons are disabled; ticking it with no URL puts the cursor in the URL
+  field. Enter (or leaving the field) connects. Create on GitHub is offered only while no
+  repository is named, and the one it makes is filled in and connected at once. A failed
+  connect leaves the box ticked and says why.
+
 ### Fixed
 
 - **The log of a session that crashed survives the next launch.** Each launch emptied

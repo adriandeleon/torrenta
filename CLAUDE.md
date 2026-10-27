@@ -67,7 +67,9 @@ selected torrent, `select-first`, `message-log` / `message-log:<query>` (the sta
   visible rows and a `settings-search=` line (query, page), `settings-key:<KeyCode>` for a key in it,
   `import-from:<folder>` (the Import dialog on that folder, `~` for a space; `import=` and
   `import-note=` lines) and `import-confirm` (Import, once the rows are in),
-  `settings-close`, `settings-layout:<left|right|hidden>/<bottom|right|hidden>` to choose the sidebar's
+  `settings-close`, `settings-sync-switch:<on|off>`, `settings-sync-url:<url>` (typed, then Enter) and
+  `settings-sync-create:<name>` (Create on GitHub, OK pressed) for the Sync page (a `sync=` line: switch,
+  connected, what is enabled, URL, status), `settings-layout:<left|right|hidden>/<bottom|right|hidden>` to choose the sidebar's
   and the detail pane's places on the General page (a `layout=` line after every action); the palette's ranking, the
   open dialog's title and the log window's state are printed, and when a dialog is open the PNG is
   of the dialog.
@@ -449,6 +451,10 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   proxy password). Automatic rounds run git with no prompt of any kind (`QuietGit`); a `gh` account
   that can read an https repository is pinned in the clone's config (`SyncAccount`, adl has two).
   `Settings.setOnSaved` is how a change reaches the service; its own saves set `applying` first.
+  The Sync page waits on its switch (`ui.SyncPage`): ticking it unlocks the page, and connecting is
+  Enter in the URL field, leaving it, or a successful Create on GitHub (offered only while the URL
+  is empty); `sync.enabled` is set only once a connect worked, so the box can be ticked and not
+  connected.
   Category names and tags travel too, in `labels.properties` beside the settings (`SyncLabels`:
   `category.<lower case>=<name>`, so two spellings are one key, never two deletions), merged the same
   way against a base of their own, `refs/torrenta/labels-base`: a machine whose last sync was by a
