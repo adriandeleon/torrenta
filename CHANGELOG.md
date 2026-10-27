@@ -32,6 +32,13 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Changed
 
+- **A Transmission daemon with thousands of torrents is polled lightly.** Most seconds the list
+  asks only for the torrents the daemon counts as recently active, without their tracker lists,
+  in the daemon's table format, and keeps the rest as they were; the whole list is read every
+  half minute and after anything Torrenta does. The detail pane reads a torrent's file names once
+  and only their progress after that. Adds and removes from another client still show within a
+  second.
+
 - **The detail pane keeps up with a torrent of 50,000 files.** Each tick reads only what the
   showing tab needs (the Files tab no longer pays for peers and pieces, the Peers tab for the
   file list), the file list's fixed half is read once, the files and folders that did not change
