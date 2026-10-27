@@ -339,7 +339,13 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   in the compiler plugin's test execution. At run time the tests are on the classpath.
 - **The detail pane is polled only for the one selected torrent**, on the poll thread, with the
   pieces bitfield (`QUERY_PIECES`): a status copy per piece, which is why it is not fetched for
-  every row. `detailId` and `detailWanted` are volatile hand-offs from the FX thread.
+  every row. `detailId`, `detailWanted` and `detailParts` are volatile hand-offs from the FX
+  thread. Only the showing tab's parts are read (`TorrentDetail.Part`, `ui.DetailParts`: the
+  Overview needs files, peers and trackers too, for `Diagnosis` and the map's skipped pieces); a
+  list of a part not read is empty and the pane keeps what it showed (`TorrentDetail.has`). A tab
+  switch refreshes at once. `LibtorrentEngine` keeps the shown torrent's file layout (paths,
+  sizes, piece ranges) and reads only progress and priorities per tick; `PeerRows` and `FileRows`
+  update in place, touching only what changed.
 - **libtorrent 2.1 keeps trackers, comment, creator and web seeds outside `torrent_info`.** A
   `.torrent` is read with `load_torrent_parsed` (via `BDecodeNode.bdecode`), which fills them into
   the add parameters; `new TorrentInfo(bytes)` reads the info dictionary alone and the torrent is

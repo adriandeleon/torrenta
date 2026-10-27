@@ -6,6 +6,7 @@ import java.lang.ref.Reference;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
@@ -1710,6 +1711,8 @@ public final class LibtorrentEngine implements Engine {
         known.remove(id);
         emit(EngineEvent.info(
                 id, name, deleteFiles ? tr("engine.event.removedWithFiles", name) : tr("engine.event.removed", name)));
+        FileLayout kept = fileLayout;
+        if (kept != null && kept.id().equals(id)) fileLayout = null;
         // Forgotten before libtorrent confirms: a crash in between loses nothing worse than a
         // torrent that comes back once, which beats one that cannot be removed. Marked and deleted
         // under the store's lock, the same lock the alert thread's write takes around its check,
@@ -2139,62 +2142,75 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public synchronized TorrentDetail detail(String id) throws EngineException {
+    public synchronized TorrentDetail detail(String id, Set<TorrentDetail.Part> parts) throws EngineException {
         TorrentHandle h = handle(id);
-        TorrentStatus status = h.status(StatusQuery.ALL);
+        boolean withPieces = parts.contains(TorrentDetail.Part.PIECES);
+        TorrentStatus status = h.status(withPieces ? StatusQuery.ALL : StatusQuery.FLAGS);
 
-        // Files: progress and priority by index; padding files hidden, indices kept.
+        // Files: progress and priority by index; padding files hidden, indices kept. The layout
+        // (paths, sizes, piece ranges) is the torrent's own and never changes, so it is read once
+        // per torrent shown; each poll asks only for the two arrays that move.
         List<TorrentDetail.FileStatus> files = new ArrayList<>();
         TorrentInfo info = status.hasMetadata() ? h.torrentFile() : null;
+        int fileCount = -1;
         if (info != null && info.isValid()) {
-            FileStorage storage = info.files();
-            // The names a person or the layout gave: torrent_file() shows the torrent's own.
-            TorrentStorage owed = this.storage.getOrDefault(id, TorrentStorage.NONE);
-            long[] progress = h.fileProgress();
-            org.libtorrent4j.Priority[] priorities = h.filePriorities();
-            for (int i = 0; i < storage.numFiles(); i++) {
-                if (storage.padFileAt(i)) continue;
-                long done = i < progress.length ? progress[i] : 0;
-                Priority priority = i < priorities.length ? fromLibtorrent(priorities[i]) : Priority.NORMAL;
-                long size = storage.fileSize(i);
-                // An empty file touches no piece; asking libtorrent for its range answers with a neighbour's.
-                int first = size == 0 ? -1 : storage.pieceIndexAtFile(i);
-                int last = size == 0 ? -1 : storage.lastPieceIndexAtFile(i);
-                files.add(new TorrentDetail.FileStatus(
-                        i,
-                        owed.name(i, slashes(storage.filePath(i))),
-                        size,
-                        done,
-                        priority,
-                        first,
-                        last,
-                        owed.found().get(i)));
+            FileLayout layout = layout(id, info);
+            fileCount = layout.index().length;
+            if (parts.contains(TorrentDetail.Part.FILES)) {
+                // The names a person or the layout gave: torrent_file() shows the torrent's own.
+                TorrentStorage owed = this.storage.getOrDefault(id, TorrentStorage.NONE);
+                long[] progress = h.fileProgress();
+                org.libtorrent4j.Priority[] priorities = h.filePriorities();
+                files = new ArrayList<>(fileCount);
+                for (int n = 0; n < fileCount; n++) {
+                    int i = layout.index()[n];
+                    long done = i < progress.length ? progress[i] : 0;
+                    Priority priority = i < priorities.length ? fromLibtorrent(priorities[i]) : Priority.NORMAL;
+                    files.add(new TorrentDetail.FileStatus(
+                            i,
+                            owed.name(i, layout.path()[n]),
+                            layout.size()[n],
+                            done,
+                            priority,
+                            layout.first()[n],
+                            layout.last()[n],
+                            owed.found().get(i)));
+                }
             }
         }
 
         List<TorrentDetail.Peer> peers = new ArrayList<>();
-        for (PeerInfo p : peers(h)) {
-            peers.add(new TorrentDetail.Peer(
-                    p.ip(),
-                    p.client() == null ? "" : p.client(),
-                    PeerFlags.text(p.flags(), p.source(), p.connectionType()),
-                    p.progress(),
-                    p.downSpeed(),
-                    p.upSpeed(),
-                    p.totalDownload(),
-                    p.totalUpload()));
+        if (parts.contains(TorrentDetail.Part.PEERS)) {
+            for (PeerInfo p : peers(h)) {
+                peers.add(new TorrentDetail.Peer(
+                        p.ip(),
+                        p.client() == null ? "" : p.client(),
+                        PeerFlags.text(p.flags(), p.source(), p.connectionType()),
+                        p.progress(),
+                        p.downSpeed(),
+                        p.upSpeed(),
+                        p.totalDownload(),
+                        p.totalUpload()));
+            }
         }
 
         List<TorrentDetail.Tracker> trackers = new ArrayList<>();
-        for (AnnounceEntry entry : trackers(h)) trackers.add(tracker(entry));
+        if (parts.contains(TorrentDetail.Part.TRACKERS))
+            for (AnnounceEntry entry : trackers(h)) trackers.add(tracker(entry));
 
         // Counted only while downloading: a seed has no use for it, and libtorrent answers a paused
         // torrent with an empty vector anyway.
-        int[] availability = status.isSeeding() || !status.hasMetadata() ? new int[0] : h.pieceAvailability();
+        int[] availability =
+                !withPieces || status.isSeeding() || !status.hasMetadata() ? new int[0] : h.pieceAvailability();
 
-        PieceIndexBitfield bits = status.pieces();
-        boolean[] pieces = new boolean[Math.max(0, bits.size())];
-        for (int i = 0; i < pieces.length; i++) pieces[i] = bits.getBit(i);
+        boolean[] pieces = new boolean[0];
+        int piecesHave = status.numPieces();
+        if (withPieces) {
+            PieceIndexBitfield bits = status.pieces();
+            pieces = new boolean[Math.max(0, bits.size())];
+            for (int i = 0; i < pieces.length; i++) pieces[i] = bits.getBit(i);
+            piecesHave = bits.count();
+        }
 
         TorrentDetail.General general = new TorrentDetail.General(
                 id,
@@ -2203,8 +2219,9 @@ public final class LibtorrentEngine implements Engine {
                 // status.numPieces() is how many it has, not how many there are.
                 info != null ? info.numPieces() : pieces.length,
                 info == null ? 0 : info.pieceLength(),
-                bits.count(),
-                status.distributedCopies(),
+                piecesHave,
+                // Distributed copies are counted only with the pieces (StatusQuery.ALL).
+                withPieces ? status.distributedCopies() : -1,
                 status.allTimeDownload(),
                 status.allTimeUpload(),
                 status.totalFailedBytes() + status.totalRedundantBytes(),
@@ -2230,8 +2247,58 @@ public final class LibtorrentEngine implements Engine {
                 trackers,
                 pieces,
                 availability,
-                h.urlSeeds(),
-                encryptedArchives.getOrDefault(id, Set.of()));
+                parts.contains(TorrentDetail.Part.WEB_SEEDS) ? h.urlSeeds() : List.of(),
+                parts.contains(TorrentDetail.Part.FILES) ? encryptedArchives.getOrDefault(id, Set.of()) : Set.of(),
+                "",
+                parts,
+                fileCount);
+    }
+
+    /**
+     * The real files of one torrent as {@code torrent_info} lays them out, padding left out, in
+     * index order: paths with forward slashes, sizes, and the pieces each touches ({@code -1} for
+     * an empty file). Fixed for an info-hash: renames are {@link TorrentStorage}'s, applied over it.
+     */
+    private record FileLayout(String id, int[] index, String[] path, long[] size, int[] first, int[] last) {}
+
+    /**
+     * The layout of the last torrent {@link #detail} read files for: the pane shows one at a time.
+     * Volatile because the alert thread drops it (a rename, a removal) without the lock.
+     */
+    private volatile @Nullable FileLayout fileLayout;
+
+    /** The torrent's {@link FileLayout}, read from {@code info} unless it is the one kept. Under the lock. */
+    private FileLayout layout(String id, TorrentInfo info) {
+        FileLayout kept = fileLayout;
+        if (kept != null && kept.id().equals(id)) return kept;
+        FileStorage storage = info.files();
+        int total = storage.numFiles();
+        int[] index = new int[total];
+        String[] path = new String[total];
+        long[] size = new long[total];
+        int[] first = new int[total];
+        int[] last = new int[total];
+        int n = 0;
+        for (int i = 0; i < total; i++) {
+            if (storage.padFileAt(i)) continue;
+            index[n] = i;
+            path[n] = slashes(storage.filePath(i));
+            size[n] = storage.fileSize(i);
+            // An empty file touches no piece; asking libtorrent for its range answers with a neighbour's.
+            first[n] = size[n] == 0 ? -1 : storage.pieceIndexAtFile(i);
+            last[n] = size[n] == 0 ? -1 : storage.lastPieceIndexAtFile(i);
+            n++;
+        }
+        Reference.reachabilityFence(info); // the storage points into it
+        FileLayout read = new FileLayout(
+                id,
+                Arrays.copyOf(index, n),
+                Arrays.copyOf(path, n),
+                Arrays.copyOf(size, n),
+                Arrays.copyOf(first, n),
+                Arrays.copyOf(last, n));
+        fileLayout = read;
+        return read;
     }
 
     /**
@@ -3560,6 +3627,7 @@ public final class LibtorrentEngine implements Engine {
                         // No line per file: the suffix going on and off is the engine's own doing,
                         // and a person's rename says itself once, from renamePath. A folder that
                         // the rename emptied goes, as it would in a file manager.
+                        fileLayout = null; // read again, under whatever name libtorrent has now
                         if (t.handle().isValid()) {
                             removeEmptyFolders(
                                     t.handle().status(StatusQuery.FLAGS).swig().getSave_path(),

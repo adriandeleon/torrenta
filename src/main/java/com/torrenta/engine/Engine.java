@@ -279,8 +279,18 @@ public interface Engine extends AutoCloseable {
     /** A magnet link for the torrent, with its trackers, as the engine would build it. */
     String magnetLink(String id) throws EngineException;
 
-    /** Everything the detail pane shows; a few milliseconds, so once a second at most. */
-    TorrentDetail detail(String id) throws EngineException;
+    /** Everything the detail pane shows, every part; see {@link #detail(String, Set)}. */
+    default TorrentDetail detail(String id) throws EngineException {
+        return detail(id, TorrentDetail.Part.ALL);
+    }
+
+    /**
+     * The general facts and the parts asked for; the lists of the others are empty and the
+     * record's {@link TorrentDetail#parts} says which were read. A torrent of 50,000 files costs a
+     * call per file for its list, so the pane asks only for what its tab shows. Once a second at
+     * most.
+     */
+    TorrentDetail detail(String id, Set<TorrentDetail.Part> parts) throws EngineException;
 
     void setFilePriority(String id, int fileIndex, Priority priority) throws EngineException;
 
