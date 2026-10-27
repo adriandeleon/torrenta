@@ -273,6 +273,61 @@ class MessagesTest {
     }
 
     @Test
+    void theCachedFormatWritesWhatAFreshlyParsedOneWrites() {
+        String[] patterns = {
+            "{0,choice,0#no peers|1#one peer|1<{0,number,integer} peers}",
+            "{0,choice,0#nothing|1<''{0}'' items}",
+            "It''s {0} of {1}",
+            "'{0}' stays literal, {0} does not",
+            "{0,number,#,##0.0} MiB at {1,number,percent}",
+        };
+        Object[][] argSets = {{0, 1}, {1, 2}, {1234567, 0.25}, {2.5, 1}};
+        for (Locale locale : List.of(Locale.ENGLISH, Locale.GERMAN, Locale.forLanguageTag("fr"))) {
+            for (String pattern : patterns) {
+                for (Object[] args : argSets) {
+                    String fresh = new MessageFormat(pattern, locale).format(args);
+                    assertEquals(fresh, Messages.format(pattern, locale, args), pattern + " in " + locale);
+                    assertEquals(fresh, Messages.format(pattern, locale, args), "the second call, from the cache");
+                }
+            }
+        }
+    }
+
+    @Test
+    void theCacheFollowsTheCatalogueAndTheLocale() {
+        Messages.setForTest("test.count", "{0} items");
+        assertEquals("1,234 items", Messages.tr("test.count", 1234));
+        Messages.setForTest("test.count", "{0} things");
+        assertEquals("1,234 things", Messages.tr("test.count", 1234), "a changed pattern is parsed afresh");
+        Messages.init("de");
+        Messages.setForTest("test.count", "{0} Dinge");
+        assertEquals("1.234 Dinge", Messages.tr("test.count", 1234), "the locale is part of the key");
+    }
+
+    @Test
+    void theCachedFormatIsSafeAcrossThreads() throws Exception {
+        String pattern = "{0,choice,0#none|1#one|1<{0,number,integer} of {1}}";
+        List<Thread> threads = new ArrayList<>();
+        List<Throwable> failures = java.util.Collections.synchronizedList(new ArrayList<>());
+        for (int t = 0; t < 8; t++) {
+            int seed = t;
+            threads.add(Thread.ofPlatform().start(() -> {
+                try {
+                    for (int i = 0; i < 2_000; i++) {
+                        int n = seed * 10_000 + i;
+                        String expected = new MessageFormat(pattern, Locale.ENGLISH).format(new Object[] {n, "x" + n});
+                        assertEquals(expected, Messages.format(pattern, Locale.ENGLISH, new Object[] {n, "x" + n}));
+                    }
+                } catch (Throwable e) {
+                    failures.add(e);
+                }
+            }));
+        }
+        for (Thread t : threads) t.join();
+        assertTrue(failures.isEmpty(), () -> String.valueOf(failures));
+    }
+
+    @Test
     void theLanguageIsResolvedFromThePreferenceThenTheSystem() {
         Set<String> available = Messages.available().keySet();
         assertEquals("en", Messages.resolve("kl", available, "kl"));

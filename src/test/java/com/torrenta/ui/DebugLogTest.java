@@ -78,4 +78,61 @@ class DebugLogTest {
         assertEquals("the crash\n", Files.readString(previous));
         assertEquals("torrenta-session.prev.log", previous.getFileName().toString());
     }
+
+    @Test
+    void theFileHasEachLineAsItIsAppendedAndKeepsTheEarlierOnesFirst(@TempDir Path dir) throws IOException {
+        DebugLog.clear();
+        DebugLog.append("before the folder was known");
+        try {
+            DebugLog.attachFile(dir);
+            DebugLog.append("one");
+            DebugLog.append("two");
+            // Read while it is still open: a crash right now must find these on disk.
+            assertEquals(
+                    java.util.List.of("before the folder was known", "one", "two"),
+                    Files.readAllLines(DebugLog.fileIn(dir)));
+        } finally {
+            DebugLog.detachFile();
+            DebugLog.clear();
+        }
+        DebugLog.append("after");
+        assertEquals(3, Files.readAllLines(DebugLog.fileIn(dir)).size(), "detached, nothing more is written");
+    }
+
+    @Test
+    void aFilePastItsLimitStartsAgainSayingSo(@TempDir Path dir) throws IOException {
+        DebugLog.clear();
+        try {
+            DebugLog.attachFile(dir, 2048);
+            for (int i = 0; i < 1000; i++) DebugLog.append("line " + i + " of a storm of warnings");
+            Path file = DebugLog.fileIn(dir);
+            long size = Files.size(file);
+            assertTrue(size <= 2048, "bounded: " + size);
+            var lines = Files.readAllLines(file);
+            assertTrue(lines.get(0).contains("earlier lines were dropped"), lines.get(0));
+            assertEquals("line 999 of a storm of warnings", lines.getLast(), "the newest line is kept");
+            assertTrue(lines.size() > 10, "not just the newest");
+            assertEquals(1000, DebugLog.text().lines().count(), "the window's copy keeps every line");
+        } finally {
+            DebugLog.detachFile();
+            DebugLog.clear();
+        }
+    }
+
+    @Test
+    void attachingAgainStartsAfreshAndKeepsTheLastAsThePrevious(@TempDir Path dir) throws IOException {
+        DebugLog.clear();
+        try {
+            DebugLog.attachFile(dir);
+            DebugLog.append("first run");
+            DebugLog.clear();
+            DebugLog.attachFile(dir);
+            DebugLog.append("second run");
+            assertEquals(java.util.List.of("second run"), Files.readAllLines(DebugLog.fileIn(dir)));
+            assertEquals(java.util.List.of("first run"), Files.readAllLines(DebugLog.previousIn(dir)));
+        } finally {
+            DebugLog.detachFile();
+            DebugLog.clear();
+        }
+    }
 }

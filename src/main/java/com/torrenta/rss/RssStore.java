@@ -23,12 +23,16 @@ import org.jspecify.annotations.Nullable;
 /**
  * The reader's files under {@code rss/} in the config folder: {@code feeds.json}, the feed list,
  * {@code articles/<feedId>.json}, one per feed, with the articles (read and downloaded flags
- * included), the last answer's validators, the time of the last refresh and its error, and
+ * included), the last answer's validators, the time of the last refresh and its error,
+ * {@code fetched/<feedId>.json}, those refresh facts alone when a fetch changed nothing else, and
  * {@code rules.json}, the auto-download rules with what they remember. Machine data, this
  * machine's, never synced: another machine has read other articles and downloaded other episodes.
  *
  * <p>Written whole and atomically on every change, as the other stores are; a feed keeps at most
- * {@link #MAX_ARTICLES}, the oldest dropped. Synchronized: fetches write from their own threads
+ * {@link #MAX_ARTICLES}, the oldest dropped. A refresh that brings nothing new (a 304, an error)
+ * writes only the small facts file ({@link #setFacts}), not the five hundred articles again; when
+ * one is there it is newer than the articles file's own facts, and a store from before it had none.
+ * Synchronized: fetches write from their own threads
  * while the window reads on the FX thread.
  */
 public final class RssStore {
@@ -39,6 +43,7 @@ public final class RssStore {
     public static final String DIR = "rss";
     public static final String FEEDS_FILE = "feeds.json";
     public static final String ARTICLES_DIR = "articles";
+    public static final String FETCHED_DIR = "fetched";
     public static final String RULES_FILE = "rules.json";
     public static final int MAX_ARTICLES = 500;
 
@@ -80,14 +85,24 @@ public final class RssStore {
         }
         for (Feed feed : feeds) {
             Path articles = articlesFile(feed.id());
-            if (!Files.isRegularFile(articles)) continue;
-            try {
-                states.put(
-                        feed.id(),
-                        parseState(Files.readString(articles), feed.id()).capped(MAX_ARTICLES));
-            } catch (IOException | RuntimeException e) {
-                LOG.log(Level.WARNING, "Could not read " + articles + "; the feed starts empty", e);
+            FeedState state = null;
+            if (Files.isRegularFile(articles)) {
+                try {
+                    state = parseState(Files.readString(articles), feed.id()).capped(MAX_ARTICLES);
+                } catch (IOException | RuntimeException e) {
+                    LOG.log(Level.WARNING, "Could not read " + articles + "; the feed starts empty", e);
+                }
             }
+            Path facts = factsFile(feed.id());
+            if (Files.isRegularFile(facts)) {
+                try {
+                    state = withFacts(
+                            state == null ? FeedState.EMPTY : state, parseState(Files.readString(facts), feed.id()));
+                } catch (IOException | RuntimeException e) {
+                    LOG.log(Level.WARNING, "Could not read " + facts + "; the articles file's facts stand", e);
+                }
+            }
+            if (state != null) states.put(feed.id(), state);
         }
     }
 
@@ -113,6 +128,7 @@ public final class RssStore {
         for (String id : gone) {
             states.remove(id);
             Files.deleteIfExists(articlesFile(id));
+            Files.deleteIfExists(factsFile(id));
         }
     }
 
@@ -126,7 +142,26 @@ public final class RssStore {
         FeedState kept = state.capped(MAX_ARTICLES);
         states.put(feedId, kept);
         write(articlesFile(feedId), formatState(kept));
+        // The articles file has the facts now; an older facts file must not override them on load.
+        Files.deleteIfExists(factsFile(feedId));
         return kept;
+    }
+
+    /**
+     * Keeps {@code facts}' validators, refresh time and error with the articles already held, and
+     * writes those alone: what a refresh that brought nothing new changes. Returns what was kept.
+     */
+    public synchronized FeedState setFacts(String feedId, FeedState facts) throws IOException {
+        FeedState kept = withFacts(state(feedId), facts);
+        states.put(feedId, kept);
+        write(factsFile(feedId), formatState(kept.withArticles(List.of())));
+        return kept;
+    }
+
+    /** {@code state}'s articles with {@code facts}' validators, refresh time and error. */
+    static FeedState withFacts(FeedState state, FeedState facts) {
+        return new FeedState(
+                facts.etag(), facts.lastModified(), facts.refreshedEpochMs(), facts.error(), state.articles());
     }
 
     /** Every rule, in the file's order. */
@@ -143,6 +178,11 @@ public final class RssStore {
 
     private Path articlesFile(String feedId) {
         return dir.resolve(ARTICLES_DIR).resolve(feedId + ".json");
+    }
+
+    /** The articles file's shape with no articles: {@link #parseState} reads it as it is. */
+    private Path factsFile(String feedId) {
+        return dir.resolve(FETCHED_DIR).resolve(feedId + ".json");
     }
 
     /** Written beside the file and moved into place, so a crash mid-write never truncates it. */

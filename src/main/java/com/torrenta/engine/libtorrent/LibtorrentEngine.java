@@ -458,8 +458,8 @@ public final class LibtorrentEngine implements Engine {
             return t;
         });
         long slice = PERIODIC_FLUSH_SECONDS / FLUSH_SLICES;
-        flusher.scheduleAtFixedRate(this::flushSlice, slice, slice, TimeUnit.SECONDS);
-        flusher.scheduleAtFixedRate(this::saveStats, STATS_SAVE_SECONDS, STATS_SAVE_SECONDS, TimeUnit.SECONDS);
+        flusher.scheduleWithFixedDelay(this::flushSlice, slice, slice, TimeUnit.SECONDS);
+        flusher.scheduleWithFixedDelay(this::saveStats, STATS_SAVE_SECONDS, STATS_SAVE_SECONDS, TimeUnit.SECONDS);
     }
 
     /** Re-adds every stored torrent. One bad blob costs that torrent and a log line, not the rest. */
@@ -3636,8 +3636,10 @@ public final class LibtorrentEngine implements Engine {
         TorrentStatus status = handle.status(StatusQuery.FLAGS);
         torrent_flags_t flags = status.flags();
         String id = status.getInfoHashes().getBest().toHex();
-        // Not for one removed while the session still lists it: the prune would be undone.
-        if (!removed.contains(id)) ownNames.put(id, status.name() == null ? "" : status.name());
+        // Not for one removed while the session still lists it: the prune would be undone. By
+        // handle, as removedOne does, so the same torrent added again is named as any other.
+        torrent_handle gone = removed.get(id);
+        if (gone == null || !gone.eq(handle.swig())) ownNames.put(id, status.name() == null ? "" : status.name());
         String name = displayName(id, status.name());
         String tracker = status.currentTracker();
         TorrentLabels l = labels.getOrDefault(id, TorrentLabels.NONE);

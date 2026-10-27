@@ -58,6 +58,16 @@ public final class Messages {
     private static String currentLang = "en";
     private static final Set<String> REPORTED = ConcurrentHashMap.newKeySet();
 
+    /**
+     * Parsed patterns, by pattern text and locale. A visible row formats its sentence every tick, and
+     * parsing is the expensive half; {@link MessageFormat} is not thread-safe, so each call formats
+     * with a clone. Keyed by the text rather than the key, so a catalogue change cannot serve a stale
+     * pattern; the catalogue is finite, so is this.
+     */
+    private static final Map<FormatKey, MessageFormat> FORMATS = new ConcurrentHashMap<>();
+
+    private record FormatKey(String pattern, Locale locale) {}
+
     private Messages() {}
 
     /** Loads the English base + the chosen language overlay (English for an unknown code). */
@@ -67,6 +77,7 @@ public final class Messages {
         active = "en".equals(currentLang) ? base : load(currentLang);
         loaded = true;
         REPORTED.clear();
+        FORMATS.clear();
     }
 
     private static synchronized void ensureLoaded() {
@@ -120,10 +131,20 @@ public final class Messages {
             return pattern;
         }
         try {
-            return new MessageFormat(pattern, locale()).format(args);
+            return format(pattern, locale(), args);
         } catch (RuntimeException e) {
             return pattern; // a malformed pattern must not take the window down
         }
+    }
+
+    /**
+     * {@code pattern} formatted with {@code args} in {@code locale}, the parse cached: the same text as
+     * {@code new MessageFormat(pattern, locale).format(args)}, which throws for a malformed pattern.
+     */
+    static String format(String pattern, Locale locale, @Nullable Object[] args) {
+        MessageFormat proto = FORMATS.computeIfAbsent(
+                new FormatKey(pattern, locale), k -> new MessageFormat(k.pattern(), k.locale()));
+        return ((MessageFormat) proto.clone()).format(args);
     }
 
     /** The active language code (e.g. {@code "es"}). */

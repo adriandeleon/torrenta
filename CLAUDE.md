@@ -715,8 +715,15 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   and the daemon's port and limits are never overwritten by local defaults. Speeds are KB (1000) on
   the daemon and KiB on the pages; `kibToKb`/`kbps` convert. The poll is one `torrent-get` with
   `LIST_FIELDS` (plus `sequential_download` from RPC 18, which is the field's name; `sequentialDownload`
-  is silently ignored by 4.1.0-beta.2); `detail()` alone asks for files, peers, `trackerStats` and
-  the base64 `pieces` bitfield (first piece in the high bit). Events are `diff(before, after,
+  is silently ignored by 4.1.0-beta.2), `format: "table"` from RPC 16 (`rows`); most polls are
+  `ids: "recently-active"` with `ACTIVE_FIELDS` (no `trackers`), folded into the last list by
+  `merge` (trackers kept, a quiet torrent's rates zeroed), `removed` read by numeric `id` and
+  confirmed gone by hash, a torrent new to the list read whole; a full poll replaces the list at
+  start, every 30 s, after any action of ours and always below RPC 5 (`fullPollDue`). Measured on
+  4.1: a label set by another client does not make a torrent recently active, a stop does.
+  `detail()` alone asks for `fileStats`, peers, `trackerStats` and the base64 `pieces` bitfield
+  (first piece in the high bit); `files` is read once per id and kept (`FileList`, re-read on our
+  rename or when the `fileStats` count or the name changes). Events are `diff(before, after,
   announced, removedByUs)`: the engine's own add and remove are announced by the action, the poll
   announces what another client did. A save path equal to this machine's default download folder
   means "the daemon's own" and is not sent (`addArguments`); the Add dialog defaults to
@@ -804,6 +811,17 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
   write under `~/.torrenta`. `LibtorrentEngineTest` starts a real session on purpose: it is the one
   test that proves the native loads on each CI platform.
+- **Window tests run on JavaFX's own headless platform, not Xvfb.** `@ExtendWith(FxToolkit.class)`
+  starts the toolkit once per test JVM with `glass.platform=Headless` and `prism.order=sw` (in
+  javafx-graphics since 25), the English catalogue, Inter and the default theme, and hides every
+  window after each test. `Fx.call`/`run` hand the FX thread work and wait, bounded, rethrowing what
+  it threw; `Fx.pulse()` waits a frame; `Fx.waitUntil` looks once a pulse, never sleeps.
+  `Fx.quietSettings(dir)` turns off everything that reaches outside a test (the update check, the
+  tray and badge on the session bus, the desktop's file-type handler). `WindowFixture.open(dir,
+  engine)` is the real `MainWindow` on a test `FakeEngine` (records in a map, every action in
+  `calls()`), returned once the first poll has drawn; `action(...)` runs a capture action, so the
+  capture hook's whole vocabulary is a test's too. Close it with try-with-resources: it stops the
+  poll and the engine as `App.stop` does.
 - **A loopback test binds port 0 and waits for its seeder to listen.** The Windows flakes (a
   loopback download with no peer for two minutes, a different test each time) were a seeder
   listening on nothing: tests picked a port with a `ServerSocket(0)`, closed it, and had libtorrent

@@ -141,7 +141,7 @@ public final class WatchFolders implements AutoCloseable {
             t.setDaemon(true);
             return t;
         });
-        scheduler.scheduleAtFixedRate(this::pollSafely, 0, POLL_SECONDS, TimeUnit.SECONDS);
+        scheduler.scheduleWithFixedDelay(this::pollSafely, 0, POLL_SECONDS, TimeUnit.SECONDS);
         try {
             service = FileSystems.getDefault().newWatchService();
             for (WatchFolder entry : entries) {

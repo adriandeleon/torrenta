@@ -340,6 +340,37 @@ class TransmissionDaemonTest {
                 "each add announced once");
     }
 
+    @Test
+    void anotherClientsAddAndRemoveReachTheIncrementalPoll(@TempDir Path work) throws Exception {
+        Path seeds = work.resolve("seeds");
+        byte[] torrent = twoFileTorrent(seeds, "other");
+        List<EngineEvent> events = new CopyOnWriteArrayList<>();
+        RpcClient other = new RpcClient(profile);
+        try (TransmissionEngine e = engine()) {
+            e.addListener(events::add);
+            e.start();
+            e.torrents();
+            long fullBefore = System.nanoTime();
+            Map<String, Object> args = new java.util.LinkedHashMap<>();
+            args.put("metainfo", java.util.Base64.getEncoder().encodeToString(torrent));
+            args.put("download-dir", seeds.toString());
+            String id = Json.str(Json.obj(other.call("torrent-add", args), "torrent-added"), "hashString", "");
+            await("the other client's add listed", () -> find(e, id) != null);
+            assertEquals(List.of("tracker.example.org"), find(e, id).trackers(), "read whole when new");
+            for (int i = 0; i < 3; i++) {
+                assertEquals(List.of("tracker.example.org"), find(e, id).trackers(), "and kept after");
+            }
+            other.call("torrent-remove", Map.of("ids", List.of(id)));
+            await("the other client's remove seen", () -> find(e, id) == null);
+            assertTrue(
+                    System.nanoTime() - fullBefore < TransmissionEngine.FULL_POLL_EVERY_MILLIS * 1_000_000,
+                    "seen before a full poll was due, so by the incremental ones");
+        }
+        List<String> lines = events.stream().map(EngineEvent::message).toList();
+        assertTrue(lines.contains("Added other"), lines.toString());
+        assertTrue(lines.contains("Removed other"), lines.toString());
+    }
+
     private static Torrent find(Engine e, String id) {
         for (Torrent t : e.torrents()) if (t.id().equals(id)) return t;
         return null;

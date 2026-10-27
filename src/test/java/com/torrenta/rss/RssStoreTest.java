@@ -202,6 +202,71 @@ class RssStoreTest {
         assertTrue(merged.get(3).read(), "an article the feed dropped stays, as it was");
     }
 
+    /** A 304 once wrote a feed's whole article file again to note the time. */
+    @Test
+    void aRefreshThatChangedNothingWritesItsFactsAloneAndTheyWinOnLoad(@TempDir Path dir) throws IOException {
+        RssStore store = new RssStore(dir);
+        Feed f1 = new Feed("f1", "https://x/rss", "X", 0);
+        store.setFeeds(List.of(f1));
+        List<Article> articles = List.of(article("a", 0, true), article("b", 1, false));
+        store.setState("f1", new FeedState("\"v1\"", "", 1000, "", articles));
+        Path root = dir.resolve(RssStore.DIR);
+        Path articlesFile = root.resolve(RssStore.ARTICLES_DIR).resolve("f1.json");
+        Path factsFile = root.resolve(RssStore.FETCHED_DIR).resolve("f1.json");
+        String written = Files.readString(articlesFile);
+        assertFalse(Files.exists(factsFile), "none until a refresh changes nothing else");
+
+        FeedState kept = store.setFacts("f1", new FeedState("\"v1\"", "", 2000, "", List.of()));
+        assertEquals(articles, kept.articles(), "the articles held stay, whatever the facts carried");
+        assertEquals(written, Files.readString(articlesFile), "the articles file is not written again");
+        assertEquals(
+                "{\"etag\":\"\\\"v1\\\"\",\"lastModified\":\"\",\"refreshedEpochMs\":2000,\"error\":\"\",\"articles\":[]}\n",
+                Files.readString(factsFile));
+        store.setFacts("f1", store.state("f1").failed(3000, "the server answered 500"));
+
+        RssStore again = new RssStore(dir);
+        again.load();
+        assertEquals(new FeedState("\"v1\"", "", 3000, "the server answered 500", articles), again.state("f1"));
+
+        // A change to the articles writes them with the facts, and the facts file goes.
+        again.setState("f1", again.state("f1").withArticles(List.of(article("a", 0, true))));
+        assertFalse(Files.exists(factsFile));
+        RssStore third = new RssStore(dir);
+        third.load();
+        assertEquals(3000, third.state("f1").refreshedEpochMs());
+        assertEquals("the server answered 500", third.state("f1").error());
+        assertEquals(1, third.state("f1").articles().size());
+    }
+
+    @Test
+    void aFeedWithFactsAndNoArticlesFileStillHasItsRefresh(@TempDir Path dir) throws IOException {
+        RssStore store = new RssStore(dir);
+        store.setFeeds(List.of(new Feed("f1", "https://x/rss", "X", 0)));
+        store.setFacts("f1", FeedState.EMPTY.failed(5000, "unreachable"));
+        RssStore again = new RssStore(dir);
+        again.load();
+        assertEquals(new FeedState("", "", 5000, "unreachable", List.of()), again.state("f1"));
+        again.setFeeds(List.of());
+        assertFalse(
+                Files.exists(
+                        dir.resolve(RssStore.DIR).resolve(RssStore.FETCHED_DIR).resolve("f1.json")),
+                "a removed feed's facts go with it");
+    }
+
+    @Test
+    void anUnreadableFactsFileLeavesTheArticlesFilesFacts(@TempDir Path dir) throws IOException {
+        RssStore store = new RssStore(dir);
+        store.setFeeds(List.of(new Feed("f1", "https://x/rss", "X", 0)));
+        FeedState state = new FeedState("e", "", 1000, "", List.of(article("a", 0, false)));
+        store.setState("f1", state);
+        Path facts = dir.resolve(RssStore.DIR).resolve(RssStore.FETCHED_DIR).resolve("f1.json");
+        Files.createDirectories(facts.getParent());
+        Files.writeString(facts, "{ not json");
+        RssStore again = new RssStore(dir);
+        again.load();
+        assertEquals(state, again.state("f1"));
+    }
+
     @Test
     void anUnreadableFileIsEmptyNotFatal(@TempDir Path dir) throws IOException {
         Path root = dir.resolve(RssStore.DIR);
