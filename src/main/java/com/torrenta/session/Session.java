@@ -421,18 +421,20 @@ public final class Session {
             return t;
         });
         poller = p;
-        p.scheduleAtFixedRate(this::poll, 0, POLL_MS, TimeUnit.MILLISECONDS);
-        p.scheduleAtFixedRate(this::refreshLimits, 0, 60, TimeUnit.SECONDS);
+        // A delay after each run, not a rate: a poll that overran must not be followed by the ones it
+        // missed back to back, each flooding the FX thread with a snapshot. The same for the rest.
+        p.scheduleWithFixedDelay(this::poll, 0, POLL_MS, TimeUnit.MILLISECONDS);
+        p.scheduleWithFixedDelay(this::refreshLimits, 0, 60, TimeUnit.SECONDS);
         // Updatable torrents: a look for newer versions when due (the lookups block, so not on the
         // poll thread), and the old versions let go of once the new ones are complete.
-        p.scheduleAtFixedRate(
+        p.scheduleWithFixedDelay(
                 () -> Thread.ofVirtual().name("follow").start(this::lookForVersions),
                 FOLLOW_FIRST_MINUTES,
                 FOLLOW_TICK_MINUTES,
                 TimeUnit.MINUTES);
-        p.scheduleAtFixedRate(this::letGoOfOldVersions, 30, 30, TimeUnit.SECONDS);
+        p.scheduleWithFixedDelay(this::letGoOfOldVersions, 30, 30, TimeUnit.SECONDS);
         // What this machine publishes, put back in the DHT when it is no longer found there.
-        p.scheduleAtFixedRate(
+        p.scheduleWithFixedDelay(
                 () -> Thread.ofVirtual().name("republish").start(this::republish),
                 REPUBLISH_FIRST_MINUTES,
                 REPUBLISH_MINUTES,
@@ -465,12 +467,12 @@ public final class Session {
         }
     }
 
-    /** Runs {@code task} on the poll thread every {@code period}, never overlapping a poll; false once stopped. */
+    /** Runs {@code task} on the poll thread, {@code period} after each run, never overlapping a poll; false once stopped. */
     public boolean schedule(Runnable task, long initialDelay, long period, TimeUnit unit) {
         ScheduledExecutorService p = poller;
         if (p == null) return false;
         try {
-            p.scheduleAtFixedRate(task, initialDelay, period, unit);
+            p.scheduleWithFixedDelay(task, initialDelay, period, unit);
             return true;
         } catch (RejectedExecutionException e) {
             return false;
@@ -630,9 +632,9 @@ public final class Session {
     }
 
     /**
-     * Poll thread. One snapshot, the share limits applied to it, then every listener. A task of a
-     * {@code scheduleAtFixedRate} that throws is never run again, so nothing may escape: a failing
-     * listener is logged and the next one, and the next poll, still run.
+     * Poll thread. One snapshot, the share limits applied to it, then every listener. A periodic task
+     * that throws is never run again, so nothing may escape: a failing listener is logged and the
+     * next one, and the next poll, still run.
      */
     private void poll() {
         Engine e = engine;

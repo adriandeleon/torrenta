@@ -133,7 +133,7 @@ public final class RssService {
             t.setDaemon(true);
             return t;
         });
-        scheduler.scheduleAtFixedRate(() -> refreshDue(Instant.now(clock)), 0, 1, TimeUnit.MINUTES);
+        scheduler.scheduleWithFixedDelay(() -> refreshDue(Instant.now(clock)), 0, 1, TimeUnit.MINUTES);
     }
 
     public synchronized void stop() {

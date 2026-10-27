@@ -381,8 +381,8 @@ public final class LibtorrentEngine implements Engine {
             t.setDaemon(true);
             return t;
         });
-        flusher.scheduleAtFixedRate(this::flush, PERIODIC_FLUSH_SECONDS, PERIODIC_FLUSH_SECONDS, TimeUnit.SECONDS);
-        flusher.scheduleAtFixedRate(this::saveStats, STATS_SAVE_SECONDS, STATS_SAVE_SECONDS, TimeUnit.SECONDS);
+        flusher.scheduleWithFixedDelay(this::flush, PERIODIC_FLUSH_SECONDS, PERIODIC_FLUSH_SECONDS, TimeUnit.SECONDS);
+        flusher.scheduleWithFixedDelay(this::saveStats, STATS_SAVE_SECONDS, STATS_SAVE_SECONDS, TimeUnit.SECONDS);
     }
 
     /** Re-adds every stored torrent. One bad blob costs that torrent and a log line, not the rest. */
