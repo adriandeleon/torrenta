@@ -1252,6 +1252,7 @@ public final class MainWindow {
         if (detailWanted && detail.activeTab().equals("overview"))
             for (String line : detail.overviewLines()) out.add("overview-" + line);
         out.add("status-bar=" + statusBarForCapture());
+        out.add("table=" + tableLineForCapture());
         if (!settingsWindow.profileDialogStatusForCapture().isEmpty()) {
             out.add("dialog=" + settingsWindow.dialogTitle());
             out.add("profile-test=" + settingsWindow.profileDialogStatusForCapture());
@@ -1262,6 +1263,24 @@ public final class MainWindow {
             out.add("rule-problem=" + settingsWindow.ruleProblemForCapture());
         }
         return out;
+    }
+
+    /**
+     * The list as the ticks left it: the sort, the shown rows' names in order with {@code *} on
+     * the selected ones, and the focused row's name.
+     */
+    private String tableLineForCapture() {
+        String sort = table.getSortOrder().stream()
+                .map(c -> c.getId() + (c.getSortType() == TableColumn.SortType.DESCENDING ? ":desc" : ""))
+                .collect(java.util.stream.Collectors.joining("+"));
+        var selected = table.getSelectionModel().getSelectedItems();
+        String shown = table.getItems().stream()
+                .map(r -> (selected.contains(r) ? "*" : "") + r.torrent().name())
+                .collect(java.util.stream.Collectors.joining(","));
+        TorrentRow focused = table.getFocusModel().getFocusedItem();
+        return "sort:" + (sort.isEmpty() ? "none" : sort) + " shown="
+                + table.getItems().size() + " rows=" + shown + " focus="
+                + (focused == null ? "none" : focused.torrent().name());
     }
 
     /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
@@ -1582,6 +1601,26 @@ public final class MainWindow {
             export(exportTargets(selectedTorrents(), Path.of(action.substring("export-to:".length()))));
         } else if (action.equals("select-first")) {
             table.getSelectionModel().clearAndSelect(0);
+        } else if (action.startsWith("select-rows:")) {
+            // select-rows:<i>+<j>…: those shown rows selected, the last one focused.
+            table.getSelectionModel().clearSelection();
+            for (String index : action.substring("select-rows:".length()).split("\\+"))
+                table.getSelectionModel().select(Integer.parseInt(index));
+        } else if (action.startsWith("sort:")) {
+            // sort:<column id>[:desc]: the list sorted by that column, as a click on its header.
+            String[] spec = action.substring("sort:".length()).split(":");
+            table.getColumns().stream()
+                    .filter(c -> spec[0].equals(c.getId()))
+                    .findFirst()
+                    .ifPresentOrElse(
+                            c -> {
+                                c.setSortType(
+                                        spec.length > 1 && spec[1].equals("desc")
+                                                ? TableColumn.SortType.DESCENDING
+                                                : TableColumn.SortType.ASCENDING);
+                                table.getSortOrder().setAll(List.of(c));
+                            },
+                            () -> System.err.println("capture: no column " + spec[0]));
         } else if (action.startsWith("detail:")) {
             showDetail();
             detail.selectTab(action.substring("detail:".length()));
@@ -5339,7 +5378,7 @@ public final class MainWindow {
 
     private TableView<TorrentRow> buildTable() {
         // Sorted over filtered over the live rows: the table's comparator drives the sort, and the
-        // rows list's extractor makes a changed rate re-sort its row without a sort() call.
+        // tick's one update change (TorrentRows) re-filters and re-sorts once, without a sort() call.
         SortedList<TorrentRow> sorted = new SortedList<>(filtered);
         TableView<TorrentRow> table = new TableView<>(sorted);
         sorted.comparatorProperty().bind(table.comparatorProperty());
