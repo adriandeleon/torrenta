@@ -165,6 +165,7 @@ final class SettingsWindow {
                 Settings.ADD_DEDUP,
                 Settings.ADD_PROBE_PRIVATE,
                 Settings.UI_STATE_COLORS,
+                Settings.UI_SIMPLE,
                 Settings.UI_DENSITY,
                 Settings.UI_SIDEBAR,
                 Settings.UI_SIDEBAR_SIDE,
@@ -191,6 +192,8 @@ final class SettingsWindow {
     private java.util.function.Consumer<Boolean> onIpFilterChanged = force -> {};
     /** Told after an appearance setting the main window draws from changed. */
     private Runnable onAppearanceChanged = () -> {};
+    /** Told after Simple mode's switch changed; the main window shows or hides what the mode leaves out. */
+    private Runnable onSimpleChanged = () -> {};
     /** Told after the tray switch changed; the main window brings the icon up or takes it down. */
     private Runnable onTrayChanged = () -> {};
     /** Told after the handler switch changed; the main window (re)registers or unregisters. */
@@ -529,6 +532,7 @@ final class SettingsWindow {
     private CheckBox preallocate;
     private CheckBox updateCheck;
     private CheckBox stateColors;
+    private CheckBox simple;
     private ChoiceBox<Density> density;
     private ChoiceBox<SidebarPlace> sidebarPlace;
     private ChoiceBox<DetailPlace> detailPlace;
@@ -1087,6 +1091,10 @@ final class SettingsWindow {
 
     void setOnAppearanceChanged(Runnable handler) {
         onAppearanceChanged = handler;
+    }
+
+    void setOnSimpleChanged(Runnable handler) {
+        onSimpleChanged = handler;
     }
 
     void setOnTrayChanged(Runnable handler) {
@@ -1940,6 +1948,21 @@ final class SettingsWindow {
                 tr("settings.general.language.keywords"));
 
         VBox appearance = section(page, tr("settings.general.appearance"));
+        // First: it decides how much of the rest of the window there is.
+        simple = new CheckBox();
+        simple.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setSimple(now);
+            settings.saveQuietly();
+            onSimpleChanged.run();
+        });
+        row(
+                Category.GENERAL,
+                appearance,
+                tr("settings.general.simple"),
+                tr("settings.general.simple.desc"),
+                simple,
+                tr("settings.general.simple.keywords"));
         theme = new ChoiceBox<>();
         theme.getItems().addAll(Theme.values());
         theme.valueProperty().addListener((o, was, now) -> {
@@ -4447,6 +4470,7 @@ final class SettingsWindow {
             preallocate.setSelected(settings.preallocate());
             updateCheck.setSelected(settings.updateCheck());
             stateColors.setSelected(settings.stateColors());
+            simple.setSelected(settings.simple());
             density.setValue(Density.byId(settings.density(), Density.DEFAULT));
             sidebarPlace.setValue(SidebarPlace.of(settings.sidebar(), settings.sidebarSide()));
             detailPlace.setValue(DetailPlace.of(settings.detailVisible(), settings.detailSide()));

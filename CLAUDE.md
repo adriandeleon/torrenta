@@ -21,7 +21,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `pause-resume`, `menu:<File|Torrent|View|Help>` or `context-menu` or `peer-menu` (the Peers tab's; `peer-ban` presses Ban Peer on the first peer) (opens that menu; the PNG is
   then of the popup and `menu=` lines list its items, `[icon]` after those with a glyph, a
   submenu's items indented under it; `menu:Torrent>Queue` opens the submenu itself, from the
-  keyboard), `set-location[:<folder>]` (the Set Location dialog, the folder typed in; a
+  keyboard), `toggle-simple` (Simple mode; every capture prints a `simple=` line: in force, `saved=`,
+  `session=` for `--simple`, sidebar, strip, the detail tabs, the toolbar's buttons, the palette's
+  count), `set-location[:<folder>]` (the Set Location dialog, the folder typed in; a
   `location-hint=` line has its free-space sentence),
   `view:<transfers|search|rss>` (shows that view; a `view=` line names it and where the focus
   landed, `view-strip=` reads the strip with the showing one starred), `focus-key:<MOD+…+KEY>`
@@ -908,6 +910,21 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   wraps the image as it is, so on macOS `scripts/add-mac-types.sh` patches
   `CFBundleDocumentTypes` and `CFBundleURLTypes` (`magnet`, which jpackage cannot declare at all)
   into `Info.plist` with PlistBuddy and re-signs, as the version fix does. The capture prints `instance=`, `badge=`, `handler=` and `openHandlers=`.
+
+- **Simple mode is a rule, `ui.SimpleMode`, laid over the window, never a second window.** It is
+  a whitelist (`COMMANDS`): a command not named there is and-ed with `simpleOn.not()` in
+  `MainWindow.simpleGate`, so its menu item, chord and palette row are dead with it, as a missing
+  capability's are; `applyCommandVisibility` shows an item when both the capability and the mode
+  allow it, then `MenuSeparators.tidy` hides the separators an emptied group leaves. The detail
+  header's buttons and `Diagnosis.Remedy` run commands by id, so theirs must stay in the list
+  (`SimpleModeTest` checks every remedy). It never writes a preference: the sidebar is taken out of
+  `transfersFrame` rather than hidden (its visibility is `ui.sidebar`, saved by a listener), its
+  selection is not applied while it is away, `show(View)` refuses Search and RSS, and
+  `DetailPane.setSimple` takes tabs out of the strip while `wantedTab` keeps the person's. The
+  saved switch is `ui.simple`; `--simple` is `simpleForSession`, OR'd with it, and any toggle in
+  the window (View, toolbar, palette, the Settings box) ends the session flag and saves the
+  opposite of what showed (`SimpleMode.toggled`), so one toggle always does something. A new
+  dialog that a newcomer meets gets an `applySimple` like `AddDialog`'s.
 
 ## Conventions (carried from Termina)
 

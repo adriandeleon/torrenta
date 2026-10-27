@@ -303,6 +303,15 @@
     -fx-background-color: -color-border-muted;
 }
 
+/* A switch that is on (Simple mode): lit as the sidebar's chosen row is, the glyph sharpened. */
+.toolbar-button:on {
+    -fx-background-color: -torrenta-chosen;
+}
+
+.toolbar-button:on .icon-line {
+    -fx-stroke: -color-fg-default;
+}
+
 .icon-line {
     -fx-fill: transparent;
     -fx-stroke: -torrenta-icon;
