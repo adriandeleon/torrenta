@@ -3,6 +3,7 @@ package com.torrenta;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
 import javax.imageio.ImageIO;
 
 import javafx.animation.PauseTransition;
@@ -68,11 +69,7 @@ final class DevCapture {
             // Halfway: late enough for the engine and the first poll, early enough for the result
             // to be painted and polled again before the shot.
             PauseTransition act = new PauseTransition(Duration.millis(delay / 2));
-            act.setOnFinished(e -> {
-                for (String action : actions.split(",")) {
-                    if (!action.isBlank()) window.runForCapture(action.trim());
-                }
-            });
+            act.setOnFinished(e -> run(window, List.of(actions.split(","))));
             act.play();
         }
         PauseTransition settle = new PauseTransition(Duration.millis(delay));
@@ -89,6 +86,24 @@ final class DevCapture {
             Platform.runLater(Platform::exit);
         });
         settle.play();
+    }
+
+    /**
+     * The actions in order; {@code wait:<ms>} puts the rest off by that long, so a window can be
+     * hidden, left a while and brought back within one capture.
+     */
+    private static void run(MainWindow window, List<String> actions) {
+        for (int i = 0; i < actions.size(); i++) {
+            String action = actions.get(i).trim();
+            if (action.startsWith("wait:")) {
+                List<String> rest = actions.subList(i + 1, actions.size());
+                PauseTransition later = new PauseTransition(Duration.millis(Long.parseLong(action.substring(5))));
+                later.setOnFinished(e -> run(window, rest));
+                later.play();
+                return;
+            }
+            if (!action.isBlank()) window.runForCapture(action);
+        }
     }
 
     private static void capture(Stage stage, MainWindow window, File out) throws IOException {
@@ -130,6 +145,8 @@ final class DevCapture {
         System.out.println("capture: trayLine=" + window.trayLine());
         // False after a close-request with a tray to close to: the window is hidden, not gone.
         System.out.println("capture: showing=" + stage.isShowing());
+        // The poll's drawing: ticks drawn and skipped off screen, catch-ups on the way back.
+        System.out.println("capture: poll=" + window.pollDescription());
         // The desktop: the single-instance lock, the badge backend (or why none), what the handler
         // registration said, which open handlers are installed (macOS).
         System.out.println("capture: instance=" + window.instanceDescription());

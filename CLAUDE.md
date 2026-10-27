@@ -867,7 +867,7 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   the menu's first item. The capture prints `tray=` (`sni`, `awt`, or the reason), `trayLine=` and
   `showing=`; `-Dtorrenta.captureAction=close-request` sends the window a real close request
   (`close-window` is `stage.close()`, which skips the handler), so `showing=false` with `tray=sni`
-  is close-to-tray working. `busctl --user` can read the item (`org.kde.StatusNotifierItem-<pid>-1`:
+  is close-to-tray working. Off screen (hidden to the tray or minimised, `PollWork`) the poll keeps the port clock, the interface watch, the leak check, the tray and the badge, and skips the detail fetch, the free-space read and the FX hand-off; the Statistics window, its own stage, is updated while it shows (it hides with the main window but stays up when that is minimised), and the way back draws the last frame at once (`drawNow`). `iconify`, `deiconify`, `tray-show` and `wait:<ms>` (the actions after it run that much later) drive it; a `poll=` line counts ticks drawn and skipped and the catch-up's delay. `busctl --user` can read the item (`org.kde.StatusNotifierItem-<pid>-1`:
   `ToolTip`, `/MenuBar GetLayout`) and click its items (`Event isvu <id> clicked s "" 0`).
 
 - **Downloads from links are curl processes, and everything about them goes in on stdin.**
