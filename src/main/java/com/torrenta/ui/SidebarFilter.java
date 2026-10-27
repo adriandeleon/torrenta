@@ -5,6 +5,7 @@ import java.util.Locale;
 import java.util.TreeSet;
 
 import com.torrenta.engine.Torrent;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -33,12 +34,19 @@ public record SidebarFilter(Kind kind, String value) {
         UNTAGGED,
         TRACKER,
         TRACKERLESS,
-        TRACKER_ERROR
+        TRACKER_ERROR,
+        /**
+         * A saved view, by its slug. Its rule is its query, which only the window can read (the
+         * views are settings, and {@code added<} needs a clock): here it matches everything, and
+         * {@code MainWindow.rowFilter} ANDs the query in.
+         */
+        VIEW
     }
 
     /** The section an entry belongs to; {@link #ALL} is the one entry above the sections. */
     public enum Axis {
         ALL,
+        VIEW,
         STATUS,
         CATEGORY,
         TAG,
@@ -58,13 +66,13 @@ public record SidebarFilter(Kind kind, String value) {
 
     public SidebarFilter {
         value = switch (kind) {
-            case CATEGORY, TAG -> value == null ? "" : value.trim();
+            case CATEGORY, TAG, VIEW -> value == null ? "" : value.trim();
             case TRACKER -> value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
             case STATUS -> SidebarStatus.parse(value).map(SidebarStatus::key).orElse("");
             default -> "";
         };
         // A status that is not one is no filter at all; the record stays total.
-        if (kind == Kind.STATUS && value.isEmpty()) kind = Kind.ALL;
+        if ((kind == Kind.STATUS || kind == Kind.VIEW) && value.isEmpty()) kind = Kind.ALL;
     }
 
     public static SidebarFilter status(SidebarStatus status) {
@@ -83,9 +91,15 @@ public record SidebarFilter(Kind kind, String value) {
         return new SidebarFilter(Kind.TRACKER, host);
     }
 
+    /** A saved view, by its slug. */
+    public static SidebarFilter view(String slug) {
+        return new SidebarFilter(Kind.VIEW, slug);
+    }
+
     public Axis axis() {
         return switch (kind) {
             case ALL -> Axis.ALL;
+            case VIEW -> Axis.VIEW;
             case STATUS -> Axis.STATUS;
             case CATEGORY, UNCATEGORISED -> Axis.CATEGORY;
             case TAG, UNTAGGED -> Axis.TAG;
@@ -100,7 +114,7 @@ public record SidebarFilter(Kind kind, String value) {
 
     public boolean matches(Torrent t) {
         return switch (kind) {
-            case ALL -> true;
+            case ALL, VIEW -> true;
             case STATUS -> status().matches(t);
             case CATEGORY -> t.category().equals(value);
             case UNCATEGORISED -> t.category().isEmpty();
@@ -123,7 +137,7 @@ public record SidebarFilter(Kind kind, String value) {
         return switch (kind) {
             case ALL -> tr("sidebar.all");
             case STATUS -> status().title();
-            case CATEGORY, TAG, TRACKER -> value;
+            case CATEGORY, TAG, TRACKER, VIEW -> value;
             case UNCATEGORISED -> tr("sidebar.uncategorised");
             case UNTAGGED -> tr("sidebar.untagged");
             case TRACKERLESS -> tr("sidebar.trackerless");
@@ -147,11 +161,12 @@ public record SidebarFilter(Kind kind, String value) {
             case TRACKER -> "tracker:" + value;
             case TRACKERLESS -> "trackerless";
             case TRACKER_ERROR -> "tracker-error";
+            case VIEW -> "view:" + value;
         };
     }
 
     /** The inverse of {@link #format}; anything unreadable is {@link #ALL}. */
-    public static SidebarFilter parse(String text) {
+    public static SidebarFilter parse(@Nullable String text) {
         if (text == null) return ALL;
         String t = text.trim();
         String lower = t.toLowerCase(Locale.ROOT);
@@ -168,6 +183,7 @@ public record SidebarFilter(Kind kind, String value) {
             String name = t.substring("tag:".length()).trim();
             return name.isEmpty() ? UNTAGGED : tag(name);
         }
+        if (lower.startsWith("view:")) return view(t.substring("view:".length()).trim());
         if (lower.startsWith("tracker:")) {
             String host = t.substring("tracker:".length()).trim();
             return host.isEmpty() ? TRACKERLESS : tracker(host);
@@ -185,7 +201,7 @@ public record SidebarFilter(Kind kind, String value) {
      * {@link #parse}, kept only if it is on the axis asked for: a remembered {@code ui.sidebar.tag}
      * that reads {@code category:x} is nothing. {@link Axis#ALL} takes anything.
      */
-    public static SidebarFilter parse(String text, Axis axis) {
+    public static SidebarFilter parse(@Nullable String text, Axis axis) {
         SidebarFilter f = parse(text);
         return axis == Axis.ALL || f.axis() == axis ? f : ALL;
     }

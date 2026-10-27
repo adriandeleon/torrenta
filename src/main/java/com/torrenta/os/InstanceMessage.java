@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.torrenta.engine.Inputs;
+import org.jspecify.annotations.Nullable;
 
 /**
  * What a second Torrenta sends the running one over the loopback socket: the token it read from
@@ -86,7 +87,7 @@ public record InstanceMessage(String token, List<String> inputs) {
     }
 
     /** A line of at most {@link #MAX_LINE} characters, the end of line stripped; null past the cap or at the end. */
-    private static String line(BufferedReader in) throws IOException {
+    private static @Nullable String line(BufferedReader in) throws IOException {
         StringBuilder sb = new StringBuilder();
         while (true) {
             int c = in.read();

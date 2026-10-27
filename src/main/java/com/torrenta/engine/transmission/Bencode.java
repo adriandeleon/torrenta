@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.torrenta.engine.TorrentPreview;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A bencode decoder, enough to read a {@code .torrent} for the Add dialog without libtorrent: a
@@ -22,7 +23,7 @@ import com.torrenta.engine.TorrentPreview;
  * decoder remembers where the top-level {@code info} dictionary sits so that its hashes can be
  * taken over the exact bytes. Pure.
  */
-final class Bencode {
+public final class Bencode {
 
     private final byte[] data;
     private int pos;
@@ -35,8 +36,22 @@ final class Bencode {
         this.data = data;
     }
 
+    /**
+     * Throws unless {@code bytes} reads as a {@code .torrent} within the decoder's bounds (nesting,
+     * lengths, no trailing bytes): what an upload from the network must pass before libtorrent's
+     * own parser sees it.
+     */
+    public static void check(byte[] bytes) throws IOException {
+        try {
+            decode(bytes);
+            preview(bytes);
+        } catch (RuntimeException e) {
+            throw new IOException("not a torrent", e);
+        }
+    }
+
     /** Decodes one value; trailing bytes are an error. */
-    static Object decode(byte[] data) throws IOException {
+    public static Object decode(byte[] data) throws IOException {
         Bencode b = new Bencode(data);
         Object value = b.read(0);
         if (b.pos != data.length) throw new IOException("trailing bytes after the torrent");
@@ -44,7 +59,7 @@ final class Bencode {
     }
 
     /** What a {@code .torrent} says about itself, as the Add dialog wants it. */
-    static TorrentPreview preview(byte[] torrent) throws IOException {
+    public static TorrentPreview preview(byte[] torrent) throws IOException {
         Bencode b = new Bencode(torrent);
         Object root = b.read(0);
         if (!(root instanceof Map<?, ?>)) throw new IOException("not a torrent: no dictionary");
@@ -146,23 +161,23 @@ final class Bencode {
         if (!url.isEmpty() && !out.contains(url)) out.add(url);
     }
 
-    private static List<String> parts(Object value) {
+    private static List<String> parts(@Nullable Object value) {
         List<String> out = new ArrayList<>();
         for (Object o : list(value)) out.add(text(o, ""));
         return out;
     }
 
-    private static String text(Object value, String fallback) {
+    private static String text(@Nullable Object value, String fallback) {
         return value instanceof byte[] b ? new String(b, StandardCharsets.UTF_8) : fallback;
     }
 
     @SuppressWarnings("unchecked")
-    private static Map<String, Object> map(Object value) {
+    private static Map<String, Object> map(@Nullable Object value) {
         return value instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
     }
 
     @SuppressWarnings("unchecked")
-    private static List<Object> list(Object value) {
+    private static List<Object> list(@Nullable Object value) {
         return value instanceof List<?> l ? (List<Object>) l : List.of();
     }
 

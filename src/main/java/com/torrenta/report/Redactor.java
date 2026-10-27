@@ -9,6 +9,8 @@ import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Strips what a problem report must not carry off the machine. Editora's, with what a torrent
  * client adds.
@@ -91,8 +93,8 @@ public final class Redactor {
     /** The redacted text and how many values were replaced. */
     public record Result(String text, int replaced) {}
 
-    private final String home;
-    private final String userName;
+    private final @Nullable String home;
+    private final @Nullable String userName;
     private final List<String> torrentNames;
 
     /**
@@ -101,7 +103,7 @@ public final class Redactor {
      * @param torrentNames the names in the list; each becomes {@code <torrent N>}, numbered in this
      *     order, so two lines about the same torrent still read as the same one
      */
-    public Redactor(String home, String userName, List<String> torrentNames) {
+    public Redactor(@Nullable String home, @Nullable String userName, List<String> torrentNames) {
         this.home = home == null || home.isBlank() ? null : stripTrailingSeparator(home.strip());
         this.userName = userName == null || userName.strip().length() < MIN_USER_NAME ? null : userName.strip();
         Set<String> names = new LinkedHashSet<>();
@@ -116,7 +118,7 @@ public final class Redactor {
         return new Redactor(System.getProperty("user.home"), System.getProperty("user.name"), torrentNames);
     }
 
-    public Result redact(String text) {
+    public Result redact(@Nullable String text) {
         if (text == null || text.isEmpty()) return new Result("", 0);
         int[] count = {0};
         String out = text;
@@ -130,15 +132,17 @@ public final class Redactor {
         }
         for (Rule rule : RULES) out = replace(out, rule.pattern(), rule.replacement(), count);
         out = replace(out, IPV4, m -> isPublic(m) ? "<ip>" : null, count);
-        if (home != null) {
+        String h = home;
+        if (h != null) {
             // Both separators: a Windows home appears as C:\Users\me in paths and C:/Users/me in URIs.
-            out = replaceLiteral(out, home, "~", count);
-            if (home.indexOf('\\') >= 0) out = replaceLiteral(out, home.replace('\\', '/'), "~", count);
+            out = replaceLiteral(out, h, "~", count);
+            if (h.indexOf('\\') >= 0) out = replaceLiteral(out, h.replace('\\', '/'), "~", count);
         }
-        if (userName != null) {
+        String user = userName;
+        if (user != null) {
             out = replace(
                     out,
-                    Pattern.compile("(?<![A-Za-z0-9_.-])" + Pattern.quote(userName) + "(?![A-Za-z0-9_-])"),
+                    Pattern.compile("(?<![A-Za-z0-9_.-])" + Pattern.quote(user) + "(?![A-Za-z0-9_-])"),
                     "<user>",
                     count);
         }
@@ -168,7 +172,8 @@ public final class Redactor {
     }
 
     /** {@code replacement} gives the text for a match (with {@code $n} groups), or null to keep it. */
-    private static String replace(String text, Pattern pattern, Function<Matcher, String> replacement, int[] count) {
+    private static String replace(
+            String text, Pattern pattern, Function<Matcher, @Nullable String> replacement, int[] count) {
         Matcher m = pattern.matcher(text);
         if (!m.find()) return text;
         StringBuilder sb = new StringBuilder(text.length());

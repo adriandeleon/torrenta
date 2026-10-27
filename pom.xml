@@ -6,7 +6,7 @@
 
     <groupId>com.torrenta</groupId>
     <artifactId>torrenta</artifactId>
-    <version>0.1.1-SNAPSHOT</version>
+    <version>0.3.1-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>Torrenta</name>
@@ -32,6 +32,13 @@
              user-authored text in it, so it gets a real parser. jackson-core only — no databind —
              and it is a proper JPMS module, so jlink links it without moditect. -->
         <jackson.version>2.22.1</jackson.version>
+        <!-- Null checking (CLAUDE.md, "Null annotations"): NullAway, an Error Prone plugin,
+             checks every @NullMarked package of the main compile and fails the build on a null it
+             cannot prove safe. JSpecify supplies the annotations. Error Prone reaches into javac,
+             hence .mvn/jvm.config. Editora's setup. -->
+        <jspecify.version>1.0.1</jspecify.version>
+        <errorprone.version>2.50.0</errorprone.version>
+        <nullaway.version>0.14.2</nullaway.version>
 
         <!-- The engine: libtorrent (the one behind qBittorrent and Deluge) through SWIG. One core
              jar, plus one jar of native libraries per OS, chosen by the os-* profiles below. The
@@ -50,6 +57,8 @@
         <!-- jpackage wants .icns on macOS, .ico on Windows, .png on Linux; the os-* profiles pick. -->
         <jpackage.icon>${project.basedir}/branding/torrenta.png</jpackage.icon>
         <jpackage.imageName>Torrenta</jpackage.imageName>
+        <!-- torrenta-nox, the headless launcher: a console program on Windows, which only it takes. -->
+        <jpackage.noxLauncher>${project.basedir}/src/jpackage/torrenta-nox.properties</jpackage.noxLauncher>
         <skip.mac.version.fix>true</skip.mac.version.fix>
         <!-- Installers are minutes of work the dev loop never wants; CI and the release turn them on. -->
         <skip.installers>true</skip.installers>
@@ -68,6 +77,15 @@
     </properties>
 
     <dependencies>
+        <!-- Compile-time only (`requires static org.jspecify`): the annotations are read by
+             NullAway, and a missing annotation class is ignored by reflection at run time, so
+             nothing ships. -->
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+            <version>${jspecify.version}</version>
+            <scope>provided</scope>
+        </dependency>
         <dependency>
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-controls</artifactId>
@@ -258,6 +276,31 @@
                 <version>3.13.0</version>
                 <executions>
                     <execution>
+                        <!-- NullAway only: every other Error Prone check is off. OnlyNullMarked
+                             leaves a package unchecked until its package-info.java says
+                             @NullMarked. Tests are not checked. -->
+                        <id>default-compile</id>
+                        <configuration>
+                            <compilerArgs>
+                                <arg>-XDcompilePolicy=simple</arg>
+                                <arg>--should-stop=ifError=FLOW</arg>
+                                <arg>-Xplugin:ErrorProne -XepDisableAllChecks -Xep:NullAway:ERROR -XepOpt:NullAway:OnlyNullMarked=true -XepOpt:NullAway:JSpecifyMode=true</arg>
+                            </compilerArgs>
+                            <annotationProcessorPaths>
+                                <path>
+                                    <groupId>com.google.errorprone</groupId>
+                                    <artifactId>error_prone_core</artifactId>
+                                    <version>${errorprone.version}</version>
+                                </path>
+                                <path>
+                                    <groupId>com.uber.nullaway</groupId>
+                                    <artifactId>nullaway</artifactId>
+                                    <version>${nullaway.version}</version>
+                                </path>
+                            </annotationProcessorPaths>
+                        </configuration>
+                    </execution>
+                    <execution>
                         <!-- Tests are compiled as a patch of the module, so a JDK module the main
                              code never needs (the HTTP server the fetch test stands up) has to be
                              made readable here. At run time the tests are on the classpath and
@@ -307,8 +350,9 @@
                     <options>
                         <!-- The engine's automatic module calls System.load; without this the JDK
                              warns on every launch and says it will refuse in a future release.
-                             ALL-UNNAMED covers the jars this plugin puts on the classpath. -->
-                        <option>--enable-native-access=javafx.graphics,libtorrent4j,ALL-UNNAMED</option>
+                             ALL-UNNAMED covers the jars this plugin puts on the classpath.
+                             com.torrenta reads a piece libtorrent hands over by address (FFM). -->
+                        <option>--enable-native-access=com.torrenta,javafx.graphics,libtorrent4j,ALL-UNNAMED</option>
                         <option>-Dprism.order=${prism.pipeline}</option>
                     </options>
                     <launcher>torrenta</launcher>
@@ -346,6 +390,7 @@
             <properties>
                 <prism.pipeline>d3d,es2,sw</prism.pipeline>
                 <jpackage.icon>${project.basedir}/branding/torrenta.ico</jpackage.icon>
+                <jpackage.noxLauncher>${project.basedir}/src/jpackage/torrenta-nox-windows.properties</jpackage.noxLauncher>
                 <native.ext>dll</native.ext>
             </properties>
             <dependencies>
@@ -547,6 +592,14 @@
                                     <icon>${jpackage.icon}</icon>
                                     <destination>${project.build.directory}/dist</destination>
                                     <module>com.torrenta/com.torrenta.App</module>
+                                    <!-- The same image without a window: torrenta-nox runs App with
+                                         the headless flag, for a server and the systemd unit in docs. -->
+                                    <launchers>
+                                        <launcher>
+                                            <name>torrenta-nox</name>
+                                            <file>${jpackage.noxLauncher}</file>
+                                        </launcher>
+                                    </launchers>
                                     <modulePaths>
                                         <modulePath>${project.build.directory}/mods</modulePath>
                                     </modulePaths>
@@ -557,7 +610,7 @@
                                         <appContentPath>${project.build.directory}/native/torrenta-native</appContentPath>
                                     </appContentPaths>
                                     <javaOptions>
-                                        <javaOption>--enable-native-access=javafx.graphics,libtorrent4j</javaOption>
+                                        <javaOption>--enable-native-access=com.torrenta,javafx.graphics,libtorrent4j</javaOption>
                                         <javaOption>-Dprism.order=${prism.pipeline}</javaOption>
                                         <javaOption>-Dlibtorrent4j.jni.path=$APPDIR/../torrenta-native/libtorrent4j.${native.ext}</javaOption>
                                         <!-- A ceiling, not a tuning claim: without it the JVM takes a

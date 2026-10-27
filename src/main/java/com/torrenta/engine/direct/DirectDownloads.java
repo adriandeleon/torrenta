@@ -22,6 +22,7 @@ import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineException;
 import com.torrenta.engine.Priority;
@@ -29,6 +30,7 @@ import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentState;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -97,7 +99,7 @@ public final class DirectDownloads {
 
     private final List<Consumer<EngineEvent>> listeners = new CopyOnWriteArrayList<>();
     private volatile Consumer<DirectDownload> onTorrentFile = d -> {};
-    private ScheduledExecutorService thread;
+    private @Nullable ScheduledExecutorService thread;
     private boolean dirty;
 
     /** One curl process. Fields other than the process are the ticking thread's, under the lock. */
@@ -242,7 +244,7 @@ public final class DirectDownloads {
      * Adds a link, to {@code savePath} or the download folder when that is null. A link already in
      * the list is that download, as a torrent added twice is.
      */
-    public Torrent add(String url, String savePath, boolean paused) throws EngineException {
+    public Torrent add(String url, @Nullable String savePath, boolean paused) throws EngineException {
         return add(url, savePath, null, paused);
     }
 
@@ -251,7 +253,7 @@ public final class DirectDownloads {
      * given: made safe, numbered past a file already there, and kept when the download finishes
      * whatever the server calls it. Null or blank takes the link's own name.
      */
-    public synchronized Torrent add(String url, String savePath, String fileName, boolean paused)
+    public synchronized Torrent add(String url, @Nullable String savePath, @Nullable String fileName, boolean paused)
             throws EngineException {
         String link = url.strip();
         String id = DirectDownload.idOf(link);
@@ -263,8 +265,10 @@ public final class DirectDownloads {
         } catch (IOException | RuntimeException e) {
             throw new EngineException(tr("engine.error.downloadFolder", dir), e);
         }
-        boolean chosen = fileName != null && !fileName.isBlank();
-        String file = unusedFile(dir, chosen ? DirectNames.safe(fileName.strip()) : DirectNames.fromUrl(link), null);
+        String chosenName = fileName == null || fileName.isBlank() ? null : fileName.strip();
+        boolean chosen = chosenName != null;
+        String file =
+                unusedFile(dir, chosenName != null ? DirectNames.safe(chosenName) : DirectNames.fromUrl(link), null);
         DirectDownload d = DirectDownload.of(link, file, dir, Instant.now().getEpochSecond())
                 .withPaused(paused);
         if (chosen) d = d.withChosenName(file);
@@ -330,6 +334,16 @@ public final class DirectDownloads {
         synchronized (this) {
             schedule();
         }
+    }
+
+    /** The download's one file: the part while it runs, the finished file after. */
+    public synchronized java.util.Optional<Engine.OnDisk> onDisk(String id) throws EngineException {
+        DirectDownload d = require(id);
+        Path save = Path.of(d.savePath()).toAbsolutePath().normalize();
+        Path file = d.finished()
+                ? save.resolve(d.file())
+                : partOf(d).toAbsolutePath().normalize();
+        return java.util.Optional.of(new Engine.OnDisk(save, List.of(file), List.of()));
     }
 
     public void pause(String id) throws EngineException {
@@ -419,7 +433,7 @@ public final class DirectDownloads {
                 id, d.name(), tr(moveFiles ? "engine.event.moved" : "engine.event.pointed", d.name(), destination)));
     }
 
-    private void moveFile(String id, DirectDownload d, Run ending, String destination, boolean moveFiles)
+    private void moveFile(String id, DirectDownload d, @Nullable Run ending, String destination, boolean moveFiles)
             throws EngineException {
         if (ending != null) end(ending);
         Path from = d.finished() ? Path.of(d.savePath(), d.file()) : partOf(d);
@@ -450,7 +464,18 @@ public final class DirectDownloads {
                 id, d.savePath(), false, 0, 0, 0, 0, t.done(), 0, 0, active, 0, 0, r == null ? 0 : 1, d.url(), "", "");
         List<TorrentDetail.FileStatus> files =
                 List.of(new TorrentDetail.FileStatus(0, d.onDisk(), t.size(), t.done(), Priority.NORMAL));
-        return new TorrentDetail(general, files, List.of(), List.of(), new boolean[0]);
+        String command = Curl.shellCommand(
+                options.get().curl(), d.url(), Path.of(d.savePath(), d.file()), userAgent, proxy, Curl.Shell.current());
+        return new TorrentDetail(
+                general,
+                files,
+                List.of(),
+                List.of(),
+                new boolean[0],
+                new int[0],
+                List.of(),
+                java.util.Set.of(),
+                command);
     }
 
     // ---- the ticking thread -------------------------------------------------------------------------
@@ -543,14 +568,16 @@ public final class DirectDownloads {
             }
             Run run = new Run(process, restarted, have, limit);
             running.put(d.id(), run);
+            // Null once stop() has run: the exit is then nobody's to handle.
             ScheduledExecutorService t = thread;
             process.onExit().thenRun(() -> {
-                if (!t.isShutdown()) t.execute(() -> exited(d.id(), run));
+                if (t != null && !t.isShutdown()) t.execute(() -> exited(d.id(), run));
             });
             return true;
         } catch (IOException | RuntimeException e) {
             String program = o.curl().isEmpty() ? "curl" : o.curl();
-            String message = e instanceof IOException && !Files.isDirectory(part.getParent())
+            Path folder = part.getParent();
+            String message = e instanceof IOException && folder != null && !Files.isDirectory(folder)
                     ? tr("direct.error.write")
                     : tr("direct.error.noCurl", program);
             LOG.log(Level.INFO, "Could not start " + program + " for " + d.url(), e);
@@ -597,7 +624,7 @@ public final class DirectDownloads {
     }
 
     /** Lock held. The part renamed to its final name; null (and in error) when it cannot be. */
-    private DirectDownload finish(DirectDownload d, CurlHeaders headers, Path part) {
+    private @Nullable DirectDownload finish(DirectDownload d, CurlHeaders headers, Path part) {
         String wanted =
                 d.named() ? d.file() : headers.name().map(DirectNames::safe).orElse(d.file());
         String file = unusedFile(d.savePath(), wanted, d.id());
@@ -645,7 +672,7 @@ public final class DirectDownloads {
      * Lock held. Marks the run as ended by us, takes it out and holds the download back; the
      * caller ends it unlocked, then {@link #release}s it.
      */
-    private Run stopRun(String id) {
+    private @Nullable Run stopRun(String id) {
         Run r = running.remove(id);
         if (r != null) {
             r.stopping = true;
@@ -654,7 +681,7 @@ public final class DirectDownloads {
         return r;
     }
 
-    private void endAndRelease(String id, Run ending) {
+    private void endAndRelease(String id, @Nullable Run ending) {
         if (ending == null) return;
         try {
             end(ending);
@@ -685,7 +712,7 @@ public final class DirectDownloads {
      * A file name in {@code dir} that neither an existing file (finished or {@code .part}) nor
      * another download there has; {@code self} is the download asking, whose own part is no clash.
      */
-    private String unusedFile(String dir, String wanted, String self) {
+    private String unusedFile(String dir, String wanted, @Nullable String self) {
         DirectDownload own = self == null ? null : downloads.get(self);
         return DirectNames.unused(wanted, name -> {
             for (DirectDownload other : downloads.values()) {

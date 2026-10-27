@@ -7,6 +7,7 @@ import com.torrenta.engine.Connectivity;
 import com.torrenta.engine.SessionStats;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentState;
+import com.torrenta.net.InterfaceWatch;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -51,6 +52,25 @@ final class NetworkStatus {
 
     /** The port's words, or empty before the engine has opened (or failed to open) one. */
     static Optional<Port> port(Connectivity c, long runningSeconds) {
+        return port(c, runningSeconds, InterfaceWatch.State.UNBOUND);
+    }
+
+    /**
+     * The same with the binding: an interface that is down or gone is the port's whole story (it
+     * reaches no one, and nothing leaks around it), said before whether the port is open. A
+     * binding that works is named in the tooltip with its addresses, and so is this machine's
+     * address as the swarm sees it, once libtorrent has settled on one.
+     */
+    static Optional<Port> port(Connectivity c, long runningSeconds, InterfaceWatch.State bound) {
+        // Said even with no port: libtorrent opens nothing on an interface that is not there, and
+        // sends no listen alert either way.
+        if (bound.reachesNoOne()) {
+            boolean down = bound.presence() == InterfaceWatch.Presence.DOWN;
+            return Optional.of(new Port(
+                    tr(down ? "status.port.boundDown" : "status.port.boundMissing", bound.label()),
+                    tr(down ? "status.port.boundDown.tip" : "status.port.boundMissing.tip", bound.label()),
+                    Dot.DOWN));
+        }
         if (c.port() <= 0) return Optional.empty();
         Dot dot;
         String tip;
@@ -81,6 +101,9 @@ final class NetworkStatus {
                 case NONE -> {}
             }
         }
+        if (bound.presence() == InterfaceWatch.Presence.UP)
+            tip += "\n" + tr("status.port.boundTo", bound.label(), String.join(", ", bound.addresses()));
+        if (!c.externalAddress().isEmpty()) tip += "\n" + tr("status.port.seenAs", c.externalAddress());
         return Optional.of(new Port(text, tip, dot));
     }
 

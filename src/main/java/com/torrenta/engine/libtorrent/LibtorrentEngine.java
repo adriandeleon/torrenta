@@ -6,8 +6,11 @@ import java.lang.ref.Reference;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -24,6 +27,8 @@ import com.torrenta.AppInfo;
 import com.torrenta.cli.CommandLine;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Connectivity;
+import com.torrenta.engine.ContentIndex;
+import com.torrenta.engine.ContentKeys;
 import com.torrenta.engine.CreateRequest;
 import com.torrenta.engine.CreatedTorrent;
 import com.torrenta.engine.Engine;
@@ -35,6 +40,7 @@ import com.torrenta.engine.IpRange;
 import com.torrenta.engine.Priority;
 import com.torrenta.engine.SessionStats;
 import com.torrenta.engine.ShareLimit;
+import com.torrenta.engine.SwarmPreview;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentLabels;
@@ -46,6 +52,7 @@ import com.torrenta.engine.TrackerHost;
 import com.torrenta.engine.WebSeeds;
 import com.torrenta.store.StatsStore;
 import com.torrenta.store.TorrentStore;
+import org.jspecify.annotations.Nullable;
 import org.libtorrent4j.AddTorrentParams;
 import org.libtorrent4j.Address;
 import org.libtorrent4j.AlertListener;
@@ -73,6 +80,7 @@ import org.libtorrent4j.Vectors;
 import org.libtorrent4j.alerts.AddTorrentAlert;
 import org.libtorrent4j.alerts.Alert;
 import org.libtorrent4j.alerts.AlertType;
+import org.libtorrent4j.alerts.ExternalIpAlert;
 import org.libtorrent4j.alerts.FileCompletedAlert;
 import org.libtorrent4j.alerts.FileErrorAlert;
 import org.libtorrent4j.alerts.FileRenameFailedAlert;
@@ -81,8 +89,12 @@ import org.libtorrent4j.alerts.IncomingConnectionAlert;
 import org.libtorrent4j.alerts.ListenFailedAlert;
 import org.libtorrent4j.alerts.ListenSucceededAlert;
 import org.libtorrent4j.alerts.PeerConnectAlert;
+import org.libtorrent4j.alerts.PeerDisconnectedAlert;
+import org.libtorrent4j.alerts.PeerErrorAlert;
+import org.libtorrent4j.alerts.PieceFinishedAlert;
 import org.libtorrent4j.alerts.PortmapAlert;
 import org.libtorrent4j.alerts.PortmapErrorAlert;
+import org.libtorrent4j.alerts.ReadPieceAlert;
 import org.libtorrent4j.alerts.SaveResumeDataAlert;
 import org.libtorrent4j.alerts.SaveResumeDataFailedAlert;
 import org.libtorrent4j.alerts.SessionStatsAlert;
@@ -163,6 +175,14 @@ public final class LibtorrentEngine implements Engine {
     /** How often the all-time totals are written; a crash costs at most this much counting. */
     private static final long STATS_SAVE_SECONDS = 300;
 
+    /**
+     * libtorrent's message for {@code errors::upload_upload_connection}, the one sign of a seed
+     * that dropped a probe at the handshake. libtorrent4j exposes no error category or enum to
+     * compare with; the text is libtorrent's own, never translated, and pinned with the version
+     * (a {@code .torrent} probe's test meets its seeder only this way).
+     */
+    private static final String UPLOAD_TO_UPLOAD = "upload to upload connection";
+
     /** Peers a fetch hands to its torrent at most; libtorrent's own peer list does the rest. */
     private static final int MAX_HANDED_OVER = 50;
 
@@ -188,17 +208,29 @@ public final class LibtorrentEngine implements Engine {
 
     private volatile long startedAtMs;
     /** The {@link Counter}s' indices into a stats alert, resolved once the native is loaded; null before start. */
-    private volatile int[] counterIndex;
+    private volatile int @Nullable [] counterIndex;
     /** The last stats alert's values, one per {@link Counter}, in its order; written on the alert thread. */
     private volatile long[] counters = new long[Counter.values().length];
 
-    private SessionManager session;
-    private ScheduledExecutorService flusher;
+    private @Nullable SessionManager session;
+    private @Nullable ScheduledExecutorService flusher;
 
     /** The connection settings in force; the session starts with them and takes changes live. */
     private volatile EngineSettings engineSettings;
+    /**
+     * The pair the session last said is in force ({@link #refreshLimits}), which the pack is built
+     * with; the person's switch until the session first says.
+     */
+    private volatile boolean alternativeInForce;
     /** Kept by the alert thread from listen, port-map, incoming-connection and DHT alerts. */
     private final AtomicReference<Connectivity> connectivity = new AtomicReference<>(Connectivity.NONE);
+    /**
+     * The complete files of v2 torrents by root, kept by the alert thread: a torrent is indexed
+     * again when a file completes (libtorrent posts that for every whole file as it loads a
+     * torrent, so a start rebuilds it), when it finishes, is checked, renamed or moved, and is
+     * forgotten when it is removed.
+     */
+    private final ContentIndex contentIndex = new ContentIndex();
 
     /** The filter in force, kept so a start after a set applies it; empty means none. */
     private volatile List<IpRange> ipFilter = List.of();
@@ -212,6 +244,13 @@ public final class LibtorrentEngine implements Engine {
 
     /** Ids re-added from the store at start, so their add alert reads "Restored", not "Added". */
     private final Set<String> restoring = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Torrents brought back from the store this session (at start, by undo, by an import). Their
+     * finished alert, posted when libtorrent loads one already complete, is no download finishing:
+     * run-on-finished and the notification must not run for every seed at every start.
+     */
+    private final Set<String> broughtBack = ConcurrentHashMap.newKeySet();
 
     /** Magnets to pause once their metadata arrives: the dialog's "stop after metadata". */
     private final Set<String> stopAfterMetadata = ConcurrentHashMap.newKeySet();
@@ -248,6 +287,21 @@ public final class LibtorrentEngine implements Engine {
     /** What the files are still owed, by id; absent means nothing. The sidecar is the durable copy. */
     private final Map<String, TorrentStorage> storage = new ConcurrentHashMap<>();
 
+    /**
+     * Archives being read for {@link com.torrenta.engine.ArchiveProbe}, by torrent id: the piece
+     * length and a reading per file. Kept on the alert thread; a torrent leaves when its last
+     * archive has been read.
+     */
+    private final Map<String, ArchiveReads> archiveReads = new ConcurrentHashMap<>();
+
+    /** The archives found asking for a password, by torrent id; not kept across a restart (read again). */
+    private final Map<String, Set<Integer>> encryptedArchives = new ConcurrentHashMap<>();
+
+    /** At most this many archives are read per torrent: a set of volumes is one, and few torrents hold more. */
+    private static final int ARCHIVES_PER_TORRENT = 8;
+
+    private record ArchiveReads(int pieceLength, Map<Integer, com.torrenta.engine.ArchiveProbe.Reading> byFile) {}
+
     /** Moves issued and not yet answered, so a second trigger does not issue another. */
     private final Set<String> moving = ConcurrentHashMap.newKeySet();
     /**
@@ -283,6 +337,7 @@ public final class LibtorrentEngine implements Engine {
         this.downloadDir = downloadDir;
         this.store = store;
         this.engineSettings = settings;
+        this.alternativeInForce = settings.speed().alternativeOn();
         this.statsStore = stats;
     }
 
@@ -300,14 +355,17 @@ public final class LibtorrentEngine implements Engine {
         try {
             connectivity.set(Connectivity.NONE.dht(engineSettings.protocol().dht()));
             s = new SessionManager();
-            s.start(new SessionParams(toPack(engineSettings)));
+            // Listening before starting: the session opens its listen sockets as it starts, and a
+            // listen_failed posted then was lost to a listener added afterwards (a seeder that
+            // never listened, with neither answer recorded).
+            s.addListener(new Listener());
+            s.start(new SessionParams(toPack(engineSettings, alternativeInForce)));
         } catch (LinkageError e) {
             // The JNI static initialiser wraps a failed System.load in a LinkageError whose own
             // message is a pointer to the project page; the cause says what actually went wrong.
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             throw new EngineException(tr("engine.error.load", cause.getMessage()), e);
         }
-        s.addListener(new Listener());
         session = s;
         // The counters' places in a stats alert are the library's to say, and asking is native.
         counterIndex = Counter.resolve();
@@ -337,24 +395,33 @@ public final class LibtorrentEngine implements Engine {
             return;
         }
         restoring.addAll(stored.keySet());
-        for (Map.Entry<String, byte[]> entry : stored.entrySet()) {
-            restoreLabels(entry.getKey());
-            restoreStorage(entry.getKey());
-            error_code ec = new error_code();
-            add_torrent_params params = libtorrent.read_resume_data_ex(Vectors.bytes2byte_vector(entry.getValue()), ec);
-            if (ec.value() != 0) {
-                LOG.warning("Resume data for " + entry.getKey() + " is unreadable (" + ec.message() + "); skipped");
-                continue;
-            }
-            restoreNames(entry.getKey(), params);
-            error_code added = new error_code();
-            s.swig().add_torrent(params, added);
-            if (added.value() != 0) {
-                LOG.warning("Could not bring back " + entry.getKey() + ": " + added.message());
-                continue;
-            }
-            rememberTrackers(entry.getKey(), new AddTorrentParams(params).getTrackers());
+        for (Map.Entry<String, byte[]> entry : stored.entrySet()) addFromStore(s, entry.getKey(), entry.getValue());
+    }
+
+    /**
+     * One torrent back from what the store holds: its sidecars read, its resume data added as it
+     * is (no recheck), its renamed files put back first. The caller marks it {@link #restoring},
+     * so its add alert reads "Restored" and nothing that runs on an add runs. False, and said in
+     * the log, when it could not be brought back.
+     */
+    private boolean addFromStore(SessionManager s, String id, byte[] resume) {
+        restoreLabels(id);
+        restoreStorage(id);
+        error_code ec = new error_code();
+        add_torrent_params params = libtorrent.read_resume_data_ex(Vectors.bytes2byte_vector(resume), ec);
+        if (ec.value() != 0) {
+            LOG.warning("Resume data for " + id + " is unreadable (" + ec.message() + "); skipped");
+            return false;
         }
+        restoreNames(id, params);
+        error_code added = new error_code();
+        s.swig().add_torrent(params, added);
+        if (added.value() != 0) {
+            LOG.warning("Could not bring back " + id + ": " + added.message());
+            return false;
+        }
+        rememberTrackers(id, new AddTorrentParams(params).getTrackers());
+        return true;
     }
 
     /** The sidecar, if there is one; an unreadable one costs the labels, not the torrent. */
@@ -380,6 +447,8 @@ public final class LibtorrentEngine implements Engine {
                 try {
                     TorrentStorage owed = TorrentStorage.decode(bytes);
                     if (!owed.isEmpty()) storage.put(id, owed);
+                    // Added to stop once its file list is in, and restarted before it came.
+                    if (owed.stopOnMetadata()) stopAfterMetadata.add(id);
                 } catch (IOException e) {
                     LOG.warning("Storage record for " + id + " is unreadable (" + e.getMessage() + "); skipped");
                 }
@@ -458,14 +527,14 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public synchronized Torrent add(AddRequest request, MetadataFetch from) throws EngineException {
+    public synchronized Torrent add(AddRequest request, SwarmProbe from) throws EngineException {
         if (!(from instanceof Fetch fetch)) return Engine.super.add(request, from);
         fetch.cancel();
         return add(request, fetch);
     }
 
     /** {@code from}: an ended fetch whose peers the torrent starts with, if it is the same one. */
-    private Torrent add(AddRequest request, Fetch from) throws EngineException {
+    private Torrent add(AddRequest request, @Nullable Fetch from) throws EngineException {
         SessionManager s = running();
         AddTorrentParams params;
         TorrentInfo info = null;
@@ -562,7 +631,9 @@ public final class LibtorrentEngine implements Engine {
         if (!request.labels().isEmpty()) writeLabels(id, request.labels());
         TorrentStorage owed = new TorrentStorage(
                         start.equals(destination) ? "" : destination.toString(), choices.partSuffix(), Set.of())
-                .withRenamed(laidOut, originals);
+                .withRenamed(laidOut, originals)
+                .withFound(info == null ? Map.of() : choices.found())
+                .withStopOnMetadata(stopAfterMetadata.contains(id));
         if (!owed.isEmpty()) writeStorage(id, owed);
 
         return snapshot(handle);
@@ -667,6 +738,73 @@ public final class LibtorrentEngine implements Engine {
     }
 
     /**
+     * Puts the torrent's complete files into the content index under the names they have on disk
+     * (a person's or the layout's rename included), replacing what it had of the torrent. Alert
+     * thread. A file with neither a v2 root nor a v1 key is left out; a file still carrying the {@code
+     * .part} suffix is about to be renamed back, and that rename indexes it again.
+     */
+    private void indexContent(String id, TorrentHandle h) {
+        TorrentInfo info = h.status(StatusQuery.FLAGS).hasMetadata() ? h.torrentFile() : null;
+        if (info == null || !info.isValid()) {
+            contentIndex.remove(id);
+            return;
+        }
+        try {
+            FileStorage files = info.files();
+            long[] progress = h.fileProgress();
+            Path save = Path.of(h.savePath());
+            TorrentStorage owed = storage.getOrDefault(id, TorrentStorage.NONE);
+            boolean v2 = info.swig().v2();
+            boolean v1 = info.swig().v1();
+            List<ContentIndex.Entry> complete = new ArrayList<>();
+            for (int i = 0; i < files.numFiles(); i++) {
+                long size = files.fileSize(i);
+                if (files.padFileAt(i) || size <= 0 || i >= progress.length || progress[i] < size) continue;
+                if (owed.suffixed().contains(i)) continue;
+                String root = v2 ? root(files, i) : "";
+                String v1Key = v1 ? v1Key(info, files, i) : "";
+                if (root.isEmpty() && v1Key.isEmpty()) continue;
+                Path onDisk = save.resolve(owed.name(i, slashes(files.filePath(i))))
+                        .toAbsolutePath()
+                        .normalize();
+                if (!root.isEmpty()) complete.add(new ContentIndex.Entry(root, id, i, onDisk, size));
+                if (!v1Key.isEmpty()) complete.add(new ContentIndex.Entry(v1Key, id, i, onDisk, size));
+            }
+            // Under the store's lock, against remove(): an alert that came in just before the
+            // torrent went must not put it back.
+            synchronized (store) {
+                if (!removed.contains(id)) contentIndex.put(id, complete);
+            }
+        } catch (RuntimeException e) {
+            // An index that misses a torrent costs a download, never the alert thread.
+            LOG.log(Level.FINE, "Could not index " + id, e);
+        } finally {
+            Reference.reachabilityFence(info);
+        }
+    }
+
+    /** A file's v2 Merkle root, hex; empty for a v1-only torrent's file or an empty one. */
+    /** The file's {@link ContentKeys#v1 v1 key}, or empty when its pieces are not its own. */
+    private static String v1Key(TorrentInfo info, FileStorage files, int index) {
+        long offset = files.fileOffset(index);
+        long size = files.fileSize(index);
+        long pieceLength = info.pieceLength();
+        // The padding after a file (a hybrid's, BEP 47's) is zeros that finish its last piece.
+        long padded = size;
+        if (index + 1 < files.numFiles() && files.padFileAt(index + 1)) padded += files.fileSize(index + 1);
+        if (!ContentKeys.ownPieces(offset, padded, pieceLength, files.totalSize())) return "";
+        int[] span = ContentKeys.pieces(offset, padded, pieceLength);
+        List<String> hashes = new ArrayList<>(span[1] - span[0] + 1);
+        for (int p = span[0]; p <= span[1]; p++) hashes.add(info.hashForPiece(p).toHex());
+        return ContentKeys.v1(pieceLength, size, hashes);
+    }
+
+    private static String root(FileStorage files, int index) {
+        org.libtorrent4j.swig.sha256_hash root = files.swig().root(index);
+        return root.is_all_zeros() ? "" : root.to_hex();
+    }
+
+    /**
      * Moves a finished torrent to its destination, once. {@code dont_replace}: a file already at
      * the destination is kept and the torrent uses it, so a complete copy is never written over.
      * The answer is a {@code storage_moved} alert, where the record is cleared.
@@ -705,11 +843,27 @@ public final class LibtorrentEngine implements Engine {
         return running().swig().listen_port();
     }
 
+    /**
+     * Asks the session to open its listen sockets again, for a loopback test whose seeder never
+     * listened: on Windows CI a session has come up with no listen socket and no listen alert of
+     * either kind, its torrents working, the port 0 for two minutes.
+     */
+    void reopenSocketsForTest() throws EngineException {
+        running().swig().reopen_network_sockets();
+    }
+
     /** Tells a fetch about a peer on this machine, for the test that hands its peers over. */
-    void connectFetchForTest(MetadataFetch fetch, int port) throws EngineException {
+    void connectFetchForTest(SwarmProbe fetch, int port) throws EngineException {
         TorrentHandle h = ((Fetch) fetch).handle(running());
         if (h == null) throw new EngineException(tr("engine.error.fetchEnded"));
         h.swig().connect_peer(new tcp_endpoint(Address.parseIp("127.0.0.1").swig(), port));
+    }
+
+    /** {@link #forgetPeersForTest} for a fetch, the hidden torrent behind a magnet's file list. */
+    void forgetFetchPeersForTest(SwarmProbe fetch) throws EngineException {
+        TorrentHandle h = ((Fetch) fetch).handle(running());
+        if (h == null) throw new EngineException(tr("engine.error.fetchEnded"));
+        h.swig().clear_peers();
     }
 
     /** How many of the torrent's peers it dialled itself, for the same test. */
@@ -725,11 +879,70 @@ public final class LibtorrentEngine implements Engine {
     }
 
     /**
+     * Forgets the torrent's peer list, for a loopback test whose seeder refused it a few times:
+     * libtorrent stops dialling a peer after three failed attempts, and another connect_peer to
+     * the same address does not bring it back; a cleared list takes it as a new peer.
+     */
+    void forgetPeersForTest(String id) throws EngineException {
+        handle(id).swig().clear_peers();
+    }
+
+    /** Tells the torrent about a peer at any address, for the test of where dials leave from. */
+    void connectPeerForTest(String id, String address, int port) throws EngineException {
+        handle(id).swig().connect_peer(new tcp_endpoint(Address.parseIp(address).swig(), port));
+    }
+
+    /**
+     * A DHT on loopback, for the updatable-torrent tests: libtorrent keeps loopback and same-/24
+     * nodes out of its routing table and searches unless told otherwise, and expects node ids that
+     * match an address; then the other session's DHT as the one node to start from.
+     */
+    synchronized void dhtOnLoopbackForTest(int otherPort) throws EngineException {
+        SessionManager s = running();
+        SettingsPack pack = new SettingsPack();
+        for (settings_pack.bool_types key : new settings_pack.bool_types[] {
+            settings_pack.bool_types.dht_restrict_routing_ips,
+            settings_pack.bool_types.dht_restrict_search_ips,
+            settings_pack.bool_types.dht_enforce_node_id,
+            settings_pack.bool_types.dht_prefer_verified_node_ids,
+            settings_pack.bool_types.dht_ignore_dark_internet
+        }) pack.setBoolean(key.swigValue(), false);
+        s.applySettings(pack);
+        if (otherPort > 0) new SessionHandle(s.swig()).addDhtNode(new org.libtorrent4j.Pair<>("127.0.0.1", otherPort));
+    }
+
+    /**
      * Retries a failed peer connection after a second instead of libtorrent's minute, for the
      * loopback tests: {@code connect_peer} only adds the address to the peer list, and an address
      * whose last attempt failed is not dialled again for {@code min_reconnect_time}, so one early
      * refusal would otherwise outlast any test deadline.
      */
+    /**
+     * The session's peer connections as they start and end, for a loopback test that fails to
+     * say why it never got a peer: off (null) unless a test asks, and only the last few kept.
+     */
+    private volatile java.util.@Nullable Deque<String> peerLog;
+
+    private static final int PEER_LOG_LINES = 40;
+
+    /** Alert thread. One line of the peer log, when a test keeps one. */
+    private void logPeer(String line) {
+        java.util.Deque<String> log = peerLog;
+        if (log == null) return;
+        log.addLast(java.time.Instant.now() + " " + line);
+        while (log.size() > PEER_LOG_LINES) log.pollFirst();
+    }
+
+    /** Starts the peer log; a second call keeps the lines already there. */
+    void recordPeersForTest() {
+        if (peerLog == null) peerLog = new java.util.concurrent.ConcurrentLinkedDeque<>();
+    }
+
+    List<String> peerLogForTest() {
+        java.util.Deque<String> log = peerLog;
+        return log == null ? List.of() : List.copyOf(log);
+    }
+
     void reconnectQuicklyForTest() throws EngineException {
         SettingsPack pack = new SettingsPack();
         pack.setInteger(settings_pack.int_types.min_reconnect_time.swigValue(), 1);
@@ -760,6 +973,147 @@ public final class LibtorrentEngine implements Engine {
     @Override
     public synchronized void rename(String id, String name) throws EngineException {
         writeLabels(id, labelsOf(id).withName(name));
+    }
+
+    @Override
+    public Map<String, com.torrenta.engine.Following> followings() {
+        Map<String, com.torrenta.engine.Following> out = new java.util.TreeMap<>();
+        labels.forEach((id, l) -> {
+            if (l.following() != null) out.put(id, l.following());
+        });
+        return out;
+    }
+
+    @Override
+    public synchronized void setFollowing(String id, com.torrenta.engine.@Nullable Following following)
+            throws EngineException {
+        writeLabels(id, labelsOf(id).withFollowing(following));
+    }
+
+    /** A DHT get of an updatable address in flight: the best answer so far, and whether it is final. */
+    private static final class MutableLookup {
+        volatile long seq = -1;
+        volatile byte @Nullable [] value;
+        final java.util.concurrent.CompletableFuture<Void> done = new java.util.concurrent.CompletableFuture<>();
+    }
+
+    /** By key and salt in hex: what the {@code dht_mutable_item_alert} handler fills in. */
+    private final Map<String, MutableLookup> mutableLookups = new ConcurrentHashMap<>();
+
+    private static String lookupKey(byte[] key, byte[] salt) {
+        return java.util.HexFormat.of().formatHex(key) + ":"
+                + java.util.HexFormat.of().formatHex(salt);
+    }
+
+    /**
+     * Posted under the lock (a get in flight for the same address is joined), waited for outside
+     * it: a DHT get takes seconds. libtorrent answers with each better item it meets and marks the
+     * last one authoritative; the highest sequence number is kept.
+     */
+    @Override
+    public java.util.Optional<MutableItem> lookupMutable(
+            com.torrenta.engine.MutableSource source, java.time.Duration timeout)
+            throws EngineException, InterruptedException {
+        String key = lookupKey(source.publicKey(), source.salt());
+        MutableLookup lookup;
+        synchronized (this) {
+            SessionManager s = running();
+            // Off by the setting is said; a DHT still starting finds nothing, and is asked again.
+            if (!engineSettings.protocol().dht()) throw new EngineException(tr("engine.error.dhtOff"));
+            boolean[] fresh = {false};
+            lookup = mutableLookups.computeIfAbsent(key, k -> {
+                fresh[0] = true;
+                return new MutableLookup();
+            });
+            if (fresh[0]) new SessionHandle(s.swig()).dhtGetItem(source.publicKey(), source.salt());
+        }
+        try {
+            lookup.done.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            // What came in so far is the answer.
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw new EngineException(e.getMessage(), e);
+        } finally {
+            mutableLookups.remove(key, lookup);
+        }
+        byte[] value = lookup.value;
+        if (value == null) return java.util.Optional.empty();
+        try {
+            return java.util.Optional.of(
+                    new MutableItem(lookup.seq, com.torrenta.engine.transmission.Bencode.decode(value)));
+        } catch (IOException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    /** By key and salt in hex: a put in flight, completed by its {@code dht_put_alert}. */
+    private final Map<String, java.util.concurrent.CompletableFuture<MutablePut>> mutablePuts =
+            new ConcurrentHashMap<>();
+
+    /** Ed25519 from libtorrent's own code, so the secret is in the form its signing takes. */
+    @Override
+    public com.torrenta.engine.MutableKey newMutableKey() throws EngineException {
+        synchronized (this) {
+            running(); // the native is loaded by now
+        }
+        org.libtorrent4j.Pair<byte[], byte[]> pair =
+                org.libtorrent4j.Ed25519.createKeypair(org.libtorrent4j.Ed25519.createSeed());
+        return new com.torrenta.engine.MutableKey(pair.first, pair.second);
+    }
+
+    /**
+     * Posted under the lock, waited for outside it. libtorrent looks the address up first and
+     * signs one above the highest number it met, which the alert gives back with the nodes that
+     * stored it; there is no way to choose the number. One put per address at a time.
+     */
+    @Override
+    public MutablePut putMutable(
+            com.torrenta.engine.MutableKey key, byte[] salt, byte[] value, java.time.Duration timeout)
+            throws EngineException, InterruptedException {
+        String k = lookupKey(key.publicKey(), salt);
+        java.util.concurrent.CompletableFuture<MutablePut> put = new java.util.concurrent.CompletableFuture<>();
+        synchronized (this) {
+            SessionManager s = running();
+            if (!engineSettings.protocol().dht()) throw new EngineException(tr("engine.error.dhtOff"));
+            if (mutablePuts.putIfAbsent(k, put) != null) throw new EngineException(tr("engine.error.putInFlight"));
+            new SessionHandle(s.swig())
+                    .dhtPutItem(key.publicKey(), key.secretKey(), org.libtorrent4j.Entry.bdecode(value), salt);
+        }
+        try {
+            return put.get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            throw new EngineException(tr("engine.error.putTimedOut"));
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw new EngineException(e.getMessage(), e);
+        } finally {
+            mutablePuts.remove(k, put);
+        }
+    }
+
+    /** Alert thread: a put finished; an immutable one's key is all zeros and matches nothing. */
+    private void onMutablePut(org.libtorrent4j.alerts.DhtPutAlert alert) {
+        java.util.concurrent.CompletableFuture<MutablePut> put =
+                mutablePuts.get(lookupKey(alert.publicKey(), alert.salt()));
+        if (put != null) put.complete(new MutablePut(alert.seq(), alert.swig().getNum_success()));
+    }
+
+    /** Alert thread: an item met under an address being looked up. */
+    private void onMutableItem(org.libtorrent4j.alerts.DhtMutableItemAlert alert) {
+        MutableLookup lookup = mutableLookups.get(lookupKey(alert.key(), alert.salt()));
+        if (lookup == null) return;
+        long seq = alert.seq();
+        byte[] value;
+        try {
+            value = alert.item().bencode();
+        } catch (RuntimeException e) {
+            value = null;
+        }
+        // An empty answer (nobody had it) bencodes to nothing worth keeping.
+        if (value != null && value.length > 1 && seq > lookup.seq) {
+            lookup.value = value;
+            lookup.seq = seq;
+        }
+        if (alert.swig().getAuthoritative()) lookup.done.complete(null);
     }
 
     /** The torrent's labels, none if it has none; an id the session lacks is an error. */
@@ -793,9 +1147,16 @@ public final class LibtorrentEngine implements Engine {
             TorrentInfo info = params.getTorrentInfo();
             FileStorage files = info.files();
             List<TorrentPreview.FileEntry> entries = new ArrayList<>(files.numFiles());
+            boolean v2 = info.swig().v2();
+            boolean v1 = info.swig().v1();
             for (int i = 0; i < files.numFiles(); i++) {
                 if (files.padFileAt(i)) continue;
-                entries.add(new TorrentPreview.FileEntry(i, files.filePath(i).replace('\\', '/'), files.fileSize(i)));
+                entries.add(new TorrentPreview.FileEntry(
+                        i,
+                        files.filePath(i).replace('\\', '/'),
+                        files.fileSize(i),
+                        v2 ? root(files, i) : "",
+                        v1 ? v1Key(info, files, i) : ""));
             }
             // The real files' bytes, not totalSize(): a hybrid torrent's padding files are not content.
             long size =
@@ -939,7 +1300,18 @@ public final class LibtorrentEngine implements Engine {
                 problem = e.getMessage();
             }
         }
-        return new CreatedTorrent(bytes, id, name, v1, v2, pieces, pieceLength, size, magnet, seeding, problem);
+        return new CreatedTorrent(
+                bytes,
+                id,
+                name,
+                v1,
+                v2,
+                pieces,
+                pieceLength,
+                size,
+                magnet,
+                seeding,
+                Objects.requireNonNullElse(problem, ""));
     }
 
     /** Every file under the path is in: libtorrent's listing asks about each. */
@@ -950,20 +1322,54 @@ public final class LibtorrentEngine implements Engine {
         }
     }
 
+    /**
+     * A magnet's probe fetches the metadata first, then looks; a {@code .torrent}'s has it and
+     * looks at once. Either is a hidden torrent ({@link Fetch}), the same from then on.
+     */
     @Override
-    public synchronized MetadataFetch fetchMetadata(String magnet) throws EngineException {
+    public synchronized SwarmProbe probe(AddRequest.Source source, boolean privateToo) throws EngineException {
         SessionManager s = running();
         AddTorrentParams params;
-        try {
-            params = AddTorrentParams.parseMagnetUri(magnet);
-        } catch (RuntimeException e) {
-            throw new EngineException(tr("engine.error.badMagnet"), e);
+        String magnet = null;
+        byte[] bytes = null;
+        switch (source) {
+            case AddRequest.Magnet m -> {
+                magnet = m.uri();
+                try {
+                    params = AddTorrentParams.parseMagnetUri(magnet);
+                } catch (RuntimeException e) {
+                    throw new EngineException(tr("engine.error.badMagnet"), e);
+                }
+            }
+            case AddRequest.TorrentFile f -> {
+                bytes = f.bytes();
+                params = load(bytes, f.origin());
+            }
         }
         String id = params.getInfoHashes().getBest().toHex();
         if (find(s, id) != null) throw new EngineException(tr("engine.error.alreadyInList"));
-        // Upload mode writes nothing; the folder is only somewhere for libtorrent to look. Out of
-        // the queue's hands, so a full download queue does not hold the file list back.
-        params.setSavePath(downloadDir.get().toString());
+        if (bytes != null) {
+            TorrentInfo info = params.getTorrentInfo();
+            boolean isPrivate = info != null && info.isPrivate();
+            Reference.reachabilityFence(info);
+            if (isPrivate && !privateToo) {
+                // Never joins: the file list is the .torrent's own, and the swarm is not looked at.
+                Fetch kept = new Fetch(id, null, null, privateToo);
+                kept.end(bytes, null);
+                return kept;
+            }
+        }
+        // Upload mode writes nothing; the folder is only somewhere for libtorrent to look, and an
+        // empty one of its own, so that the check at the metadata, while the probe stays to look
+        // at the swarm, never hashes a copy already in the download folder. Out of the queue's
+        // hands, so a full download queue does not hold the file list back.
+        Path probeDir;
+        try {
+            probeDir = Files.createTempDirectory("torrenta-probe-");
+        } catch (java.io.IOException e) {
+            throw new EngineException(e.getMessage(), e);
+        }
+        params.setSavePath(probeDir.toString());
         torrent_flags_t flags = params.getFlags()
                 .or_(Flags.UPLOAD_MODE)
                 .and_(Flags.AUTO_MANAGED.inv())
@@ -972,27 +1378,71 @@ public final class LibtorrentEngine implements Engine {
         params.setFlags(flags);
         appendDefaultTrackers(params);
 
-        Fetch fetch = new Fetch(id, magnet);
-        if (fetches.putIfAbsent(id, fetch) != null) throw new EngineException(tr("engine.error.alreadyFetching"));
+        Fetch fetch = new Fetch(id, magnet, probeDir, privateToo);
+        if (fetches.putIfAbsent(id, fetch) != null) {
+            deleteQuietly(probeDir);
+            throw new EngineException(tr("engine.error.alreadyFetching"));
+        }
         fetchAddAlerts.add(id);
         error_code ec = new error_code();
         s.swig().add_torrent(params.swig(), ec);
         if (ec.value() != 0) {
             fetches.remove(id, fetch);
+            deleteQuietly(probeDir);
             throw new EngineException(ec.message());
         }
+        // A .torrent's file list is in from the start; no metadata alert will say so.
+        if (bytes != null) fetch.listed(bytes);
         return fetch;
     }
 
-    /** One fetch: the dialog polls {@link #peers()} and waits on {@link #torrent()}. */
-    private final class Fetch implements MetadataFetch {
+    /** A probe's folder: empty, since upload mode writes nothing; anything else is left alone. */
+    private static void deleteQuietly(@Nullable Path dir) {
+        if (dir == null) return;
+        try {
+            Files.deleteIfExists(dir);
+        } catch (java.io.IOException e) {
+            LOG.log(Level.FINE, "Probe folder left behind: " + dir, e);
+        }
+    }
+
+    /**
+     * One fetch: the dialog polls {@link #peers()}, waits on {@link #torrent()}, and once the
+     * file list is in polls {@link #swarm} while the fetch stays to look.
+     */
+    private final class Fetch implements SwarmProbe {
         private final String id;
-        private final String magnet;
+        /** The link a magnet's probe fetches from; null for a {@code .torrent}'s. */
+        private final @Nullable String magnet;
+        /** Its own empty save path; null for a probe that never joined. */
+        private final @Nullable Path probeDir;
+        /** A private torrent is looked at too ({@link Engine#probe}). */
+        private final boolean privateToo;
+
+        private final long started = System.currentTimeMillis();
         private final java.util.concurrent.CompletableFuture<byte[]> torrent =
                 new java.util.concurrent.CompletableFuture<>();
+        /** Out of the session; the future may have completed long before, with the metadata. */
+        private volatile boolean ended;
+        /** When the file list came in; 0 before. */
+        private volatile long metadataAt;
+        /**
+         * Seeds met, by address: a seed that dials in comes from a new port each time. A seed
+         * drops an upload-only peer, which the probe is once its file list is in, at the handshake
+         * ({@link #UPLOAD_TO_UPLOAD}), before libtorrent's peer list marks it; so a peer is counted
+         * when it shows its pieces or when it drops the probe that way.
+         */
+        private final Set<String> seedsMet = ConcurrentHashMap.newKeySet();
+
+        /** Alert thread: a peer dropped the probe because both ends only upload. */
+        void seedMet(String address) {
+            seedsMet.add(address);
+        }
+        /** Pieces some peer met was seen to hold, gathered over the fetch's life. Under the engine's lock. */
+        private final BitSet seen = new BitSet();
         /**
          * The peers it dialled, as each connection succeeds (a {@code peer_connect_alert}), for
-         * {@link #add(AddRequest, MetadataFetch)}. Recorded as they come rather than read at the
+         * {@link #add(AddRequest, SwarmProbe)}. Recorded as they come rather than read at the
          * end: once the metadata is in, the fetch is upload-only and a seed drops it at once.
          */
         private final Set<Endpoint> dialled = ConcurrentHashMap.newKeySet();
@@ -1004,9 +1454,17 @@ public final class LibtorrentEngine implements Engine {
             if (dialled.size() < MAX_HANDED_OVER) dialled.add(peer);
         }
 
-        Fetch(String id, String magnet) {
+        Fetch(String id, @Nullable String magnet, @Nullable Path probeDir, boolean privateToo) {
             this.id = id;
             this.magnet = magnet;
+            this.probeDir = probeDir;
+            this.privateToo = privateToo;
+        }
+
+        /** The file list is in: it stays to look at the swarm from now. */
+        void listed(byte[] bytes) {
+            metadataAt = System.currentTimeMillis();
+            torrent.complete(bytes);
         }
 
         /** Under the engine's lock, like every call from outside that reaches the session. */
@@ -1014,9 +1472,92 @@ public final class LibtorrentEngine implements Engine {
         public int peers() {
             synchronized (LibtorrentEngine.this) {
                 SessionManager s = session;
-                if (torrent.isDone() || s == null || !s.isRunning()) return 0;
+                if (ended || s == null || !s.isRunning()) return 0;
                 TorrentHandle h = handle(s);
                 return h == null ? 0 : h.status().numPeers();
+            }
+        }
+
+        @Override
+        public Optional<SwarmPreview> swarm(Set<Integer> wanted) {
+            synchronized (LibtorrentEngine.this) {
+                SessionManager s = session;
+                if (ended || s == null || !s.isRunning()) return Optional.empty();
+                TorrentHandle h = handle(s);
+                return h == null ? Optional.empty() : Optional.of(look(h, wanted));
+            }
+        }
+
+        /**
+         * The swarm as the fetch sees it now. Seeds are the most anyone knows of: the trackers'
+         * scrapes (libtorrent keeps the highest of them), its peer list, which keeps a seed that
+         * dropped the fetch, and the seeds met. With no seed, the pieces are what the peers met
+         * were seen to hold, gathered over the fetch's life, since a peer that leaves took its
+         * pieces with it only for now. The peers are read in place, the vector fenced.
+         */
+        private SwarmPreview look(TorrentHandle h, Set<Integer> wanted) {
+            TorrentStatus status = h.status();
+            boolean metadata = status.hasMetadata();
+            peer_info_vector vector = new peer_info_vector();
+            h.swig().get_peer_info(vector);
+            try {
+                for (int i = 0; i < vector.size(); i++) {
+                    peer_info p = vector.get(i);
+                    String address = p.remote_endpoint().address().to_string();
+                    if (p.getFlags().and_(PeerConstants.SEED).non_zero()) {
+                        seedsMet.add(address);
+                        continue;
+                    }
+                    if (!metadata) continue;
+                    org.libtorrent4j.swig.bitfield pieces = p.get_pieces();
+                    if (pieces.size() > 0 && pieces.all_set()) {
+                        seedsMet.add(address);
+                        continue;
+                    }
+                    for (int j = seen.nextClearBit(0); j < pieces.size(); j = seen.nextClearBit(j + 1)) {
+                        if (pieces.get_bit(j)) seen.set(j);
+                    }
+                }
+            } finally {
+                Reference.reachabilityFence(vector);
+            }
+            int seeds = Math.max(
+                    Math.max(status.numComplete(), status.listSeeds()), Math.max(seedsMet.size(), status.numSeeds()));
+            // Not list_peers: that is every address heard of, from the DHT too, never contacted.
+            int others = Math.max(status.numIncomplete(), status.numPeers() - status.numSeeds());
+            if (!metadata) {
+                return new SwarmPreview(started, 0, seeds, Math.max(0, others), status.numPeers(), 0, 0, 0, 0);
+            }
+            TorrentInfo info = h.torrentFile();
+            try {
+                FileStorage files = info.files();
+                int pieces = info.numPieces();
+                // A seed somewhere holds every piece, whether or not it was met.
+                BitSet held = new BitSet();
+                if (seeds > 0) held.set(0, pieces);
+                else held.or(seen);
+                BitSet want = new BitSet();
+                for (int index : wanted) {
+                    if (index < 0 || index >= files.numFiles() || files.padFileAt(index)) continue;
+                    // An empty file touches no piece; libtorrent answers with a neighbour's.
+                    if (files.fileSize(index) == 0) continue;
+                    want.set(files.pieceIndexAtFile(index), files.lastPieceIndexAtFile(index) + 1);
+                }
+                int wantedPieces = want.cardinality();
+                want.and(held);
+                return new SwarmPreview(
+                        started,
+                        metadataAt,
+                        seeds,
+                        Math.max(0, others),
+                        status.numPeers(),
+                        pieces,
+                        Math.min(pieces, held.cardinality()),
+                        wantedPieces,
+                        want.cardinality());
+            } finally {
+                // The file storage points into the info.
+                Reference.reachabilityFence(info);
             }
         }
 
@@ -1032,12 +1573,22 @@ public final class LibtorrentEngine implements Engine {
             }
         }
 
-        /** Alert thread: the metadata is in. The .torrent is the info plus the link's trackers. */
+        /**
+         * Alert thread: the metadata is in. The .torrent is the info plus the link's trackers. The
+         * fetch stays to look at the swarm, downloading nothing, unless the torrent is private: a
+         * private tracker counts every announce, and the person has not added it yet. libtorrent
+         * itself never hands a private torrent's metadata to a magnet (measured: a loopback fetch
+         * from a libtorrent seed of one never completes), so this is for other clients that do.
+         */
         void arrived(TorrentHandle handle) {
             byte[] bytes;
+            boolean isPrivate;
             try {
                 TorrentInfo info = handle.torrentFile();
-                AddTorrentParams params = AddTorrentParams.parseMagnetUri(magnet);
+                isPrivate = info.isPrivate();
+                // Only a magnet's probe waits for its file list; a .torrent's has it.
+                AddTorrentParams params =
+                        AddTorrentParams.parseMagnetUri(Objects.requireNonNull(magnet, "a probe without a link"));
                 params.setTorrentInfo(info);
                 // A v2 torrent's piece layers come from peers as it downloads; the file would
                 // otherwise not be written at all.
@@ -1049,11 +1600,15 @@ public final class LibtorrentEngine implements Engine {
                 end(null, e);
                 return;
             }
-            end(bytes, null);
+            if (isPrivate && !privateToo) {
+                end(bytes, null);
+                return;
+            }
+            listed(bytes);
         }
 
         /** This fetch's torrent in the session, as a handle Java owns; null once it has left. */
-        private TorrentHandle handle(SessionManager s) {
+        private @Nullable TorrentHandle handle(SessionManager s) {
             session_handle sh = s.swig();
             torrent_handle_vector vector = sh.get_torrents();
             try {
@@ -1068,9 +1623,13 @@ public final class LibtorrentEngine implements Engine {
             }
         }
 
-        /** Out of the session first, then out of the map, so no snapshot sees it in between. */
-        synchronized void end(byte[] bytes, Throwable failure) {
-            if (torrent.isDone()) return;
+        /**
+         * Out of the session first, then out of the map, so no snapshot sees it in between. The
+         * future completes here unless the metadata completed it already.
+         */
+        synchronized void end(byte @Nullable [] bytes, @Nullable Throwable failure) {
+            if (ended) return;
+            ended = true;
             SessionManager s = session;
             endedFetches.add(id);
             if (s != null && s.isRunning()) {
@@ -1084,7 +1643,8 @@ public final class LibtorrentEngine implements Engine {
             fetches.remove(id, this);
             found = List.copyOf(dialled);
             if (bytes != null) torrent.complete(bytes);
-            else torrent.completeExceptionally(failure);
+            else torrent.completeExceptionally(Objects.requireNonNull(failure, "ended with neither"));
+            deleteQuietly(probeDir);
         }
     }
 
@@ -1147,15 +1707,162 @@ public final class LibtorrentEngine implements Engine {
             removed.add(id);
             labels.remove(id);
             storage.remove(id);
+            contentIndex.remove(id);
+            archiveReads.remove(id);
+            encryptedArchives.remove(id);
             moving.remove(id);
             trackerHosts.remove(id);
             trackerErrors.remove(id);
+            failWaits(id, tr("engine.error.streamGone", name));
             try {
                 store.delete(id);
             } catch (IOException e) {
                 throw new EngineException(tr("engine.error.resumeStayed", e.getMessage()), e);
             }
         }
+    }
+
+    @Override
+    public synchronized java.util.Optional<OnDisk> onDisk(String id) throws EngineException {
+        TorrentHandle h = handle(id);
+        Path save = Path.of(h.savePath()).toAbsolutePath().normalize();
+        List<Path> files = new ArrayList<>();
+        TorrentInfo info = h.status(StatusQuery.FLAGS).hasMetadata() ? h.torrentFile() : null;
+        try {
+            if (info != null && info.isValid()) {
+                FileStorage fs = info.files();
+                TorrentStorage owed = storage.getOrDefault(id, TorrentStorage.NONE);
+                for (int i = 0; i < fs.numFiles(); i++) {
+                    if (fs.padFileAt(i)) continue;
+                    files.add(save.resolve(owed.onDisk(i, slashes(fs.filePath(i))))
+                            .normalize());
+                }
+            }
+        } finally {
+            Reference.reachabilityFence(info);
+        }
+        // Where the pieces of skipped files wait: named by the same hash the id is.
+        return java.util.Optional.of(new OnDisk(save, files, List.of(save.resolve("." + id + ".parts"))));
+    }
+
+    /**
+     * Saves answered, by id, for a {@link #detach} waiting on its own torrent's: the alert thread
+     * counts one down once the blob is written (or libtorrent said it was not).
+     */
+    private final Map<String, java.util.concurrent.CountDownLatch> saveWaits = new ConcurrentHashMap<>();
+
+    /**
+     * Asks for the torrent's resume data with the disk cache flushed and waits for it, bounded as
+     * {@link #stop} is, so what is kept is the torrent as it is now: the periodic blob can be two
+     * minutes old, and pieces it does not know of would be downloaded again. The store then holds
+     * everything; it is read, and the torrent removed as {@link #remove} does.
+     */
+    @Override
+    public synchronized Detached detach(String id) throws EngineException {
+        SessionManager s = running();
+        TorrentHandle handle = find(s, id);
+        if (handle == null) throw new EngineException(tr("engine.error.noSuchTorrent", id));
+        String name = nameOf(handle);
+        int queue = handle.status().queuePosition();
+        java.util.concurrent.CountDownLatch saved = new java.util.concurrent.CountDownLatch(1);
+        saveWaits.put(id, saved);
+        try {
+            requestSave(handle, false, true);
+            if (!saved.await(STOP_FLUSH_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS))
+                LOG.warning("Resume data for " + id + " did not come in time; the undo keeps the last one written");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } finally {
+            saveWaits.remove(id);
+        }
+        byte[] resume;
+        byte[] labelBytes;
+        byte[] storageBytes;
+        try {
+            resume = store.load(id).orElseThrow(() -> new EngineException(tr("engine.error.noUndoData", name)));
+            labelBytes = store.loadLabels(id).orElse(new byte[0]);
+            storageBytes = store.loadStorage(id).orElse(new byte[0]);
+        } catch (IOException e) {
+            throw new EngineException(tr("engine.error.noUndoData", name), e);
+        }
+        remove(id, false);
+        return new Detached(id, name, resume, labelBytes, storageBytes, queue);
+    }
+
+    /**
+     * Another client's torrent: its resume data read by libtorrent's own reader, the metainfo put
+     * back, the save path set, then written into the store as this engine's own resume data and
+     * added from there, as at start: no check unless libtorrent finds the files do not match.
+     */
+    @Override
+    public synchronized String adopt(Adoption a) throws EngineException {
+        SessionManager s = running();
+        error_code ec = new error_code();
+        add_torrent_params read = libtorrent.read_resume_data_ex(Vectors.bytes2byte_vector(a.resume()), ec);
+        if (ec.value() != 0) throw new EngineException(tr("engine.error.importUnreadable", a.name(), ec.message()));
+        if (a.check()) {
+            // Nothing taken on trust: with no pieces recorded, the add checks the files on disk, as
+            // an add of a .torrent whose data is already there does. Not force_recheck.
+            read.set_have_pieces(new org.libtorrent4j.swig.bitfield());
+            read.set_verified_pieces(new org.libtorrent4j.swig.bitfield());
+            read.set_unfinished_pieces(new org.libtorrent4j.swig.int_bitfield_map());
+            read.setFlags(read.getFlags().and_(org.libtorrent4j.TorrentFlags.SEED_MODE.inv()));
+        }
+        AddTorrentParams params = new AddTorrentParams(read);
+        if (a.metainfo() != null) {
+            try {
+                params.setTorrentInfo(new TorrentInfo(a.metainfo()));
+            } catch (IllegalArgumentException e) {
+                throw new EngineException(tr("engine.error.importUnreadable", a.name(), e.getMessage()), e);
+            }
+        }
+        params.setSavePath(a.savePath());
+        String id = params.getInfoHashes().getBest().toHex();
+        if (find(s, id) != null) throw new EngineException(tr("engine.error.importAlreadyHere", a.name()));
+        byte[] blob = AddTorrentParams.writeResumeDataBuf(params);
+        synchronized (store) {
+            removed.remove(id);
+            try {
+                store.save(id, blob);
+                if (!a.labels().isEmpty()) store.saveLabels(id, a.labels().encode());
+                // The other client's renames, where this engine keeps them: put back before the add.
+                if (!a.renamed().isEmpty())
+                    store.saveStorage(id, new TorrentStorage("", false, Set.of(), a.renamed()).encode());
+            } catch (IOException e) {
+                throw new EngineException(tr("engine.error.importUnreadable", a.name(), e.getMessage()), e);
+            }
+        }
+        restoring.add(id);
+        if (!addFromStore(s, id, blob)) {
+            restoring.remove(id);
+            throw new EngineException(tr("engine.error.importUnreadable", a.name(), ""));
+        }
+        return id;
+    }
+
+    /** Writes the detached torrent back into the store and adds it from there, as at start. */
+    @Override
+    public synchronized void reattach(Detached torrent) throws EngineException {
+        SessionManager s = running();
+        String id = torrent.id();
+        if (find(s, id) != null) throw new EngineException(tr("engine.error.alreadyBack", torrent.name()));
+        synchronized (store) {
+            removed.remove(id);
+            try {
+                store.save(id, torrent.resume());
+                if (torrent.labels().length > 0) store.saveLabels(id, torrent.labels());
+                if (torrent.storage().length > 0) store.saveStorage(id, torrent.storage());
+            } catch (IOException e) {
+                throw new EngineException(tr("engine.error.couldNotReattach", torrent.name(), e.getMessage()), e);
+            }
+        }
+        restoring.add(id);
+        if (!addFromStore(s, id, torrent.resume())) {
+            restoring.remove(id);
+            throw new EngineException(tr("engine.error.couldNotReattach", torrent.name(), ""));
+        }
+        TorrentHandle back = find(s, id);
+        if (back != null && torrent.queuePosition() >= 0) back.queuePositionSet(torrent.queuePosition());
     }
 
     @Override
@@ -1215,7 +1922,8 @@ public final class LibtorrentEngine implements Engine {
             TorrentStorage next = owed.withRenamed(changes, originals);
             // Recorded first: the rename alerts, and a restart, read the names from the record.
             writeStorage(id, next);
-            changes.forEach((index, renamed) -> h.renameFile(index, next.onDisk(index, originals.get(index))));
+            changes.forEach((index, renamed) -> h.renameFile(
+                    index, next.onDisk(index, Objects.requireNonNull(originals.get(index), "a file the plan named"))));
             String shown = displayName(id, status.name());
             emit(EngineEvent.info(id, shown, tr("engine.event.pathRenamed", shown, path, name.strip())));
         } finally {
@@ -1442,7 +2150,14 @@ public final class LibtorrentEngine implements Engine {
                 int first = size == 0 ? -1 : storage.pieceIndexAtFile(i);
                 int last = size == 0 ? -1 : storage.lastPieceIndexAtFile(i);
                 files.add(new TorrentDetail.FileStatus(
-                        i, owed.name(i, slashes(storage.filePath(i))), size, done, priority, first, last));
+                        i,
+                        owed.name(i, slashes(storage.filePath(i))),
+                        size,
+                        done,
+                        priority,
+                        first,
+                        last,
+                        owed.found().get(i)));
             }
         }
 
@@ -1497,7 +2212,15 @@ public final class LibtorrentEngine implements Engine {
         // The bitfield and the file storage point into these two; keep them until the end.
         Reference.reachabilityFence(status);
         Reference.reachabilityFence(info);
-        return new TorrentDetail(general, files, peers, trackers, pieces, availability, h.urlSeeds());
+        return new TorrentDetail(
+                general,
+                files,
+                peers,
+                trackers,
+                pieces,
+                availability,
+                h.urlSeeds(),
+                encryptedArchives.getOrDefault(id, Set.of()));
     }
 
     /**
@@ -1666,6 +2389,229 @@ public final class LibtorrentEngine implements Engine {
         return Priority.NORMAL;
     }
 
+    /**
+     * What streams wait on, by torrent id and piece: completed by the {@code piece_finished_alert},
+     * failed when the torrent goes or the engine stops.
+     */
+    private final Map<String, Map<Integer, java.util.concurrent.CompletableFuture<Void>>> pieceWaits =
+            new ConcurrentHashMap<>();
+
+    @Override
+    public synchronized com.torrenta.engine.StreamFile stream(String id, int fileIndex) throws EngineException {
+        TorrentHandle h = handle(id);
+        TorrentInfo info = h.status(StatusQuery.FLAGS).hasMetadata() ? h.torrentFile() : null;
+        if (info == null || !info.isValid()) throw new EngineException(tr("engine.error.streamNoMetadata", nameOf(h)));
+        try {
+            FileStorage files = info.files();
+            if (fileIndex < 0 || fileIndex >= files.numFiles() || files.padFileAt(fileIndex))
+                throw new EngineException(tr("engine.error.streamNoFile", fileIndex, nameOf(h)));
+            String original = slashes(files.filePath(fileIndex));
+            String name = storage.getOrDefault(id, TorrentStorage.NONE).name(fileIndex, original);
+            // A file played is a file wanted: a skipped file's pieces go into the part file, not the
+            // file read from (measured: the wait ended, the file was not there). Low, so the rest of
+            // it does not jump the queue; libtorrent moves what the part file has over.
+            org.libtorrent4j.Priority[] priorities = h.filePriorities();
+            if (fileIndex < priorities.length && priorities[fileIndex] == org.libtorrent4j.Priority.IGNORE) {
+                h.filePriority(fileIndex, org.libtorrent4j.Priority.LOW);
+                requestSave(h, false);
+            }
+            return new Stream(
+                    id,
+                    fileIndex,
+                    original,
+                    name.substring(name.lastIndexOf('/') + 1),
+                    files.fileOffset(fileIndex),
+                    files.fileSize(fileIndex),
+                    info.pieceLength());
+        } finally {
+            Reference.reachabilityFence(info);
+        }
+    }
+
+    /**
+     * A file read while it downloads. Each call that reaches the session goes through the engine's
+     * lock, as every call does; the wait itself is outside it, on futures the alert thread completes.
+     */
+    private final class Stream implements com.torrenta.engine.StreamFile {
+        private final String id;
+        private final int index;
+        private final String original;
+        private final String name;
+        private final long offset;
+        private final long size;
+        private final long pieceLength;
+
+        Stream(String id, int index, String original, String name, long offset, long size, long pieceLength) {
+            this.id = id;
+            this.index = index;
+            this.original = original;
+            this.name = name;
+            this.offset = offset;
+            this.size = size;
+            this.pieceLength = pieceLength;
+        }
+
+        @Override
+        public String name() {
+            return name;
+        }
+
+        @Override
+        public long size() {
+            return size;
+        }
+
+        @Override
+        public long chunkEnd(long from) {
+            int piece = com.torrenta.engine.PieceMath.span(offset, pieceLength, from, from)
+                    .first();
+            return com.torrenta.engine.PieceMath.lastByteOf(piece, offset, size, pieceLength);
+        }
+
+        @Override
+        public boolean await(long from, long to, java.time.Duration timeout)
+                throws EngineException, InterruptedException {
+            List<java.util.concurrent.CompletableFuture<Void>> waits =
+                    askFor(id, com.torrenta.engine.PieceMath.span(offset, pieceLength, from, to));
+            if (waits.isEmpty()) return true;
+            try {
+                java.util.concurrent.CompletableFuture.allOf(
+                                waits.toArray(java.util.concurrent.CompletableFuture[]::new))
+                        .get(timeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+                return true;
+            } catch (java.util.concurrent.TimeoutException e) {
+                return false;
+            } catch (java.util.concurrent.ExecutionException e) {
+                throw e.getCause() instanceof EngineException ee ? ee : new EngineException(e.getMessage(), e);
+            }
+        }
+
+        @Override
+        public byte[] read(long from, long to) throws EngineException, InterruptedException {
+            int piece = com.torrenta.engine.PieceMath.span(offset, pieceLength, from, from)
+                    .first();
+            byte[] bytes = readPiece(id, piece);
+            // Where the range starts in the piece: the file need not start on a piece's edge.
+            long at = offset + from - piece * pieceLength;
+            int length = (int) (to - from + 1);
+            if (at < 0 || at + length > bytes.length) throw new EngineException(tr("engine.error.streamGone", name));
+            return java.util.Arrays.copyOfRange(bytes, (int) at, (int) at + length);
+        }
+
+        @Override
+        public long offset() {
+            return offset;
+        }
+
+        @Override
+        public long pieceLength() {
+            return pieceLength;
+        }
+
+        @Override
+        public java.util.BitSet have(int first, int last) throws EngineException {
+            return streamHave(id, first, last);
+        }
+
+        @Override
+        public void deadlines(Map<Integer, Integer> millisByPiece) throws EngineException {
+            streamDeadlines(id, millisByPiece);
+        }
+
+        @Override
+        public void clearDeadlines(int first, int last) throws EngineException {
+            streamClear(id, first, last);
+        }
+    }
+
+    /**
+     * Pieces being read for a stream, by torrent id and piece: completed by the {@code
+     * read_piece_alert} with the piece's bytes, failed when it says it could not.
+     */
+    private final Map<String, Map<Integer, java.util.concurrent.CompletableFuture<byte[]>>> pieceReads =
+            new ConcurrentHashMap<>();
+
+    /**
+     * A piece's bytes as libtorrent has them, its write buffer included: asked under the lock,
+     * waited for outside it. Reads of one piece at once share one request.
+     */
+    private byte[] readPiece(String id, int piece) throws EngineException, InterruptedException {
+        java.util.concurrent.CompletableFuture<byte[]> f;
+        synchronized (this) {
+            TorrentHandle h = handle(id);
+            Map<Integer, java.util.concurrent.CompletableFuture<byte[]>> reads =
+                    pieceReads.computeIfAbsent(id, k -> new ConcurrentHashMap<>());
+            boolean[] asked = {false};
+            f = reads.computeIfAbsent(piece, p -> {
+                asked[0] = true;
+                return new java.util.concurrent.CompletableFuture<>();
+            });
+            if (asked[0]) h.readPiece(piece);
+        }
+        try {
+            return f.get(30, java.util.concurrent.TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            Map<Integer, java.util.concurrent.CompletableFuture<byte[]>> reads = pieceReads.get(id);
+            if (reads != null) reads.remove(piece, f);
+            throw new EngineException(tr("engine.error.streamGone", id), e);
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw e.getCause() instanceof EngineException ee ? ee : new EngineException(e.getMessage(), e);
+        }
+    }
+
+    private synchronized java.util.BitSet streamHave(String id, int first, int last) throws EngineException {
+        TorrentHandle h = handle(id);
+        java.util.BitSet out = new java.util.BitSet();
+        for (int p = Math.max(0, first); p <= last; p++) if (h.havePiece(p)) out.set(p);
+        return out;
+    }
+
+    private synchronized void streamDeadlines(String id, Map<Integer, Integer> millisByPiece) throws EngineException {
+        TorrentHandle h = handle(id);
+        millisByPiece.forEach((piece, millis) -> {
+            if (!h.havePiece(piece)) h.setPieceDeadline(piece, millis);
+        });
+    }
+
+    private synchronized void streamClear(String id, int first, int last) throws EngineException {
+        TorrentHandle h = handle(id);
+        for (int p = Math.max(0, first); p <= last; p++) h.resetPieceDeadline(p);
+    }
+
+    /**
+     * The pieces of {@code span} the torrent lacks, each asked for with a deadline (ahead of
+     * everything else; a skipped file's piece is raised to the top priority by it) and its future
+     * registered before the second look, so a piece finished in between is not waited on forever.
+     */
+    private synchronized List<java.util.concurrent.CompletableFuture<Void>> askFor(
+            String id, com.torrenta.engine.PieceMath.Span span) throws EngineException {
+        TorrentHandle h = handle(id);
+        Map<Integer, java.util.concurrent.CompletableFuture<Void>> waits =
+                pieceWaits.computeIfAbsent(id, k -> new ConcurrentHashMap<>());
+        List<java.util.concurrent.CompletableFuture<Void>> out = new ArrayList<>();
+        for (int piece = span.first(); piece <= span.last(); piece++) {
+            if (h.havePiece(piece)) continue;
+            java.util.concurrent.CompletableFuture<Void> f =
+                    waits.computeIfAbsent(piece, p -> new java.util.concurrent.CompletableFuture<>());
+            h.setPieceDeadline(piece, 0);
+            if (h.havePiece(piece)) {
+                waits.remove(piece, f);
+                f.complete(null);
+                continue;
+            }
+            out.add(f);
+        }
+        return out;
+    }
+
+    /** The streams waiting on a torrent hear it is gone. */
+    private void failWaits(String id, String why) {
+        Map<Integer, java.util.concurrent.CompletableFuture<Void>> waits = pieceWaits.remove(id);
+        if (waits != null) for (var f : waits.values()) f.completeExceptionally(new EngineException(why));
+        Map<Integer, java.util.concurrent.CompletableFuture<byte[]>> reads = pieceReads.remove(id);
+        if (reads != null) for (var f : reads.values()) f.completeExceptionally(new EngineException(why));
+    }
+
     private TorrentHandle handle(String id) throws EngineException {
         TorrentHandle handle = find(running(), id);
         if (handle == null) throw new EngineException(tr("engine.error.noSuchTorrent", id));
@@ -1697,6 +2643,12 @@ public final class LibtorrentEngine implements Engine {
     @Override
     public Connectivity connectivity() {
         return connectivity.get();
+    }
+
+    /** Kept by the alert thread; reading it never reaches the session, so no lock. */
+    @Override
+    public ContentIndex contentIndex() {
+        return contentIndex;
     }
 
     @Override
@@ -1786,7 +2738,7 @@ public final class LibtorrentEngine implements Engine {
         connectivity.updateAndGet(c -> c.dht(settings.protocol().dht()));
         SessionManager s = session;
         if (s == null || !s.isRunning()) return;
-        s.applySettings(toPack(settings));
+        s.applySettings(toPack(settings, alternativeInForce));
         // PEX is a per-torrent flag and default trackers are per-torrent lists: carried to what is
         // already in the session, so a change does not wait for the next add.
         for (TorrentHandle handle : handles(s)) {
@@ -1805,15 +2757,32 @@ public final class LibtorrentEngine implements Engine {
         emit(EngineEvent.session(EngineEvent.Level.INFO, tr("engine.event.settingsApplied", settings)));
     }
 
+    /**
+     * The bound interface changed under the session: the settings again, and the listen sockets
+     * reopened, since an unchanged {@code listen_interfaces} string is not looked at twice.
+     */
+    @Override
+    public synchronized void rebind() throws EngineException {
+        SessionManager s = session;
+        if (s == null || !s.isRunning()) return;
+        s.applySettings(toPack(engineSettings, alternativeInForce));
+        s.swig().reopen_network_sockets();
+    }
+
     /** The session's connection limit as libtorrent has it; for the test. */
     int connectionsLimitForTest() throws EngineException {
         return running().settings().connectionsLimit();
     }
 
-    /** {@link EngineSettings} onto libtorrent's pack. Enum constants are SWIG objects: after load only. */
-    private static SettingsPack toPack(EngineSettings s) {
+    /**
+     * {@link EngineSettings} onto libtorrent's pack, with the speed pair the session last said is in
+     * force. Enum constants are SWIG objects: after load only.
+     */
+    private static SettingsPack toPack(EngineSettings s, boolean alternativeInForce) {
         SettingsPack pack = new SettingsPack();
         pack.listenInterfaces(s.listenInterfaces());
+        // Dialled peers too, not only the listening sockets: empty, they follow the system's route.
+        pack.setString(settings_pack.string_types.outgoing_interfaces.swigValue(), s.outgoingInterfaces());
         pack.setBoolean(settings_pack.bool_types.enable_upnp.swigValue(), s.upnp());
         pack.setBoolean(settings_pack.bool_types.enable_natpmp.swigValue(), s.upnp());
         pack.connectionsLimit(s.maxConnections());
@@ -1874,9 +2843,8 @@ public final class LibtorrentEngine implements Engine {
         pack.setInteger(settings_pack.int_types.allowed_enc_level.swigValue(), level.swigValue());
 
         EngineSettings.Speed speed = s.speed();
-        java.time.LocalDateTime now = java.time.LocalDateTime.now();
-        pack.downloadRateLimit(speed.effectiveDownloadBytes(now));
-        pack.uploadRateLimit(speed.effectiveUploadBytes(now));
+        pack.downloadRateLimit(speed.downloadBytes(alternativeInForce));
+        pack.uploadRateLimit(speed.uploadBytes(alternativeInForce));
         pack.setBoolean(settings_pack.bool_types.rate_limit_ip_overhead.swigValue(), speed.countOverhead());
 
         // The queue: 0 is "no limit" to a person and -1 to libtorrent, where 0 would park everything.
@@ -1908,13 +2876,13 @@ public final class LibtorrentEngine implements Engine {
     }
 
     @Override
-    public synchronized boolean refreshLimits(java.time.LocalDateTime now) throws EngineException {
+    public synchronized boolean refreshLimits(boolean alternative) throws EngineException {
+        alternativeInForce = alternative;
         SessionManager s = session;
         EngineSettings.Speed speed = engineSettings.speed();
-        boolean alternative = speed.alternativeActive(now);
         if (s == null || !s.isRunning()) return alternative;
-        int down = speed.effectiveDownloadBytes(now);
-        int up = speed.effectiveUploadBytes(now);
+        int down = speed.downloadBytes(alternative);
+        int up = speed.uploadBytes(alternative);
         SettingsPack current = s.settings();
         if (current.downloadRateLimit() != down || current.uploadRateLimit() != up) {
             SettingsPack pack = new SettingsPack();
@@ -2005,14 +2973,15 @@ public final class LibtorrentEngine implements Engine {
 
     @Override
     public synchronized void stop() {
-        if (session == null) return;
+        SessionManager s = session;
+        if (s == null) return;
         if (flusher != null) flusher.shutdownNow();
         saveStats();
         for (Fetch fetch : List.copyOf(fetches.values()))
             fetch.end(null, new EngineException(tr("engine.error.stopped")));
         // Flush with the disk cache, then wait for the alerts, bounded: libtorrent answers every
         // request (success or "not modified"), but a wedged disk must not hold the quit.
-        for (TorrentHandle handle : handles(session)) requestSave(handle, true, true);
+        for (TorrentHandle handle : handles(s)) requestSave(handle, true, true);
         long deadline = System.currentTimeMillis() + STOP_FLUSH_TIMEOUT_MS;
         while (pendingSaves.get() > 0 && System.currentTimeMillis() < deadline) {
             try {
@@ -2025,7 +2994,10 @@ public final class LibtorrentEngine implements Engine {
         if (pendingSaves.get() > 0) {
             LOG.warning(pendingSaves.get() + " resume-data write(s) did not finish before stop");
         }
-        session.stop();
+        java.util.Set<String> streamed = new java.util.HashSet<>(pieceWaits.keySet());
+        streamed.addAll(pieceReads.keySet());
+        for (String id : streamed) failWaits(id, tr("engine.error.stopped"));
+        s.stop();
         session = null;
         connectivity.set(Connectivity.NONE);
         emit(EngineEvent.session(EngineEvent.Level.INFO, tr("engine.event.stopped")));
@@ -2071,7 +3043,7 @@ public final class LibtorrentEngine implements Engine {
         }
     }
 
-    private static TorrentHandle find(SessionManager s, String id) {
+    private static @Nullable TorrentHandle find(SessionManager s, String id) {
         session_handle session = s.swig();
         torrent_handle_vector vector = session.get_torrents();
         try {
@@ -2091,7 +3063,7 @@ public final class LibtorrentEngine implements Engine {
      * The fetch a handle belongs to, if any, by either hash: a v1 magnet of a hybrid torrent has a
      * new best hash (the v2 one) once its metadata is in, and is still the same fetch.
      */
-    private Fetch fetchOf(torrent_handle raw) {
+    private @Nullable Fetch fetchOf(torrent_handle raw) {
         if (fetches.isEmpty()) return null;
         info_hash_t hashes = raw.info_hashes();
         try {
@@ -2123,6 +3095,96 @@ public final class LibtorrentEngine implements Engine {
     /** The best info-hash (v2 if the torrent has one, else v1) in hex: the id everywhere. */
     private static String id(TorrentHandle handle) {
         return bestHash(handle.swig()).to_hex();
+    }
+
+    /**
+     * Alert thread. A torrent whose files are known and still to download: the first volume of
+     * each wanted archive (and a 7z's end, where its header is) gets a deadline that asks
+     * libtorrent for a {@code read_piece_alert} when the piece is in — at once, from disk, if it
+     * already is. {@link #onPieceRead} takes it from there. A finished torrent restored at start
+     * is not read, or a startup would read pieces of every seed; a new one is, finished or not (a
+     * small torrent can be done before its metadata alert is even handled).
+     *
+     * @param restored the torrent was re-added from the store at start
+     */
+    private void probeArchives(TorrentHandle h, boolean restored) {
+        if (!h.isValid()) return;
+        TorrentInfo info = h.torrentFile();
+        if (info == null) return;
+        String id = id(h);
+        if (archiveReads.containsKey(id) || (restored && h.status().isFinished())) return;
+        FileStorage files = info.files();
+        int pieceLength = info.pieceLength();
+        org.libtorrent4j.Priority[] priorities = h.filePriorities();
+        Map<Integer, com.torrenta.engine.ArchiveProbe.Reading> byFile = new ConcurrentHashMap<>();
+        for (int i = 0; i < files.numFiles() && byFile.size() < ARCHIVES_PER_TORRENT; i++) {
+            if (files.padFileAt(i) || files.fileSize(i) == 0) continue;
+            if (i < priorities.length && priorities[i] == org.libtorrent4j.Priority.IGNORE) continue;
+            String path = slashes(files.filePath(i));
+            if (!com.torrenta.engine.ArchiveProbe.firstVolume(path)) continue;
+            byFile.put(
+                    i,
+                    new com.torrenta.engine.ArchiveProbe.Reading(
+                            i, path, files.fileOffset(i), files.fileSize(i), pieceLength));
+        }
+        Reference.reachabilityFence(info);
+        if (byFile.isEmpty()) return;
+        archiveReads.put(id, new ArchiveReads(pieceLength, byFile));
+        Set<Integer> pieces = new java.util.TreeSet<>();
+        for (com.torrenta.engine.ArchiveProbe.Reading r : byFile.values()) pieces.addAll(r.missing());
+        // A deadline also raises the piece to the top of the picker: the verdict comes first.
+        for (int piece : pieces) h.setPieceDeadline(piece, 500, TorrentHandle.ALERT_WHEN_AVAILABLE);
+    }
+
+    /**
+     * Alert thread. A piece a deadline asked for: whatever head or tail of an archive it covers is
+     * gathered, and an archive whose bytes are all in gets its verdict. An encrypted one is kept
+     * for {@link #detail} (the Overview's card) and said once in the log.
+     */
+    private void onPieceRead(ReadPieceAlert alert) {
+        if (!alert.handle().isValid()) return;
+        String id = id(alert.handle());
+        int piece = alert.piece();
+        // A stream's read first: the bytes, or why there are none.
+        Map<Integer, java.util.concurrent.CompletableFuture<byte[]>> streamReads = pieceReads.get(id);
+        java.util.concurrent.CompletableFuture<byte[]> streamRead =
+                streamReads == null ? null : streamReads.remove(piece);
+        if (streamRead != null) {
+            if (alert.error().isError())
+                streamRead.completeExceptionally(
+                        new EngineException(alert.error().getMessage()));
+            else streamRead.complete(NativeBytes.copy(alert.bufferPtr(), alert.size()));
+        }
+        if (alert.error().isError()) return;
+        ArchiveReads reads = archiveReads.get(id);
+        if (reads == null) return;
+        List<com.torrenta.engine.ArchiveProbe.Reading> wanting = reads.byFile().values().stream()
+                .filter(r -> r.missing().contains(piece))
+                .toList();
+        if (wanting.isEmpty()) return;
+        byte[] data = NativeBytes.copy(alert.bufferPtr(), alert.size());
+        for (com.torrenta.engine.ArchiveProbe.Reading r : wanting) {
+            if (!r.accept(piece, data, reads.pieceLength())) continue;
+            reads.byFile().remove(r.fileIndex());
+            if (r.verdict() == com.torrenta.engine.ArchiveProbe.Verdict.ENCRYPTED) {
+                encryptedArchives
+                        .computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet())
+                        .add(r.fileIndex());
+                String file = fileName(alert.handle(), r.fileIndex());
+                emit(EngineEvent.warning(
+                        id, nameOf(alert.handle()), tr("engine.event.archiveEncrypted", nameOf(alert.handle()), file)));
+            }
+        }
+        if (reads.byFile().isEmpty()) archiveReads.remove(id);
+    }
+
+    /** A file's name inside the torrent, for a log line; its index while the info is not there. */
+    private static String fileName(TorrentHandle h, int index) {
+        TorrentInfo info = h.torrentFile();
+        if (info == null) return String.valueOf(index);
+        String path = slashes(info.files().filePath(index));
+        Reference.reachabilityFence(info);
+        return path.substring(path.lastIndexOf('/') + 1);
     }
 
     /**
@@ -2201,6 +3263,7 @@ public final class LibtorrentEngine implements Engine {
     /** Same rule as {@link StatusQuery}: {@code peer_info}'s flag constants are SWIG objects. */
     private static final class PeerConstants {
         static final peer_flags_t LOCAL_CONNECTION = peer_info.local_connection;
+        static final peer_flags_t SEED = peer_info.seed;
     }
 
     /** Same rule as {@link StatusQuery}: {@code TorrentFlags}' constants are SWIG objects. */
@@ -2313,6 +3376,9 @@ public final class LibtorrentEngine implements Engine {
             AlertType.TORRENT_CHECKED.swig(),
             AlertType.TORRENT_ERROR.swig(),
             AlertType.FILE_COMPLETED.swig(),
+            AlertType.PIECE_FINISHED.swig(),
+            AlertType.DHT_MUTABLE_ITEM.swig(),
+            AlertType.DHT_PUT.swig(),
             AlertType.FILE_ERROR.swig(),
             AlertType.FILE_RENAMED.swig(),
             AlertType.FILE_RENAME_FAILED.swig(),
@@ -2326,12 +3392,16 @@ public final class LibtorrentEngine implements Engine {
             AlertType.PORTMAP_ERROR.swig(),
             AlertType.INCOMING_CONNECTION.swig(),
             AlertType.DHT_BOOTSTRAP.swig(),
+            AlertType.EXTERNAL_IP.swig(),
             AlertType.PEER_BLOCKED.swig(),
             AlertType.PEER_CONNECT.swig(),
             AlertType.STORAGE_MOVED.swig(),
             AlertType.STORAGE_MOVED_FAILED.swig(),
             AlertType.SAVE_RESUME_DATA.swig(),
             AlertType.SAVE_RESUME_DATA_FAILED.swig(),
+            AlertType.READ_PIECE.swig(),
+            AlertType.PEER_DISCONNECTED.swig(),
+            AlertType.PEER_ERROR.swig(),
         };
 
         @Override
@@ -2342,6 +3412,7 @@ public final class LibtorrentEngine implements Engine {
         @Override
         public void alert(Alert<?> alert) {
             try {
+                if (ofAFetch(alert)) return;
                 switch (alert.type()) {
                     case ADD_TORRENT -> onAdded((AddTorrentAlert) alert);
                     case SESSION_STATS -> onStats((SessionStatsAlert) alert);
@@ -2356,19 +3427,31 @@ public final class LibtorrentEngine implements Engine {
                         if (t.handle().isValid() && stopAfterMetadata.remove(id(t.handle()))) {
                             t.handle().unsetFlags(Flags.AUTO_MANAGED);
                             t.handle().pause();
+                            String stopped = id(t.handle());
+                            TorrentStorage owed = storage.get(stopped);
+                            if (owed != null && owed.stopOnMetadata())
+                                writeStorageQuietly(stopped, owed.withStopOnMetadata(false));
                             torrentEvent(t, EngineEvent.Level.INFO, "engine.event.metadataStopped");
                         } else {
                             torrentEvent(t, EngineEvent.Level.INFO, "engine.event.metadata");
                         }
+                        probeArchives(t.handle(), false);
                     }
                     case TORRENT_FINISHED -> {
                         TorrentAlert<?> t = (TorrentAlert<?>) alert;
                         requestSave(t.handle(), false);
-                        torrentEvent(t, EngineEvent.Level.INFO, EngineEvent.Kind.FINISHED, "engine.event.finished");
+                        // Brought back complete, not finished now: no download, so nothing to run on.
+                        // One brought back part done that finishes this session has downloaded.
+                        boolean wasComplete = t.handle().isValid()
+                                && broughtBack.contains(id(t.handle()))
+                                && t.handle().status().totalPayloadDownload() == 0;
+                        if (!wasComplete)
+                            torrentEvent(t, EngineEvent.Level.INFO, EngineEvent.Kind.FINISHED, "engine.event.finished");
                         if (t.handle().isValid()) {
                             // Names first, then the move: both are disk jobs, done in this order.
                             applySuffixes(id(t.handle()), t.handle());
                             maybeMove(id(t.handle()), t.handle());
+                            indexContent(id(t.handle()), t.handle());
                         }
                     }
                     case TORRENT_CHECKED -> {
@@ -2379,11 +3462,27 @@ public final class LibtorrentEngine implements Engine {
                             // Finished at the check (the files were there, or a move was owed
                             // from before a restart): the finished alert does not come again.
                             maybeMove(id(t.handle()), t.handle());
+                            // After a recheck too, which is the one thing that says a file is
+                            // no longer complete: nothing else is posted for that.
+                            indexContent(id(t.handle()), t.handle());
                         }
+                    }
+                    case PIECE_FINISHED -> {
+                        // Only while a stream waits: a downloading torrent says this for every piece.
+                        if (pieceWaits.isEmpty()) return;
+                        PieceFinishedAlert t = (PieceFinishedAlert) alert;
+                        if (!t.handle().isValid()) return;
+                        Map<Integer, java.util.concurrent.CompletableFuture<Void>> waits =
+                                pieceWaits.get(id(t.handle()));
+                        var f = waits == null ? null : waits.remove(t.pieceIndex());
+                        if (f != null) f.complete(null);
                     }
                     case FILE_COMPLETED -> {
                         FileCompletedAlert t = (FileCompletedAlert) alert;
-                        if (t.handle().isValid()) unsuffix(id(t.handle()), t.handle(), t.index());
+                        if (t.handle().isValid()) {
+                            unsuffix(id(t.handle()), t.handle(), t.index());
+                            indexContent(id(t.handle()), t.handle());
+                        }
                     }
                     case STORAGE_MOVED -> {
                         StorageMovedAlert t = (StorageMovedAlert) alert;
@@ -2394,6 +3493,7 @@ public final class LibtorrentEngine implements Engine {
                             if (owed != null) writeStorageQuietly(id, owed.withDestination(""));
                             // The save path is part of the resume data: written now, not later.
                             requestSave(t.handle(), false);
+                            indexContent(id, t.handle());
                         }
                         torrentEvent(t, EngineEvent.Level.INFO, "engine.event.moved", t.storagePath());
                     }
@@ -2422,10 +3522,12 @@ public final class LibtorrentEngine implements Engine {
                         // No line per file: the suffix going on and off is the engine's own doing,
                         // and a person's rename says itself once, from renamePath. A folder that
                         // the rename emptied goes, as it would in a file manager.
-                        if (t.handle().isValid())
+                        if (t.handle().isValid()) {
                             removeEmptyFolders(
                                     t.handle().status(StatusQuery.FLAGS).swig().getSave_path(),
                                     t.swig().old_name());
+                            indexContent(id(t.handle()), t.handle());
+                        }
                     }
                     case FILE_RENAME_FAILED -> {
                         FileRenameFailedAlert t = (FileRenameFailedAlert) alert;
@@ -2523,11 +3625,32 @@ public final class LibtorrentEngine implements Engine {
                         connectivity.updateAndGet(c -> c.connectedFrom(from));
                     }
                     case DHT_BOOTSTRAP -> connectivity.updateAndGet(Connectivity::bootstrapped);
+                    case EXTERNAL_IP ->
+                        onExternalAddress(
+                                ((ExternalIpAlert) alert).externalAddress().toString());
                     // Counted, not logged: a busy blocklist refuses peers by the hundred.
                     case PEER_BLOCKED -> blockedPeers.incrementAndGet();
-                    case PEER_CONNECT -> onPeerConnected((PeerConnectAlert) alert);
+                    case PEER_CONNECT -> {
+                        PeerConnectAlert c = (PeerConnectAlert) alert;
+                        logPeer("connect " + c.direction() + " " + c.endpoint());
+                        onPeerConnected(c);
+                    }
+                    case PEER_DISCONNECTED -> {
+                        PeerDisconnectedAlert d = (PeerDisconnectedAlert) alert;
+                        logPeer("disconnected " + d.endpoint() + " " + d.operation() + ": "
+                                + d.error().getMessage() + " (" + d.reason() + ")");
+                        onPeerDisconnected(d);
+                    }
+                    case PEER_ERROR -> {
+                        PeerErrorAlert e = (PeerErrorAlert) alert;
+                        logPeer("error " + e.endpoint() + " " + e.operation() + ": "
+                                + e.error().getMessage());
+                    }
                     case SAVE_RESUME_DATA -> onSaved((SaveResumeDataAlert) alert);
                     case SAVE_RESUME_DATA_FAILED -> onSaveFailed((SaveResumeDataFailedAlert) alert);
+                    case READ_PIECE -> onPieceRead((ReadPieceAlert) alert);
+                    case DHT_MUTABLE_ITEM -> onMutableItem((org.libtorrent4j.alerts.DhtMutableItemAlert) alert);
+                    case DHT_PUT -> onMutablePut((org.libtorrent4j.alerts.DhtPutAlert) alert);
                     default -> {}
                 }
             } catch (RuntimeException e) {
@@ -2540,6 +3663,24 @@ public final class LibtorrentEngine implements Engine {
          * name, trackers, save path — which is exactly what brings it back after a crash; the real
          * resume data replaces it when the metadata arrives.
          */
+        /**
+         * A fetch is the dialog's, not the person's, and stays past its metadata to look at the
+         * swarm: its check, its trackers and its errors must not reach the list's state or the log
+         * (the check's handler would apply suffixes and owed moves by its id). Only its metadata,
+         * its add alert (swallowed by id) and its peers are heard.
+         */
+        private boolean ofAFetch(Alert<?> alert) {
+            if (fetches.isEmpty() || !(alert instanceof TorrentAlert<?> t)) return false;
+            switch (alert.type()) {
+                case METADATA_RECEIVED, ADD_TORRENT, PEER_CONNECT, PEER_DISCONNECTED, PEER_ERROR -> {
+                    return false;
+                }
+                default -> {}
+            }
+            TorrentHandle h = t.handle();
+            return h.isValid() && fetchOf(h.swig()) != null;
+        }
+
         /** Once a second, by libtorrent4j's own request: the counters are copied out, nothing else. */
         private void onStats(SessionStatsAlert alert) {
             int[] idx = counterIndex;
@@ -2559,16 +3700,26 @@ public final class LibtorrentEngine implements Engine {
                         tr("engine.event.addFailed", name, alert.error().getMessage())));
                 return;
             }
-            write(alert.params());
-            // The add params carry the trackers only for a magnet; for a .torrent they live inside
-            // the info and the params' own list is empty, so a blob written from the params alone
-            // would bring the torrent back without its trackers. libtorrent's own resume data has
-            // them: ask for it now, and it replaces the blob shortly after.
-            requestSave(alert.handle(), false);
             String id = alert.params().getInfoHashes().getBest().toHex();
             // A torrent restored at start is not new to the person; nothing runs on it.
-            if (restoring.remove(id)) torrentEvent(alert, EngineEvent.Level.INFO, "engine.event.restored");
+            boolean restored = restoring.remove(id);
+            // One from the store (a start, an import, an undo) has its blob there already, and asking
+            // for resume data now would replace it: libtorrent answers a request made before its
+            // resume check is done with no pieces at all, and a paused torrent, never modified
+            // again, kept that blob, so the next start found files and no resume data and wanted
+            // a full check that a paused torrent never runs (one import in thirty on Linux).
+            if (!restored) {
+                write(alert.params());
+                // The add params carry the trackers only for a magnet; for a .torrent they live
+                // inside the info and the params' own list is empty, so a blob written from the
+                // params alone would bring the torrent back without its trackers. libtorrent's own
+                // resume data has them: ask for it now, and it replaces the blob shortly after.
+                requestSave(alert.handle(), false);
+            }
+            if (restored) broughtBack.add(id);
+            if (restored) torrentEvent(alert, EngineEvent.Level.INFO, "engine.event.restored");
             else torrentEvent(alert, EngineEvent.Level.INFO, EngineEvent.Kind.ADDED, "engine.event.added");
+            probeArchives(alert.handle(), restored);
         }
 
         /**
@@ -2588,6 +3739,28 @@ public final class LibtorrentEngine implements Engine {
                 Set<String> errors = trackerErrors.get(id);
                 if (errors != null) errors.remove(alert.trackerUrl());
             }
+        }
+
+        /**
+         * A peer that drops a probe because both ends only upload is a seed (or, rarely, a partial
+         * seed): the probe, once its file list is in, is upload-only, and nothing else is.
+         */
+        private void onPeerDisconnected(PeerDisconnectedAlert alert) {
+            if (fetches.isEmpty() || !UPLOAD_TO_UPLOAD.equals(alert.error().getMessage())) return;
+            TorrentHandle handle = alert.handle();
+            Fetch fetch = handle.isValid() ? fetchOf(handle.swig()) : null;
+            if (fetch != null) fetch.seedMet(alert.endpoint().address().toString());
+        }
+
+        /**
+         * libtorrent's vote on this machine's address as peers, trackers and the DHT report it: kept
+         * for the status bar, and said in the log when it moves, since an address that is suddenly
+         * the home connection's rather than the VPN's is the leak a person wants to hear of.
+         */
+        private void onExternalAddress(String address) {
+            String was = connectivity.getAndUpdate(c -> c.seenAs(address)).externalAddress();
+            if (!address.equals(was))
+                emit(EngineEvent.session(EngineEvent.Level.INFO, tr("engine.event.seenAs", address)));
         }
 
         /** A fetch's outgoing connections are remembered for the torrent it becomes; nothing else. */
@@ -2622,10 +3795,18 @@ public final class LibtorrentEngine implements Engine {
         private void onSaved(SaveResumeDataAlert alert) {
             pendingSaves.decrementAndGet();
             write(alert.params());
+            savedFor(alert.params().getInfoHashes().getBest().toHex());
+        }
+
+        /** A detach waiting on this torrent's save hears it is done. */
+        private void savedFor(String id) {
+            java.util.concurrent.CountDownLatch waiting = saveWaits.get(id);
+            if (waiting != null) waiting.countDown();
         }
 
         private void onSaveFailed(SaveResumeDataFailedAlert alert) {
             pendingSaves.decrementAndGet();
+            if (alert.handle().isValid()) savedFor(id(alert.handle()));
             // "Resume data not modified" is the normal answer to an only-if-modified request.
             if (alert.error().isError()) {
                 LOG.fine("Resume data not written for " + alert.handle().infoHash() + ": " + alert.message());

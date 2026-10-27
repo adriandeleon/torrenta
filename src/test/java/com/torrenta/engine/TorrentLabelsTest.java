@@ -67,4 +67,20 @@ class TorrentLabelsTest {
         assertThrows(IOException.class, () -> TorrentLabels.decode("[]".getBytes(StandardCharsets.UTF_8)));
         assertThrows(IOException.class, () -> TorrentLabels.decode("not json".getBytes(StandardCharsets.UTF_8)));
     }
+
+    /** An updatable torrent's address, version and the one it replaces travel with the filing. */
+    @Test
+    void theFollowingRoundTripsAndKeepsTheRest() throws IOException {
+        Following f = new Following(" magnet:?xs=urn:btpk:" + "00".repeat(32) + " ", 7, "ab".repeat(20));
+        TorrentLabels l =
+                new TorrentLabels("Movies", List.of("hd")).withName("Film").withFollowing(f);
+        assertEquals("magnet:?xs=urn:btpk:" + "00".repeat(32), l.following().source());
+        assertEquals(l, TorrentLabels.decode(l.encode()));
+        assertEquals(f, l.withCategory("TV").withTags(List.of("x")).withName("").following(), "the withers keep it");
+        TorrentLabels done = l.withFollowing(f.withReplaces(""));
+        assertEquals(done, TorrentLabels.decode(done.encode()), "with nothing left to replace");
+        assertFalse(TorrentLabels.NONE.withFollowing(f).isEmpty(), "a following alone is worth a sidecar");
+        assertTrue(TorrentLabels.NONE.withFollowing(new Following("", 1, "")).isEmpty(), "no address, no following");
+        assertEquals(null, l.withFollowing(null).following());
+    }
 }

@@ -1,6 +1,9 @@
 package com.torrenta.search;
 
+import java.util.Collection;
 import java.util.Locale;
+
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -45,6 +48,36 @@ public enum SearchCategory {
     /** The Newznab category number; {@code 0} for {@link #ALL}, which sends none. */
     public int newznab() {
         return newznab;
+    }
+
+    /**
+     * The category an indexer's Newznab numbers put a result in, or null when none of them is
+     * one of ours: a number's thousand block names it (2000–2999 Movies, 5000–5999 TV …), except
+     * 5070, which is Anime and wins over TV when both are given. Indexer-specific numbers (100000
+     * and up) and the blocks we have no chip for (6000) name nothing.
+     */
+    public static @Nullable SearchCategory ofNewznab(Collection<Integer> numbers) {
+        SearchCategory found = null;
+        for (int n : numbers) {
+            if (n == ANIME.newznab) return ANIME;
+            if (found != null || n < 1000 || n >= 9000) continue;
+            int block = n / 1000 * 1000;
+            for (SearchCategory c : values()) {
+                if (c != ALL && c != ANIME && c.newznab == block) found = c;
+            }
+        }
+        return found;
+    }
+
+    /**
+     * The category a filter names, by its English id or its label in the UI language, ignoring
+     * case ({@code movies}, {@code Filme}); null for anything else, {@link #ALL} included.
+     */
+    public static @Nullable SearchCategory named(String name) {
+        for (SearchCategory c : values()) {
+            if (c != ALL && (c.id.equalsIgnoreCase(name) || c.label().equalsIgnoreCase(name))) return c;
+        }
+        return null;
     }
 
     /** The {@code cat=} parameter's value, or empty for {@link #ALL}. */

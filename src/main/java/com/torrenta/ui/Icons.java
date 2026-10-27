@@ -7,6 +7,9 @@ import javafx.scene.control.Control;
 import javafx.scene.control.Tooltip;
 import javafx.scene.shape.SVGPath;
 
+import com.torrenta.content.FileKind;
+import org.jspecify.annotations.Nullable;
+
 /**
  * Toolbar icons, the glyphs Editora draws, returned wrapped in a {@link Group} and scaled down. The
  * Group's layout bounds reflect the scaled size, so buttons sized to their graphic shrink with it.
@@ -112,7 +115,7 @@ final class Icons {
      * (the Show: filters, the toggles the palette alone lists). The toolbar's commands show the
      * toolbar's glyph, so the two cannot disagree.
      */
-    static Glyph forCommand(String id) {
+    static @Nullable Glyph forCommand(String id) {
         return switch (id) {
             case "add-file" -> open();
             case "add-magnet" -> magnet();
@@ -137,8 +140,11 @@ final class Icons {
             case "copy-name" -> copy();
             case "copy-hash" -> hash();
             case "copy-magnet" -> magnet();
+            case "copy-updatable-link" -> magnet();
+            case "new-version" -> newFile();
             case "rename" -> rename();
             case "export-torrent" -> exportFile();
+            case "import-from-client" -> importInto();
             case "open-folder" -> open();
             case "remove" -> trash();
             case "remove-data" -> trashData();
@@ -148,11 +154,14 @@ final class Icons {
             case "quit" -> power();
             case "settings" -> settings();
             case "search" -> search();
+            case "search-clear" -> trash();
             case "rss" -> rss();
             case "view-next" -> viewNext();
             case "view-previous" -> viewPrevious();
             case "transfers" -> transfers();
             case "filter" -> find();
+            case "undo" -> history();
+            case "save-view" -> eye();
             case "select-all" -> selectAll();
             case "event-log" -> history();
             case "statistics" -> gauge();
@@ -172,15 +181,17 @@ final class Icons {
      * what a command does, it shows that command's glyph (Search, RSS, Speed, Queue, Categories and
      * tags), so the menus and the sidebar agree.
      */
-    static Glyph forSettingsPage(String id) {
+    static @Nullable Glyph forSettingsPage(String id) {
         return switch (id) {
             case "general" -> sliders();
+            case "keyboard" -> palette();
             case "adding" -> download();
             case "watchFolders" -> eye();
             case "automation" -> terminal();
             case "search" -> search();
             case "rss" -> rss();
             case "sync" -> sync();
+            case "remote" -> remote();
             case "labels" -> tag();
             case "engine" -> server();
             case "connection" -> globe();
@@ -193,6 +204,11 @@ final class Icons {
     }
 
     // ---- glyphs; the paths are Editora's, by the same name --------------------------------------
+
+    /** An arrow into a tray, for "Import from another client": torrents coming in from elsewhere. */
+    static Glyph importInto() {
+        return line("M8 2v7.5M5 6.5l3 3 3-3M2.5 9.5v4h11v-4");
+    }
 
     /** A page with a plus, Editora's new-file glyph, for "New Torrent". */
     static Glyph newFile() {
@@ -586,6 +602,11 @@ final class Icons {
     }
 
     /** Two stacked units with their lights: an engine, local or remote. */
+    /** A phone, for Remote access: what most of its clients run on. */
+    static Glyph remote() {
+        return line("M5 2.5h6v11H5zM7.25 11.25h1.5");
+    }
+
     static Glyph server() {
         return line("M2.5 2.5h11V7h-11zM2.5 9h11v4.5h-11zM5 4.75h.1M5 11.25h.1M8 4.75h3M8 11.25h3");
     }
@@ -605,5 +626,25 @@ final class Icons {
     /** A shield with a tick: IP filter. */
     static Glyph shield() {
         return line("M8 2l5 2v4c0 3-2.2 5-5 6-2.8-1-5-3-5-6V4zM5.8 8l1.6 1.6 2.9-3");
+    }
+
+    /** A file kind's glyph ({@link FileKind}), fresh, at the menus' size. */
+    static Glyph forKind(FileKind kind) {
+        Glyph g =
+                switch (kind) {
+                    case FOLDER -> folder();
+                    case VIDEO -> fileVideo();
+                    case AUDIO -> fileAudio();
+                    case IMAGE -> fileImage();
+                    case BOOK -> book();
+                    case DOCUMENT -> files();
+                    case SUBTITLE -> subtitles();
+                    case ARCHIVE -> fileArchive();
+                    case DISC -> disc();
+                    case DATA -> database();
+                    case PROGRAM -> box();
+                    case OTHER -> file();
+                };
+        return g.at(MENU_SIZE);
     }
 }

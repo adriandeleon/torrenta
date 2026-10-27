@@ -14,10 +14,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -157,6 +160,7 @@ public final class DeclarativeProvider implements SearchProvider {
 
     /** Reads one field's raw text off a row, or null. */
     private interface RowReader {
+        @Nullable
         String read(Definition.Field field);
     }
 
@@ -189,18 +193,18 @@ public final class DeclarativeProvider implements SearchProvider {
         return raw;
     }
 
-    private static String regex(Definition.Field field, String value) {
+    private static @Nullable String regex(Definition.Field field, @Nullable String value) {
         if (value == null || field.regex().isEmpty()) return value;
         Matcher m = Pattern.compile(field.regex()).matcher(value);
         if (!m.find()) return null;
         return m.groupCount() >= 1 ? m.group(1) : m.group();
     }
 
-    private static String jsonRaw(Definition.Field field, Object row) {
+    private static @Nullable String jsonRaw(Definition.Field field, Object row) {
         return JsonExtractor.text(row, field.path());
     }
 
-    private static String htmlRaw(Definition.Field field, HtmlNode row) {
+    private static @Nullable String htmlRaw(Definition.Field field, HtmlNode row) {
         HtmlNode node = row;
         if (!field.path().isEmpty()) {
             Optional<HtmlNode> found = row.selectFirst(field.path());
@@ -242,11 +246,11 @@ public final class DeclarativeProvider implements SearchProvider {
                 link,
                 infoHash,
                 definition.name(),
-                resolve(raw.get("detailUrl"), pageUri)));
+                Objects.requireNonNullElse(resolve(raw.get("detailUrl"), pageUri), "")));
     }
 
     /** A 40- or 64-digit hex hash lower-cased, a 32-letter base32 one as it is; else empty. */
-    static String hash(String text) {
+    static String hash(@Nullable String text) {
         if (text == null) return "";
         String t = text.trim();
         if (HEX40.matcher(t).matches()) return t.toLowerCase(Locale.ROOT);
@@ -255,7 +259,7 @@ public final class DeclarativeProvider implements SearchProvider {
     }
 
     /** An http(s) URL, a relative one resolved against the page; null for anything else. */
-    static String resolve(String text, URI pageUri) {
+    static @Nullable String resolve(@Nullable String text, @Nullable URI pageUri) {
         if (text == null || text.isBlank()) return null;
         String t = text.trim();
         String lower = t.toLowerCase(Locale.ROOT);

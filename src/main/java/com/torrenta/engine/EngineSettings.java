@@ -117,18 +117,14 @@ public record EngineSettings(
                     || (scheduleDays.contains(today.minus(1)) && minute < scheduleTo);
         }
 
-        /** The alternative pair is in force now, by hand or by schedule. */
-        public boolean alternativeActive(java.time.LocalDateTime now) {
-            return alternativeOn || scheduleActive(now);
+        /** A pair's download limit, bytes per second, 0 for none. */
+        public int downloadBytes(boolean alternative) {
+            return (alternative ? alternativeDownload : download) * 1024;
         }
 
-        /** The download limit in force now, bytes per second, 0 for none. */
-        public int effectiveDownloadBytes(java.time.LocalDateTime now) {
-            return (alternativeActive(now) ? alternativeDownload : download) * 1024;
-        }
-
-        public int effectiveUploadBytes(java.time.LocalDateTime now) {
-            return (alternativeActive(now) ? alternativeUpload : upload) * 1024;
+        /** A pair's upload limit, bytes per second, 0 for none. */
+        public int uploadBytes(boolean alternative) {
+            return (alternative ? alternativeUpload : upload) * 1024;
         }
 
         public Speed withAlternativeOn(boolean on) {
@@ -302,6 +298,18 @@ public record EngineSettings(
         }
         String v4 = "0.0.0.0:" + port;
         return ipv6 ? v4 + ",[::]:" + port : v4;
+    }
+
+    /**
+     * libtorrent's {@code outgoing_interfaces}: the bound address or interface name, without a
+     * port or brackets, or empty when unbound. {@code listen_interfaces} binds only the listening
+     * sockets; without this the peers the session dials leave by whatever route the system picks,
+     * which is the VPN leak that binding is there to prevent.
+     */
+    public String outgoingInterfaces() {
+        String bound = listenInterface == null ? "" : listenInterface.trim();
+        if (bound.startsWith("[") && bound.endsWith("]")) return bound.substring(1, bound.length() - 1);
+        return bound;
     }
 
     /** True when the proxy needs credentials, which libtorrent treats as a distinct type. */

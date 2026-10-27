@@ -1,5 +1,6 @@
 package com.torrenta.store;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -7,16 +8,21 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.stream.Stream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import com.torrenta.search.Definition;
 import com.torrenta.search.DefinitionException;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -41,7 +47,7 @@ public final class DefinitionStore {
     static final String EXAMPLES = "/com/torrenta/search/examples/";
 
     /** One file in the folder: loaded (definition set) or not (problem set). */
-    public record Entry(Path file, String id, Definition definition, String problem) {
+    public record Entry(Path file, String id, @Nullable Definition definition, String problem) {
         public boolean loaded() {
             return definition != null;
         }
@@ -137,6 +143,90 @@ public final class DefinitionStore {
         return written;
     }
 
+    /**
+     * Each file's text by id, as it is on disk now: what settings sync sends. Only the names a
+     * definition can have; a file that cannot be read is left out.
+     */
+    public synchronized Map<String, String> texts() {
+        Map<String, String> out = new TreeMap<>();
+        for (Path file : files()) {
+            String name = file.getFileName().toString();
+            if (!name.endsWith(SUFFIX)) continue;
+            String id = name.substring(0, name.length() - SUFFIX.length());
+            if (!Definition.ID.matcher(id).matches()) continue;
+            String text = readQuietly(file);
+            if (text != null) out.put(id, text);
+        }
+        return out;
+    }
+
+    /**
+     * Every {@code *.json} in the folder, loaded or not, into a zip at {@code target} as
+     * {@code search-providers/<name>}, so unpacking it in the config folder puts them back. Written
+     * beside the target and moved into place; returns how many files went in.
+     */
+    public synchronized int exportZip(Path target) throws IOException {
+        Map<String, byte[]> files = new TreeMap<>();
+        for (Path file : files()) files.put(file.getFileName().toString(), Files.readAllBytes(file));
+        Path parent = target.toAbsolutePath().normalize().getParent();
+        if (parent == null) throw new IOException("Nowhere to write " + target);
+        write(parent.resolve(target.getFileName()), zip(files));
+        return files.size();
+    }
+
+    /** The files by name as a zip, each under {@code search-providers/}, in the map's order. */
+    static byte[] zip(Map<String, byte[]> files) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream out = new ZipOutputStream(bytes, StandardCharsets.UTF_8)) {
+            for (Map.Entry<String, byte[]> e : files.entrySet()) {
+                out.putNextEntry(new ZipEntry(FOLDER + "/" + e.getKey()));
+                out.write(e.getValue());
+                out.closeEntry();
+            }
+        }
+        return bytes.toByteArray();
+    }
+
+    /** The export's suggested file name: {@code torrenta-search-providers-2026-10-25.zip}. */
+    public static String exportName(LocalDate day) {
+        return "torrenta-" + FOLDER + "-" + day + ".zip";
+    }
+
+    /** The chosen path with {@code .zip} added when it has none: a chooser does not always add it. */
+    public static Path withZipSuffix(Path chosen) {
+        String name = chosen.getFileName().toString();
+        return name.toLowerCase(Locale.ROOT).endsWith(".zip") ? chosen : chosen.resolveSibling(name + ".zip");
+    }
+
+    /** The shipped examples' texts by id. */
+    public static Map<String, String> shippedTexts() {
+        Map<String, String> out = new TreeMap<>();
+        for (String name : exampleNames()) {
+            String text = example(name);
+            if (text != null && name.endsWith(SUFFIX))
+                out.put(name.substring(0, name.length() - SUFFIX.length()), text);
+        }
+        return out;
+    }
+
+    /** Writes {@code <id>.json}, as sync brings it; the next {@link #load} reads it. */
+    public synchronized void put(String id, String text) throws IOException {
+        if (!Definition.ID.matcher(id).matches()) throw new IOException("not a definition id: " + id);
+        write(dir.resolve(id + SUFFIX), text);
+        if (text.equals(shippedTexts().get(id))) Files.deleteIfExists(dir.resolve(id + SUFFIX + EXAMPLE_SUFFIX));
+    }
+
+    /**
+     * Removes {@code <id>.json}, as sync removes it; a shipped example gets its shipped text back
+     * instead, since that is what an example left out of the sync means.
+     */
+    public synchronized void remove(String id) throws IOException {
+        if (!Definition.ID.matcher(id).matches()) throw new IOException("not a definition id: " + id);
+        String shipped = shippedTexts().get(id);
+        if (shipped != null) put(id, shipped);
+        else Files.deleteIfExists(dir.resolve(id + SUFFIX));
+    }
+
     /** The shipped examples' file names, from the index beside them. */
     public static List<String> exampleNames() {
         String index = example("index.txt");
@@ -150,7 +240,7 @@ public final class DefinitionStore {
     }
 
     /** A shipped example's text, or null when there is none of that name. */
-    public static String example(String name) {
+    public static @Nullable String example(String name) {
         try (InputStream in = DefinitionStore.class.getResourceAsStream(EXAMPLES + name)) {
             if (in == null) return null;
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
@@ -208,7 +298,7 @@ public final class DefinitionStore {
         }
     }
 
-    private static String readQuietly(Path file) {
+    private static @Nullable String readQuietly(Path file) {
         try {
             return Files.isRegularFile(file) ? Files.readString(file, StandardCharsets.UTF_8) : null;
         } catch (IOException e) {
@@ -218,10 +308,14 @@ public final class DefinitionStore {
 
     /** Written beside the file and moved into place, so a crash mid-write never truncates it. */
     private static void write(Path file, String text) throws IOException {
+        write(file, text.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void write(Path file, byte[] bytes) throws IOException {
         Files.createDirectories(file.getParent());
         Path tmp = Files.createTempFile(file.getParent(), file.getFileName().toString(), ".part");
         try {
-            Files.writeString(tmp, text, StandardCharsets.UTF_8);
+            Files.write(tmp, bytes);
             Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } finally {
             Files.deleteIfExists(tmp);

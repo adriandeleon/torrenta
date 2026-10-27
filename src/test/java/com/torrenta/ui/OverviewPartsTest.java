@@ -3,6 +3,7 @@ package com.torrenta.ui;
 import java.util.List;
 
 import com.torrenta.engine.Torrent;
+import com.torrenta.session.SpeedHistory;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -20,6 +21,21 @@ class OverviewPartsTest {
         boolean[] out = new boolean[s.length()];
         for (int i = 0; i < s.length(); i++) out[i] = s.charAt(i) == '1';
         return out;
+    }
+
+    /** A player's read-ahead marks the cells whose runs hold a piece of its window, by the same runs. */
+    @Test
+    void theReadaheadMarksTheCellsItsPiecesFallIn() {
+        // 10 pieces over 5 cells: two a cell; pieces 3 to 6 fall in cells 1, 2 and 3.
+        assertArrayEquals(
+                new boolean[] {false, true, true, true, false},
+                PieceStrip.marks(new com.torrenta.engine.PieceMath.Span(3, 6), 10, 5));
+        assertArrayEquals(new boolean[5], PieceStrip.marks(null, 10, 5), "nobody plays it");
+        assertArrayEquals(
+                new boolean[] {false, false, true},
+                PieceStrip.marks(new com.torrenta.engine.PieceMath.Span(2, 2), 3, 9),
+                "fewer pieces than cells: one a piece");
+        assertEquals(0, PieceStrip.marks(new com.torrenta.engine.PieceMath.Span(0, 0), 0, 5).length);
     }
 
     @Test
@@ -228,5 +244,15 @@ class OverviewPartsTest {
         assertEquals("7a3f 02c1 … 9e4d c912", OverviewText.shortHash("7a3f02c1aaaaaaaaaaaaaaaaaaaaaaaa9e4dc912"));
         assertEquals("abcd ef", OverviewText.shortHash("abcdef"));
         assertEquals("—", OverviewText.shortHash(""));
+    }
+
+    @Test
+    void aDownloadFromALinkShowsTheOverviewInPlaceOfPeersAndTrackers() {
+        assertEquals("overview", DetailPane.tabFor("peers", true));
+        assertEquals("overview", DetailPane.tabFor("trackers", true));
+        assertEquals("files", DetailPane.tabFor("files", true));
+        assertEquals("log", DetailPane.tabFor("log", true));
+        assertEquals("peers", DetailPane.tabFor("peers", false));
+        assertEquals("trackers", DetailPane.tabFor("trackers", false));
     }
 }

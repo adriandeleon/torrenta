@@ -10,6 +10,8 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Hashes the files of a torrent the way libtorrent's own {@code set_piece_hashes} would, in Java:
  * SHA-1 per piece over the files laid end to end (v1), and per file the SHA-256 merkle root of
@@ -35,7 +37,8 @@ final class PieceHasher {
      * One file of the layout, in torrent order. A pad file has no path and reads as zeros; it
      * takes part in the v1 pieces and is skipped by v2, as libtorrent's canonical layout has it.
      */
-    record Entry(Path path, long size, boolean pad) {}
+    /** {@code path} is null for a padding file, which is zeros and on no disk. */
+    record Entry(@Nullable Path path, long size, boolean pad) {}
 
     /** Where the hashes go. All calls on the hashing thread, in order. */
     interface Sink {

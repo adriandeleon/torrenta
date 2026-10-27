@@ -5,6 +5,8 @@ import java.util.List;
 import javafx.scene.layout.Pane;
 import javafx.scene.layout.Region;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * The Overview's pieces map: a few rows of squares, each standing for a run of pieces, coloured
  * as the run is: all there, some missing, or some missing that no connected peer has (the amber
@@ -40,6 +42,10 @@ final class PieceStrip extends Pane {
     private int[] availability = new int[0];
     private boolean[] skipped = new boolean[0];
     private Cell[] shown = new Cell[0];
+    /** The pieces a player's read-ahead covers, first to last; null for none. */
+    private com.torrenta.engine.PieceMath.@Nullable Span window;
+
+    private boolean[] marked = new boolean[0];
 
     PieceStrip() {
         getStyleClass().add("piece-strip");
@@ -122,11 +128,33 @@ final class PieceStrip extends Pane {
         return Math.max(1, (int) ((width + GAP) / (CELL + GAP)));
     }
 
-    void show(boolean[] pieces, int[] counts, boolean[] unwanted) {
+    void show(
+            boolean[] pieces,
+            int[] counts,
+            boolean[] unwanted,
+            com.torrenta.engine.PieceMath.@Nullable Span readahead) {
         have = pieces;
         availability = counts;
         skipped = unwanted;
+        window = readahead;
         rebuild();
+    }
+
+    /**
+     * Which of {@code count} cells over {@code n} pieces hold a piece of the read-ahead window,
+     * by the same runs as {@link #cells}. Pure.
+     */
+    static boolean[] marks(com.torrenta.engine.PieceMath.@Nullable Span window, int n, int count) {
+        if (n == 0 || count <= 0) return new boolean[0];
+        int cells = Math.min(count, n);
+        boolean[] out = new boolean[cells];
+        if (window == null) return out;
+        for (int c = 0; c < cells; c++) {
+            int from = (int) ((long) c * n / cells);
+            int to = (int) ((long) (c + 1) * n / cells) - 1;
+            out[c] = from <= window.last() && to >= window.first();
+        }
+        return out;
     }
 
     /** The cells as shown, for the capture hook: {@code have/missing/rare} counts. */
@@ -140,12 +168,16 @@ final class PieceStrip extends Pane {
                 case SKIPPED -> s++;
             }
         }
-        return shown.length + " cells (" + h + " have, " + m + " missing, " + r + " rare, " + s + " skipped)";
+        int w = 0;
+        for (boolean b : marked) if (b) w++;
+        return shown.length + " cells (" + h + " have, " + m + " missing, " + r + " rare, " + s + " skipped)"
+                + (w > 0 ? ", " + w + " in the read-ahead" : "");
     }
 
     private void rebuild() {
         int columns = columns(getWidth());
         Cell[] next = cells(have, availability, skipped, columns * ROWS);
+        boolean[] nextMarks = marks(window, have.length, columns * ROWS);
         List<javafx.scene.Node> kids = getChildren();
         while (kids.size() > next.length) kids.removeLast();
         while (kids.size() < next.length) {
@@ -156,11 +188,14 @@ final class PieceStrip extends Pane {
         }
         for (int i = 0; i < next.length; i++) {
             Region r = (Region) kids.get(i);
-            if (i < shown.length && shown[i] == next[i]) continue;
-            r.getStyleClass().removeAll("have", "missing", "rare", "skipped");
+            boolean mark = i < nextMarks.length && nextMarks[i];
+            if (i < shown.length && shown[i] == next[i] && i < marked.length && marked[i] == mark) continue;
+            r.getStyleClass().removeAll("have", "missing", "rare", "skipped", "readahead");
             r.getStyleClass().add(next[i].styleClass);
+            if (mark) r.getStyleClass().add("readahead");
         }
         shown = next;
+        marked = nextMarks;
         requestLayout();
     }
 

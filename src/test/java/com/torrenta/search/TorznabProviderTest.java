@@ -92,6 +92,17 @@ class TorznabProviderTest {
     }
 
     @Test
+    void aServerWhoseKeyIsOnAnotherMachineIsNotAsked() {
+        TorznabProvider waiting = new TorznabProvider(
+                new TorznabEndpoint("Prowlarr", base.resolve("/1/api").toString(), "", true, -1, true));
+        lastQuery.set("untouched");
+        SearchException e = assertThrows(SearchException.class, () -> waiting.search("debian", SearchCategory.ALL));
+        assertEquals(com.torrenta.i18n.Messages.tr("search.error.keyNeeded"), e.getMessage());
+        assertThrows(SearchException.class, waiting::capabilities);
+        assertEquals("untouched", lastQuery.get(), "no request was made");
+    }
+
+    @Test
     void capsSayWhoTheServerIsAndWhatItKnows() throws SearchException {
         TorznabProvider.Capabilities caps = prowlarr("secret").capabilities();
         assertEquals("Prowlarr", caps.title());
@@ -140,6 +151,7 @@ class TorznabProviderTest {
         assertEquals("", netinst.infoHash());
         assertEquals("Prowlarr", netinst.provider());
         assertEquals("https://example.test/details/42", netinst.detailUrl());
+        assertEquals(SearchCategory.SOFTWARE, netinst.category(), "the category attribute's Newznab number");
 
         SearchResult dvd = results.get(1);
         assertEquals(
@@ -166,6 +178,7 @@ class TorznabProviderTest {
         assertTrue(desktop.link() instanceof SearchResult.Link.Magnet);
         assertEquals("https://example-indexer.test/torrent/123", desktop.detailUrl());
         assertEquals("127.0.0.1", desktop.provider());
+        assertEquals(SearchCategory.SOFTWARE, desktop.category(), "the indexer's own 100001 names nothing");
 
         SearchResult server = results.get(1);
         assertTrue(server.link() instanceof SearchResult.Link.Magnet, "a <link> that is a magnet");

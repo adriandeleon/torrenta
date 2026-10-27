@@ -5,6 +5,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.stream.Stream;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Reads the blocklist formats in the wild into {@link IpRange}s. Pure, and tested on each shape:
  *
@@ -39,7 +41,7 @@ public final class Blocklist {
     }
 
     /** One line, or null; also how a manual ban is read. */
-    public static IpRange parseLine(String line) {
+    public static @Nullable IpRange parseLine(String line) {
         try {
             String s = line;
             // eMule .dat: "first - last , access , name". Access 0 blocks; anything else is allowed.

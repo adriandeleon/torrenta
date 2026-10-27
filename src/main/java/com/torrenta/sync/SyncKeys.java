@@ -27,21 +27,29 @@ public final class SyncKeys {
      * dialog's last folder and trackers, this machine's; {@code os.*} is this machine's desktop
      * (whether it is registered as the handler, whether its dock shows a badge); {@code engine.*}
      * names which engine profile this machine starts, the daemon being reachable from here;
-     * {@code ui.window.*} is where the window sits on this machine's screens.
+     * {@code ui.window.*} is where the window sits on this machine's screens; {@code webapi.*} is
+     * this machine's door from the network, its password's hash among it.
      */
-    static final List<String> LOCAL_PREFIXES =
-            List.of("sync.", "torrent.", "ui.sidebar.", "ui.window.", "automation.", "create.", "os.", "engine.");
+    static final List<String> LOCAL_PREFIXES = List.of(
+            "sync.", "torrent.", "ui.sidebar.", "ui.window.", "automation.", "create.", "os.", "engine.", "webapi.");
 
     static final List<String> LOCAL_KEYS = List.of(
             "download.dir",
             "download.incompleteDir",
             "download.curl",
+            "stream.player",
             "connection.interface",
             "ipfilter.file",
             "ipfilter.lastRefreshEpochMs",
             "updates.lastCheckEpochMs",
             "updates.dismissedVersion",
-            "proxy.password");
+            "proxy.password",
+            // The switch follows this machine's battery and network now: one unplugged laptop
+            // must not slow the others down.
+            "speed.altOn",
+            "speed.autoWas",
+            "speed.conditionPausing",
+            "speed.conditionHeld");
 
     private SyncKeys() {}
 

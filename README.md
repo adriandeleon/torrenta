@@ -14,11 +14,14 @@
 
 A keyboard-first, cross-platform BitTorrent client built on JavaFX.
 
+**Website: [adriandeleon.github.io/torrenta-website](https://adriandeleon.github.io/torrenta-website/)**:
+features, documentation, keybindings and release news.
+
 <p align="center">
   <img src="docs/screenshot.png" alt="Torrenta's main window: the sidebar, the torrent list with five downloads and seeds, and the detail pane's Overview of the selected torrent with its pieces and speed graph" width="860">
 </p>
 
-Status: **feature-complete against the roadmap (0.2 through 0.9); 0.1.0 is the first release**. A themed window with a menu bar, an icon toolbar, a torrent list, a status bar that keeps its history, an event log, a debug log,
+Status: **feature-complete against the roadmap (0.2 through 0.9); 0.2.0 is the latest release**. A themed window with a menu bar, an icon toolbar, a torrent list, a status bar that keeps its history, an event log, a debug log,
 on a real engine: libtorrent, through [libtorrent4j](https://github.com/aldenml/libtorrent4j).
 Torrents arrive from a file, a magnet link, a URL, a drop or the clipboard through an Add dialog
 (file selection and priorities, save path with what the torrent leaves free, category, tags, stop
@@ -89,7 +92,13 @@ answer landing in the results as it arrives with a line per provider saying how 
 why it could not answer; the same torrent from two servers is shown once, the better-seeded copy
 first, sorted by seeds unless a column is clicked. `Enter` on a result opens the Add dialog for it,
 a `.torrent` link fetched first. The results table's columns are remembered like the transfer
-list's.
+list's. Once there are results a Filter box above them narrows them in the omnibox's language:
+words match the name, `provider:jack`, `cat:movies` (the category the indexer filed it under),
+`size>1g`, `seeds>=10`, `leechers<5`, `date<7d` or `date>=2026-01-01` (a range is two terms), a
+`-` in front for "not"; each term is a chip (red when it does not read, a click removes it) and
+the box says how many of the results it shows. The row menu's Show Only and Hide put a
+provider's or a category's term in it. `/` in the results (or `Ctrl+K`) goes to it, `Enter`
+returns to the results, `Esc` empties it; it stays across searches until Clear.
 
 RSS (`Ctrl+R`) is a third tab: feeds on the left (All feeds first, each with its unread count and
 a glyph while it refreshes or after it failed), the articles of the chosen feed on the right (bold
@@ -153,7 +162,8 @@ TORRENTA_CAPTURE=/tmp/torrenta.png ./mvnw javafx:run
 
 Renders the real window, writes it to a PNG, prints a few `capture:` facts (size, title, focus owner,
 engine, status bar) and exits. CI runs the first form under Xvfb on Linux as a smoke test.
-`-Dtorrenta.captureAction=search:debian,search-keys:DOWN+ENTER` drives the Search tab; a stand-in
+`-Dtorrenta.captureAction=search:debian,search-keys:DOWN+ENTER` drives the Search tab
+(`search-filter:size>1g~seeds>=10` types a results filter once the search ends); a stand-in
 Torznab server for it is `java scripts/torznab-stub.java 9696 <search.xml> [caps.xml]` with the
 fixtures under `src/test/resources/com/torrenta/search`, and a provider at
 `http://127.0.0.1:9696/api` in the config folder's `search-providers.json`. For a definition file,
@@ -206,10 +216,11 @@ filed under which is `torrents/<info-hash>.labels` beside its resume data, writt
 changes and deleted with the torrent. Watch folders are `watch-folders.json` (folder, what to do
 with the file, save path, category, start paused), this machine's and never synced; a file that is
 not a torrent is renamed `.invalid` and left alone. Search providers are `search-providers.json`
-(name, URL, API key, enabled, the category count the last Test found), this machine's too and
-never synced, since the key is a secret. Definition-file providers are `search-providers/<id>.json`,
-one per site, read only (the shipped examples are copied in once and never written over); which are
-switched off is `search.disabled` in the settings file and syncs. The RSS reader keeps its feeds in
+(name, URL, API key, enabled, the category count the last Test found); settings sync carries the
+servers but never the key, which is a secret, nor the count. Definition-file providers are
+`search-providers/<id>.json`, one per site, read only (the shipped examples are copied in once and
+never written over); a file that differs from the shipped one syncs, and which are switched off is
+`search.disabled` in the settings file and syncs too. The RSS reader keeps its feeds in
 `rss/feeds.json` (id, URL, name, its own interval if any) and each feed's articles, read or not,
 with the last answer's `ETag`, `Last-Modified`, time and error, in `rss/articles/<id>.json`, at most
 500 per feed, the oldest dropped, and its auto-download rules, with what each remembers (the last
@@ -240,6 +251,10 @@ this machine's value and says so. It syncs after startup, half a minute after a 
 few minutes while the window is in front, without ever asking for a password: git signs in the way
 it does for you, and with two `gh` accounts the one that can read the repository is used. Folders,
 the network interface, the clocks of the last checks and the proxy password stay on each machine.
+Category names and tags travel, and so do the search providers: the Torznab servers without their
+API keys, which never leave the machine they were typed on (a server that arrives says "needed
+here" in Settings → Search until you type its key once on that computer), and the definition files
+you added or changed.
 
 After startup, at most once a day, Torrenta asks GitHub whether there is a newer release and says
 so in the status bar and the Help menu; nothing about you or the machine is sent beyond the request

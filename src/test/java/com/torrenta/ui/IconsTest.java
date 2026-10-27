@@ -9,6 +9,7 @@ import javafx.scene.Group;
 import javafx.scene.Node;
 import javafx.scene.shape.SVGPath;
 
+import com.torrenta.content.FileKind;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -104,6 +105,8 @@ class IconsTest {
                 "copy-name",
                 "copy-hash",
                 "copy-magnet",
+                "copy-updatable-link",
+                "new-version",
                 "rename",
                 "export-torrent",
                 "open-folder",
@@ -149,5 +152,10 @@ class IconsTest {
             assertTrue(paths.add(content), page + " shares its glyph with another page");
         }
         assertNull(Icons.forSettingsPage("nothing"));
+    }
+
+    @Test
+    void everyFileKindHasAGlyph() {
+        for (FileKind kind : FileKind.values()) assertNotNull(Icons.forKind(kind), kind.name());
     }
 }

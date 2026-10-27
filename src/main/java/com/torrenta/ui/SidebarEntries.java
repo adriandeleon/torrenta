@@ -9,6 +9,7 @@ import javafx.beans.property.SimpleIntegerProperty;
 
 import com.torrenta.engine.Torrent;
 import com.torrenta.ui.SidebarFilter.Axis;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -22,32 +23,42 @@ import static com.torrenta.i18n.Messages.tr;
 final class SidebarEntries {
 
     /**
-     * One line: a filter with its count, or a section's heading (no filter, no count). The
+     * One line: a filter with its count, or a section's heading (no count; its filter is All). The
      * section's own All carries the section's axis, so choosing it clears that axis alone.
      */
     static final class Entry {
         final SidebarFilter filter;
+        final boolean heading;
         final Axis axis;
         final String title;
+        /** For a view whose query no longer reads: what is wrong, for the tooltip; empty otherwise. */
+        final String problem;
+
         final IntegerProperty count = new SimpleIntegerProperty();
 
         Entry(SidebarFilter filter, Axis axis) {
-            this(filter, axis, filter.title());
+            this(filter, axis, filter.title(), "");
         }
 
-        private Entry(SidebarFilter filter, Axis axis, String title) {
+        private Entry(SidebarFilter filter, Axis axis, String title, String problem) {
+            this(filter, false, axis, title, problem);
+        }
+
+        private Entry(SidebarFilter filter, boolean heading, Axis axis, String title, String problem) {
             this.filter = filter;
+            this.heading = heading;
             this.axis = axis;
             this.title = title;
+            this.problem = problem;
         }
 
         boolean isHeading() {
-            return filter == null;
+            return heading;
         }
 
         /** The entry is one of the selection's choices, or the All of an axis with none. */
         boolean chosenIn(SidebarSelection selection) {
-            if (filter == null) return false;
+            if (heading) return false;
             if (filter.kind() != SidebarFilter.Kind.ALL) return selection.has(filter);
             return axis == Axis.ALL ? selection.isAll() : selection.on(axis).kind() == SidebarFilter.Kind.ALL;
         }
@@ -59,12 +70,12 @@ final class SidebarEntries {
         final String title;
         final Entry heading;
         private List<Entry> entries = List.of();
-        private List<String> names = null;
+        private @Nullable List<String> names = null;
 
         Section(Axis axis, String title) {
             this.axis = axis;
             this.title = title;
-            this.heading = new Entry(null, axis, title);
+            this.heading = new Entry(SidebarFilter.ALL, true, axis, title, "");
         }
 
         List<Entry> entries() {
@@ -72,7 +83,24 @@ final class SidebarEntries {
         }
     }
 
+    /**
+     * A saved view as the sidebar lists it: its slug, its name, and its query read with the clock
+     * of this poll (the window reads them; {@code added<} counts back from now).
+     */
+    record View(String slug, String name, FilterQuery query) {
+
+        /** What is wrong with the query, from its first term that does not read; empty if none. */
+        String problem() {
+            return query.chips().stream()
+                    .filter(c -> !c.valid())
+                    .map(FilterQuery.Chip::label)
+                    .findFirst()
+                    .orElse("");
+        }
+    }
+
     final Entry all = new Entry(SidebarFilter.ALL, Axis.ALL);
+    final Section views = new Section(Axis.VIEW, tr("sidebar.section.views"));
     final Section status = new Section(Axis.STATUS, tr("sidebar.section.status"));
     final Section categories = new Section(Axis.CATEGORY, tr("sidebar.section.categories"));
     final Section tags = new Section(Axis.TAG, tr("sidebar.section.tags"));
@@ -84,10 +112,12 @@ final class SidebarEntries {
         for (SidebarStatus s : SidebarStatus.values()) fixed.add(new Entry(SidebarFilter.status(s), Axis.STATUS));
         status.entries = List.copyOf(fixed);
         status.names = List.of();
+        // No views until one is saved: an empty section is not a rebuild.
+        views.names = List.of();
     }
 
     List<Section> sections() {
-        return List.of(status, categories, tags, trackers);
+        return List.of(views, status, categories, tags, trackers);
     }
 
     /** Every entry in order, the top All first. */
@@ -130,7 +160,29 @@ final class SidebarEntries {
      *     counts moved
      */
     List<Section> update(List<String> categoryNames, List<String> tagNames, List<Torrent> torrents) {
+        return update(List.of(), categoryNames, tagNames, torrents);
+    }
+
+    /**
+     * {@link #update}, the saved views too: listed in their order under their All, rebuilt when
+     * one is added, removed, renamed or reordered or its query starts or stops reading, and each
+     * counted by its own query over every torrent, as the other entries are.
+     */
+    List<Section> update(
+            List<View> savedViews, List<String> categoryNames, List<String> tagNames, List<Torrent> torrents) {
         List<Section> rebuilt = new ArrayList<>();
+        List<String> v = savedViews.stream()
+                .map(view -> view.slug() + "\u0000" + view.name() + "\u0000" + view.problem())
+                .toList();
+        if (!v.equals(views.names)) {
+            views.names = v;
+            List<Entry> entries = new ArrayList<>();
+            if (!savedViews.isEmpty()) entries.add(new Entry(SidebarFilter.ALL, Axis.VIEW));
+            for (View view : savedViews)
+                entries.add(new Entry(SidebarFilter.view(view.slug()), Axis.VIEW, view.name(), view.problem()));
+            views.entries = List.copyOf(entries);
+            rebuilt.add(views);
+        }
         List<String> c = SidebarFilter.names(categoryNames, torrents, false);
         if (!c.equals(categories.names)) {
             categories.names = c;
@@ -159,6 +211,12 @@ final class SidebarEntries {
             rebuilt.add(trackers);
         }
         for (Entry e : entries()) e.count.set(e.filter.count(torrents));
+        for (int i = 0; i < savedViews.size(); i++) {
+            FilterQuery q = savedViews.get(i).query();
+            // The section's own All comes first; the views follow in order.
+            views.entries.get(i + 1).count.set((int)
+                    torrents.stream().filter(q::matches).count());
+        }
         return rebuilt;
     }
 

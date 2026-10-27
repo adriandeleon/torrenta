@@ -10,6 +10,7 @@ import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentPreview.FileEntry;
 import com.torrenta.i18n.Messages;
+import com.torrenta.session.AddDefaults;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -77,7 +78,7 @@ class AddDialogTest {
         AddRequest.Source source = new AddRequest.Magnet("magnet:?xt=urn:btih:abc");
         Path data = Path.of("/data").toAbsolutePath();
         Path incomplete = Path.of("/data/incomplete").toAbsolutePath();
-        AddDialog.Defaults direct = new AddDialog.Defaults(data, true, false, false, incomplete, false, false);
+        AddDefaults direct = new AddDefaults(data, true, false, false, incomplete, false, false);
         assertEquals(
                 new AddRequest(
                         source,
@@ -89,13 +90,13 @@ class AddDialogTest {
                         Map.of(),
                         TorrentLabels.NONE,
                         AddRequest.Storage.DEFAULT),
-                AddDialog.withoutAsking(source, direct));
-        AddDialog.Defaults via = new AddDialog.Defaults(data, false, true, true, incomplete, true, true);
+                direct.withoutAsking(source));
+        AddDefaults via = new AddDefaults(data, false, true, true, incomplete, true, true);
         assertEquals(
                 new AddRequest.Storage(incomplete, true, true),
-                AddDialog.withoutAsking(source, via).storage(),
+                via.withoutAsking(source).storage(),
                 "the storage plan applies without the dialog too");
-        AddDialog.Defaults flat = new AddDialog.Defaults(
+        AddDefaults flat = new AddDefaults(
                 data,
                 false,
                 false,
@@ -106,7 +107,7 @@ class AddDialogTest {
                 com.torrenta.engine.FileRenames.Layout.NO_SUBFOLDER);
         assertEquals(
                 com.torrenta.engine.FileRenames.Layout.NO_SUBFOLDER,
-                AddDialog.withoutAsking(source, flat).storage().layout(),
+                flat.withoutAsking(source).storage().layout(),
                 "and the content layout");
     }
 

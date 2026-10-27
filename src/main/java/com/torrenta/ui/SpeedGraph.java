@@ -21,6 +21,9 @@ import javafx.scene.paint.Paint;
 import javafx.scene.shape.StrokeLineJoin;
 import javafx.scene.text.Font;
 
+import com.torrenta.session.SpeedHistory;
+import org.jspecify.annotations.Nullable;
+
 /**
  * A speed graph: download and upload over the chosen window, drawn on a canvas from a
  * {@link SpeedHistory}, with the window chips above and the rate now and the peak below. The
@@ -44,9 +47,9 @@ final class SpeedGraph extends VBox {
     private final Region textSwatch = swatch("speed-graph-text");
     private int windowSeconds;
     private IntConsumer onWindowChanged = w -> {};
-    private SpeedHistory history;
+    private @Nullable SpeedHistory history;
     private long now;
-    private SpeedPlot lastPlot;
+    private @Nullable SpeedPlot lastPlot;
 
     /**
      * @param windowSeconds the span to start with, one of {@link SpeedHistory#WINDOWS}
@@ -127,8 +130,8 @@ final class SpeedGraph extends VBox {
         return windowSeconds;
     }
 
-    /** FX thread. The history to draw, as of {@code nowSeconds} (the history's clock). */
-    void show(SpeedHistory history, long nowSeconds) {
+    /** FX thread. The history to draw, as of {@code nowSeconds} (the history's clock); none is {@link #clear}. */
+    void show(@Nullable SpeedHistory history, long nowSeconds) {
         this.history = history;
         this.now = nowSeconds;
         paint();

@@ -47,6 +47,16 @@ class EngineSettingsTest {
     }
 
     @Test
+    void outgoingInterfacesString() {
+        assertEquals("", with(6881, false, "", true).outgoingInterfaces(), "unbound: the system's route");
+        assertEquals("", with(6881, false, null, true).outgoingInterfaces());
+        assertEquals("192.168.1.5", with(7000, false, " 192.168.1.5 ", true).outgoingInterfaces(), "no port");
+        assertEquals("tun0", with(7000, true, "tun0", true).outgoingInterfaces(), "an interface name");
+        assertEquals("fe80::1", with(7000, false, "fe80::1", true).outgoingInterfaces(), "no brackets");
+        assertEquals("fe80::1", with(7000, false, "[fe80::1]", true).outgoingInterfaces(), "taken off");
+    }
+
+    @Test
     void proxyAuthentication() {
         EngineSettings d = EngineSettings.defaults();
         assertFalse(d.proxyAuthenticated());

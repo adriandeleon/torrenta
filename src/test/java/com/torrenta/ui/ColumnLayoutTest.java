@@ -43,7 +43,7 @@ class ColumnLayoutTest {
     @Test
     void theSearchTabsColumnsAreOrdinaryColumnsToo() {
         // The same format under its own key, search.columns; the pane's ids round-trip with it.
-        String stored = "name:420,size:90,seeds:70,-leechers:80,date:150,provider:120";
+        String stored = "name:420,size:90,seeds:70,-leechers:80,date:150,provider:120,category:90";
         List<Column> parsed = ColumnLayout.parse(stored);
         assertEquals(SearchPane.columnIds(), parsed.stream().map(Column::id).toList());
         assertEquals(new Column("leechers", 80, false), parsed.get(3));

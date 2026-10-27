@@ -7,12 +7,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.jspecify.annotations.Nullable;
+
 /**
- * One settings sync between this machine and the user's repository; Editora's engine, for one
- * file. Blocking and free of JavaFX; the caller picks the thread.
+ * One settings sync between this machine and the user's repository; Editora's engine, for the
+ * settings file, the labels file ({@link SyncLabels}) and the search providers ({@link SyncSearch}).
+ * Blocking and free of JavaFX; the caller picks the thread.
  *
  * <p>Git only carries the data. Torrenta keeps a clone of its own ({@code sync/repo} in the config
  * directory) that nothing else reads, and never asks git to merge: the working tree is set to what
@@ -24,6 +28,12 @@ import java.util.regex.Pattern;
  * after the push succeeded and the live settings were written, so a sync interrupted anywhere is
  * simply repeated by the next one: until then this machine's edits still differ from the base and
  * are sent again.
+ *
+ * <p>The labels file is merged the same way against {@value #LABELS_BASE_REF}, a base of its own: a
+ * machine whose last sync was by a build that did not sync labels has a {@value #BASE_REF} whose
+ * labels file it never applied, and against that base its own lists would read as removals. With
+ * no labels base the merge is a first one, which only adds. The search providers have
+ * {@value #SEARCH_BASE_REF} for the same reason. Each is a {@link Part}.
  */
 public final class SyncEngine {
 
@@ -32,14 +42,21 @@ public final class SyncEngine {
 
     static final String FORMAT_FILE = "torrenta-sync.properties";
     static final String SETTINGS_FILE = "settings.properties";
+    static final String LABELS_FILE = "labels.properties";
     static final String BASE_REF = "refs/torrenta/base";
+    static final String LABELS_BASE_REF = "refs/torrenta/labels-base";
+    static final String SEARCH_BASE_REF = "refs/torrenta/search-base";
     private static final int ATTEMPTS = 3;
     private static final String README = """
             # Torrenta settings
 
             Written by Torrenta's settings sync. Every computer that connects to this repository keeps
-            the settings in `settings.properties` the same. Edit it by hand if you like; the next sync
-            on each computer merges the change, one key at a time.
+            the settings in `settings.properties` the same, and the category names and tags in
+            `labels.properties`. The search providers travel too: the Torznab servers in
+            `search-providers.json`, without their API keys, which each computer keeps to itself, and
+            the definition files in `search-providers/` that differ from the shipped examples. Edit
+            them by hand if you like; the next sync on each computer merges the change, one key, server
+            or file at a time.
             """;
 
     private final QuietGit git;
@@ -47,12 +64,18 @@ public final class SyncEngine {
     private final String url;
     private final String branch;
     private final SyncTarget target;
+    private final List<Part> parts;
     private final String machine;
 
     /** A command git refused; the message is its output. */
     static final class GitFailure extends Exception {
         GitFailure(String message) {
             super(message);
+        }
+
+        @Override
+        public String getMessage() {
+            return java.util.Objects.requireNonNullElse(super.getMessage(), "");
         }
     }
 
@@ -61,11 +84,39 @@ public final class SyncEngine {
      * @param machine this computer's name, for the commit message
      */
     public SyncEngine(QuietGit git, String url, String branch, SyncTarget target, String machine) {
+        this(git, url, branch, target, null, machine);
+    }
+
+    /**
+     * @param labels the category names and tags as {@link SyncLabels#entries}, or null to leave the
+     *     repository's labels file as it is
+     */
+    public SyncEngine(
+            QuietGit git, String url, String branch, SyncTarget target, @Nullable SyncTarget labels, String machine) {
+        this(git, url, branch, target, labels, null, machine);
+    }
+
+    /**
+     * @param search the search providers as {@link SyncSearch#entries}, or null to leave the
+     *     repository's as they are
+     */
+    public SyncEngine(
+            QuietGit git,
+            String url,
+            String branch,
+            SyncTarget target,
+            @Nullable SyncTarget labels,
+            @Nullable SyncTarget search,
+            String machine) {
         this.git = git;
         this.clone = git.dir();
         this.url = url == null ? "" : url.strip();
         this.branch = branch == null || branch.isBlank() ? "main" : branch.strip();
         this.target = target;
+        List<Part> parts = new ArrayList<>();
+        if (labels != null) parts.add(labelsPart(labels));
+        if (search != null) parts.add(searchPart(search));
+        this.parts = List.copyOf(parts);
         this.machine = machine == null || machine.isBlank() ? "this computer" : machine.strip();
     }
 
@@ -141,7 +192,8 @@ public final class SyncEngine {
     }
 
     /** One fetch-merge-push round; null when the push lost a race and the round must be repeated. */
-    private SyncReport cycle(boolean previewOnly) throws IOException, GitFailure {
+    /** Null when another machine pushed first: the caller goes round again. */
+    private @Nullable SyncReport cycle(boolean previewOnly) throws IOException, GitFailure {
         Proc.Result fetch = git.network("fetch", "--prune", "--quiet", "origin");
         if (!fetch.ok()) return SyncReport.failure(SyncReport.Status.FETCH_FAILED, fetch.transcript());
         String remoteRef = "refs/remotes/origin/" + branch;
@@ -170,11 +222,29 @@ public final class SyncEngine {
         }
         Map<String, String> mine = target.read();
         SyncMerge.Result merged = SyncMerge.merge(base, mine, theirs);
-        if (previewOnly) return ok(merged);
+        List<Round> rounds = new ArrayList<>();
+        for (Part part : parts) {
+            Map<String, String> partBase =
+                    exists(part.baseRef()) ? part.reader().read(commitTree(part.baseRef())) : null;
+            Map<String, String> partTheirs = remoteHas ? part.reader().read(workTree()) : Map.of();
+            Map<String, String> partMine = part.target().read();
+            rounds.add(new Round(part, partMine, SyncMerge.merge(partBase, partMine, partTheirs)));
+        }
+        List<SyncMerge.Result> results = new ArrayList<>(List.of(merged));
+        for (Round round : rounds) results.add(round.merged());
+        if (previewOnly) return ok(results);
         if (!merged.merged().equals(mine) && !target.apply(mine, merged.merged())) {
             return SyncReport.failure(SyncReport.Status.LOCAL_BUSY, "");
         }
+        for (Round round : rounds) {
+            Map<String, String> next = round.merged().merged();
+            if (!next.equals(round.mine()) && !round.part().target().apply(round.mine(), next)) {
+                return SyncReport.failure(SyncReport.Status.LOCAL_BUSY, "");
+            }
+        }
         Files.writeString(clone.resolve(SETTINGS_FILE), SyncKeys.render(merged.merged()));
+        for (Round round : rounds)
+            round.part().writer().write(clone, round.merged().merged());
         writeIfAbsent(FORMAT_FILE, "formatVersion=" + FORMAT_VERSION + "\n");
         writeIfAbsent(".gitattributes", "* -text\n");
         writeIfAbsent("README.md", README);
@@ -194,18 +264,131 @@ public final class SyncEngine {
                 // The live settings already hold the merge; the base stays, so the next sync sends again.
                 return new SyncReport(
                         SyncReport.Status.PUSH_FAILED,
-                        merged.received(),
+                        all(results, SyncMerge.Result::received),
                         List.of(),
-                        merged.conflicts(),
+                        all(results, SyncMerge.Result::conflicts),
                         push.transcript());
             }
         }
         must(git.run("update-ref", BASE_REF, "HEAD"));
-        return ok(merged);
+        for (Round round : rounds) must(git.run("update-ref", round.part().baseRef(), "HEAD"));
+        return ok(results);
     }
 
-    private static SyncReport ok(SyncMerge.Result merged) {
-        return new SyncReport(SyncReport.Status.OK, merged.received(), merged.sent(), merged.conflicts(), "");
+    private static SyncReport ok(List<SyncMerge.Result> results) {
+        return new SyncReport(
+                SyncReport.Status.OK,
+                all(results, SyncMerge.Result::received),
+                all(results, SyncMerge.Result::sent),
+                all(results, SyncMerge.Result::conflicts),
+                "");
+    }
+
+    /** The settings' keys, then each part's. */
+    private static List<String> all(List<SyncMerge.Result> results, Function<SyncMerge.Result, List<String>> part) {
+        List<String> out = new ArrayList<>();
+        for (SyncMerge.Result r : results) out.addAll(part.apply(r));
+        return List.copyOf(out);
+    }
+
+    // ---- the parts ------------------------------------------------------------------------------
+
+    /** A part's entries out of a tree. */
+    @FunctionalInterface
+    interface Reader {
+        Map<String, String> read(RepoTree tree) throws IOException;
+    }
+
+    /** A part's merged entries into the clone's working tree. */
+    @FunctionalInterface
+    interface Writer {
+        void write(Path clone, Map<String, String> entries) throws IOException;
+    }
+
+    /** What is merged beside the settings, against a base of its own, and where it sits in the repository. */
+    record Part(String baseRef, SyncTarget target, Reader reader, Writer writer) {}
+
+    private record Round(Part part, Map<String, String> mine, SyncMerge.Result merged) {}
+
+    private static Part labelsPart(SyncTarget labels) {
+        return new Part(
+                LABELS_BASE_REF,
+                labels,
+                tree -> SyncLabels.parse(tree.file(LABELS_FILE)),
+                (clone, entries) -> Files.writeString(clone.resolve(LABELS_FILE), SyncKeys.render(entries)));
+    }
+
+    private static Part searchPart(SyncTarget search) {
+        return new Part(SEARCH_BASE_REF, search, SyncSearch::read, SyncEngine::writeSearch);
+    }
+
+    /**
+     * The endpoints file and the definition files for {@code entries}: an absent endpoint list is no
+     * file, and a definition file the merge has not got is deleted (only the names a definition can
+     * have: anything else in the folder was put there by hand and is left alone).
+     */
+    private static void writeSearch(Path clone, Map<String, String> entries) throws IOException {
+        Path torznab = clone.resolve(SyncSearch.TORZNAB_FILE);
+        String text = SyncSearch.torznabFile(entries);
+        if (text == null) Files.deleteIfExists(torznab);
+        else Files.writeString(torznab, text);
+        Map<String, String> files = SyncSearch.definitionFiles(entries);
+        Path folder = clone.resolve(SyncSearch.DEFINITIONS);
+        for (String name : listFiles(folder)) {
+            String stem = name.endsWith(".json") ? name.substring(0, name.length() - 5) : "";
+            if (SyncSearch.isDefinitionId(stem) && !files.containsKey(name)) Files.delete(folder.resolve(name));
+        }
+        if (!files.isEmpty()) Files.createDirectories(folder);
+        for (var file : files.entrySet()) Files.writeString(folder.resolve(file.getKey()), file.getValue());
+    }
+
+    private RepoTree workTree() {
+        return new RepoTree() {
+            @Override
+            public @Nullable String file(String path) throws IOException {
+                Path file = clone.resolve(path);
+                return Files.isRegularFile(file) ? Files.readString(file) : null;
+            }
+
+            @Override
+            public List<String> list(String folder) throws IOException {
+                return listFiles(clone.resolve(folder));
+            }
+        };
+    }
+
+    /** A commit's tree, through git: the base a part was last synced at. */
+    private RepoTree commitTree(String ref) {
+        return new RepoTree() {
+            @Override
+            public @Nullable String file(String path) {
+                Proc.Result shown = git.run("show", ref + ":" + path);
+                return shown.ok() ? shown.out() : null;
+            }
+
+            @Override
+            public List<String> list(String folder) throws IOException {
+                Proc.Result listed = git.run("ls-tree", "--name-only", ref, folder);
+                if (!listed.ok()) return List.of();
+                List<String> out = new ArrayList<>();
+                for (String line : listed.out().split("\\R")) {
+                    if (line.startsWith(folder) && line.length() > folder.length()) {
+                        out.add(line.substring(folder.length()));
+                    }
+                }
+                return out;
+            }
+        };
+    }
+
+    private static List<String> listFiles(Path folder) throws IOException {
+        if (!Files.isDirectory(folder)) return List.of();
+        try (var list = Files.list(folder)) {
+            return list.filter(Files::isRegularFile)
+                    .map(p -> p.getFileName().toString())
+                    .sorted()
+                    .toList();
+        }
     }
 
     static boolean nonFastForward(Proc.Result push) {
@@ -226,6 +409,9 @@ public final class SyncEngine {
             // What was synced with the old repository says nothing about this one: a first sync.
             must(git.run("remote", "set-url", "origin", url));
             if (exists(BASE_REF)) must(git.run("update-ref", "-d", BASE_REF));
+            for (String ref : List.of(LABELS_BASE_REF, SEARCH_BASE_REF)) {
+                if (exists(ref)) must(git.run("update-ref", "-d", ref));
+            }
             git.run("config", "--local", "--unset-all", SyncAccount.KEY); // absent is fine
         }
     }

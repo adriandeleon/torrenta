@@ -803,6 +803,8 @@
 .about-tagline { -fx-font-size: 13px; -fx-text-fill: -color-fg-muted; }
 .about-copyright { -fx-text-fill: -color-fg-muted; }
 .about-update { -fx-text-fill: -color-accent-fg; -fx-font-weight: bold; }
+.about-uptodate { -fx-text-fill: -color-success-fg; }
+.about-update-muted { -fx-text-fill: -color-fg-muted; }
 .about-env {
     -fx-font-family: monospace;
     -fx-font-size: 11.5px;
@@ -917,6 +919,12 @@
     -fx-stroke: -color-accent-fg;
 }
 
+/* A file that came from disk at the add rather than from the swarm: the link, in the success ink. */
+.detail-pane .file-found .icon-line {
+    -fx-stroke: -color-success-fg;
+    -fx-stroke-width: 1.4;
+}
+
 .sidebar .tree-cell:filled:selected,
 .sidebar .tree-view:focused .tree-cell:filled:selected {
     -fx-background-color: transparent;
@@ -947,6 +955,11 @@
 }
 
 .sidebar .tree-cell:filled:selected .label,
+/* A saved view whose query no longer reads: struck through, the reason in its tooltip. */
+.sidebar .tree-cell:filled:broken .label .text {
+    -fx-strikethrough: true;
+}
+
 .sidebar .tree-cell:filled:chosen .label {
     -fx-text-fill: -color-fg-default;
 }
@@ -1072,6 +1085,16 @@
     -fx-cursor: hand;
 }
 
+/* Undo, after the message that said what was done: the accent, a link to click. */
+.status-bar .status-undo {
+    -fx-text-fill: -color-accent-fg;
+    -fx-cursor: hand;
+}
+
+.status-bar .status-undo:hover {
+    -fx-underline: true;
+}
+
 .status-bar .status-message.status-warning,
 .message-log-text.message-log-warning {
     -fx-text-fill: -color-warning-fg;
@@ -1140,6 +1163,38 @@
 .message-log .message-log-empty {
     -fx-text-fill: -color-fg-muted;
 }
+
+/* The leak check (LeakView): a shield pill beside the port, coloured by the verdict, and its card
+   in the message log's chrome. Unchecked stays muted: it is not a warning, only not known. */
+.status-bar .leak-pill {
+    -fx-text-fill: -color-fg-muted;
+    -fx-border-color: -color-border-default;
+    -fx-border-radius: 6;
+    -fx-padding: 1 8 1 6;
+    -fx-graphic-text-gap: 5;
+    -fx-cursor: hand;
+}
+
+.status-bar .leak-pill .icon-line { -fx-stroke: -color-fg-muted; }
+.status-bar .leak-pill.leak-protected { -fx-text-fill: -color-success-fg; }
+.status-bar .leak-pill.leak-protected .icon-line { -fx-stroke: -color-success-fg; }
+.status-bar .leak-pill.leak-exposed {
+    -fx-text-fill: -color-danger-fg;
+    -fx-border-color: -color-danger-emphasis;
+}
+.status-bar .leak-pill.leak-exposed .icon-line { -fx-stroke: -color-danger-fg; }
+.status-bar .leak-pill.leak-halted { -fx-text-fill: -color-warning-fg; }
+.status-bar .leak-pill.leak-halted .icon-line { -fx-stroke: -color-warning-fg; }
+
+.leak-card .leak-sentence {
+    -fx-text-fill: -color-fg-default;
+    -fx-padding: 0 4 0 4;
+}
+
+.leak-card .leak-sentence.leak-exposed { -fx-text-fill: -color-danger-fg; }
+.leak-card .leak-rows { -fx-padding: 2 4 2 4; }
+.leak-card .leak-value { -fx-text-fill: -color-fg-muted; }
+.leak-card .leak-value.leak-address { -fx-text-fill: -color-fg-default; -fx-font-family: monospace; }
 
 .message-log .message-log-footer {
     -fx-padding: 6 4 0 4;
@@ -1405,11 +1460,13 @@
     -fx-background-radius: 10, 9;
 }
 
-.diagnosis-card.diagnosis-error {
+.diagnosis-card.diagnosis-error,
+.diagnosis-card.diagnosis-encrypted {
     -fx-background-color: -color-danger-muted, -color-danger-subtle;
 }
 
-.diagnosis-card.diagnosis-queued {
+.diagnosis-card.diagnosis-queued,
+.diagnosis-card.diagnosis-choose {
     -fx-background-color: -color-border-default, -color-bg-subtle;
 }
 
@@ -1419,11 +1476,13 @@
     -fx-text-fill: -color-warning-fg;
 }
 
-.diagnosis-error .diagnosis-title {
+.diagnosis-error .diagnosis-title,
+.diagnosis-encrypted .diagnosis-title {
     -fx-text-fill: -color-danger-fg;
 }
 
-.diagnosis-queued .diagnosis-title {
+.diagnosis-queued .diagnosis-title,
+.diagnosis-choose .diagnosis-title {
     -fx-text-fill: -color-fg-default;
 }
 
@@ -1456,20 +1515,26 @@
 }
 
 .diagnosis-error .remedy.primary,
-.diagnosis-error .remedy:hover {
+.diagnosis-error .remedy:hover,
+.diagnosis-encrypted .remedy.primary,
+.diagnosis-encrypted .remedy:hover {
     -fx-background-color: -torrenta-error-chip;
 }
 
-.diagnosis-error .remedy.primary .remedy-label {
+.diagnosis-error .remedy.primary .remedy-label,
+.diagnosis-encrypted .remedy.primary .remedy-label {
     -fx-text-fill: -torrenta-error;
 }
 
 .diagnosis-queued .remedy.primary,
-.diagnosis-queued .remedy:hover {
+.diagnosis-queued .remedy:hover,
+.diagnosis-choose .remedy.primary,
+.diagnosis-choose .remedy:hover {
     -fx-background-color: -torrenta-idle-chip;
 }
 
-.diagnosis-queued .remedy.primary .remedy-label {
+.diagnosis-queued .remedy.primary .remedy-label,
+.diagnosis-choose .remedy.primary .remedy-label {
     -fx-text-fill: -color-fg-default;
 }
 
@@ -1478,6 +1543,16 @@
 }
 
 .diagnosis-card .remedy-key {
+    -fx-text-fill: -color-fg-muted;
+    -fx-font-size: 12px;
+}
+
+/* The Add dialog's content check (ui.ContentCheck): the diagnosis card's colours, a line per kind. */
+.content-card .content-line {
+    -fx-text-fill: -color-fg-default;
+}
+
+.content-card .content-advice {
     -fx-text-fill: -color-fg-muted;
     -fx-font-size: 12px;
 }
@@ -1504,6 +1579,14 @@
 .piece-cell.skipped {
     -fx-background-color: -color-border-default, -color-bg-default;
     -fx-background-insets: 0, 1;
+}
+
+/* A player's read-ahead: a ring in the text's ink around whatever the run is (the accent was too
+   close to the pieces' own green to tell apart). */
+.piece-cell.readahead {
+    -fx-border-color: -color-fg-default;
+    -fx-border-width: 1.5;
+    -fx-border-radius: 1.5;
 }
 
 /* Sparklines (ui.Sparkline): the status bar's minute and the Overview's half hour. */
@@ -1567,4 +1650,9 @@
     -fx-background-radius: 6;
     -fx-padding: 1 8 1 8;
     -fx-font-weight: bold;
+}
+
+/* Remote access over plain HTTP from other machines: the password crosses the network readable. */
+.settings-row-description.settings-warning {
+    -fx-text-fill: -color-warning-fg;
 }

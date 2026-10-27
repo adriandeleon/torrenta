@@ -1,0 +1,166 @@
+{
+ "add-magnet": {
+  "body": "Ok.",
+  "status": 200
+ },
+ "add-nothing": {
+  "body": "Fails.",
+  "status": 200
+ },
+ "add-pack": {
+  "body": "Ok.",
+  "status": 200
+ },
+ "add-seed": {
+  "body": "Ok.",
+  "status": 200
+ },
+ "categories": {
+  "body": "{\"tv\":{\"name\":\"tv\",\"savePath\":\"\"}}",
+  "status": 200
+ },
+ "categories-remove": {
+  "body": "",
+  "status": 200
+ },
+ "create-category": {
+  "body": "",
+  "status": 200
+ },
+ "create-category-again": {
+  "body": "Unable to create category",
+  "status": 409
+ },
+ "create-tags": {
+  "body": "",
+  "status": 200
+ },
+ "default-save-path": {
+  "body": "/srv/qbittorrent/dl",
+  "status": 200
+ },
+ "delete": {
+  "body": "",
+  "status": 200
+ },
+ "download-limit": {
+  "body": "0",
+  "status": 200
+ },
+ "file-prio-bad": {
+  "body": "Priority is not valid",
+  "status": 400
+ },
+ "files": {
+  "body": "[{\"availability\":0,\"index\":0,\"is_seed\":false,\"name\":\"Episode.Pack/e1.mkv\",\"piece_range\":[0,18],\"priority\":1,\"progress\":0,\"size\":300000},{\"availability\":0,\"index\":1,\"name\":\"Episode.Pack/e2.mkv\",\"piece_",
+  "status": 200
+ },
+ "info": {
+  "body": "[{\"added_on\":1792974573,\"amount_left\":500000,\"auto_tmm\":false,\"availability\":0,\"category\":\"tv\",\"comment\":\"\",\"completed\":0,\"completion_on\":-1,\"content_path\":\"/srv/qbittorrent",
+  "status": 200
+ },
+ "info-filtered": {
+  "body": "[{\"added_on\":1792974573,\"amount_left\":0,\"auto_tmm\":false,\"availability\":-1,\"category\":\"\",\"comment\":\"\",\"completed\":250000,\"completion_on\":1792974574,\"content_path\":\"/srv/qbittorrent",
+  "status": 200
+ },
+ "log": {
+  "body": "[{\"id\":0,\"message\":\"qBittorrent v5.1.0 started. Process ID: 1000\",\"timestamp\":1792974471,\"type\":1},{\"id\":1,\"message\":\"Using config directory: /srv/qbittorrent",
+  "status": 200
+ },
+ "login": {
+  "body": "Ok.",
+  "status": 200
+ },
+ "login-wrong": {
+  "body": "Fails.",
+  "status": 200
+ },
+ "logout": {
+  "body": "",
+  "status": 200
+ },
+ "maindata": {
+  "body": "{\"categories\":{\"tv\":{\"name\":\"tv\",\"savePath\":\"\"}},\"full_update\":true,\"rid\":1,\"server_state\":{\"alltime_dl\":0,\"alltime_ul\":0,\"average_time_queue\":12,\"connection_status\":\"firewalled\",\"dht_nodes\":0,\"dl_inf",
+  "status": 200
+ },
+ "maindata-diff": {
+  "body": "{\"rid\":2,\"torrents\":{\"1b42db6c7991aeb563129eb63e5c764351c03836\":{\"category\":\"tv\",\"seeding_time\":5,\"time_active\":4}}}",
+  "status": 200
+ },
+ "no-session": {
+  "body": "Forbidden",
+  "status": 403
+ },
+ "peers": {
+  "body": "{\"full_update\":true,\"peers\":{},\"rid\":1,\"show_flags\":true}",
+  "status": 200
+ },
+ "piece-states": {
+  "body": "[2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]",
+  "status": 200
+ },
+ "preferences": {
+  "body": "{\"add_stopped_enabled\":false,\"add_to_top_of_queue\":false,\"add_trackers\":\"\",\"add_trackers_enabled\":false,\"add_trackers_from_url_enabled\":false,\"add_trackers_url\":\"\",\"add_trackers_url_list\":\"\",\"alt_dl_l",
+  "status": 200
+ },
+ "properties": {
+  "body": "{\"addition_date\":1792974573,\"comment\":\"\",\"completion_date\":1792974574,\"created_by\":\"Transmission/4.1.0-beta.2 (ac5c9e082d)\",\"creation_date\":1792970162,\"dl_limit\":-1,\"dl_speed\":0,\"dl_speed_avg\":-1,\"dow",
+  "status": 200
+ },
+ "properties-no-hash": {
+  "body": "Bad Request",
+  "status": 400
+ },
+ "properties-unknown": {
+  "body": "Not Found",
+  "status": 404
+ },
+ "set-category": {
+  "body": "",
+  "status": 200
+ },
+ "set-category-unknown": {
+  "body": "Incorrect category name",
+  "status": 409
+ },
+ "speed-mode": {
+  "body": "0",
+  "status": 200
+ },
+ "tags": {
+  "body": "[\"keep\",\"old\"]",
+  "status": 200
+ },
+ "tags-delete": {
+  "body": "",
+  "status": 200
+ },
+ "torrent-download-limit": {
+  "body": "{\"0b6f939dc753294dbdf34348f7eff24f7b967d9b\":0}",
+  "status": 200
+ },
+ "trackers": {
+  "body": "[{\"msg\":\"\",\"num_downloaded\":0,\"num_leeches\":0,\"num_peers\":0,\"num_seeds\":0,\"status\":0,\"tier\":-1,\"url\":\"** [DHT] **\"},{\"msg\":\"\",\"num_downloaded\":0,\"num_leeches\":0,\"num_peers\":0,\"num_seeds\":0,\"status\":0,",
+  "status": 200
+ },
+ "transfer": {
+  "body": "{\"connection_status\":\"firewalled\",\"dht_nodes\":0,\"dl_info_data\":0,\"dl_info_speed\":0,\"dl_rate_limit\":0,\"last_external_address_v4\":\"\",\"last_external_address_v6\":\"\",\"up_info_data\":0,\"up_info_speed\":0,\"up_",
+  "status": 200
+ },
+ "unknown-endpoint": {
+  "body": "Not Found",
+  "status": 404
+ },
+ "version": {
+  "body": "v5.1.0",
+  "status": 200
+ },
+ "webapi-version": {
+  "body": "2.11.4",
+  "status": 200
+ },
+ "webseeds": {
+  "body": "[]",
+  "status": 200
+ }
+}

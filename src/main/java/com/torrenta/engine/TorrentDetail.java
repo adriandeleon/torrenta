@@ -2,6 +2,8 @@ package com.torrenta.engine;
 
 import java.util.List;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Everything the detail pane shows about one torrent, read in one go.
  *
@@ -13,6 +15,10 @@ import java.util.List;
  * @param availability how many connected peers have each piece, by index; empty when libtorrent
  *     keeps no count (a seed, a paused torrent, one without metadata)
  * @param webSeeds the web seeds (BEP 19 HTTP sources), as {@link Engine#webSeeds} lists them
+ * @param encryptedArchives the indices of the archives whose first bytes say they ask for a
+ *     password ({@link ArchiveProbe}); empty until read, and always for an engine that cannot
+ * @param command a download from a link: the command line that fetches the same file by hand
+ *     ({@code Curl.shellCommand}); empty for a torrent
  */
 public record TorrentDetail(
         General general,
@@ -21,11 +27,38 @@ public record TorrentDetail(
         List<Tracker> trackers,
         boolean[] pieces,
         int[] availability,
-        List<String> webSeeds) {
+        List<String> webSeeds,
+        java.util.Set<Integer> encryptedArchives,
+        String command) {
 
     public TorrentDetail {
         availability = availability == null ? new int[0] : availability;
         webSeeds = webSeeds == null ? List.of() : List.copyOf(webSeeds);
+        encryptedArchives = encryptedArchives == null ? java.util.Set.of() : java.util.Set.copyOf(encryptedArchives);
+        command = command == null ? "" : command;
+    }
+
+    public TorrentDetail(
+            General general,
+            List<FileStatus> files,
+            List<Peer> peers,
+            List<Tracker> trackers,
+            boolean[] pieces,
+            int[] availability,
+            List<String> webSeeds,
+            java.util.Set<Integer> encryptedArchives) {
+        this(general, files, peers, trackers, pieces, availability, webSeeds, encryptedArchives, "");
+    }
+
+    public TorrentDetail(
+            General general,
+            List<FileStatus> files,
+            List<Peer> peers,
+            List<Tracker> trackers,
+            boolean[] pieces,
+            int[] availability,
+            List<String> webSeeds) {
+        this(general, files, peers, trackers, pieces, availability, webSeeds, java.util.Set.of());
     }
 
     /** A detail with no web seeds. */
@@ -79,7 +112,19 @@ public record TorrentDetail(
      * it touches, first and last inclusive ({@code -1} for an empty file or when unknown).
      */
     public record FileStatus(
-            int index, String path, long size, long done, Priority priority, int firstPiece, int lastPiece) {
+            int index,
+            String path,
+            long size,
+            long done,
+            Priority priority,
+            int firstPiece,
+            int lastPiece,
+            @Nullable FoundFile found) {
+
+        public FileStatus(
+                int index, String path, long size, long done, Priority priority, int firstPiece, int lastPiece) {
+            this(index, path, size, done, priority, firstPiece, lastPiece, null);
+        }
 
         public FileStatus(int index, String path, long size, long done, Priority priority) {
             this(index, path, size, done, priority, -1, -1);

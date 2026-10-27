@@ -1,0 +1,1017 @@
+package com.torrenta.session;
+
+import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
+import java.util.stream.Stream;
+
+import com.torrenta.engine.AddRequest;
+import com.torrenta.engine.Engine;
+import com.torrenta.engine.EngineEvent;
+import com.torrenta.engine.EngineProfile;
+import com.torrenta.engine.Torrent;
+import com.torrenta.engine.TorrentDetail;
+import com.torrenta.engine.TorrentPreview;
+import com.torrenta.engine.TorrentState;
+import com.torrenta.store.Settings;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class SessionTest {
+
+    private static final Path SOURCES = Path.of("src", "main", "java", "com", "torrenta", "session");
+
+    /**
+     * The session is what a headless run and the HTTP API will drive, with no toolkit: a JavaFX
+     * name anywhere under it, an import or a qualified use, fails here, as a literal in a text
+     * position fails {@code UiStringSweepTest}.
+     */
+    @Test
+    void nothingUnderSessionTouchesJavaFx() throws Exception {
+        List<String> found = new ArrayList<>();
+        try (Stream<Path> walk = Files.walk(SOURCES)) {
+            for (Path file : walk.filter(p -> p.toString().endsWith(".java")).toList()) {
+                List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+                for (int i = 0; i < lines.size(); i++) {
+                    String line = lines.get(i).strip();
+                    if (line.startsWith("*") || line.startsWith("/*") || line.startsWith("//")) continue;
+                    if (line.contains("javafx.")) found.add(file.getFileName() + ":" + (i + 1) + " " + line);
+                }
+            }
+        }
+        assertTrue(found.isEmpty(), "JavaFX under com.torrenta.session: " + found);
+    }
+
+    /** A seed past its limit is paused once, and the owner hears it with the snapshot. */
+    @Test
+    void aSeedPastItsShareLimitIsPausedOnceAndTheOwnerHears(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        settings.set(Settings.SHARE_RATIO, "1.0");
+        settings.set(Settings.SHARE_ACTION, "PAUSE");
+        AtomicBoolean paused = new AtomicBoolean();
+        AtomicInteger pauses = new AtomicInteger();
+        Engine engine = engine(() -> List.of(seed("s", 2000, paused.get())), id -> {
+            pauses.incrementAndGet();
+            paused.set(true);
+        });
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        AtomicInteger polls = new AtomicInteger();
+        session.addListener(p -> polls.incrementAndGet());
+        session.start(engine);
+        try {
+            await(() -> polls.get() >= 3);
+        } finally {
+            session.stop();
+        }
+        assertEquals(1, pauses.get(), "done once: a paused seed no longer qualifies");
+        assertEquals(1, host.seedingDone.size());
+        EngineEvent event = host.seedingDone.get(0);
+        assertEquals(EngineEvent.Kind.SEEDING_DONE, event.kind());
+        assertEquals("s", event.torrentId());
+        assertTrue(event.message().contains("name"), event.message());
+    }
+
+    @Test
+    void theSpeedScheduleIsLookedAtOnStartAndNothingIsPolledOnceStopped(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        AtomicInteger polls = new AtomicInteger();
+        List<String> threads = new CopyOnWriteArrayList<>();
+        session.addListener(p -> {
+            throw new IllegalStateException("a listener that fails");
+        });
+        session.addListener(p -> {
+            threads.add(Thread.currentThread().getName());
+            polls.incrementAndGet();
+        });
+        Engine engine = engine(List::of, id -> {});
+        session.start(engine);
+        await(() -> polls.get() >= 2 && !host.limits.isEmpty());
+        assertEquals(List.of(false), host.limits.subList(0, 1));
+        assertEquals("engine-poll", threads.get(0), "listeners hear on the poll thread");
+        // A scheduled task that throws is never run again; the failing listener must not stop the poll.
+        assertTrue(session.execute(() -> {}), "the poll thread takes work while polling");
+        session.stop();
+        int after = polls.get();
+        Thread.sleep(Session.POLL_MS * 2);
+        assertEquals(after, polls.get(), "stopped means no poll");
+        assertEquals(null, session.engine());
+        assertFalse(session.execute(() -> {}), "and no work");
+        session.stop(); // idempotent
+    }
+
+    /** The IP filters set on any proxy engine, in order. */
+    private static final List<List<?>> IP_FILTERS = new CopyOnWriteArrayList<>();
+
+    private static Session session(Path dir, Settings settings, Session.Host host) {
+        return new Session(
+                settings,
+                dir,
+                new com.torrenta.store.LabelStore(dir),
+                new com.torrenta.store.WatchFolderStore(dir),
+                new com.torrenta.rss.RssStore(dir),
+                Runnable::run,
+                host);
+    }
+
+    /**
+     * Starting takes the engine's IP filter (from disk, here a ban, before any download runs) and
+     * the watch folders with the poll; stopping gives both back.
+     */
+    @Test
+    void startAppliesTheIpFilterAndWatchesStopLetsBothGo(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        settings.set(Settings.IPFILTER_ENABLED, "true");
+        settings.setIpFilterBans(List.of("203.0.113.9"));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        IP_FILTERS.clear();
+        session.start(engine(List::of, id -> {}));
+        try {
+            await(() -> !IP_FILTERS.isEmpty() && host.watchStatus.get() > 0);
+            assertEquals(1, IP_FILTERS.get(0).size(), "the ban, as one range: " + IP_FILTERS);
+            assertTrue(session.watcher() != null, "watching while an engine is up");
+        } finally {
+            session.close();
+        }
+        assertEquals(null, session.watcher(), "and not after");
+    }
+
+    private static final EngineProfile OTHER =
+            new EngineProfile("nas", "NAS", EngineProfile.Kind.REMOTE, "http://nas:9091/transmission/rpc", "", "");
+
+    /**
+     * The session builds the profile's engine, tells the owner before starting it (to listen from
+     * its first event), starts it off the caller's thread and polls it; a switch stops the poll and
+     * the old engine and polls the new one; quitting stops the engine in use.
+     */
+    @Test
+    void theSessionStartsSwitchesAndStopsTheEngine(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        AtomicInteger localStops = new AtomicInteger();
+        AtomicInteger otherStops = new AtomicInteger();
+        Engine local = engine(List::of, id -> {}, () -> {}, localStops);
+        Engine other = engine(List::of, id -> {}, () -> {}, otherStops);
+        session.setEngineFactory(profile -> profile.isLocal() ? local : other);
+        List<Engine> polled = new CopyOnWriteArrayList<>();
+        session.addListener(p -> polled.add(p.engine()));
+
+        session.startEngine(EngineProfile.LOCAL);
+        await(() -> host.ready.contains(local) && polled.contains(local));
+        assertEquals(List.of(local), host.created, "heard of before it started");
+        assertEquals(local, session.engine());
+
+        session.switchTo(OTHER);
+        await(() -> host.ready.contains(other) && polled.contains(other) && localStops.get() == 1);
+        assertEquals(OTHER, session.profile());
+        int beforeQuit = polled.size();
+        session.stopEngine();
+        assertEquals(1, otherStops.get(), "stopped at quit, on the caller's thread");
+        Thread.sleep(Session.POLL_MS * 2);
+        assertEquals(beforeQuit, polled.size(), "and no longer polled");
+        assertTrue(host.failed.isEmpty(), host.failed.toString());
+    }
+
+    /** An engine that cannot be built, or cannot start, is the owner's to hear of; nothing is polled. */
+    @Test
+    void anEngineThatCannotStartIsSaidAndNotPolled(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        session.setEngineFactory(profile -> engine(
+                List::of,
+                id -> {},
+                () -> {
+                    throw new IllegalStateException("no native library");
+                },
+                new AtomicInteger()));
+        session.startEngine(EngineProfile.LOCAL);
+        await(() -> !host.failed.isEmpty());
+        assertEquals("no native library", host.failed.get(0).getMessage());
+        assertEquals(null, session.engine());
+
+        session.setEngineFactory(profile -> {
+            throw new IllegalArgumentException("bad profile");
+        });
+        session.startEngine(OTHER);
+        assertEquals("bad profile", host.failed.get(1).getMessage(), "said at once, on the caller's thread");
+    }
+
+    /**
+     * A switch while the first engine is still connecting: that one, once up, is stopped rather
+     * than polled beside the next, and says nothing.
+     */
+    @Test
+    void anEngineOvertakenByASwitchIsStoppedNeverPolled(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        CountDownLatch slow = new CountDownLatch(1);
+        AtomicInteger slowStops = new AtomicInteger();
+        Engine connecting = engine(
+                List::of,
+                id -> {},
+                () -> {
+                    try {
+                        slow.await();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                },
+                slowStops);
+        Engine next = engine(List::of, id -> {}, () -> {}, new AtomicInteger());
+        session.setEngineFactory(profile -> profile.isLocal() ? connecting : next);
+        List<Engine> polled = new CopyOnWriteArrayList<>();
+        session.addListener(p -> polled.add(p.engine()));
+        session.startEngine(EngineProfile.LOCAL);
+        session.switchTo(OTHER);
+        await(() -> polled.contains(next));
+        slow.countDown();
+        await(() -> slowStops.get() == 1);
+        Thread.sleep(Session.POLL_MS * 2);
+        assertFalse(polled.contains(connecting), "never polled");
+        assertEquals(List.of(next), host.ready, "only the newer one is said to be ready");
+        session.stopEngine();
+    }
+
+    /** A film and a program named like one beside it: the content check flags the second. */
+    private static final TorrentPreview FILM = new TorrentPreview(
+            "film",
+            "Film.2026",
+            1010,
+            List.of(
+                    new TorrentPreview.FileEntry(0, "Film.2026/film.mkv", 1000),
+                    new TorrentPreview.FileEntry(1, "Film.2026/film.mkv.exe", 10)),
+            false,
+            List.of(),
+            "",
+            "",
+            0,
+            true,
+            false);
+
+    /** What an add engine was asked and did, for the pipeline's tests. */
+    private static final class Adds {
+        final List<AddRequest> added = new CopyOnWriteArrayList<>();
+        final List<String> calls = new CopyOnWriteArrayList<>();
+        volatile List<Torrent> torrents = List.of();
+        volatile List<TorrentDetail.FileStatus> files = List.of();
+        volatile TorrentPreview preview = FILM;
+        volatile com.torrenta.engine.ContentIndex index = com.torrenta.engine.ContentIndex.EMPTY;
+
+        Engine engine() {
+            return (Engine) Proxy.newProxyInstance(
+                    Engine.class.getClassLoader(),
+                    new Class<?>[] {Engine.class},
+                    (proxy, method, args) -> switch (method.getName()) {
+                        case "torrents" -> torrents;
+                        case "rates" -> Engine.Rates.ZERO;
+                        case "capabilities" -> Engine.Capabilities.ALL;
+                        case "refreshLimits" -> false;
+                        case "setIpFilter", "start", "stop", "addListener" -> null;
+                        case "inspect" -> preview;
+                        case "contentIndex" -> index;
+                        case "add" -> {
+                            added.add((AddRequest) args[0]);
+                            yield seed("film", 0, true);
+                        }
+                        case "detail" ->
+                            new TorrentDetail(
+                                    null,
+                                    files,
+                                    List.of(),
+                                    List.of(),
+                                    new boolean[0],
+                                    new int[0],
+                                    List.of(),
+                                    java.util.Set.of(),
+                                    "");
+                        case "setFilePriority", "resume", "remove" -> {
+                            calls.add(method.getName() + " " + java.util.Arrays.toString(args));
+                            yield null;
+                        }
+                        case "toString" -> "add engine";
+                        case "hashCode" -> System.identityHashCode(proxy);
+                        case "equals" -> proxy == args[0];
+                        default -> throw new UnsupportedOperationException(method.getName());
+                    });
+        }
+    }
+
+    /**
+     * A {@code .torrent} added without a dialog is checked before it is added: under the default
+     * (skip), the program named like a film is left out and the log hears why.
+     */
+    @Test
+    void aTorrentFilesFlaggedFileIsSkippedOnAnAddWithoutADialog(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        Adds adds = new Adds();
+        AddRequest request =
+                AddDefaults.from(settings).withoutAsking(new AddRequest.TorrentFile(new byte[1], "film.torrent"));
+        session.add(adds.engine(), request);
+        assertEquals(1, adds.added.size());
+        assertEquals(
+                java.util.Map.of(1, com.torrenta.engine.Priority.IGNORE),
+                adds.added.get(0).filePriorities(),
+                "the program left out, the film kept");
+        assertEquals(1, host.reports.size(), "what was found is said");
+        assertTrue(
+                host.reports.get(0).message().contains("film.mkv.exe"),
+                host.reports.get(0).message());
+    }
+
+    /**
+     * An add without a dialog uses what is on disk as the setting says: the film, found complete
+     * in another torrent on the same volume, is linked into place before the add and recorded for
+     * the Files tab; the flagged program beside it is skipped and so never looked for. Off, the
+     * film is downloaded as ever.
+     */
+    @Test
+    void anAddWithoutADialogLinksWhatIsOnDiskAsTheSettingSays(@TempDir Path dir) throws Exception {
+        String root = "6".repeat(64);
+        Path old = dir.resolve("seeds/Old/old.mkv");
+        Files.createDirectories(old.getParent());
+        Files.write(old, new byte[1000]);
+        com.torrenta.engine.ContentIndex index = new com.torrenta.engine.ContentIndex();
+        index.put("old", List.of(new com.torrenta.engine.ContentIndex.Entry(root, "old", 0, old, 1000)));
+        Torrent oldTorrent = seed("old", 0, false);
+
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        settings.set(Settings.DOWNLOAD_DIR, dir.resolve("dl").toString());
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        Adds adds = new Adds();
+        adds.torrents = List.of(oldTorrent);
+        adds.index = index;
+        adds.preview = new TorrentPreview(
+                "film",
+                "Film.2026",
+                1010,
+                List.of(
+                        new TorrentPreview.FileEntry(0, "Film.2026/film.mkv", 1000, root),
+                        new TorrentPreview.FileEntry(1, "Film.2026/film.mkv.exe", 10, root.replace('6', '7'))),
+                false,
+                List.of(),
+                "",
+                "",
+                0,
+                true,
+                true);
+        AddRequest request =
+                AddDefaults.from(settings).withoutAsking(new AddRequest.TorrentFile(new byte[1], "film.torrent"));
+        session.add(adds.engine(), request);
+        AddRequest added = adds.added.getFirst();
+        assertEquals(
+                java.util.Map.of(0, new com.torrenta.engine.FoundFile(com.torrenta.engine.FoundFile.How.LINK, "name")),
+                added.storage().found(),
+                "linked without asking, from the torrent of that name");
+        Path target = dir.resolve("dl/Film.2026/film.mkv");
+        assertTrue(Files.isSameFile(old, target));
+        assertTrue(
+                host.reports.stream().anyMatch(e -> e.message().startsWith("One file of “Film.2026” already on disk")),
+                host.reports.toString());
+
+        // Off: nothing is looked for.
+        Files.delete(target);
+        settings.setAddDedup(com.torrenta.engine.DedupMode.OFF.name());
+        session.add(adds.engine(), request);
+        assertTrue(adds.added.get(1).storage().found().isEmpty());
+        assertFalse(Files.exists(target));
+    }
+
+    /**
+     * A magnet has no files when it is added: it is added to stop at its metadata and marked; the
+     * poll checks it once its files are known, skips the flagged one, starts it, and clears the mark.
+     */
+    @Test
+    void aMagnetIsStoppedAtItsMetadataAndCheckedOnceItsFilesAreKnown(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        Adds adds = new Adds();
+        Engine engine = adds.engine();
+        session.add(
+                engine, AddDefaults.from(settings).withoutAsking(new AddRequest.Magnet("magnet:?xt=urn:btih:film")));
+        assertEquals(
+                AddRequest.StopCondition.METADATA_RECEIVED, adds.added.get(0).stopCondition());
+        assertTrue(settings.unsafeContentPending().containsKey("film"), "marked for the poll");
+
+        // The metadata is in: the torrent stopped, its files known.
+        adds.torrents = List.of(seed("film", 0, true));
+        adds.files = List.of(
+                new TorrentDetail.FileStatus(0, "Film.2026/film.mkv", 1000, 0, com.torrenta.engine.Priority.NORMAL),
+                new TorrentDetail.FileStatus(1, "Film.2026/film.mkv.exe", 10, 0, com.torrenta.engine.Priority.NORMAL));
+        session.setEngineFactory(profile -> engine);
+        session.startEngine(EngineProfile.LOCAL);
+        try {
+            await(() -> settings.unsafeContentPending().isEmpty());
+        } finally {
+            session.stopEngine();
+        }
+        assertEquals(List.of("setFilePriority [film, 1, IGNORE]", "resume [film]"), adds.calls);
+        assertTrue(
+                new Settings(dir.resolve(Settings.FILE_NAME))
+                        .unsafeContentPending()
+                        .isEmpty(),
+                "and saved so");
+    }
+
+    /** The listeners and adds of the plain proxy engines, for the tests that look at them. */
+    private static final List<java.util.function.Consumer<EngineEvent>> LISTENERS = new CopyOnWriteArrayList<>();
+
+    private static final List<Object> ADDED = new CopyOnWriteArrayList<>();
+
+    /** The engine's events reach the owner from the first, through the session's own listener. */
+    @Test
+    void theEnginesEventsReachTheOwner(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        LISTENERS.clear();
+        session.setEngineFactory(profile -> engine(List::of, id -> {}));
+        session.startEngine(EngineProfile.LOCAL);
+        try {
+            await(() -> !host.ready.isEmpty());
+            assertEquals(1, LISTENERS.size(), "attached before the start");
+            EngineEvent added = EngineEvent.info("a", "name", "Added name");
+            LISTENERS.get(0).accept(added);
+            assertEquals(List.of(added), host.events);
+        } finally {
+            session.stopEngine();
+        }
+    }
+
+    /**
+     * An input with no engine up waits, and is handed on once one is, in order; one that comes
+     * while an engine is up is handed on at once.
+     */
+    @Test
+    void anInputWaitsForAnEngineAndIsHandedOnInOrder(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        List<String> handed = new CopyOnWriteArrayList<>();
+        session.setInputHandler(handed::add);
+        session.input("magnet:?xt=urn:btih:one");
+        session.input("/tmp/two.torrent");
+        assertTrue(handed.isEmpty(), "no engine yet");
+        session.setEngineFactory(profile -> engine(List::of, id -> {}));
+        session.startEngine(EngineProfile.LOCAL);
+        try {
+            await(() -> handed.size() == 2);
+            assertEquals(List.of("magnet:?xt=urn:btih:one", "/tmp/two.torrent"), handed);
+            session.input("magnet:?xt=urn:btih:three");
+            assertEquals("magnet:?xt=urn:btih:three", handed.get(2), "at once while one is up");
+        } finally {
+            session.stopEngine();
+        }
+    }
+
+    /** "Add without asking" of a magnet: the defaults' request, through the session's own add. */
+    @Test
+    void anInputAddedWithoutAskingIsTheDefaultsRequest(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        settings.set(Settings.ADD_UNSAFE_CONTENT, "ADD");
+        Session session = session(dir, settings, new RecordingHost());
+        assertThrows(
+                com.torrenta.engine.EngineException.class, () -> session.addWithoutAsking("magnet:?xt=urn:btih:x"));
+        ADDED.clear();
+        session.setEngineFactory(profile -> engine(List::of, id -> {}));
+        session.startEngine(EngineProfile.LOCAL);
+        try {
+            await(() -> session.engine() != null);
+            session.addWithoutAsking("  magnet:?xt=urn:btih:x  ");
+            AddRequest request = (AddRequest) ADDED.get(0);
+            assertEquals(new AddRequest.Magnet("magnet:?xt=urn:btih:x"), request.source());
+            assertEquals(settings.downloadDir(), request.savePath());
+            assertEquals(
+                    com.torrenta.engine.LinkRequest.of("https://example.org/file.iso"),
+                    addLink(session, "https://example.org/file.iso"),
+                    "a link that is not a torrent goes to curl");
+        } finally {
+            session.stopEngine();
+        }
+    }
+
+    private static Object addLink(Session session, String url) throws Exception {
+        ADDED.clear();
+        session.addWithoutAsking(url);
+        return ADDED.get(0);
+    }
+
+    /** The session keeps its rates and every torrent's; a followed torrent's history grows from then. */
+    @Test
+    void theHistoriesAreKeptAndAFollowedTorrentsGrows(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        Session session = session(dir, settings, new RecordingHost());
+        session.setEngineFactory(profile -> engine(() -> List.of(seed("s", 0, false)), id -> {}));
+        session.startEngine(EngineProfile.LOCAL);
+        try {
+            await(() -> !session.history().isEmpty());
+            assertEquals(null, session.followed("s"), "not followed yet");
+            session.follow("s");
+            SpeedHistory followed = session.followed("s");
+            assertTrue(followed != null && !followed.isEmpty(), "starts from the recent one");
+        } finally {
+            session.stopEngine();
+        }
+    }
+
+    private static final class RecordingHost implements Session.Host {
+        final List<EngineEvent> events = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void event(EngineEvent event) {
+            events.add(event);
+        }
+
+        final List<EngineEvent> reports = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void report(EngineEvent event) {
+            reports.add(event);
+        }
+
+        final AtomicInteger watchStatus = new AtomicInteger();
+        final List<Engine> created = new CopyOnWriteArrayList<>();
+        final List<Engine> ready = new CopyOnWriteArrayList<>();
+        final List<com.torrenta.engine.EngineException> failed = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void engineCreated(Engine engine) {
+            created.add(engine);
+        }
+
+        @Override
+        public void engineReady(Engine engine) {
+            ready.add(engine);
+        }
+
+        @Override
+        public void engineFailed(com.torrenta.engine.EngineException failure) {
+            failed.add(failure);
+        }
+
+        @Override
+        public void watchStatusChanged() {
+            watchStatus.incrementAndGet();
+        }
+
+        final List<EngineEvent> seedingDone = new CopyOnWriteArrayList<>();
+        final List<Boolean> limits = new CopyOnWriteArrayList<>();
+        final List<SpeedMode.Reason> reasons = new CopyOnWriteArrayList<>();
+        final List<SpeedMode.Reason> pauses = new CopyOnWriteArrayList<>();
+
+        @Override
+        public void seedingDone(EngineEvent event, Torrent torrent, boolean removed) {
+            seedingDone.add(event);
+        }
+
+        @Override
+        public void limitsRefreshed(boolean alternative, SpeedMode.Reason reason, SpeedMode.Reason paused) {
+            limits.add(alternative);
+            reasons.add(reason);
+            pauses.add(paused);
+        }
+
+        @Override
+        public void problem(EngineEvent event) {
+            throw new AssertionError(event.message());
+        }
+    }
+
+    private interface Pauser {
+        void pause(String id);
+    }
+
+    /**
+     * The whole loop on a fake machine: unplugged, the alternative pair and the pill's reason; a
+     * person's flip holds while it stays unplugged; plugged in, normal; on a metered network with
+     * the pause rule, the running torrent is paused and held, and resumed when it is no longer.
+     */
+    @Test
+    void theBatteryAndTheNetworksCostDecideThePairAndThePause(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        settings.set(Settings.SPEED_ON_BATTERY, "ALTERNATIVE");
+        settings.set(Settings.SPEED_ON_METERED, "PAUSE");
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        List<Boolean> asked = new CopyOnWriteArrayList<>();
+        List<String> calls = new CopyOnWriteArrayList<>();
+        java.util.concurrent.atomic.AtomicBoolean runPaused = new java.util.concurrent.atomic.AtomicBoolean();
+        Engine engine = (Engine) Proxy.newProxyInstance(
+                Engine.class.getClassLoader(),
+                new Class<?>[] {Engine.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "torrents" -> List.of(seed("run", 0, runPaused.get()));
+                    case "rates" -> Engine.Rates.ZERO;
+                    case "capabilities" -> Engine.Capabilities.ALL;
+                    case "refreshLimits" -> {
+                        asked.add((Boolean) args[0]);
+                        yield args[0];
+                    }
+                    case "pause", "resume" -> {
+                        calls.add(method.getName() + " " + args[0]);
+                        runPaused.set(method.getName().equals("pause"));
+                        yield null;
+                    }
+                    case "setIpFilter", "start", "stop", "addListener" -> null;
+                    case "toString" -> "conditions engine";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        java.util.concurrent.atomic.AtomicReference<com.torrenta.os.Conditions> now =
+                new java.util.concurrent.atomic.AtomicReference<>(com.torrenta.os.Conditions.NORMAL);
+        session.setConditions(now::get);
+        session.start(engine);
+        try {
+            now.set(new com.torrenta.os.Conditions(true, false));
+            session.refreshLimits();
+            assertEquals(true, asked.getLast(), "unplugged: the alternative pair");
+            assertEquals(SpeedMode.Reason.ON_BATTERY, host.reasons.getLast());
+            assertTrue(settings.engineSettings().speed().alternativeOn(), "the one switch, flipped");
+
+            settings.set(Settings.SPEED_ALT_ON, "false");
+            session.refreshLimits();
+            assertEquals(false, asked.getLast(), "a person's flip holds while it stays unplugged");
+            assertEquals(SpeedMode.Reason.NONE, host.reasons.getLast());
+
+            now.set(com.torrenta.os.Conditions.NORMAL);
+            session.refreshLimits();
+            now.set(new com.torrenta.os.Conditions(true, false));
+            session.refreshLimits();
+            assertEquals(true, asked.getLast(), "unplugged again: a change, so the pair again");
+
+            now.set(new com.torrenta.os.Conditions(false, true));
+            session.refreshLimits();
+            assertEquals(false, asked.getLast(), "plugged in");
+            assertEquals(List.of("pause run"), calls, "metered, with the pause rule");
+            assertEquals(SpeedMode.Reason.METERED, host.pauses.getLast());
+            assertEquals("run", settings.get(Settings.SPEED_CONDITION_HELD, ""), "held, and kept so");
+            session.refreshLimits();
+            assertEquals(List.of("pause run"), calls, "paused once, not again");
+
+            now.set(com.torrenta.os.Conditions.NORMAL);
+            session.refreshLimits();
+            assertEquals(List.of("pause run", "resume run"), calls);
+            assertEquals(SpeedMode.Reason.NONE, host.pauses.getLast());
+            assertEquals("", settings.get(Settings.SPEED_CONDITION_HELD, ""));
+        } finally {
+            session.stop();
+        }
+    }
+
+    /**
+     * An updatable torrent's life: a higher number in the DHT adds the version it names where the
+     * old one is, filed as it is and following in its place, and says UPDATED; a look is not
+     * repeated before {@code follow.hours}; once the new version is complete the old one leaves
+     * the list (its files kept) when the setting says so, and is only let go of when it does not.
+     */
+    @Test
+    void aNewerVersionIsAddedBesideTheOldWhichIsLetGoOfOnceTheNewIsComplete(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        settings.setFollowRemoveOld(true);
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        String source = "magnet:?xs=urn:btpk:" + "11".repeat(32);
+        String oldId = "aa".repeat(20);
+        String newId = "bb".repeat(20);
+        byte[] ih = java.util.HexFormat.of().parseHex(newId);
+        List<Torrent> torrents = new CopyOnWriteArrayList<>(List.of(FollowRulesTest.torrent(oldId, 1.0)));
+        java.util.Map<String, com.torrenta.engine.Following> followings =
+                new java.util.concurrent.ConcurrentHashMap<>();
+        followings.put(oldId, new com.torrenta.engine.Following(source, 3, ""));
+        List<AddRequest> adds = new CopyOnWriteArrayList<>();
+        List<String> removed = new CopyOnWriteArrayList<>();
+        AtomicInteger lookups = new AtomicInteger();
+        Engine engine = (Engine) Proxy.newProxyInstance(
+                Engine.class.getClassLoader(),
+                new Class<?>[] {Engine.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "torrents" -> List.copyOf(torrents);
+                    case "rates" -> Engine.Rates.ZERO;
+                    case "capabilities" -> new Engine.Capabilities(java.util.EnumSet.of(Engine.Capability.MUTABLE));
+                    case "refreshLimits" -> false;
+                    case "followings" -> java.util.Map.copyOf(followings);
+                    case "setFollowing" -> {
+                        if (args[1] == null) followings.remove((String) args[0]);
+                        else followings.put((String) args[0], (com.torrenta.engine.Following) args[1]);
+                        yield null;
+                    }
+                    case "lookupMutable" -> {
+                        lookups.incrementAndGet();
+                        yield java.util.Optional.of(new Engine.MutableItem(4, java.util.Map.of("ih", ih)));
+                    }
+                    case "add" -> {
+                        AddRequest r = (AddRequest) args[0];
+                        adds.add(r);
+                        followings.put(newId, r.labels().following());
+                        Torrent t = FollowRulesTest.torrent(newId, 0.5);
+                        torrents.add(t);
+                        yield t;
+                    }
+                    case "remove" -> {
+                        removed.add(args[0] + " " + args[1]);
+                        torrents.removeIf(t -> t.id().equals(args[0]));
+                        yield null;
+                    }
+                    case "setIpFilter", "start", "stop", "addListener" -> null;
+                    case "toString" -> "following engine";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        session.start(engine);
+        try {
+            session.lookForVersions();
+            assertEquals(1, adds.size(), "the newer version added");
+            AddRequest r = adds.getFirst();
+            assertEquals(new AddRequest.Magnet("magnet:?xt=urn:btih:" + newId), r.source());
+            assertEquals(Path.of("/data/films"), r.savePath(), "where the old one is");
+            assertEquals("Films", r.labels().category());
+            assertEquals(List.of("hd"), r.labels().tags());
+            assertEquals(new com.torrenta.engine.Following(source, 4, oldId), followings.get(newId));
+            assertFalse(followings.containsKey(oldId), "the old one is no longer followed");
+            assertTrue(
+                    host.events.stream()
+                            .anyMatch(e -> e.kind() == EngineEvent.Kind.UPDATED && newId.equals(e.torrentId())),
+                    "UPDATED, for the automation");
+
+            session.lookForVersions();
+            assertEquals(1, lookups.get(), "not looked up again before follow.hours");
+
+            session.letGoOfOldVersions();
+            assertEquals(List.of(), removed, "the new version is not complete yet");
+            torrents.replaceAll(t -> t.id().equals(newId) ? FollowRulesTest.torrent(newId, 1.0) : t);
+            session.letGoOfOldVersions();
+            assertEquals(List.of(oldId + " false"), removed, "removed, its files kept");
+            assertEquals(new com.torrenta.engine.Following(source, 4, ""), followings.get(newId));
+
+            settings.setFollowRemoveOld(false);
+            torrents.add(FollowRulesTest.torrent(oldId, 1.0));
+            followings.put(newId, new com.torrenta.engine.Following(source, 4, oldId));
+            session.letGoOfOldVersions();
+            assertEquals(List.of(oldId + " false"), removed, "kept when the setting says so");
+            assertEquals("", followings.get(newId).replaces(), "but let go of");
+        } finally {
+            session.stop();
+        }
+    }
+
+    private static com.torrenta.engine.CreatedTorrent made(String v1, String id) {
+        return new com.torrenta.engine.CreatedTorrent(
+                new byte[0],
+                id,
+                "films",
+                v1,
+                "",
+                1,
+                16384,
+                1000,
+                "magnet:?xt=urn:btih:" + v1,
+                java.util.Optional.empty(),
+                "");
+    }
+
+    /**
+     * Publishing on a stand-in DHT that signs one above what it holds, as libtorrent does: the first
+     * version is number 1, the next 2; a republish of what is still held puts nothing; once the
+     * DHT has forgotten, the puts climb back above the record, which followers may have seen; a
+     * put no node takes ends the round, the key and the new version kept for the next.
+     */
+    @Test
+    void aPublicationClimbsAboveWhatFollowersHaveSeen(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        RecordingHost host = new RecordingHost();
+        Session session = session(dir, settings, host);
+        java.util.concurrent.atomic.AtomicReference<Engine.MutableItem> dht =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        AtomicInteger puts = new AtomicInteger();
+        AtomicInteger takers = new AtomicInteger(8);
+        Engine engine = (Engine) Proxy.newProxyInstance(
+                Engine.class.getClassLoader(),
+                new Class<?>[] {Engine.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "torrents" -> List.of();
+                    case "rates" -> Engine.Rates.ZERO;
+                    case "capabilities" -> new Engine.Capabilities(java.util.EnumSet.of(Engine.Capability.MUTABLE));
+                    case "refreshLimits" -> false;
+                    case "newMutableKey" -> new com.torrenta.engine.MutableKey(new byte[32], new byte[64]);
+                    case "lookupMutable" -> java.util.Optional.ofNullable(dht.get());
+                    case "putMutable" -> {
+                        puts.incrementAndGet();
+                        Engine.MutableItem held = dht.get();
+                        long seq = (held == null ? 0 : held.seq()) + 1;
+                        if (takers.get() > 0)
+                            dht.set(new Engine.MutableItem(
+                                    seq, com.torrenta.engine.transmission.Bencode.decode((byte[]) args[2])));
+                        yield new Engine.MutablePut(seq, takers.get());
+                    }
+                    case "setIpFilter", "start", "stop", "addListener" -> null;
+                    case "toString" -> "publishing engine";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        String first = "aa".repeat(20);
+        String second = "bb".repeat(20);
+        session.start(engine);
+        try {
+            Session.Published one = session.publish(engine, "films", made(first, first));
+            assertTrue(one.reached());
+            assertEquals(1, one.publication().seq());
+            assertEquals(8, one.nodes());
+            assertEquals(
+                    java.util.Optional.of(first), session.publicationOf(first).map(p -> p.infoHash()));
+            assertFalse(session.publicationProblem("films").isEmpty(), "the name is taken now");
+            assertThrows(
+                    com.torrenta.engine.EngineException.class,
+                    () -> session.publish(engine, "films", made(first, first)));
+
+            Session.Published two = session.newVersion(engine, "films", made(second, second));
+            assertEquals(2, two.publication().seq());
+            assertEquals(java.util.Optional.empty(), session.publicationOf(first), "the current version moved");
+            assertEquals(2, puts.get());
+
+            session.republish();
+            assertEquals(2, puts.get(), "still held: nothing put");
+
+            dht.set(null);
+            session.republish();
+            assertEquals(5, puts.get(), "forgotten: 1, 2, then 3, above the 2 followers saw");
+            assertEquals(3, session.publications().getFirst().seq());
+
+            dht.set(null);
+            takers.set(0);
+            Session.Published nobody = session.newVersion(engine, "films", made(first, "cc".repeat(20)));
+            assertFalse(nobody.reached(), "no node took it");
+            assertEquals(6, puts.get(), "one put, not a climb into nothing");
+            assertEquals(3, nobody.publication().seq(), "the record stays");
+            assertEquals(
+                    first, session.publications().getFirst().infoHash(), "the new version kept for the next round");
+            assertTrue(host.reports.stream().anyMatch(r -> r.message().contains("films")), "said");
+        } finally {
+            session.stop();
+        }
+    }
+
+    /** A republish naming the same torrent moves the number, and 0 hours never looks. */
+    @Test
+    void aRepublishMovesTheNumberAndZeroHoursNeverLooks(@TempDir Path dir) throws Exception {
+        Settings settings = new Settings(dir.resolve(Settings.FILE_NAME));
+        Session session = session(dir, settings, new RecordingHost());
+        String id = "aa".repeat(20);
+        java.util.Map<String, com.torrenta.engine.Following> followings =
+                new java.util.concurrent.ConcurrentHashMap<>();
+        followings.put(id, new com.torrenta.engine.Following("magnet:?xs=urn:btpk:" + "11".repeat(32), 3, ""));
+        AtomicInteger lookups = new AtomicInteger();
+        Engine engine = (Engine) Proxy.newProxyInstance(
+                Engine.class.getClassLoader(),
+                new Class<?>[] {Engine.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "torrents" -> List.of(FollowRulesTest.torrent(id, 1.0));
+                    case "rates" -> Engine.Rates.ZERO;
+                    case "capabilities" -> new Engine.Capabilities(java.util.EnumSet.of(Engine.Capability.MUTABLE));
+                    case "refreshLimits" -> false;
+                    case "followings" -> java.util.Map.copyOf(followings);
+                    case "setFollowing" -> {
+                        followings.put((String) args[0], (com.torrenta.engine.Following) args[1]);
+                        yield null;
+                    }
+                    case "lookupMutable" -> {
+                        lookups.incrementAndGet();
+                        yield java.util.Optional.of(new Engine.MutableItem(
+                                9,
+                                java.util.Map.of("ih", java.util.HexFormat.of().parseHex(id))));
+                    }
+                    case "setIpFilter", "start", "stop", "addListener" -> null;
+                    case "toString" -> "republish engine";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+        session.start(engine);
+        try {
+            settings.set(Settings.FOLLOW_HOURS, "0");
+            session.lookForVersions();
+            assertEquals(0, lookups.get(), "0 hours: never");
+            settings.set(Settings.FOLLOW_HOURS, "6");
+            session.lookForVersions();
+            assertEquals(1, lookups.get());
+            assertEquals(9, followings.get(id).seq(), "the number moved, nothing added");
+        } finally {
+            session.stop();
+        }
+    }
+
+    /** The few calls a session makes, answered; anything else is a test that needs more. */
+    private static Engine engine(java.util.function.Supplier<List<Torrent>> torrents, Pauser pauser) {
+        return engine(torrents, pauser, () -> {}, new AtomicInteger());
+    }
+
+    /** {@code starting} runs inside {@code start()} (a wait, or a throw); {@code stops} counts {@code stop()}. */
+    private static Engine engine(
+            java.util.function.Supplier<List<Torrent>> torrents,
+            Pauser pauser,
+            Runnable starting,
+            AtomicInteger stops) {
+        return (Engine) Proxy.newProxyInstance(
+                Engine.class.getClassLoader(),
+                new Class<?>[] {Engine.class},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "torrents" -> torrents.get();
+                    case "rates" -> Engine.Rates.ZERO;
+                    case "capabilities" -> Engine.Capabilities.ALL;
+                    case "refreshLimits" -> false;
+                    case "setIpFilter" -> {
+                        IP_FILTERS.add(List.copyOf((List<?>) args[0]));
+                        yield null;
+                    }
+                    case "pause" -> {
+                        pauser.pause((String) args[0]);
+                        yield null;
+                    }
+                    case "start" -> {
+                        starting.run();
+                        yield null;
+                    }
+                    case "stop" -> {
+                        stops.incrementAndGet();
+                        yield null;
+                    }
+                    case "addListener" -> {
+                        LISTENERS.add((java.util.function.Consumer<EngineEvent>) args[0]);
+                        yield null;
+                    }
+                    case "addLink", "add" -> {
+                        ADDED.add(args[0]);
+                        yield seed("added", 0, false);
+                    }
+                    case "toString" -> "test engine";
+                    case "hashCode" -> System.identityHashCode(proxy);
+                    case "equals" -> proxy == args[0];
+                    default -> throw new UnsupportedOperationException(method.getName());
+                });
+    }
+
+    /** A finished torrent of 1000 bytes that has sent {@code uploaded}. */
+    private static Torrent seed(String id, long uploaded, boolean paused) {
+        return new Torrent(
+                id,
+                "name",
+                1000,
+                1000,
+                1,
+                TorrentState.SEEDING,
+                0,
+                0,
+                0,
+                0,
+                uploaded,
+                1000,
+                0,
+                0,
+                "",
+                "/data",
+                paused,
+                false,
+                0,
+                "",
+                List.of(),
+                "",
+                List.of(),
+                false,
+                false,
+                -1,
+                false,
+                false);
+    }
+
+    private static void await(BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (!condition.getAsBoolean()) {
+            if (System.currentTimeMillis() > deadline) throw new AssertionError("timed out");
+            Thread.sleep(20);
+        }
+    }
+}

@@ -45,6 +45,7 @@ import com.torrenta.rss.EpisodeFilter;
 import com.torrenta.rss.Feed;
 import com.torrenta.rss.Rule;
 import com.torrenta.rss.RuleMatcher;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -89,8 +90,8 @@ final class RuleDialog {
     private final AtomicInteger generation = new AtomicInteger();
     private final Articles articles;
     private final Set<String> otherNames;
-    private final Rule existing;
-    private Rule result;
+    private final @Nullable Rule existing;
+    private @Nullable Rule result;
     private int lastMatched = -1;
     private int lastTotal;
 
@@ -103,7 +104,7 @@ final class RuleDialog {
      */
     RuleDialog(
             Window owner,
-            Rule existing,
+            @Nullable Rule existing,
             List<Feed> feeds,
             List<Category> categories,
             Set<String> otherNames,
@@ -178,7 +179,7 @@ final class RuleDialog {
             }
 
             @Override
-            public Rule.AddPaused fromString(String s) {
+            public Rule.@Nullable AddPaused fromString(String s) {
                 return null;
             }
         });
@@ -193,7 +194,7 @@ final class RuleDialog {
             }
 
             @Override
-            public String fromString(String s) {
+            public @Nullable String fromString(String s) {
                 return null;
             }
         });
@@ -245,6 +246,7 @@ final class RuleDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
 
         if (existing == null) {
             enabled.setSelected(true);

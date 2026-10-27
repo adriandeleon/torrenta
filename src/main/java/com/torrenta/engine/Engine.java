@@ -2,8 +2,11 @@ package com.torrenta.engine;
 
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -68,26 +71,54 @@ public interface Engine extends AutoCloseable {
     CreatedTorrent create(CreateRequest request, CreateProgress progress) throws EngineException;
 
     /**
-     * Starts fetching a magnet's metadata without adding it, so the Add dialog can show the files
-     * while it is open. The magnet joins the swarm writing nothing, is in no snapshot and no
-     * store, and leaves once the metadata is in or the fetch is cancelled. Fails if the magnet is
-     * already in the session.
+     * Joins the swarm of a torrent not added yet, writing nothing, so the Add dialog can show what
+     * is there while it is open: a magnet's metadata first ({@link SwarmProbe#torrent}), then for
+     * either kind the swarm itself ({@link SwarmProbe#swarm}), until it is added or cancelled. The
+     * probe is in no snapshot and no store. A private torrent is looked at only with {@code
+     * privateToo}, since a private tracker counts every announce and the person has not added it
+     * yet: a magnet's probe leaves once its metadata shows it private, and a private {@code
+     * .torrent}'s never joins. Fails if the torrent is already in the session, or (with {@link
+     * Capability#METADATA_FETCH} or {@link Capability#SWARM_PREVIEW} missing) where the engine
+     * cannot.
      */
-    MetadataFetch fetchMetadata(String magnet) throws EngineException;
+    SwarmProbe probe(AddRequest.Source source, boolean privateToo) throws EngineException;
 
     /**
-     * Adds what a fetch was fetching, taking over the peers it found: the fetch is ended first
+     * Adds what a probe was looking at, taking over the peers it found: the probe is ended first
      * (the session holds one torrent per info-hash), and the peers it had dialled are handed to
      * the new torrent, which connects to them as it starts rather than looking for the swarm
-     * again. A fetch of another torrent is only ended.
+     * again. A probe of another torrent is only ended.
      */
-    default Torrent add(AddRequest request, MetadataFetch from) throws EngineException {
+    default Torrent add(AddRequest request, SwarmProbe from) throws EngineException {
         from.cancel();
         return add(request);
     }
 
     /** Removes the torrent and forgets it; with {@code deleteFiles}, its data on disk too. */
     void remove(String id, boolean deleteFiles) throws EngineException;
+
+    /**
+     * Where a torrent's data is on this machine, read before a remove that moves it to the trash
+     * instead of deleting it. Empty when the engine's files are elsewhere (a daemon's).
+     */
+    default java.util.Optional<OnDisk> onDisk(String id) throws EngineException {
+        return java.util.Optional.empty();
+    }
+
+    /**
+     * A torrent's data on disk.
+     *
+     * @param savePath the folder it is saved in, absolute
+     * @param files every file under the name it has on disk now (a rename, an incomplete file's
+     *     suffix), whether or not it exists yet
+     * @param scratch the engine's own leftovers (libtorrent's part file), deleted rather than kept
+     */
+    record OnDisk(java.nio.file.Path savePath, List<java.nio.file.Path> files, List<java.nio.file.Path> scratch) {
+        public OnDisk {
+            files = List.copyOf(files);
+            scratch = List.copyOf(scratch);
+        }
+    }
 
     /** Stops transferring and leaves the queue; the torrent stays until resumed. */
     void pause(String id) throws EngineException;
@@ -124,6 +155,83 @@ public interface Engine extends AutoCloseable {
      * #downloadDir()} is.
      */
     void moveStorage(String id, String destination, boolean moveFiles) throws EngineException;
+
+    /**
+     * Removes the torrent (not its files) and hands back what puts it back as it was: its resume
+     * data written fresh for the occasion, its labels, its storage record, its place in the
+     * queue. Only with {@link Capability#UNDO_REMOVE}.
+     */
+    /**
+     * Another client's torrent, from its resume data, added as it is and without a check, as a
+     * restored one (nothing that runs on an add runs on it): its metainfo put back into the resume
+     * data, its files where {@code savePath} says, its labels filed; with {@link Adoption#check} its
+     * pieces are checked on the add instead, and a torrent whose files do not match comes up short
+     * rather than wrong. The id it is known by. Only with {@link Capability#IMPORT_RESUME}.
+     */
+    default String adopt(Adoption adoption) throws EngineException {
+        throw new EngineException(tr("engine.error.noImport"));
+    }
+
+    /**
+     * What {@link #adopt} takes.
+     *
+     * @param resume the other client's resume data, libtorrent's format
+     * @param metainfo the {@code .torrent}; null for a magnet whose metadata never arrived
+     * @param name for messages
+     * @param check the files on disk do not match what the resume data says (the import plan
+     *     looked): its pieces are not taken on trust, and the engine checks the files on the add.
+     *     libtorrent 2 keeps no file sizes in resume data, so it would believe a truncated file
+     *     whole and seed it
+     */
+    record Adoption(
+            byte[] resume,
+            byte @Nullable [] metainfo,
+            String savePath,
+            TorrentLabels labels,
+            String name,
+            boolean check,
+            Map<Integer, String> renamed) {
+
+        public Adoption {
+            renamed = renamed == null ? Map.of() : Map.copyOf(renamed);
+        }
+
+        /** No file renamed. */
+        public Adoption(
+                byte[] resume, byte[] metainfo, String savePath, TorrentLabels labels, String name, boolean check) {
+            this(resume, metainfo, savePath, labels, name, check, Map.of());
+        }
+    }
+
+    default Detached detach(String id) throws EngineException {
+        throw new EngineException(tr("engine.error.noUndo"));
+    }
+
+    /**
+     * Puts a detached torrent back, without a recheck, as a restored one: nothing that runs on an
+     * add runs on it. Refused when a torrent of that id is in the list again.
+     */
+    default void reattach(Detached torrent) throws EngineException {
+        throw new EngineException(tr("engine.error.noUndo"));
+    }
+
+    /**
+     * A torrent taken out by {@link #detach}. The bytes are the engine's own: its resume data and
+     * its sidecars, opaque here as they are in the store.
+     *
+     * @param id the torrent's id
+     * @param name its name, for what the undo says
+     * @param resume its resume data, fresh
+     * @param labels its labels sidecar, or empty
+     * @param storage its storage record, or empty
+     * @param queuePosition its place in the queue, or -1
+     */
+    record Detached(String id, String name, byte[] resume, byte[] labels, byte[] storage, int queuePosition) {
+        public Detached {
+            labels = labels == null ? new byte[0] : labels;
+            storage = storage == null ? new byte[0] : storage;
+        }
+    }
 
     /**
      * Super seeding: a seed offers each peer only pieces nobody else has yet, so a first seed's
@@ -223,6 +331,74 @@ public interface Engine extends AutoCloseable {
         return Connectivity.NONE;
     }
 
+    /**
+     * The complete files the torrents have on disk, by v2 root, kept by the engine as they check,
+     * finish, are renamed, moved and removed: what a new torrent's files are looked for in before
+     * they are downloaded again. {@link ContentIndex#EMPTY} from an engine that keeps none (a
+     * daemon, whose disk is not this machine's).
+     */
+    /**
+     * File {@code fileIndex} of torrent {@code id}, to be read while it downloads ({@link
+     * Capability#STREAMING}). Needs the torrent's metadata.
+     */
+    default StreamFile stream(String id, int fileIndex) throws EngineException {
+        throw new EngineException(com.torrenta.i18n.Messages.tr("engine.error.noStreaming"));
+    }
+
+    /**
+     * An updatable address's item in the DHT ({@link Capability#MUTABLE}): the highest version
+     * found within {@code timeout}, empty when none answered. Blocking; never under a lock.
+     */
+    default java.util.Optional<MutableItem> lookupMutable(MutableSource source, java.time.Duration timeout)
+            throws EngineException, InterruptedException {
+        throw new EngineException(com.torrenta.i18n.Messages.tr("engine.error.noMutable"));
+    }
+
+    /**
+     * An item found under an updatable address.
+     *
+     * @param seq its sequence number: higher is newer
+     * @param value its value as {@code Bencode} decodes it (a map whose strings are bytes)
+     */
+    record MutableItem(long seq, Object value) {}
+
+    /** A new key pair to publish an updatable torrent with ({@link Capability#MUTABLE}). */
+    default MutableKey newMutableKey() throws EngineException {
+        throw new EngineException(com.torrenta.i18n.Messages.tr("engine.error.noMutable"));
+    }
+
+    /**
+     * Signs {@code value} (bencoded) with {@code key} under {@code salt} and stores it in the DHT
+     * ({@link Capability#MUTABLE}), one above the highest number found there. Blocking; never under
+     * a lock.
+     */
+    default MutablePut putMutable(MutableKey key, byte[] salt, byte[] value, java.time.Duration timeout)
+            throws EngineException, InterruptedException {
+        throw new EngineException(com.torrenta.i18n.Messages.tr("engine.error.noMutable"));
+    }
+
+    /**
+     * What a put did.
+     *
+     * @param seq the sequence number it was signed with
+     * @param nodes how many DHT nodes stored it; 0 is a put nobody took
+     */
+    record MutablePut(long seq, int nodes) {}
+
+    /** The torrents followed from an updatable address, by id. */
+    default java.util.Map<String, Following> followings() {
+        return java.util.Map.of();
+    }
+
+    /** Follows torrent {@code id} from an updatable address; null stops following. */
+    default void setFollowing(String id, @Nullable Following following) throws EngineException {
+        throw new EngineException(com.torrenta.i18n.Messages.tr("engine.error.noMutable"));
+    }
+
+    default ContentIndex contentIndex() {
+        return ContentIndex.EMPTY;
+    }
+
     /** Writes what is needed to bring the torrents back; also done on {@link #stop()}. */
     void flush();
 
@@ -230,11 +406,18 @@ public interface Engine extends AutoCloseable {
     void applySettings(EngineSettings settings) throws EngineException;
 
     /**
-     * Re-evaluates the speed limits for this moment: the alternative pair if its schedule says so
-     * or it is on by hand, the normal pair otherwise. Called every minute by the window and after
-     * any change. Returns whether the alternative pair is in force.
+     * The interface the settings bind to came up, went down or changed its addresses: the engine
+     * binds again to what is there now. Nothing for an engine whose network is not this machine's.
      */
-    boolean refreshLimits(java.time.LocalDateTime now) throws EngineException;
+    default void rebind() throws EngineException {}
+
+    /**
+     * Puts the speed pair the session decided in force ({@code session.SpeedMode}: the person's
+     * switch, the schedule, the battery and the network's cost): the alternative pair when {@code
+     * alternative}, the normal one otherwise. Called every minute and after any change. Returns
+     * the pair in force, which a daemon that keeps its own schedule decides itself.
+     */
+    boolean refreshLimits(boolean alternative) throws EngineException;
 
     /** Replaces the IP filter: peers in these ranges are refused. Empty clears it. */
     void setIpFilter(List<IpRange> ranges) throws EngineException;
@@ -280,20 +463,32 @@ public interface Engine extends AutoCloseable {
         CreateProgress NONE = (done, total) -> true;
     }
 
-    /** A magnet's metadata on its way, from {@link #fetchMetadata}. */
-    interface MetadataFetch {
+    /** A torrent's swarm being looked at before it is added, from {@link #probe}. */
+    interface SwarmProbe {
 
-        /** Peers connected to fetch it now; 0 once the fetch is over. Not on the FX thread. */
+        /** Peers connected to it now; 0 once the probe is over. Not on the FX thread. */
         int peers();
 
         /**
-         * The whole {@code .torrent}, the magnet's trackers included, once the metadata is in:
-         * what {@link #inspect} reads and {@link AddRequest.TorrentFile} adds. Completes on an
-         * engine thread; fails if the fetch is cancelled or the engine stops.
+         * The whole {@code .torrent}, a magnet's trackers included, once the metadata is in:
+         * what {@link #inspect} reads and {@link AddRequest.TorrentFile} adds; a {@code .torrent}'s
+         * own bytes at once. Completes on an engine thread; fails if a magnet's probe is cancelled
+         * or the engine stops first.
          */
         java.util.concurrent.CompletableFuture<byte[]> torrent();
 
-        /** Leaves the swarm. Idempotent; must come before the same magnet is added for real. */
+        /**
+         * What the probe has seen of the swarm so far, with the pieces counted over the files at
+         * {@code wanted} (indices): once the file list is in, it stays in the swarm downloading
+         * nothing, to look, until it is added or cancelled. Empty where the engine cannot look,
+         * once the probe is over, and for a private torrent not let in ({@link #probe}). Not on
+         * the FX thread.
+         */
+        default java.util.Optional<SwarmPreview> swarm(java.util.Set<Integer> wanted) {
+            return java.util.Optional.empty();
+        }
+
+        /** Leaves the swarm. Idempotent; must come before the same torrent is added for real. */
         void cancel();
     }
 
@@ -361,7 +556,41 @@ public interface Engine extends AutoCloseable {
         /** The content layout on add: in a folder of its own, or without the torrent's root folder. */
         CONTENT_LAYOUT,
         /** Adding and removing a torrent's web seeds; any engine lists them. */
-        WEB_SEEDS;
+        WEB_SEEDS,
+        /**
+         * A removal that can be taken back: {@link #detach} keeps what brings the torrent back as
+         * it was, and {@link #reattach} brings it back without a recheck.
+         */
+        UNDO_REMOVE,
+        /**
+         * A look at a torrent's swarm before it is added ({@link SwarmProbe#swarm}): the Add
+         * dialog's Swarm line, for a {@code .torrent} as for a magnet. A daemon has no hidden
+         * torrents to look with.
+         */
+        SWARM_PREVIEW,
+        /** Another client's torrents brought over from their resume data, without a check. */
+        IMPORT_RESUME,
+        /**
+         * The speed pair and a pause decided by this machine's battery and network cost, as rules
+         * of the session's; a daemon keeps its own schedule.
+         */
+        SPEED_CONDITIONS,
+        /**
+         * A new torrent's files found complete on disk in another torrent ({@link #contentIndex})
+         * and linked or copied into place before the add, rather than downloaded again. A daemon's
+         * disk is not this machine's.
+         */
+        DEDUP,
+        /**
+         * A file read while it downloads ({@link #stream}): its pieces asked for with a deadline and
+         * served from the disk to a player on this machine. A daemon's disk is not this machine's.
+         */
+        STREAMING,
+        /**
+         * Updatable torrents (BEP 46): an address looked up in the DHT for the torrent's current
+         * version, followed for newer ones.
+         */
+        MUTABLE;
 
         /** The capability's name in the interface language, read at call time. */
         public String label() {

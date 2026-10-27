@@ -1,6 +1,5 @@
 package com.torrenta.engine.direct;
 
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -23,6 +22,7 @@ import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -77,7 +77,7 @@ public final class WithDownloads implements Engine {
     public void start() throws EngineException {
         torrents.start();
         links.onTorrentFile(this::handOver);
-        shareLimit(LocalDateTime.now());
+        shareLimit();
         links.start();
     }
 
@@ -126,7 +126,7 @@ public final class WithDownloads implements Engine {
     }
 
     @Override
-    public Torrent add(AddRequest request, MetadataFetch from) throws EngineException {
+    public Torrent add(AddRequest request, SwarmProbe from) throws EngineException {
         return torrents.add(request, from);
     }
 
@@ -141,14 +141,36 @@ public final class WithDownloads implements Engine {
     }
 
     @Override
-    public MetadataFetch fetchMetadata(String magnet) throws EngineException {
-        return torrents.fetchMetadata(magnet);
+    public SwarmProbe probe(AddRequest.Source source, boolean privateToo) throws EngineException {
+        return torrents.probe(source, privateToo);
+    }
+
+    @Override
+    public Detached detach(String id) throws EngineException {
+        torrentOnly(id);
+        return torrents.detach(id);
+    }
+
+    @Override
+    public void reattach(Detached torrent) throws EngineException {
+        torrentOnly(torrent.id());
+        torrents.reattach(torrent);
+    }
+
+    @Override
+    public String adopt(Adoption adoption) throws EngineException {
+        return torrents.adopt(adoption);
     }
 
     @Override
     public void remove(String id, boolean deleteFiles) throws EngineException {
         if (DirectDownload.isId(id)) links.remove(id, deleteFiles);
         else torrents.remove(id, deleteFiles);
+    }
+
+    @Override
+    public java.util.Optional<OnDisk> onDisk(String id) throws EngineException {
+        return DirectDownload.isId(id) ? links.onDisk(id) : torrents.onDisk(id);
     }
 
     @Override
@@ -329,16 +351,64 @@ public final class WithDownloads implements Engine {
         return torrents.connectivity();
     }
 
+    /** A torrent's file; a download from a link is curl's, read when it is done. */
+    @Override
+    public com.torrenta.engine.StreamFile stream(String id, int fileIndex) throws EngineException {
+        if (DirectDownload.isId(id)) throw new EngineException(tr("engine.error.noStreaming"));
+        return torrents.stream(id, fileIndex);
+    }
+
+    @Override
+    public java.util.Optional<MutableItem> lookupMutable(
+            com.torrenta.engine.MutableSource source, java.time.Duration timeout)
+            throws EngineException, InterruptedException {
+        return torrents.lookupMutable(source, timeout);
+    }
+
+    @Override
+    public com.torrenta.engine.MutableKey newMutableKey() throws EngineException {
+        return torrents.newMutableKey();
+    }
+
+    @Override
+    public MutablePut putMutable(
+            com.torrenta.engine.MutableKey key, byte[] salt, byte[] value, java.time.Duration timeout)
+            throws EngineException, InterruptedException {
+        return torrents.putMutable(key, salt, value, timeout);
+    }
+
+    @Override
+    public java.util.Map<String, com.torrenta.engine.Following> followings() {
+        return torrents.followings();
+    }
+
+    @Override
+    public void setFollowing(String id, com.torrenta.engine.@Nullable Following following) throws EngineException {
+        if (DirectDownload.isId(id)) throw new EngineException(tr("engine.error.noMutable"));
+        torrents.setFollowing(id, following);
+    }
+
+    /** The torrents' files: a download from a link has no v2 root to be found by. */
+    @Override
+    public com.torrenta.engine.ContentIndex contentIndex() {
+        return torrents.contentIndex();
+    }
+
     @Override
     public void flush() {
         torrents.flush();
     }
 
     @Override
+    public void rebind() throws EngineException {
+        torrents.rebind();
+    }
+
+    @Override
     public void applySettings(EngineSettings settings) throws EngineException {
         this.settings = settings;
         links.setProxy(proxyOf(settings));
-        shareLimit(LocalDateTime.now());
+        shareLimit();
         torrents.applySettings(settings);
     }
 
@@ -347,14 +417,18 @@ public final class WithDownloads implements Engine {
      * shared among them: the normal pair's, or the alternative one's while it is in force.
      */
     @Override
-    public boolean refreshLimits(LocalDateTime now) throws EngineException {
-        shareLimit(now);
-        return torrents.refreshLimits(now);
+    public boolean refreshLimits(boolean alternative) throws EngineException {
+        this.alternative = alternative;
+        shareLimit();
+        return torrents.refreshLimits(alternative);
     }
 
-    private void shareLimit(LocalDateTime now) {
+    /** The pair the session last said is in force, for the links' share of it. */
+    private volatile boolean alternative;
+
+    private void shareLimit() {
         EngineSettings s = settings;
-        links.setGlobalLimit(s == null ? 0 : s.speed().effectiveDownloadBytes(now));
+        links.setGlobalLimit(s == null ? 0 : s.speed().downloadBytes(alternative));
     }
 
     @Override

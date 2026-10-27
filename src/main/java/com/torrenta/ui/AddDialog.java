@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import javafx.beans.Observable;
 import javafx.beans.binding.Bindings;
@@ -49,12 +50,16 @@ import javafx.stage.Stage;
 import javafx.stage.Window;
 import javafx.util.StringConverter;
 
+import com.torrenta.content.ContentCheck;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
 import com.torrenta.engine.DownloadPlan;
 import com.torrenta.engine.FileRenames;
+import com.torrenta.engine.SwarmPreview;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentPreview;
+import com.torrenta.session.AddDefaults;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -88,7 +93,25 @@ final class AddDialog {
      * @param filesLater added before its file list; its files are to be chosen when it arrives
      * @param withoutAsking from now on, add with these settings and do not open the dialog
      */
-    record Choice(AddRequest request, boolean firstAndLastFirst, boolean filesLater, boolean withoutAsking) {}
+    /**
+     * @param preview the files the request adds, for the dedup to be planned from again at the add;
+     *     null when they are not known
+     * @param dedupLinks link the files found on disk on the same volume
+     * @param dedupCopies copy the files found on disk on another volume
+     */
+    record Choice(
+            AddRequest request,
+            boolean firstAndLastFirst,
+            boolean filesLater,
+            boolean withoutAsking,
+            @Nullable TorrentPreview preview,
+            boolean dedupLinks,
+            boolean dedupCopies) {
+
+        Choice(AddRequest request, boolean firstAndLastFirst, boolean filesLater, boolean withoutAsking) {
+            this(request, firstAndLastFirst, filesLater, withoutAsking, null, false, false);
+        }
+    }
 
     /** Where the input came from, for the header's small caps. */
     enum Via {
@@ -112,8 +135,28 @@ final class AddDialog {
     }
 
     private final DiskBar diskBar = new DiskBar();
+    /** The files already on disk: link them, and copy those on another volume. */
+    private final VBox dedupBox = new VBox(4);
+
+    private final CheckBox dedupLink = new CheckBox();
+    private final CheckBox dedupCopy = new CheckBox();
+    /** What the engine has on disk, how the setting says to use it, and its torrents' names. */
+    private com.torrenta.engine.ContentIndex fromDisk = com.torrenta.engine.ContentIndex.EMPTY;
+
+    private com.torrenta.engine.DedupMode dedupMode = com.torrenta.engine.DedupMode.OFF;
+    private java.util.function.Function<String, String> torrentNames = id -> id;
+    /** What the dedup lines offer now, for the free-space line. */
+    private DedupText.Offer lastOffer = DedupText.Offer.NONE;
     /** One label per line: the disk sentence, then where the files start if not here. */
     private final VBox diskText = new VBox(1);
+
+    /** The swarm as a magnet's fetch sees it once the files are in ({@link SwarmVerdict}); hidden before. */
+    private final VBox swarmBox = new VBox(4);
+
+    private final Region swarmDot = new Region();
+    private final Label swarmText = new Label();
+    /** The ticked files' indices, for the poll thread to count pieces over. */
+    private volatile Set<Integer> wantedFiles = Set.of();
 
     private final CheckBox sequential = new CheckBox(tr("dialog.add.sequential"));
     private final CheckBox firstLast = new CheckBox(tr("dialog.add.firstLast"));
@@ -127,7 +170,7 @@ final class AddDialog {
     private final TextField tags = new TextField();
     private final CheckBox withoutAsking = new CheckBox(tr("dialog.add.withoutAsking"));
     private final List<Category> categories;
-    private final Defaults defaults;
+    private final AddDefaults defaults;
     /** Enter adds paused and Shift+Enter starts, rather than the other way round. */
     private final boolean startPausedDefault;
 
@@ -136,7 +179,16 @@ final class AddDialog {
     private final CheckBox allFiles = new CheckBox();
     private final Label fetching = new Label();
     private final VBox placeholder;
-    private FileTree.Node root;
+    private FileTree.@Nullable Node root;
+
+    /** What in the wanted files deserves a look (ContentCheck), above the tree; hidden when nothing. */
+    private final VBox contentCard = new VBox(6);
+
+    private final Label contentTitle = new Label();
+    private final VBox contentLines = new VBox(2);
+    private final Label contentAdvice = new Label();
+    private final Button contentSkip = new Button(tr("content.skip"));
+    private ContentCheck content = ContentCheck.NONE;
 
     private final Button cancel = keyed(tr("common.cancel"), tr("dialog.common.key.esc"));
     private final Button add = keyed(tr("common.add"), tr("dialog.common.key.enter"));
@@ -161,75 +213,8 @@ final class AddDialog {
     private Map<Integer, com.torrenta.engine.Priority> initial = Map.of();
 
     private AddRequest.Source source;
-    private TorrentPreview preview;
-    private Choice result;
-
-    /**
-     * What the settings say a new torrent starts as.
-     *
-     * @param savePath the download folder
-     * @param startPaused the Start paused box's starting position
-     * @param sequential the Sequential box's
-     * @param incompleteEnabled whether downloads start in the incomplete folder
-     * @param incompleteDir that folder
-     * @param partSuffix whether incomplete files carry {@code .part}
-     * @param preallocate whether files are allocated in full at the start
-     * @param layout how the files sit under the save path
-     */
-    record Defaults(
-            Path savePath,
-            boolean startPaused,
-            boolean sequential,
-            boolean incompleteEnabled,
-            Path incompleteDir,
-            boolean partSuffix,
-            boolean preallocate,
-            FileRenames.Layout layout) {
-
-        Defaults {
-            if (layout == null) layout = FileRenames.Layout.ORIGINAL;
-        }
-
-        /** In the torrent's own layout. */
-        Defaults(
-                Path savePath,
-                boolean startPaused,
-                boolean sequential,
-                boolean incompleteEnabled,
-                Path incompleteDir,
-                boolean partSuffix,
-                boolean preallocate) {
-            this(savePath, startPaused, sequential, incompleteEnabled, incompleteDir, partSuffix, preallocate, null);
-        }
-
-        static Defaults from(com.torrenta.store.Settings settings) {
-            return new Defaults(
-                    settings.downloadDir(),
-                    settings.addStartPaused(),
-                    settings.addSequential(),
-                    settings.incompleteEnabled(),
-                    settings.incompleteDir(),
-                    settings.partSuffix(),
-                    settings.preallocate(),
-                    settings.addContentLayout());
-        }
-
-        /** The same defaults with another folder: a remote engine's own, when the files are not here. */
-        Defaults withSavePath(Path path) {
-            return new Defaults(
-                    path, startPaused, sequential, incompleteEnabled, incompleteDir, partSuffix, preallocate);
-        }
-
-        /** Where a torrent saved to {@code destination} starts and ends. */
-        DownloadPlan plan(Path destination) {
-            return DownloadPlan.of(destination, incompleteEnabled, incompleteDir);
-        }
-
-        AddRequest.Storage storage(Path destination) {
-            return AddRequest.Storage.of(plan(destination), partSuffix, preallocate)
-                    .withLayout(layout);
-        }
-    }
+    private @Nullable TorrentPreview preview;
+    private @Nullable Choice result;
 
     /**
      * @param preview the torrent's contents, or null for a magnet
@@ -241,9 +226,9 @@ final class AddDialog {
     AddDialog(
             Window owner,
             AddRequest.Source source,
-            TorrentPreview preview,
+            @Nullable TorrentPreview preview,
             Via via,
-            Defaults defaults,
+            AddDefaults defaults,
             List<Category> categories) {
         this(owner, source, preview, via, defaults, categories, false);
     }
@@ -260,7 +245,7 @@ final class AddDialog {
                 new AddRequest.Magnet(""),
                 null,
                 Via.FILE,
-                new Defaults(Path.of(""), false, false, false, Path.of(""), false, false),
+                new AddDefaults(Path.of(""), false, false, false, Path.of(""), false, false),
                 List.of(),
                 true);
         dialog.initial = Map.copyOf(priorities);
@@ -271,9 +256,9 @@ final class AddDialog {
     private AddDialog(
             Window owner,
             AddRequest.Source source,
-            TorrentPreview preview,
+            @Nullable TorrentPreview preview,
             Via via,
-            Defaults defaults,
+            AddDefaults defaults,
             List<Category> categories,
             boolean existing) {
         this.source = source;
@@ -306,8 +291,9 @@ final class AddDialog {
         placeholder.setPadding(new Insets(16));
         treeHost.getStyleClass().add("add-files");
         buildTree();
+        buildContentCard();
         VBox.setVgrow(treeHost, Priority.ALWAYS);
-        VBox left = new VBox(6, treeHost, hint);
+        VBox left = new VBox(6, contentCard, treeHost, hint);
         HBox.setHgrow(left, Priority.ALWAYS);
         left.setMinWidth(320);
 
@@ -348,14 +334,39 @@ final class AddDialog {
         layout.setValue(defaults.layout());
         layout.setMaxWidth(Double.MAX_VALUE);
         layout.disableProperty().bind(hasFiles.not());
+        layout.valueProperty().addListener((o, was, now) -> updateDisk());
         layoutLabel = muted(tr("dialog.add.layout"));
         GridPane.setMargin(layoutLabel, new Insets(8, 0, 0, 0));
         filing.add(layoutLabel, 0, 2, 2, 1);
         filing.add(layout, 0, 3, 2, 1);
 
+        swarmDot.getStyleClass().add("swarm-dot");
+        swarmText.getStyleClass().add("swarm-text");
+        // A wrapping label in a box is squeezed to one line and an ellipsis unless its height holds.
+        swarmText.setWrapText(true);
+        swarmText.setMinHeight(Region.USE_PREF_SIZE);
+        HBox swarmLine = new HBox(6, swarmDot, swarmText);
+        // The dot stays by the first line when the sentence wraps.
+        swarmLine.setAlignment(Pos.TOP_LEFT);
+        HBox.setMargin(swarmDot, new Insets(5, 0, 0, 0));
+        swarmBox.getChildren().addAll(muted(tr("dialog.add.swarm")), swarmLine);
+        // Its own top margin rather than spaced()'s wrapper, which would keep the gap while hidden.
+        swarmBox.setPadding(new Insets(12, 0, 0, 0));
+        shown(swarmBox, false);
+
         // First-and-last is piece priorities, which need the metadata: not for "Add now".
         firstLast.disableProperty().bind(hasFiles.not());
         VBox options = new VBox(6, sequential, firstLast, skipCheck);
+
+        for (CheckBox box : List.of(dedupLink, dedupCopy)) {
+            box.setWrapText(true);
+            box.setMinHeight(Region.USE_PREF_SIZE);
+        }
+        dedupBox.getChildren().addAll(muted(tr("dialog.add.dedup")), dedupLink, dedupCopy);
+        // Unticking the link puts its bytes back in the free-space line.
+        dedupLink.selectedProperty().addListener((o, was, now) -> updateDisk());
+        dedupBox.setPadding(new Insets(12, 0, 0, 0));
+        shown(dedupBox, false);
 
         VBox right = new VBox(
                 4,
@@ -363,6 +374,8 @@ final class AddDialog {
                 pathRow,
                 spaced(diskBar, 8),
                 diskText,
+                dedupBox,
+                swarmBox,
                 spaced(filing, 12),
                 spaced(muted(tr("dialog.common.tags")), 12),
                 tags,
@@ -464,6 +477,7 @@ final class AddDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
 
         if (preview != null) showFiles(source, preview);
         else if (!existing) showFetching(0);
@@ -522,6 +536,28 @@ final class AddDialog {
                 fetchingLine(peers, Duration.between(opened, Instant.now()).toSeconds()));
         if (!treeHost.getChildren().contains(placeholder))
             treeHost.getChildren().setAll(placeholder);
+    }
+
+    /** The ticked files' indices; any thread. */
+    Set<Integer> wantedFiles() {
+        return wantedFiles;
+    }
+
+    /**
+     * Once a second while the files are in and the fetch stays to look: the swarm's verdict under
+     * the disk sentence. Empty (the fetch has left, a private torrent, an engine that cannot look)
+     * hides the line rather than guess.
+     */
+    void showSwarm(Optional<SwarmPreview> preview) {
+        if (preview.isEmpty() || !hasFiles.get()) {
+            shown(swarmBox, false);
+            return;
+        }
+        SwarmVerdict verdict = SwarmVerdict.of(preview.get(), System.currentTimeMillis());
+        swarmText.setText(verdict.sentence());
+        swarmDot.getStyleClass().removeIf(c -> c.startsWith("swarm-") && !c.equals("swarm-dot"));
+        swarmDot.getStyleClass().add(verdict.styleClass());
+        shown(swarmBox, true);
     }
 
     /**
@@ -619,11 +655,15 @@ final class AddDialog {
             if (b.isVisible())
                 buttons.add(b.getText() + (b.isDefaultButton() ? "*" : "") + (b.isDisabled() ? "(off)" : ""));
         }
-        String files = hasFiles.get()
-                ? FileTree.files(root).size() + " files, " + Bytes.human(FileTree.wantedSize(root)) + " wanted"
+        FileTree.Node tree = root;
+        String files = hasFiles.get() && tree != null
+                ? FileTree.files(tree).size() + " files, " + Bytes.human(FileTree.wantedSize(tree)) + " wanted"
                 : "placeholder: " + fetching.getText();
+        String swarm = swarmBox.isVisible()
+                ? " | swarm=" + swarmDot.getStyleClass().getLast() + " " + swarmText.getText()
+                : "";
         return kicker.getText() + " | " + title.getText() + " | " + summary.getText() + " | " + hint() + " | " + files
-                + " | buttons=" + buttons;
+                + swarm + " | dedup=" + dedupForCapture() + " | buttons=" + buttons;
     }
 
     /** Picks a category as a person would, for the capture hook. */
@@ -659,7 +699,10 @@ final class AddDialog {
                                 : defaults.storage(destination).withLayout(layout.getValue())),
                 firstLast.isSelected(),
                 false,
-                withoutAsking.isSelected());
+                withoutAsking.isSelected(),
+                preview,
+                dedupLink.isVisible() && dedupLink.isSelected(),
+                dedupCopy.isVisible() && dedupCopy.isSelected());
         stage.hide();
     }
 
@@ -723,7 +766,10 @@ final class AddDialog {
         name.setSortable(false);
         name.setPrefWidth(300);
         allFiles.setFocusTraversable(false);
-        allFiles.setOnAction(e -> setWanted(root, allFiles.isSelected()));
+        allFiles.setOnAction(e -> {
+            FileTree.Node tree = root;
+            if (tree != null) setWanted(tree, allFiles.isSelected());
+        });
         name.setCellValueFactory(p -> new ReadOnlyObjectWrapper<>(p.getValue().getValue()));
         name.setCellFactory(column -> new NameCell());
 
@@ -832,7 +878,7 @@ final class AddDialog {
     private static final class NameCell extends TreeTableCell<FileTree.Node, FileTree.Node> {
         private final CheckBox box = new CheckBox();
         private final javafx.beans.value.ChangeListener<Boolean> mixed = (o, was, now) -> box.setIndeterminate(now);
-        private CheckBoxTreeItem<FileTree.Node> bound;
+        private @Nullable CheckBoxTreeItem<FileTree.Node> bound;
 
         NameCell() {
             box.setFocusTraversable(false);
@@ -871,7 +917,76 @@ final class AddDialog {
         long wanted = files.stream().filter(f -> f.wantedProperty().get()).count();
         allFiles.setIndeterminate(wanted > 0 && wanted < files.size());
         allFiles.setSelected(wanted == files.size());
+        wantedFiles = files.stream()
+                .filter(f -> f.wantedProperty().get())
+                .map(FileTree.Node::index)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
         updateDisk();
+        updateContentCard();
+    }
+
+    // ---- the content check -----------------------------------------------------------------------
+
+    private void buildContentCard() {
+        contentCard.getStyleClass().addAll("diagnosis-card", "content-card");
+        contentTitle.getStyleClass().add("diagnosis-title");
+        contentAdvice.getStyleClass().add("content-advice");
+        // A wrapping label in a VBox is squeezed to one line and an ellipsis unless its height holds.
+        contentAdvice.setWrapText(true);
+        contentAdvice.setMinHeight(Region.USE_PREF_SIZE);
+        contentSkip.setOnAction(e -> skipFlagged());
+        contentCard.getChildren().addAll(contentTitle, contentLines, contentAdvice, contentSkip);
+        shown(contentCard, false);
+    }
+
+    /** The card follows the ticks: a file skipped no longer warns, and the card goes with the last. */
+    private void updateContentCard() {
+        Map<Integer, FileTree.Node> byIndex = new java.util.HashMap<>();
+        if (root != null) for (FileTree.Node f : FileTree.files(root)) byIndex.put(f.index(), f);
+        content = preview == null
+                ? ContentCheck.NONE
+                : ContentCheck.of(preview, i -> {
+                    FileTree.Node node = byIndex.get(i);
+                    return node != null && node.wantedProperty().get();
+                });
+        shown(contentCard, !content.isEmpty());
+        if (content.isEmpty()) return;
+        contentCard.getStyleClass().remove("diagnosis-error");
+        if (content.severity() == ContentCheck.Severity.DANGER)
+            contentCard.getStyleClass().add("diagnosis-error");
+        contentTitle.setText(content.title());
+        contentLines.getChildren().clear();
+        for (ContentCheck.Line line : content.lines()) {
+            Label label = new Label(line.text());
+            label.getStyleClass().add("content-line");
+            label.setWrapText(true);
+            label.setMinHeight(Region.USE_PREF_SIZE);
+            contentLines.getChildren().add(label);
+        }
+        contentAdvice.setText(content.advice());
+    }
+
+    /** Skip these files: every flagged file unticked, the rest of the torrent kept. */
+    private void skipFlagged() {
+        if (root == null) return;
+        java.util.Set<Integer> flagged = content.indices();
+        for (FileTree.Node f : FileTree.files(root)) {
+            if (flagged.contains(f.index())) f.wantedProperty().set(false);
+        }
+    }
+
+    /** The card as the capture prints it: severity, then each line; "none" without one. */
+    String contentForCapture() {
+        if (content.isEmpty()) return "none";
+        List<String> parts = new ArrayList<>();
+        parts.add(content.severity().name());
+        for (ContentCheck.Line line : content.lines()) parts.add(line.text());
+        return String.join(" | ", parts);
+    }
+
+    /** Presses Skip these files, for the capture. */
+    void skipFlaggedForCapture() {
+        if (contentSkip.isVisible()) contentSkip.fire();
     }
 
     /** Files are bound to their node's wanted flag; folders follow their files, as the item does. */
@@ -904,7 +1019,12 @@ final class AddDialog {
             destination = null;
         }
         Optional<FreeSpace.Disk> disk = destination == null ? Optional.empty() : FreeSpace.disk(destination);
-        long wanted = root == null ? -1 : FileTree.wantedSize(root);
+        // Planned first: a file that will be linked takes no space, so it is not counted.
+        updateDedup();
+        long wanted = DedupText.written(
+                root == null ? -1 : FileTree.wantedSize(root),
+                lastOffer,
+                dedupLink.isVisible() && dedupLink.isSelected());
         diskBar.set(disk.map(d -> FreeSpace.bar(d, wanted)).orElse(new FreeSpace.Bar(0, 0, true)));
         String line = disk.map(d -> FreeSpace.sentence(d, wanted))
                 .orElse(text.isEmpty() ? "" : tr("dialog.add.freeSpaceUnknown"));
@@ -924,6 +1044,82 @@ final class AddDialog {
             label.setMaxWidth(Double.MAX_VALUE);
             diskText.getChildren().add(label);
         }
+    }
+
+    // ---- files already on disk -----------------------------------------------------------------
+
+    /**
+     * What the engine has on disk, as the setting says to use it. Called once, before the dialog
+     * shows, and only for an engine with {@link com.torrenta.engine.Engine.Capability#DEDUP}; the
+     * copies start ticked only when the setting says to make them without asking.
+     */
+    void offerFromDisk(
+            com.torrenta.engine.ContentIndex index,
+            com.torrenta.engine.DedupMode mode,
+            java.util.function.Function<String, String> names) {
+        this.fromDisk = index;
+        this.dedupMode = mode;
+        this.torrentNames = names;
+        dedupLink.setSelected(true);
+        dedupCopy.setSelected(mode.copiesWithoutAsking());
+        updateDisk();
+    }
+
+    /** The window's poll: the index and the torrents' names may have moved since the line was drawn. */
+    void refreshFromDisk() {
+        if (dedupMode.links() && result == null) updateDisk();
+    }
+
+    /**
+     * The lines follow the ticks, the folder and the layout: planned again each time, as the add
+     * will plan it. A few file-system looks per file found, none for the others.
+     */
+    private void updateDedup() {
+        lastOffer = DedupText.Offer.NONE;
+        if (existing || !dedupMode.links() || root == null || preview == null) {
+            shown(dedupBox, false);
+            return;
+        }
+        Path destination;
+        try {
+            String text = savePath.getText().trim();
+            destination = text.isEmpty() ? null : Path.of(text);
+        } catch (RuntimeException e) {
+            destination = null;
+        }
+        if (destination == null) {
+            shown(dedupBox, false);
+            return;
+        }
+        java.util.Set<Integer> skipped = new java.util.HashSet<>();
+        FileTree.priorities(root).forEach((index, priority) -> {
+            if (priority == com.torrenta.engine.Priority.IGNORE) skipped.add(index);
+        });
+        com.torrenta.engine.DedupPlan plan = com.torrenta.engine.DedupPlan.of(
+                preview,
+                fromDisk,
+                skipped,
+                defaults.storage(destination).start(destination),
+                layout.getValue(),
+                com.torrenta.engine.DedupPlan.Disk.SYSTEM);
+        DedupText.Offer offer = DedupText.offer(plan, torrentNames);
+        lastOffer = offer;
+        boolean links = offer.links() > 0;
+        boolean copies = offer.copies() > 0 && dedupMode.offersCopies();
+        if (links) dedupLink.setText(DedupText.linkLine(offer));
+        if (copies) dedupCopy.setText(DedupText.copyLine(offer));
+        shown(dedupLink, links);
+        shown(dedupCopy, copies);
+        shown(dedupBox, links || copies);
+    }
+
+    /** The dedup lines as the capture prints them: "none", or each with its tick. */
+    String dedupForCapture() {
+        if (!dedupBox.isVisible()) return "none";
+        List<String> lines = new ArrayList<>();
+        for (CheckBox box : List.of(dedupLink, dedupCopy))
+            if (box.isVisible()) lines.add((box.isSelected() ? "[x] " : "[ ] ") + box.getText());
+        return String.join(" / ", lines);
     }
 
     /** The lines under the save path, for the capture hook; joined with " / ". */
@@ -1017,11 +1213,15 @@ final class AddDialog {
 
     /** "Fetching file list · 3 peers · 12s"; a minute and more reads "1m 05s". */
     static String fetchingLine(int peers, long seconds) {
+        return tr("dialog.add.fetching", tr("dialog.add.peers", Math.max(0, peers)), elapsed(seconds));
+    }
+
+    /** "12s" under a minute, "1m 05s" from there. */
+    static String elapsed(long seconds) {
         long s = Math.max(0, seconds);
-        String elapsed = s < 60
+        return s < 60
                 ? tr("dialog.add.elapsed.seconds", Long.toString(s))
                 : tr("dialog.add.elapsed.minutes", Long.toString(s / 60), String.format(Locale.ROOT, "%02d", s % 60));
-        return tr("dialog.add.fetching", tr("dialog.add.peers", Math.max(0, peers)), elapsed);
     }
 
     /**
@@ -1030,20 +1230,6 @@ final class AddDialog {
      */
     static String keyLabel(String displayText) {
         return displayText.replace("↵", tr("dialog.common.key.enter")).replace("⏎", tr("dialog.common.key.enter"));
-    }
-
-    /** The request an input is added with when the dialog does not open: the settings' defaults. */
-    static AddRequest withoutAsking(AddRequest.Source source, Defaults defaults) {
-        return new AddRequest(
-                source,
-                defaults.savePath(),
-                defaults.startPaused(),
-                defaults.sequential(),
-                false,
-                AddRequest.StopCondition.NONE,
-                Map.of(),
-                TorrentLabels.NONE,
-                defaults.storage(defaults.savePath()));
     }
 
     /**
@@ -1058,7 +1244,7 @@ final class AddDialog {
         return Optional.of(chosen);
     }
 
-    static String nameOf(AddRequest.Source source, TorrentPreview preview) {
+    static String nameOf(AddRequest.Source source, @Nullable TorrentPreview preview) {
         if (preview != null) return preview.name();
         if (source instanceof AddRequest.Magnet magnet) {
             String dn = MagnetNames.displayName(magnet.uri());
@@ -1104,7 +1290,7 @@ final class AddDialog {
             }
 
             @Override
-            public T fromString(String s) {
+            public @Nullable T fromString(String s) {
                 return null;
             }
         };

@@ -7,6 +7,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * A lenient HTML tokeniser and tree builder of our own, enough for a listing page: tags with
  * quoted, unquoted and bare attributes, comments, doctypes and CDATA skipped, entities decoded,
@@ -332,7 +334,7 @@ public final class HtmlParser {
         return sb.toString();
     }
 
-    private static String entity(String body) {
+    private static @Nullable String entity(String body) {
         if (body.startsWith("#")) {
             try {
                 int code = body.length() > 1 && (body.charAt(1) == 'x' || body.charAt(1) == 'X')

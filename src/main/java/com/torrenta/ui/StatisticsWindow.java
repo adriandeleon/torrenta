@@ -19,6 +19,7 @@ import javafx.stage.Window;
 
 import com.torrenta.AppInfo;
 import com.torrenta.engine.SessionStats;
+import com.torrenta.session.SpeedHistory;
 
 import static com.torrenta.i18n.Messages.tr;
 

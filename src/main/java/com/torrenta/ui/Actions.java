@@ -25,6 +25,16 @@ public final class Actions {
         return selected.stream().filter(t -> !t.direct()).toList();
     }
 
+    /**
+     * What a command typed in the omnibox acts on: every match while the box holds a filter (so
+     * {@code state:paused >resume} resumes what the list shows), the selection otherwise.
+     *
+     * @param filtering the box holds chips: a filter is in force
+     */
+    public static List<Torrent> targets(List<Torrent> selection, List<Torrent> matches, boolean filtering) {
+        return filtering ? List.copyOf(matches) : List.copyOf(selection);
+    }
+
     /** Whether such a command has anything to act on: off for a selection of downloads alone. */
     public static boolean anyTorrent(List<Torrent> selected) {
         return selected.stream().anyMatch(t -> !t.direct());
@@ -127,7 +137,13 @@ public final class Actions {
 
     /** The confirmation for removal, worded by what it will do. */
     public static String removeQuestion(int count, boolean deleteFiles) {
-        return deleteFiles ? tr("actions.removeQuestion.delete", count) : tr("actions.removeQuestion.keep", count);
+        return removeQuestion(count, deleteFiles, false);
+    }
+
+    /** The same, for files that go to the trash rather than away for good. */
+    public static String removeQuestion(int count, boolean deleteFiles, boolean toTrash) {
+        if (!deleteFiles) return tr("actions.removeQuestion.keep", count);
+        return toTrash ? tr("actions.removeQuestion.trash", count) : tr("actions.removeQuestion.delete", count);
     }
 
     /**

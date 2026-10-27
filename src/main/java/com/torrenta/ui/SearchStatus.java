@@ -54,4 +54,13 @@ final class SearchStatus {
         if (!queryGiven) return tr("search.status.typeQuery");
         return "";
     }
+
+    /**
+     * Whether Clear has anything to clear: a search ran (its rows, or its "nothing found", are
+     * showing, or it is still running) or a query is typed. Escape in the query clears when this
+     * holds and leaves the tab when it does not, so a second Escape always leaves.
+     */
+    static boolean canClear(String query, boolean searched) {
+        return searched || !query.isBlank();
+    }
 }

@@ -22,6 +22,8 @@ import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -95,7 +97,9 @@ public final class TorznabProvider implements SearchProvider {
 
     // ---- HTTP -----------------------------------------------------------------------------------
 
+    /** A server whose key is on another machine is not asked: it would only refuse. */
     private InputStream fetch(URI uri) throws SearchException {
+        if (endpoint.keyNeeded()) throw new SearchException(tr("search.error.keyNeeded"));
         return SearchHttp.get(
                 client,
                 uri,
@@ -229,7 +233,7 @@ public final class TorznabProvider implements SearchProvider {
     }
 
     /** Positioned on {@code <item>}; returns past {@code </item>}. */
-    private static SearchResult readItem(XMLStreamReader r, String provider) throws XMLStreamException {
+    private static @Nullable SearchResult readItem(XMLStreamReader r, String provider) throws XMLStreamException {
         String title = "";
         String link = "";
         String guid = "";
@@ -244,6 +248,7 @@ public final class TorznabProvider implements SearchProvider {
         int seeders = -1;
         int leechers = -1;
         int peers = -1;
+        List<Integer> categories = new ArrayList<>();
         int depth = 1;
         while (depth > 0 && r.hasNext()) {
             int event = r.next();
@@ -259,6 +264,7 @@ public final class TorznabProvider implements SearchProvider {
                 case "guid" -> guid = r.getElementText();
                 case "comments" -> comments = r.getElementText();
                 case "pubDate" -> pubDate = r.getElementText();
+                case "category" -> addCategory(categories, r.getElementText());
                 case "size" -> {
                     sizeElement = parseLong(r.getElementText());
                 }
@@ -277,6 +283,7 @@ public final class TorznabProvider implements SearchProvider {
                         case "size" -> size = parseLong(v);
                         case "infohash" -> infoHash = v;
                         case "magneturl" -> magnet = v;
+                        case "category" -> addCategory(categories, v);
                         default -> {}
                     }
                     depth++;
@@ -294,7 +301,22 @@ public final class TorznabProvider implements SearchProvider {
         if (leechers < 0 && peers >= 0 && seeders >= 0) leechers = Math.max(0, peers - seeders);
         String detail = isHttp(comments) ? comments : isHttp(guid) && !guid.equals(where.value()) ? guid : "";
         return new SearchResult(
-                title, size, seeders, leechers, parseDate(pubDate), where, infoHash, provider, detail.trim());
+                title,
+                size,
+                seeders,
+                leechers,
+                parseDate(pubDate),
+                where,
+                infoHash,
+                provider,
+                detail.trim(),
+                SearchCategory.ofNewznab(categories));
+    }
+
+    /** A {@code <category>} element's or a {@code category} attribute's number; anything else is skipped. */
+    private static void addCategory(List<Integer> categories, String text) {
+        int n = parseInt(text.trim());
+        if (n > 0) categories.add(n);
     }
 
     private static SearchException torznabError(XMLStreamReader r) {
@@ -342,7 +364,7 @@ public final class TorznabProvider implements SearchProvider {
     }
 
     /** RFC 1123 as RSS writes it ("Sat, 18 Oct 2026 09:12:00 +0000"), or ISO; null otherwise. */
-    public static Instant parseDate(String text) {
+    public static @Nullable Instant parseDate(@Nullable String text) {
         if (text == null || text.isBlank()) return null;
         String t = text.trim();
         try {

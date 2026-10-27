@@ -174,6 +174,22 @@ class DirectDownloadsTest {
     }
 
     @Test
+    void theDetailsCommandFetchesTheSameFileByHand() throws Exception {
+        Torrent added =
+                downloads.add(base + "/files/small.bin", dir.resolve("by hand").toString(), "it's.bin", true);
+        String command = downloads.detail(added.id()).command();
+        assertTrue(command.contains(base + "/files/small.bin"), command);
+        assertTrue(command.contains("--user-agent Torrenta/test"), command);
+        org.junit.jupiter.api.Assumptions.assumeTrue(Curl.Shell.current() == Curl.Shell.POSIX);
+        Process p = new ProcessBuilder("sh", "-c", command)
+                .redirectErrorStream(true)
+                .start();
+        String said = new String(p.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertEquals(0, p.waitFor(), said);
+        assertArrayEquals(SMALL, Files.readAllBytes(dir.resolve("by hand").resolve(added.name())));
+    }
+
+    @Test
     void theSameLinkTwiceIsOneDownload() throws Exception {
         Torrent a = downloads.add(base + "/files/small.bin", null, true);
         Torrent b = downloads.add(base + "/files/small.bin", null, true);

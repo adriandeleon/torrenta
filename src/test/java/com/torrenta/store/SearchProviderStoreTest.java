@@ -49,6 +49,17 @@ class SearchProviderStoreTest {
     }
 
     @Test
+    void anEntryWaitingForItsKeySaysSoInTheFile(@TempDir Path dir) throws IOException {
+        SearchProviderStore store = new SearchProviderStore(dir);
+        TorznabEndpoint waiting = new TorznabEndpoint("P", "http://nas:9696/1/api", "", true, -1, true);
+        store.set(List.of(waiting));
+        assertTrue(Files.readString(dir.resolve(SearchProviderStore.FILE)).contains("\"keyNeeded\":true"));
+        SearchProviderStore again = new SearchProviderStore(dir);
+        again.load();
+        assertEquals(List.of(waiting), again.entries());
+    }
+
+    @Test
     void anUnreadableFileIsEmptyNotFatal(@TempDir Path dir) throws IOException {
         Files.writeString(dir.resolve(SearchProviderStore.FILE), "{ not a list");
         SearchProviderStore store = new SearchProviderStore(dir);

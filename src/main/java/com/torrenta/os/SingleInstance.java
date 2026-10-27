@@ -25,6 +25,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * One Torrenta per config folder. The first to start takes a lock on {@code instance.lock} there,
  * listens on a loopback port it writes to {@code instance.port}, and keeps a random token in
@@ -69,17 +71,22 @@ public final class SingleInstance implements AutoCloseable {
     }
 
     private final Path configDir;
-    private final FileChannel lockChannel;
-    private final FileLock lock;
+    private final @Nullable FileChannel lockChannel;
+    private final @Nullable FileLock lock;
     private final ServerSocket server;
     private final String token;
     private final Thread acceptor;
     private final Object pending = new Object();
     private final List<List<String>> queued = new ArrayList<>();
-    private volatile Consumer<List<String>> handler;
+    private volatile @Nullable Consumer<List<String>> handler;
     private volatile boolean closed;
 
-    private SingleInstance(Path configDir, FileChannel lockChannel, FileLock lock, ServerSocket server, String token) {
+    private SingleInstance(
+            Path configDir,
+            @Nullable FileChannel lockChannel,
+            @Nullable FileLock lock,
+            ServerSocket server,
+            String token) {
         this.configDir = configDir;
         this.lockChannel = lockChannel;
         this.lock = lock;
@@ -130,6 +137,23 @@ public final class SingleInstance implements AutoCloseable {
 
     private record Locked(FileChannel channel, FileLock lock) {}
 
+    /**
+     * Whether a Torrenta holds {@code configDir} now, for a command that writes its files and
+     * leaves ({@code --set-remote-password}): the lock is taken and let go at once.
+     */
+    public static boolean inUse(Path configDir) {
+        try {
+            Files.createDirectories(configDir);
+            Optional<Locked> locked = tryLock(configDir.resolve(LOCK_FILE));
+            if (locked.isEmpty()) return true;
+            locked.get().lock().release();
+            locked.get().channel().close();
+            return false;
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     /** Empty when another process (or this one, in a test) holds the lock. */
     private static Optional<Locked> tryLock(Path file) throws IOException {
         FileChannel channel = FileChannel.open(file, StandardOpenOption.CREATE, StandardOpenOption.WRITE);
@@ -175,7 +199,8 @@ public final class SingleInstance implements AutoCloseable {
     }
 
     /** Binds a port, writes the files, starts accepting. {@code channel} and {@code lock} may be null when no lock could be taken. */
-    private static SingleInstance bind(Path configDir, FileChannel channel, FileLock lock) throws IOException {
+    private static SingleInstance bind(Path configDir, @Nullable FileChannel channel, @Nullable FileLock lock)
+            throws IOException {
         ServerSocket server = new ServerSocket();
         try {
             server.bind(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0));
@@ -246,7 +271,7 @@ public final class SingleInstance implements AutoCloseable {
     }
 
     private void deliver(List<String> inputs) {
-        Consumer<List<String>> target;
+        @Nullable Consumer<List<String>> target;
         synchronized (pending) {
             target = handler;
             if (target == null) {

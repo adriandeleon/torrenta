@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executor;
@@ -19,6 +20,8 @@ import java.util.function.BooleanSupplier;
 import java.util.function.IntSupplier;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import org.jspecify.annotations.Nullable;
 
 /**
  * The reader: keeps the feeds and their articles through an {@link RssStore}, refreshes each feed
@@ -41,7 +44,7 @@ public final class RssService {
 
     /** Told on the notify executor; {@code feedId} is null when the feed list itself changed. */
     public interface Listener {
-        void changed(String feedId);
+        void changed(@Nullable String feedId);
     }
 
     /** Adds an article's torrent as a rule says, on the fetch thread; throws with the reason when it cannot. */
@@ -70,8 +73,8 @@ public final class RssService {
     private final List<Listener> listeners = new CopyOnWriteArrayList<>();
     private final Set<String> refreshing = new HashSet<>();
     private final Object rulesLock = new Object();
-    private ScheduledExecutorService scheduler;
-    private volatile Downloader downloader;
+    private @Nullable ScheduledExecutorService scheduler;
+    private volatile @Nullable Downloader downloader;
     private volatile Reporter reporter = (message, failed) -> {};
     private volatile BooleanSupplier autoDownload = () -> false;
 
@@ -144,7 +147,7 @@ public final class RssService {
         return store.feeds();
     }
 
-    public Feed feed(String id) {
+    public @Nullable Feed feed(String id) {
         return store.feed(id);
     }
 
@@ -304,7 +307,7 @@ public final class RssService {
         return store.rules();
     }
 
-    public Rule rule(String name) {
+    public @Nullable Rule rule(String name) {
         for (Rule r : store.rules()) if (r.name().equals(name)) return r;
         return null;
     }
@@ -323,7 +326,7 @@ public final class RssService {
      *
      * @throws IllegalArgumentException when another rule has the name already
      */
-    public void putRule(String replacing, Rule rule) throws IOException {
+    public void putRule(@Nullable String replacing, Rule rule) throws IOException {
         synchronized (rulesLock) {
             List<Rule> list = new ArrayList<>(store.rules());
             int at = -1;
@@ -475,7 +478,7 @@ public final class RssService {
         finish(feed, result, error);
     }
 
-    private void finish(Feed fetched, FeedSource.Result result, String error) {
+    private void finish(Feed fetched, FeedSource.@Nullable Result result, @Nullable String error) {
         boolean renamed = false;
         List<Article> fresh = List.of();
         synchronized (this) {
@@ -487,7 +490,8 @@ public final class RssService {
             FeedState after;
             if (error != null) {
                 after = before.failed(now, error);
-            } else if (result.changed()) {
+            } else if (Objects.requireNonNull(result, "a fetch with neither an answer nor an error")
+                    .changed()) {
                 List<Article> merged = merge(
                         before.articles(),
                         result.articles().stream()
@@ -557,7 +561,7 @@ public final class RssService {
         return out;
     }
 
-    private void notify(String feedId) {
+    private void notify(@Nullable String feedId) {
         if (listeners.isEmpty()) return;
         notifyExecutor.execute(() -> {
             for (Listener l : listeners) l.changed(feedId);

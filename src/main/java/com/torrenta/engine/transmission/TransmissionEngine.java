@@ -44,6 +44,7 @@ import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.TorrentState;
 import com.torrenta.engine.TrackerHost;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -395,7 +396,7 @@ public final class TransmissionEngine implements Engine {
     }
 
     @Override
-    public MetadataFetch fetchMetadata(String magnet) throws EngineException {
+    public SwarmProbe probe(AddRequest.Source source, boolean privateToo) throws EngineException {
         throw new EngineException(tr("engine.error.transmissionFetch"));
     }
 
@@ -726,7 +727,7 @@ public final class TransmissionEngine implements Engine {
         return Json.obj(torrents.get(0));
     }
 
-    private Torrent one(String id) {
+    private @Nullable Torrent one(String id) {
         try {
             return snapshot(get(id, listFields()));
         } catch (EngineException e) {
@@ -1302,7 +1303,7 @@ public final class TransmissionEngine implements Engine {
     }
 
     @Override
-    public boolean refreshLimits(java.time.LocalDateTime now) throws EngineException {
+    public boolean refreshLimits(boolean alternative) throws EngineException {
         checkRunning();
         // The schedule is the daemon's own once pushed; it flips alt-speed-enabled itself.
         Map<String, Object> session = rpc.call("session-get", Map.of("fields", List.of("alt-speed-enabled")));

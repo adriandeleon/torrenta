@@ -14,6 +14,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * The UI string catalogue, Termina's.
  *
@@ -49,8 +51,10 @@ public final class Messages {
         LANGUAGES.put("pt", "Português");
     }
 
-    private static Map<String, String> base;
-    private static Map<String, String> active;
+    // Empty until init: ensureLoaded asks loaded, never the maps.
+    private static Map<String, String> base = Map.of();
+    private static Map<String, String> active = Map.of();
+    private static boolean loaded;
     private static String currentLang = "en";
     private static final Set<String> REPORTED = ConcurrentHashMap.newKeySet();
 
@@ -61,11 +65,12 @@ public final class Messages {
         base = load("en");
         currentLang = LANGUAGES.containsKey(lang) ? lang : "en";
         active = "en".equals(currentLang) ? base : load(currentLang);
+        loaded = true;
         REPORTED.clear();
     }
 
     private static synchronized void ensureLoaded() {
-        if (base == null) init("en");
+        if (!loaded) init("en");
     }
 
     private static Map<String, String> load(String lang) {
@@ -109,7 +114,7 @@ public final class Messages {
     }
 
     /** The localized string for {@code key} with {@link MessageFormat} arguments, in the active locale. */
-    public static String tr(String key, Object... args) {
+    public static String tr(String key, @Nullable Object... args) {
         String pattern = tr(key);
         if (args == null || args.length == 0) {
             return pattern;
@@ -143,7 +148,7 @@ public final class Messages {
     }
 
     /** Test hook: the English text of {@code key}, or null. */
-    static synchronized String englishForTest(String key) {
+    static synchronized @Nullable String englishForTest(String key) {
         ensureLoaded();
         return base.get(key);
     }
@@ -165,7 +170,7 @@ public final class Messages {
      * The effective UI language: the explicit {@code pref} if bundled, else the {@code systemLang} if
      * bundled, else English. {@link #SYSTEM} and blank both mean "follow the system". Pure.
      */
-    public static String resolve(String pref, Set<String> available, String systemLang) {
+    public static String resolve(@Nullable String pref, Set<String> available, @Nullable String systemLang) {
         if (pref != null && available.contains(pref)) {
             return pref;
         }
@@ -176,7 +181,7 @@ public final class Messages {
     }
 
     /** Whether {@code pref} asks to follow the operating system: blank or {@link #SYSTEM}. */
-    public static boolean isAutomatic(String pref) {
+    public static boolean isAutomatic(@Nullable String pref) {
         return pref == null || pref.isBlank() || SYSTEM.equalsIgnoreCase(pref.trim());
     }
 

@@ -16,6 +16,8 @@ import com.torrenta.automation.AutomationSettings;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
+import com.torrenta.webapi.WebApiConfig;
+import org.jspecify.annotations.Nullable;
 
 /**
  * User preferences, stored as a plain properties file.
@@ -45,8 +47,26 @@ public final class Settings {
     /** Downloads from links running at once; the rest wait their turn. */
     public static final String DIRECT_ACTIVE = "download.linksAtOnce";
 
+    /** Hours between looks for an updatable torrent's newer version (BEP 46), 1 to 168; 0 never. */
+    public static final String FOLLOW_HOURS = "follow.hours";
+
+    /** Whether an updatable torrent's older version leaves the list once the new one is complete. */
+    public static final String FOLLOW_REMOVE_OLD = "follow.removeOld";
+
+    /** The media player a stream is handed to; empty for mpv or VLC wherever they are. This machine's. */
+    public static final String STREAM_PLAYER = "stream.player";
+
     public static final String[] DOWNLOAD_KEYS = {
-        DOWNLOAD_DIR, INCOMPLETE_ENABLED, INCOMPLETE_DIR, PART_SUFFIX, PREALLOCATE, DIRECT_CURL, DIRECT_ACTIVE
+        DOWNLOAD_DIR,
+        INCOMPLETE_ENABLED,
+        INCOMPLETE_DIR,
+        PART_SUFFIX,
+        PREALLOCATE,
+        DIRECT_CURL,
+        DIRECT_ACTIVE,
+        STREAM_PLAYER,
+        FOLLOW_HOURS,
+        FOLLOW_REMOVE_OLD
     };
     /** The transfer list's columns: order, widths, visibility. See {@code ui.ColumnLayout}. */
     public static final String TABLE_COLUMNS = "table.columns";
@@ -91,6 +111,27 @@ public final class Settings {
     public static final String SYNC_BRANCH = "sync.branch";
     public static final String SYNC_INTERVAL = "sync.intervalMinutes";
     public static final String SYNC_LAST = "sync.lastEpochMs";
+    /**
+     * Remote access, qBittorrent's WebUI API ({@code com.torrenta.webapi}): machine-local, never
+     * synced, the password kept only as its PBKDF2 hash.
+     */
+    public static final String WEBAPI_ENABLED = "webapi.enabled";
+
+    public static final String WEBAPI_ADDRESS = "webapi.address";
+    public static final String WEBAPI_PORT = "webapi.port";
+    public static final String WEBAPI_USERNAME = "webapi.username";
+    public static final String WEBAPI_PASSWORD = "webapi.password";
+    public static final String WEBAPI_HTTPS_FILE = "webapi.httpsFile";
+    public static final String WEBAPI_HTTPS_PASSWORD = "webapi.httpsPassword";
+    /** Names besides addresses and {@code localhost} the {@code Host} header may carry, by spaces. */
+    public static final String WEBAPI_DOMAINS = "webapi.domains";
+    /**
+     * Folders besides the download folder and the categories' where a client may put files, one per
+     * line: {@code savepath} outside all of them is refused.
+     */
+    public static final String WEBAPI_ROOTS = "webapi.roots";
+    /** A web UI written for qBittorrent's API (VueTorrent, say), served at {@code /}; empty for none. */
+    public static final String WEBAPI_ROOT_FOLDER = "webapi.rootFolder";
     /** Whether the icon toolbar under the menu bar shows; View → Toolbar flips it. */
     public static final String UI_TOOLBAR = "ui.toolbar";
     /** Whether the sidebar of filters shows beside the list; View → Sidebar flips it. */
@@ -110,7 +151,8 @@ public final class Settings {
     /** The sidebar's width in px, as its edge was last dragged; this machine's, like its choices. */
     public static final String UI_SIDEBAR_WIDTH = "ui.sidebar.width";
     /** The sections a choice or a fold can name. */
-    public static final java.util.List<String> SIDEBAR_AXES = java.util.List.of("status", "category", "tag", "tracker");
+    public static final java.util.List<String> SIDEBAR_AXES =
+            java.util.List.of("view", "status", "category", "tag", "tracker");
     /** Rows coloured by state (glyph, sentence, progress bar); off leaves the glyphs uncoloured. */
     public static final String UI_STATE_COLORS = "ui.stateColors";
     /** The theme id ({@code editora-dark}, {@code nord-light}, …); the UI maps it and falls back. */
@@ -124,10 +166,18 @@ public final class Settings {
     /** A tray (menu-bar) icon with the rates and a menu; on by default, where the desktop has one. */
     public static final String UI_TRAY = "ui.tray";
     /**
-     * Which chord opens the command palette, by {@code ui.PaletteKey} id ({@code alt-x}, Editora's
-     * M-x, or {@code shortcut-shift-p}); the UI maps it and falls back.
+     * The palette's chord as the first releases chose it, {@code alt-x} or {@code shortcut-shift-p}.
+     * Read only as {@code keys.palette} when that line is absent (see {@link #keyBindings()}), and
+     * dropped by the first {@link #replaceKeyBindings}.
      */
     public static final String UI_PALETTE_KEY = "ui.paletteKey";
+    /**
+     * The user's key bindings, one line per command: {@code keys.recheck=Shortcut+Shift+K}, in
+     * {@code KeyCombination} notation. Termina's format; see {@link #keyBindings()}.
+     */
+    public static final String KEYS_PREFIX = "keys.";
+    /** A binding's value meaning "no chord at all", as against blank or absent, which is the default. */
+    public static final String UNBOUND = "none";
     /** Closing the window hides it behind the tray icon and keeps the torrents going; on by default. */
     public static final String UI_CLOSE_TO_TRAY = "ui.closeToTray";
     /** Register as the handler for .torrent files and magnet links at start; on by default. This machine's. */
@@ -150,6 +200,16 @@ public final class Settings {
 
     public static final String CONN_RANDOM_PORT = "connection.randomPort";
     public static final String CONN_INTERFACE = "connection.interface";
+
+    /** Opt-in: ask an address-echo server where traffic through the binding and around it leaves. */
+    public static final String CONN_EXIT_CHECK = "connection.exitCheck";
+
+    /** The address-echo server's URL; {@code net.ExitCheck.DEFAULT_URL} when unset. */
+    public static final String CONN_EXIT_CHECK_URL = "connection.exitCheckUrl";
+
+    /** Pause the running torrents while the leak check says Exposed; resume them when protected. */
+    public static final String CONN_PAUSE_WHEN_EXPOSED = "connection.pauseWhenExposed";
+
     public static final String CONN_IPV6 = "connection.ipv6";
     public static final String CONN_UPNP = "connection.upnp";
     public static final String CONN_MAX_CONNECTIONS = "connection.maxConnections";
@@ -187,6 +247,24 @@ public final class Settings {
     public static final String SPEED_SCHEDULE_DAYS = "speed.schedule.days";
     public static final String SPEED_COUNT_OVERHEAD = "speed.countOverhead";
 
+    /** What being on battery does: {@code NONE}, {@code ALTERNATIVE} or {@code PAUSE} ({@code session.SpeedMode.Rule}). */
+    public static final String SPEED_ON_BATTERY = "speed.onBattery";
+
+    /** What a metered network does: as {@link #SPEED_ON_BATTERY}. */
+    public static final String SPEED_ON_METERED = "speed.onMetered";
+
+    /**
+     * The automatic decision last applied to {@link #SPEED_ALT_ON} ({@code session.SpeedMode}), so
+     * the switch is flipped only when that decision changes; this machine's.
+     */
+    public static final String SPEED_AUTO_WAS = "speed.autoWas";
+
+    /** A condition's pause holds the torrents now; this machine's. */
+    public static final String SPEED_CONDITION_PAUSING = "speed.conditionPausing";
+
+    /** The torrents a condition's pause holds, comma-separated ids, to resume exactly those; this machine's. */
+    public static final String SPEED_CONDITION_HELD = "speed.conditionHeld";
+
     public static final String[] SPEED_KEYS = {
         SPEED_DOWNLOAD,
         SPEED_UPLOAD,
@@ -197,7 +275,9 @@ public final class Settings {
         SPEED_SCHEDULE_FROM,
         SPEED_SCHEDULE_TO,
         SPEED_SCHEDULE_DAYS,
-        SPEED_COUNT_OVERHEAD
+        SPEED_COUNT_OVERHEAD,
+        SPEED_ON_BATTERY,
+        SPEED_ON_METERED
     };
 
     /** Queue and share limits page. Active counts are 0 for none; the ratio is a decimal, 0 for none. */
@@ -231,6 +311,12 @@ public final class Settings {
     /** {@code torrent.<info-hash>.pickFiles}: added before its file list, the files still to choose. */
     private static final String PICK_FILES_SUFFIX = ".pickFiles";
 
+    /**
+     * {@code torrent.<info-hash>.unsafeContent}: a magnet added without a dialog, its files to be
+     * checked once they are known; the value is {@code ui.UnsafeContent.Pending}'s.
+     */
+    private static final String UNSAFE_PENDING_SUFFIX = ".unsafeContent";
+
     /** IP filter page. Bans are space-separated ranges or addresses. */
     public static final String IPFILTER_ENABLED = "ipfilter.enabled";
 
@@ -251,7 +337,7 @@ public final class Settings {
     public static final String[] CONNECTION_KEYS = {
         CONN_PORT, CONN_RANDOM_PORT, CONN_INTERFACE, CONN_IPV6, CONN_UPNP, CONN_MAX_CONNECTIONS,
         CONN_MAX_PER_TORRENT, CONN_UPLOAD_SLOTS, PROXY_TYPE, PROXY_HOST, PROXY_PORT, PROXY_USERNAME,
-        PROXY_PASSWORD, PROXY_PEERS
+        PROXY_PASSWORD, PROXY_PEERS, CONN_EXIT_CHECK, CONN_EXIT_CHECK_URL, CONN_PAUSE_WHEN_EXPOSED
     };
 
     /** The Add dialog's starting positions for its checkboxes. */
@@ -262,6 +348,26 @@ public final class Settings {
 
     /** Inputs are added with the defaults above and the Add dialog does not open. Off by default. */
     public static final String ADD_WITHOUT_ASKING = "add.withoutAsking";
+    /** Remove with files moves them to the desktop's trash (the default) rather than deleting them. */
+    public static final String REMOVE_TO_TRASH = "remove.toTrash";
+
+    /**
+     * What an add without a dialog does with files the content check flags: {@code ADD},
+     * {@code SKIP} (the default) or {@code REFUSE}; read through {@code ui.UnsafeContent.byName}.
+     */
+    public static final String ADD_UNSAFE_CONTENT = "add.unsafeContent";
+
+    /**
+     * A new torrent's files already on disk in another torrent: {@code OFF}, {@code LINK},
+     * {@code ASK} (the default) or {@code COPY}; read through {@code engine.DedupMode.byName}.
+     */
+    public static final String ADD_DEDUP = "add.dedup";
+
+    /**
+     * The Add dialog looks at a private torrent's swarm too. Off by default: a private tracker
+     * counts every announce, and the probe announces before the person has added the torrent.
+     */
+    public static final String ADD_PROBE_PRIVATE = "add.probePrivate";
 
     /** Where the Create Torrent dialog last saved a {@code .torrent}; a folder of this machine, never synced. */
     public static final String CREATE_LAST_DIR = "create.lastDir";
@@ -280,12 +386,14 @@ public final class Settings {
 
     public static final String AUTOMATION_ON_FINISHED = "automation.onFinished";
     public static final String AUTOMATION_ON_SEEDING_DONE = "automation.onSeedingDone";
+    public static final String AUTOMATION_ON_UPDATED = "automation.onUpdated";
     /** Desktop notifications, one switch per event; only {@code notify.finished} is on by default. */
     public static final String NOTIFY_ADDED = "notify.added";
 
     public static final String NOTIFY_FINISHED = "notify.finished";
     public static final String NOTIFY_SEEDING_DONE = "notify.seedingDone";
     public static final String NOTIFY_ERROR = "notify.error";
+    public static final String NOTIFY_UPDATED = "notify.updated";
 
     /** Minutes between feed refreshes, 5 to 1440, 30 by default; syncs (the feeds and articles do not). */
     public static final String RSS_REFRESH_MINUTES = "rss.refreshMinutes";
@@ -303,12 +411,14 @@ public final class Settings {
         NOTIFY_ADDED,
         NOTIFY_FINISHED,
         NOTIFY_SEEDING_DONE,
-        NOTIFY_ERROR
+        NOTIFY_ERROR,
+        AUTOMATION_ON_UPDATED,
+        NOTIFY_UPDATED
     };
 
     private final Path file;
     private final Properties properties = new Properties();
-    private Runnable onSaved;
+    private @Nullable Runnable onSaved;
 
     public Settings(Path file) {
         this.file = file;
@@ -369,6 +479,88 @@ public final class Settings {
         merged.forEach((key, value) -> {
             if (com.torrenta.sync.SyncKeys.isSynced(key) && value != null) properties.setProperty(key, value);
         });
+    }
+
+    /** Remote access as set; off, on {@code 127.0.0.1:8080}, until someone changes it. */
+    public WebApiConfig webApi() {
+        String https = properties.getProperty(WEBAPI_HTTPS_FILE, "").trim();
+        java.util.Set<String> domains = new java.util.LinkedHashSet<>();
+        for (String d : properties.getProperty(WEBAPI_DOMAINS, "").trim().split("[\\s,;]+"))
+            if (!d.isEmpty()) domains.add(d.toLowerCase(java.util.Locale.ROOT));
+        return new WebApiConfig(
+                readBoolean(WEBAPI_ENABLED, false),
+                properties
+                        .getProperty(WEBAPI_ADDRESS, WebApiConfig.DEFAULT_ADDRESS)
+                        .trim(),
+                readInt(WEBAPI_PORT, WebApiConfig.DEFAULT_PORT, 1, 65535),
+                properties.getProperty(WEBAPI_USERNAME, WebApiConfig.DEFAULT_USERNAME),
+                properties.getProperty(WEBAPI_PASSWORD, "").trim(),
+                https.isEmpty() ? null : Path.of(https),
+                properties.getProperty(WEBAPI_HTTPS_PASSWORD, ""),
+                domains);
+    }
+
+    public void setWebApiEnabled(boolean enabled) {
+        properties.setProperty(WEBAPI_ENABLED, String.valueOf(enabled));
+    }
+
+    public void setWebApiAddress(String address) {
+        properties.setProperty(WEBAPI_ADDRESS, address == null ? "" : address.trim());
+    }
+
+    public void setWebApiPort(int port) {
+        properties.setProperty(WEBAPI_PORT, String.valueOf(port));
+    }
+
+    public void setWebApiUsername(String username) {
+        properties.setProperty(WEBAPI_USERNAME, username == null ? "" : username);
+    }
+
+    /** {@code webapi.Passwords.hash}'s text, never a password. */
+    public void setWebApiPasswordHash(String hash) {
+        properties.setProperty(WEBAPI_PASSWORD, hash == null ? "" : hash);
+    }
+
+    /** A PKCS#12 file and its password; a blank file is plain HTTP. */
+    public void setWebApiHttps(String file, String password) {
+        properties.setProperty(WEBAPI_HTTPS_FILE, file == null ? "" : file.trim());
+        properties.setProperty(WEBAPI_HTTPS_PASSWORD, password == null ? "" : password);
+    }
+
+    public void setWebApiDomains(String domains) {
+        properties.setProperty(WEBAPI_DOMAINS, domains == null ? "" : domains.trim());
+    }
+
+    /** The folders added by hand, as written; a line that is not a path is left out. */
+    public List<Path> webApiRoots() {
+        List<Path> out = new java.util.ArrayList<>();
+        for (String line : properties.getProperty(WEBAPI_ROOTS, "").split("\\R")) {
+            if (line.isBlank()) continue;
+            try {
+                out.add(Path.of(line.trim()));
+            } catch (java.nio.file.InvalidPathException e) {
+                // Typed by hand; one bad line does not take the others with it.
+            }
+        }
+        return out;
+    }
+
+    public java.util.Optional<Path> webApiRootFolder() {
+        String value = properties.getProperty(WEBAPI_ROOT_FOLDER, "").trim();
+        if (value.isEmpty()) return java.util.Optional.empty();
+        try {
+            return java.util.Optional.of(Path.of(value));
+        } catch (java.nio.file.InvalidPathException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    public void setWebApiRootFolder(String folder) {
+        properties.setProperty(WEBAPI_ROOT_FOLDER, folder == null ? "" : folder.trim());
+    }
+
+    public void setWebApiRoots(String lines) {
+        properties.setProperty(WEBAPI_ROOTS, lines == null ? "" : lines.strip());
     }
 
     public boolean syncEnabled() {
@@ -453,6 +645,11 @@ public final class Settings {
         return properties.getProperty(key, fallback);
     }
 
+    /** A raw value, or null when the file has none. */
+    public @Nullable String raw(String key) {
+        return properties.getProperty(key);
+    }
+
     public void set(String key, String value) {
         properties.setProperty(key, value);
     }
@@ -523,13 +720,51 @@ public final class Settings {
         properties.setProperty(UI_STATE_COLORS, String.valueOf(on));
     }
 
-    /** The palette's chord id as written, trimmed; empty when unset. */
-    public String paletteKey() {
-        return properties.getProperty(UI_PALETTE_KEY, "").trim();
+    /**
+     * The user's key bindings, by command id with the prefix stripped: {@code recheck ->
+     * Shortcut+Shift+K}, or {@code recheck -> none} for a command the user has unbound. A command
+     * that is absent, or whose line is blank, keeps its default.
+     *
+     * <p>Strings rather than chords, because this class knows nothing of the toolkit. Nothing is
+     * validated here: the window resolves the whole table at once ({@code ui.Keybindings}), and a
+     * line that does not parse, names no command, or takes a chord another line already took is
+     * dropped there, clamped on read like every other setting.
+     *
+     * <p>{@code ui.paletteKey=shortcut-shift-p}, the first releases' palette choice, reads as {@code
+     * palette -> Shortcut+Shift+P} while there is no {@code keys.palette} line.
+     */
+    public Map<String, String> keyBindings() {
+        Map<String, String> bindings = new java.util.TreeMap<>();
+        for (String name : properties.stringPropertyNames()) {
+            if (!name.startsWith(KEYS_PREFIX) || name.length() == KEYS_PREFIX.length()) continue;
+            String value = properties.getProperty(name).trim();
+            if (!value.isEmpty()) bindings.put(name.substring(KEYS_PREFIX.length()), value);
+        }
+        if (!bindings.containsKey("palette")
+                && "shortcut-shift-p"
+                        .equalsIgnoreCase(
+                                properties.getProperty(UI_PALETTE_KEY, "").trim())) {
+            bindings.put("palette", "Shortcut+Shift+P");
+        }
+        return bindings;
     }
 
-    public void setPaletteKey(String id) {
-        properties.setProperty(UI_PALETTE_KEY, id);
+    /**
+     * Replaces every binding at once, so a rebind that takes a chord from another command is one
+     * change: the window never applies a table with the chord on both. Not saved here. The old
+     * palette choice goes with the rest, since the table now says what the palette is on.
+     */
+    public void replaceKeyBindings(Map<String, String> bindings) {
+        for (String name : List.copyOf(properties.stringPropertyNames())) {
+            if (name.startsWith(KEYS_PREFIX)) properties.remove(name);
+        }
+        properties.remove(UI_PALETTE_KEY);
+        if (bindings == null) return;
+        new java.util.TreeMap<>(bindings).forEach((id, chord) -> {
+            if (id != null && !id.isBlank() && chord != null && !chord.isBlank()) {
+                properties.setProperty(KEYS_PREFIX + id.trim(), chord.trim());
+            }
+        });
     }
 
     public boolean sidebar() {
@@ -705,6 +940,14 @@ public final class Settings {
         properties.setProperty(CREATE_DEFAULT_TRACKERS, text == null ? "" : text);
     }
 
+    public boolean removeToTrash() {
+        return readBoolean(REMOVE_TO_TRASH, true);
+    }
+
+    public void setRemoveToTrash(boolean on) {
+        properties.setProperty(REMOVE_TO_TRASH, String.valueOf(on));
+    }
+
     public boolean addWithoutAsking() {
         return readBoolean(ADD_WITHOUT_ASKING, false);
     }
@@ -721,9 +964,99 @@ public final class Settings {
         return readBoolean(TORRENT_PREFIX + torrentId + PICK_FILES_SUFFIX, false);
     }
 
+    /** The saved views, in their order ({@link SavedView#read}). */
+    public List<SavedView> savedViews() {
+        Map<String, String> keys = new java.util.HashMap<>();
+        for (String key : properties.stringPropertyNames()) {
+            if (key.startsWith(SavedView.PREFIX) || key.equals(SavedView.ORDER))
+                keys.put(key, properties.getProperty(key));
+        }
+        return SavedView.read(keys);
+    }
+
+    /** Replaces the saved views: their keys written, a view's keys no longer there removed. */
+    public void setSavedViews(List<SavedView> views) {
+        for (String key : List.copyOf(properties.stringPropertyNames()))
+            if (key.startsWith(SavedView.PREFIX)) properties.remove(key);
+        properties.putAll(SavedView.keys(views));
+    }
+
     public void setFilesToPick(String torrentId, boolean pending) {
         String key = TORRENT_PREFIX + torrentId + PICK_FILES_SUFFIX;
         if (pending) properties.setProperty(key, "true");
+        else properties.remove(key);
+    }
+
+    public boolean exitCheck() {
+        return readBoolean(CONN_EXIT_CHECK, false);
+    }
+
+    /** The URL as set; empty means the offered one ({@code net.ExitCheck.DEFAULT_URL}). */
+    public String exitCheckUrl() {
+        return properties.getProperty(CONN_EXIT_CHECK_URL, "").trim();
+    }
+
+    public boolean pauseWhenExposed() {
+        return readBoolean(CONN_PAUSE_WHEN_EXPOSED, false);
+    }
+
+    public String addUnsafeContent() {
+        return properties.getProperty(ADD_UNSAFE_CONTENT, "SKIP").trim();
+    }
+
+    public void setAddUnsafeContent(String value) {
+        properties.setProperty(ADD_UNSAFE_CONTENT, value);
+    }
+
+    public int followHours() {
+        try {
+            return Math.clamp(
+                    Integer.parseInt(properties.getProperty(FOLLOW_HOURS, "6").trim()), 0, 168);
+        } catch (NumberFormatException e) {
+            return 6;
+        }
+    }
+
+    public void setFollowRemoveOld(boolean on) {
+        properties.setProperty(FOLLOW_REMOVE_OLD, String.valueOf(on));
+    }
+
+    public boolean followRemoveOld() {
+        return readBoolean(FOLLOW_REMOVE_OLD, false);
+    }
+
+    public String addDedup() {
+        return properties.getProperty(ADD_DEDUP, "ASK").trim();
+    }
+
+    public void setAddDedup(String value) {
+        properties.setProperty(ADD_DEDUP, value);
+    }
+
+    public boolean addProbePrivate() {
+        return readBoolean(ADD_PROBE_PRIVATE, false);
+    }
+
+    public void setAddProbePrivate(boolean on) {
+        properties.setProperty(ADD_PROBE_PRIVATE, String.valueOf(on));
+    }
+
+    /** Every torrent still waiting for its content check, by id, with the mark's value. */
+    public java.util.Map<String, String> unsafeContentPending() {
+        java.util.Map<String, String> pending = new java.util.HashMap<>();
+        for (String key : properties.stringPropertyNames()) {
+            if (key.startsWith(TORRENT_PREFIX) && key.endsWith(UNSAFE_PENDING_SUFFIX)) {
+                String id = key.substring(TORRENT_PREFIX.length(), key.length() - UNSAFE_PENDING_SUFFIX.length());
+                pending.put(id, properties.getProperty(key));
+            }
+        }
+        return pending;
+    }
+
+    /** Marks a torrent for its content check once its files are known; null clears the mark. */
+    public void setUnsafeContentPending(String torrentId, @Nullable String value) {
+        String key = TORRENT_PREFIX + torrentId + UNSAFE_PENDING_SUFFIX;
+        if (value != null) properties.setProperty(key, value);
         else properties.remove(key);
     }
 
@@ -894,7 +1227,7 @@ public final class Settings {
     }
 
     /** Sets, or with {@code null} forgets, a torrent's own share limit. Not saved here. */
-    public void setShareOverride(String torrentId, ShareLimit limit) {
+    public void setShareOverride(String torrentId, @Nullable ShareLimit limit) {
         String key = TORRENT_PREFIX + torrentId + SHARE_SUFFIX;
         if (limit == null) properties.remove(key);
         else properties.setProperty(key, limit.format());
@@ -1094,7 +1427,9 @@ public final class Settings {
                 readBoolean(NOTIFY_ADDED, d.notifyAdded()),
                 readBoolean(NOTIFY_FINISHED, d.notifyFinished()),
                 readBoolean(NOTIFY_SEEDING_DONE, d.notifySeedingDone()),
-                readBoolean(NOTIFY_ERROR, d.notifyError()));
+                readBoolean(NOTIFY_ERROR, d.notifyError()),
+                properties.getProperty(AUTOMATION_ON_UPDATED, ""),
+                readBoolean(NOTIFY_UPDATED, d.notifyUpdated()));
     }
 
     /** The command line run on an event, or empty; only the three kinds that run one have a key. */
@@ -1122,6 +1457,7 @@ public final class Settings {
             case ADDED -> AUTOMATION_ON_ADDED;
             case FINISHED -> AUTOMATION_ON_FINISHED;
             case SEEDING_DONE -> AUTOMATION_ON_SEEDING_DONE;
+            case UPDATED -> AUTOMATION_ON_UPDATED;
             default -> throw new IllegalArgumentException("no command runs on " + kind);
         };
     }
@@ -1132,6 +1468,7 @@ public final class Settings {
             case FINISHED -> NOTIFY_FINISHED;
             case SEEDING_DONE -> NOTIFY_SEEDING_DONE;
             case ERROR -> NOTIFY_ERROR;
+            case UPDATED -> NOTIFY_UPDATED;
             default -> throw new IllegalArgumentException("no notification for " + kind);
         };
     }

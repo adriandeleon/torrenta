@@ -1,7 +1,6 @@
 package com.torrenta.ui;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -10,11 +9,9 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.logging.Level;
@@ -23,6 +20,7 @@ import java.util.logging.Logger;
 import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.binding.BooleanBinding;
+import javafx.beans.property.ReadOnlyBooleanWrapper;
 import javafx.beans.value.ObservableBooleanValue;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
@@ -68,7 +66,7 @@ import javafx.stage.StageStyle;
 
 import com.torrenta.AppInfo;
 import com.torrenta.automation.Automation;
-import com.torrenta.automation.Notifiers;
+import com.torrenta.content.UnsafeContent;
 import com.torrenta.engine.AddRequest;
 import com.torrenta.engine.Category;
 import com.torrenta.engine.Connectivity;
@@ -78,13 +76,18 @@ import com.torrenta.engine.EngineException;
 import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.Inputs;
 import com.torrenta.engine.LinkRequest;
+import com.torrenta.engine.QueueOrder;
 import com.torrenta.engine.ShareLimit;
+import com.torrenta.engine.SwarmPreview;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
 import com.torrenta.engine.TorrentLabels;
 import com.torrenta.engine.TorrentLimits;
 import com.torrenta.engine.TorrentPreview;
 import com.torrenta.engine.WatchFolders;
+import com.torrenta.net.ExitCheck;
+import com.torrenta.net.InterfaceWatch;
+import com.torrenta.net.LeakCheck;
 import com.torrenta.net.TorrentFetch;
 import com.torrenta.os.Badge;
 import com.torrenta.os.BadgeState;
@@ -95,26 +98,34 @@ import com.torrenta.report.ProblemReport;
 import com.torrenta.report.Redactor;
 import com.torrenta.rss.Article;
 import com.torrenta.rss.Feed;
-import com.torrenta.rss.FeedFetcher;
 import com.torrenta.rss.RssService;
 import com.torrenta.rss.RssStore;
-import com.torrenta.rss.Rule;
 import com.torrenta.search.DeclarativeProvider;
 import com.torrenta.search.SearchProvider;
 import com.torrenta.search.SearchResult;
 import com.torrenta.search.TorznabEndpoint;
 import com.torrenta.search.TorznabProvider;
+import com.torrenta.session.AddDefaults;
+import com.torrenta.session.IpFilterController;
+import com.torrenta.session.RuleAdd;
+import com.torrenta.session.Session;
+import com.torrenta.session.SpeedHistory;
 import com.torrenta.store.DefinitionStore;
 import com.torrenta.store.LabelStore;
 import com.torrenta.store.ProfileStore;
 import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
+import com.torrenta.sync.SyncLabels;
 import com.torrenta.tray.TorrentaTray;
 import com.torrenta.tray.Trays;
 import com.torrenta.update.ReleaseInfo;
 import com.torrenta.update.UpdateCheck;
 import com.torrenta.update.UpdateService;
+import com.torrenta.webapi.SessionBackend;
+import com.torrenta.webapi.WebApiConfig;
+import com.torrenta.webapi.WebApiService;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -130,7 +141,6 @@ import static com.torrenta.i18n.Messages.tr;
  */
 public final class MainWindow {
 
-    private static final long POLL_MS = 1000;
     private static final Logger LOG = Logger.getLogger(MainWindow.class.getName());
 
     private final Stage stage;
@@ -146,6 +156,21 @@ public final class MainWindow {
     // The status bar's network half (NetworkStatus): port with its dot, DHT, free space.
     private final Label portStatus = new Label();
     private final Region portDot = new Region();
+    /** The leak check's shield, beside the port: hidden while nothing is bound. */
+    private final Label leakPill = new Label();
+
+    private LeakCard leakCard;
+    /** The exit check's last answers; written by its worker, read by the poll. */
+    private volatile ExitCheck.Exits exits = ExitCheck.Exits.NONE;
+    /** An exit check is out; the card's Check now waits on it. */
+    private volatile boolean exitChecking;
+    /** Check now was pressed: the next poll asks whatever the interval says. */
+    private volatile boolean exitCheckWanted;
+    /** Poll thread: the binding and the swarm's view the last exit check was asked for. */
+    private String exitAskedFor = "";
+    /** Poll thread: the torrents pauseWhenExposed paused, to resume when protected. */
+    private Set<String> exposureHeld = Set.of();
+
     private final Tooltip portTip = new Tooltip();
     private final Label dhtStatus = new Label();
     private final Label freeStatus = new Label();
@@ -162,6 +187,13 @@ public final class MainWindow {
     private final TextField filter = new TextField();
     /** The omnibox as a value: chips and text; the field and the chip row draw it. */
     private Omnibox omnibox = Omnibox.EMPTY;
+    /** The omnibox holds a query that Save Filter as View can keep. */
+    private final javafx.beans.property.BooleanProperty filterSaveable =
+            new javafx.beans.property.SimpleBooleanProperty();
+    /** The last poll's torrents, for a sidebar refresh that cannot wait for the next one. */
+    private List<Torrent> lastSnapshot = List.of();
+    /** A name the capture hook types into Save Filter as View's prompt; null for a person's. */
+    private @Nullable String saveViewForCapture;
 
     private final HBox chipRow = new HBox(4);
     /** Set while the field's text is being written from the value, so the listener stays quiet. */
@@ -170,8 +202,20 @@ public final class MainWindow {
     private ToolBar toolbar;
     private final StackPane host = new StackPane();
     private final CommandPalette palette;
-    /** The chord that opens the palette, as {@code ui.paletteKey} says; see {@link #applyPaletteKey}. */
-    private KeyCombination paletteChord;
+    /**
+     * Every chord in force, by command id (or the {@link Chords} table's own name): the defaults
+     * with the user's key bindings laid over them by {@link #applyKeybindings}. A null value is a
+     * command the user has left with none.
+     */
+    private Map<String, KeyCombination> keyChords = Chords.all();
+    /** The commands as built, on their default chords; {@link #commands} is these, rebound. */
+    private List<Command> baseCommands = List.of();
+    /** The menu items that are not a command's own {@link #menuItem}: the View menu's check items, the palette's. */
+    private final Map<String, MenuItem> chordItems = new java.util.HashMap<>();
+    /** The scene accelerators {@link #applyKeybindings} put in, so the next pass can take them out. */
+    private final List<KeyCombination> sceneChords = new ArrayList<>();
+
+    private Label filterBadge;
 
     private Button paletteButton;
     private MenuItem paletteItem;
@@ -180,28 +224,17 @@ public final class MainWindow {
     private final StatisticsWindow statsWindow;
     /** Whether the poll should read the engine's counters: only while the Statistics window shows. */
     private volatile boolean statsWanted;
-    /** The session rates, one sample per poll, for the Statistics window's graph. */
-    private final SpeedHistory sessionHistory = new SpeedHistory();
     /** The window's bounds when last neither maximised nor minimised; what is saved. */
     private WindowGeometry.Bounds normalBounds;
-    /**
-     * The last {@link SpeedHistory#RECENT_SECONDS} of every torrent's rates, by id: a few KiB each,
-     * so the Speed tab is not empty the first time a torrent is chosen. Gone with the torrent.
-     */
-    private final java.util.concurrent.ConcurrentMap<String, SpeedHistory> recentHistories =
-            new java.util.concurrent.ConcurrentHashMap<>();
-    /** The rates of every torrent that has been selected, by id, for the Speed tab; gone with the torrent. */
-    private final java.util.concurrent.ConcurrentMap<String, SpeedHistory> torrentHistories =
-            new java.util.concurrent.ConcurrentHashMap<>();
     /** What the status bar has said; the popup over it shows the history. */
     private final MessageLog messages = new MessageLog();
 
     private HBox statusBar;
     private final MessageLogPopup messagePopup;
     /** Built on first use: most sessions never open it. */
-    private DebugLogWindow debugLogWindow;
+    private @Nullable DebugLogWindow debugLogWindow;
     /** Help → Report a Problem, built on first use like the debug log's. */
-    private ReportProblemWindow reportWindow;
+    private @Nullable ReportProblemWindow reportWindow;
     /** The list's names and the engine when the report was asked for, read by its worker; FX-written. */
     private volatile List<String> reportNames = List.of();
 
@@ -224,21 +257,27 @@ public final class MainWindow {
     private final java.util.Map<Density, javafx.scene.control.RadioMenuItem> densityItems =
             new java.util.EnumMap<>(Density.class);
     private List<Command> commands = List.of();
-    private AddDialog currentDialog;
-    private CreateDialog createDialog;
-    private LimitsDialog limitsDialog;
-    private TagsDialog tagsDialog;
-    private LocationDialog locationDialog;
+    private @Nullable AddDialog currentDialog;
+    private @Nullable CreateDialog createDialog;
+    private @Nullable LimitsDialog limitsDialog;
+    private @Nullable TagsDialog tagsDialog;
+    private @Nullable LocationDialog locationDialog;
     /** A folder the capture hook wants typed into the next Set Location dialog, or null. */
-    private String locationForCapture;
+    private @Nullable String locationForCapture;
 
-    private LinkDialog linkDialog;
+    private @Nullable LinkDialog linkDialog;
+    /** File → Import from another client…, while it is open. */
+    private @Nullable ImportDialog importDialog;
+    /** The capture hook's folder for the next Import dialog, instead of the ones found on this machine. */
+    private @Nullable Path importFolderForCapture;
+    /** The capture hook's Import, pressed once the next dialog's rows are in. */
+    private boolean importConfirmForCapture;
     /** Links that arrived while the Add Link dialog was open, each asked about in turn. */
     private final java.util.ArrayDeque<String> linksWaiting = new java.util.ArrayDeque<>();
     /** A name the capture hook types into the Add Link dialog when it opens. */
-    private String linkNameForCapture;
+    private @Nullable String linkNameForCapture;
     /** A choice or text prompt of the category commands, while one is up. */
-    private javafx.scene.control.Dialog<?> promptDialog;
+    private javafx.scene.control.@Nullable Dialog<?> promptDialog;
 
     private final LabelStore labels;
     private final WatchFolderStore watchStore;
@@ -249,11 +288,9 @@ public final class MainWindow {
     /** The definition problems already said in the log, so a broken file is reported once. */
     private final Set<String> reportedDefinitionProblems = new java.util.HashSet<>();
 
-    private WatchFolders watcher;
     /** Runs the person's commands and shows notifications; made with the engine in {@link #listenTo}. */
-    private volatile Automation automation;
-
     private Sidebar sidebar;
+
     private SidebarSelection sidebarSelection = SidebarSelection.ALL;
     private String lastClipboardOffer = "";
     private final DetailPane detail = new DetailPane();
@@ -274,7 +311,6 @@ public final class MainWindow {
 
     private final UpdateService updates = new UpdateService();
     private final SettingsWindow settingsWindow;
-    private final IpFilterController ipFilter;
     private final MenuItem downloadUpdateItem = new MenuItem();
     private MenuBar menuBar;
     private final MenuItem skipUpdateItem = new MenuItem();
@@ -285,10 +321,14 @@ public final class MainWindow {
     /** Whether the alternative limits were in force at the last refresh, on the FX thread. */
     private boolean altSpeedOn;
 
-    private ReleaseInfo availableUpdate;
+    private @Nullable ReleaseInfo availableUpdate;
+    /** A check is running; and the last one's failure this session, null when it answered. */
+    private boolean updateChecking;
+
+    private @Nullable String updateError;
     private SettingsSync sync;
     private final Label syncBadge = new Label(tr("status.syncProblem"));
-    private Alert aboutDialog;
+    private @Nullable Alert aboutDialog;
     /** On the sidebar when it sits on the right: the rule faces the list. */
     private static final javafx.css.PseudoClass BESIDE = javafx.css.PseudoClass.getPseudoClass("right");
 
@@ -301,21 +341,19 @@ public final class MainWindow {
     private CheckMenuItem detailItem;
     private CheckMenuItem detailBottomItem;
     private CheckMenuItem sidebarRightItem;
-    private volatile String detailId;
+    private volatile @Nullable String detailId;
     private volatile boolean detailWanted;
     /** A {@link #refreshDetailNow} waiting on the poll thread; later requests ride on it. */
     private final java.util.concurrent.atomic.AtomicBoolean detailRefreshQueued =
             new java.util.concurrent.atomic.AtomicBoolean();
     /** The global share limit as the poll thread applies it; refreshed with the engine settings. */
-    private volatile ShareLimit globalShareLimit = ShareLimit.NONE;
     /** Per-torrent share limits as of the last poll, for the status sentences ("ratio 1.2 of 2"). */
-    private volatile java.util.Map<String, ShareLimit> shareOverrides = java.util.Map.of();
 
     /**
      * Set on the FX thread, read by the poll thread and workers: volatile, and copied to a local
      * before use, since a profile switch sets it to null while a poll may still be running.
      */
-    private volatile Engine engine;
+    private volatile @Nullable Engine engine;
 
     private String engineDescription = "";
     /** What the engine can do; everything until one has started. Read by workers, set on the FX thread. */
@@ -333,27 +371,34 @@ public final class MainWindow {
     /** The profile the engine is built from; the local one until App says otherwise. */
     private EngineProfile profile = EngineProfile.LOCAL;
 
-    private EngineFactory engineFactory;
     private final ProfileStore profiles;
     /** The engine could not start: the empty state says why and offers Retry and another profile. */
     private final javafx.beans.property.BooleanProperty engineDown = new javafx.beans.property.SimpleBooleanProperty();
     /** Bumped on the FX thread whenever a "pick files when ready" mark is set or cleared. */
+    /** What this machine publishes, by the current version's id; FX thread. */
+    private Map<String, com.torrenta.engine.Publication> publishedById = Map.of();
+    /** Bumped when {@link #publishedById} changes, for the commands' bindings. */
+    private final javafx.beans.property.IntegerProperty publicationMarks =
+            new javafx.beans.property.SimpleIntegerProperty();
+
     private final javafx.beans.property.IntegerProperty pickFilesMarks =
             new javafx.beans.property.SimpleIntegerProperty();
 
     private VBox engineProblem;
+
     private Label engineProblemText;
     /** What the daemon's own blocklist fetch last said, for the IP filter page of a remote engine. */
-    private volatile String blocklistStatus = "";
-
-    private final List<String> pendingInputs = new ArrayList<>();
     /** Opened when the engine is up: a rule's add from a feed fetched before then waits on it. */
     private final java.util.concurrent.CountDownLatch engineUp = new java.util.concurrent.CountDownLatch(1);
 
-    private ScheduledExecutorService poller;
+    /** The engine's poll, its share limits and its speed schedule, without the window (roadmap 1.2). */
+    private final Session session;
+
+    /** Remote access, qBittorrent's API over the session (roadmap 1.2); off unless Settings says. */
+    private final WebApiService webApi;
 
     /** The tray icon once one has come up, else null; set on the FX thread, read by the poll. */
-    private volatile TorrentaTray tray;
+    private volatile @Nullable TorrentaTray tray;
     /** Why there is no tray, once an attempt has said; empty before one and while there is one. */
     private volatile String trayReason = "";
     /** What the tray was last given, so an equal snapshot costs no round trip; poll thread. */
@@ -364,7 +409,7 @@ public final class MainWindow {
     private boolean quitting;
 
     /** The dock or launcher badge once one has come up, else null; set on the FX thread, read by the poll. */
-    private volatile Badge badge;
+    private volatile @Nullable Badge badge;
     /** Why there is no badge, once an attempt has said; empty before one and while there is one. */
     private volatile String badgeReason = "";
     /** What the badge was last given, so an equal snapshot costs nothing; poll thread. */
@@ -387,7 +432,6 @@ public final class MainWindow {
         this.settings = settings;
         this.opener = opener;
         this.configDir = configDir;
-        this.ipFilter = new IpFilterController(settings, configDir);
         for (Engine.Capability c : Engine.Capability.values()) {
             capabilityOn.put(c, new javafx.beans.property.SimpleBooleanProperty(true));
         }
@@ -404,12 +448,20 @@ public final class MainWindow {
         definitionStore.load();
         this.rssStore = new RssStore(configDir);
         rssStore.load();
-        this.rss = new RssService(
-                rssStore,
-                new FeedFetcher(),
-                settings::rssRefreshMinutes,
-                r -> Thread.ofVirtual().name("rss-fetch").start(r),
-                Platform::runLater);
+        this.session =
+                new Session(settings, configDir, labels, watchStore, rssStore, Platform::runLater, new SessionHost());
+        session.addListener(this::polled);
+        // What arrived before an engine was up, once one is; after engineReady on the FX thread.
+        session.setInputHandler(text -> Platform.runLater(() -> addInput(text)));
+        // The battery and the network's cost, off the FX thread: on Linux it is the system bus.
+        Thread.ofVirtual()
+                .name("conditions")
+                .start(() -> session.setConditions(com.torrenta.os.SystemConditions.create()));
+        this.rss = session.rss();
+        SessionBackend remote = new SessionBackend(session, settings, labels);
+        // A client changed the settings (setPreferences, the speed mode): the pages show what is now true.
+        remote.setOnSettingsChanged(() -> Platform.runLater(this::showRemoteSettings));
+        this.webApi = new WebApiService(remote, System::currentTimeMillis);
         stage.setTitle(AppInfo.NAME);
         // Before anything else touches the stage: initStyle throws once a stage has been shown, and
         // the setting is read here, once, which is why it applies on restart.
@@ -424,15 +476,13 @@ public final class MainWindow {
         }
 
         BorderPane root = new BorderPane();
+        table = buildTable();
         root.setCenter(buildCenter());
         statusBar = buildStatusBar();
         root.setBottom(statusBar);
-        commands = buildCommands();
+        baseCommands = buildCommands();
+        commands = baseCommands;
         installWelcome();
-        // The strip is built with the centre, before the chords it shows exist.
-        viewStrip.showChords(v -> Chords.view(v).getDisplayText());
-        paletteChord =
-                PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT).chord();
         // The toolbar first: the View menu's check item binds to its visibility.
         ToolBar bar = buildToolbar();
         // An extended window has no system title bar, so the menu bar takes its place; asking the
@@ -446,13 +496,19 @@ public final class MainWindow {
                 id -> commands.stream().filter(c -> c.id().equals(id)).findFirst());
         detail.setMoreMenu(buildContextMenu());
         detail.setEvents(log.events());
-        palette = new CommandPalette(host, this::focusList, paletteChord.getDisplayText());
+        detail.setFilesToChoose(settings::filesToPick);
+        // The rows' sentence reads the mark; equal snapshots redraw nothing, so a change of it does.
+        pickFilesMarks.addListener(o -> table.refresh());
+        palette = new CommandPalette(host, this::focusList, Chords.of("palette").getDisplayText());
+        palette.setResolver(this::typedCommand);
         logWindow = new LogWindow(stage, log);
         statsWindow = new StatisticsWindow(stage, settings.statsWindowSeconds(), this::rememberStatsWindow);
         statsWindow.showingProperty().addListener((o, was, now) -> statsWanted = now);
         detail.setSpeedWindow(settings.statsWindowSeconds());
         detail.setOnSpeedWindowChanged(this::rememberStatsWindow);
         messagePopup = new MessageLogPopup(host, statusBar, messages, this::focusList);
+        leakCard = new LeakCard(
+                host, statusBar, this::focusList, () -> exitCheckWanted = true, () -> openSettingsPage("CONNECTION"));
         settingsWindow = new SettingsWindow(settings);
         settingsWindow.setOnShowDebugLog(this::showDebugLog);
         settingsWindow.setOnEngineSettingsChanged(this::applyEngineSettings);
@@ -465,19 +521,21 @@ public final class MainWindow {
         settingsWindow.setProfiles(profiles, new ProfilesHost());
         applyAppearance();
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
-        settingsWindow.setSearchProviders(searchStore, searchPane::reloadProviders);
+        settingsWindow.setSearchProviders(searchStore, () -> {
+            searchPane.reloadProviders();
+            // The servers and the definition files travel with the settings.
+            if (sync != null) sync.markDirty();
+        });
         settingsWindow.setSearchDefinitions(
                 definitionStore,
                 () -> opener.accept(definitionStore.dir().toUri().toString()));
         settingsWindow.setRss(rss);
-        rss.setDownloader(this::downloadForRule, settings::rssAutoDownload, this::reportRule);
-        rss.start();
-        settingsWindow.setOnTestNotification(() -> {
-            Automation a = automation;
-            if (a != null) a.testNotification();
-        });
-        sync = new SettingsSync(settings, configDir, new SyncHost());
+        session.open();
+        settingsWindow.setOnTestNotification(session::testNotification);
+        sync = new SettingsSync(settings, labels, searchStore, definitionStore, configDir, new SyncHost());
         settingsWindow.setSync(sync);
+        settingsWindow.setRemoteAccess(webApi::status, this::applyRemoteAccess);
+        applyRemoteAccess(settingsWindow::showRemoteStatus);
         sync.addListener(() -> {
             boolean problem = sync.state().phase() == SettingsSync.Phase.PROBLEM;
             syncBadge.setVisible(problem);
@@ -490,12 +548,20 @@ public final class MainWindow {
             // The download folder may have moved in Settings; the welcome's footer names it.
             showDownloadFolder(welcome);
         }));
+        // So is a category or tag added or deleted; the lists travel with the settings.
+        labels.setOnChanged(() -> Platform.runLater(sync::markDirty));
         detail.setOnBanPeer(this::banPeer);
         detail.setOnCopyPeer(address -> {
             ClipboardContent content = new ClipboardContent();
             content.putString(address);
             Clipboard.getSystemClipboard().setContent(content);
             setStatus(tr("status.copied.address", address));
+        });
+        detail.setOnCopyCommand(command -> {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(command);
+            Clipboard.getSystemClipboard().setContent(content);
+            setStatus(tr("status.copied.command"));
         });
         log.installLogBridge(Platform::runLater);
         reportDefinitionProblems();
@@ -508,24 +574,36 @@ public final class MainWindow {
                         .getResource("/com/torrenta/styles/app.css")
                         .toExternalForm());
         Fonts.installUiFont(scene);
-        scene.getAccelerators().put(Chords.of("filter-find"), this::focusFilter);
-        scene.getAccelerators().put(Chords.of("filter"), this::focusFilter);
-        scene.getAccelerators().put(paletteChord, () -> palette.show(CapabilityRules.commands(commands, capabilities)));
-        scene.getAccelerators().put(Chords.of("event-log"), logWindow::show);
-        scene.getAccelerators().put(Chords.of("statistics"), statsWindow::show);
-        scene.getAccelerators().put(Chords.of("message-log"), messagePopup::toggle);
-        scene.getAccelerators().put(Chords.of("add-clipboard"), this::addFromClipboard);
-        // Set Category is a submenu, and a submenu carries no accelerator: the chord is the scene's.
-        scene.getAccelerators().put(Chords.of("set-category"), this::chooseCategoryByChord);
-        // Ctrl+1, 2, 3: each view by its place on the strip, beside the views' own chords
-        // (Esc, Ctrl+Shift+F, Ctrl+R), which the menus keep showing.
-        for (View v : View.values()) scene.getAccelerators().put(Chords.view(v), () -> show(v));
+        // The scene accelerators (the filter's, the palette's, the logs', Ctrl+1/2/3 …) are put in
+        // by applyKeybindings, once the scene is the stage's, and moved by it after every rebind.
+        // Shortcut+Alt+1…9 choose the saved views in order, unless a text field has the focus:
+        // Ctrl+Alt is AltGr on many layouts, and what it types there is the field's.
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+            if (scene.getFocusOwner() instanceof javafx.scene.control.TextInputControl) return;
+            for (int n = 1; n <= 9; n++) {
+                if (matches("saved-view-" + n, e)) {
+                    chooseSavedView(n);
+                    e.consume();
+                    return;
+                }
+            }
+        });
+        // Shortcut+Z takes back the newest undoable action, unless a text field has the focus: there
+        // it is the field's own undo, which a scene accelerator would steal.
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
+            if (scene.getFocusOwner() instanceof javafx.scene.control.TextInputControl) return;
+            if (matches("undo", e)) {
+                undoNewest();
+                e.consume();
+            }
+        });
         // Ctrl+Tab and Ctrl+Shift+Tab cycle the views. A filter, ahead of focus traversal, which
         // would otherwise take Ctrl+Tab out of the table; Control on every platform, since Cmd+Tab
         // is macOS's own application switcher and never reaches the window.
         scene.addEventFilter(KeyEvent.KEY_PRESSED, e -> {
-            if (e.getCode() == KeyCode.TAB && e.isControlDown() && !e.isAltDown() && !e.isMetaDown()) {
-                show(e.isShiftDown() ? ViewSwitch.previous(view) : ViewSwitch.next(view));
+            boolean next = matches("view-next", e);
+            if (next || matches("view-previous", e)) {
+                show(next ? ViewSwitch.next(view) : ViewSwitch.previous(view));
                 e.consume();
             }
         });
@@ -541,6 +619,10 @@ public final class MainWindow {
             }
         });
         stage.setScene(scene);
+        // After the menus and the scene: the Keyboard page lists the commands under their menus,
+        // and the first pass puts the scene's accelerators in.
+        settingsWindow.setKeyboard(keyboardCommands(), this::applyKeybindings);
+        applyKeybindings();
         placeWindow(opening);
         // The live setting, not one captured at startup: the checkbox can change while the window
         // is open. Conditional on a tray having actually appeared, not on the preference alone:
@@ -678,7 +760,7 @@ public final class MainWindow {
         String said = inputs.isEmpty()
                 ? tr("status.broughtToFront", origin)
                 : tr("status.received", inputs.size(), origin, String.join(", ", inputs));
-        log.add(EngineEvent.info(null, null, said));
+        log.add(EngineEvent.info(null, "", said));
         setStatus(said);
         inputs.forEach(this::addInput);
     }
@@ -873,13 +955,36 @@ public final class MainWindow {
         table.requestFocus();
     }
 
+    /** How long a quit waits for the dialogs it closed (or a file chooser) to give their loops back. */
+    private static final int QUIT_WAIT_MS = 100;
+
+    private static final int QUIT_WAITS = 100;
+
     /**
-     * Ends the program: from the File menu, the tray menu, or a close with no tray to close to.
-     * Platform.exit is needed outright once implicit exit is off; before that it is harmless.
+     * Ends the program: from the File menu, the tray menu, the system's Quit, or a close with no
+     * tray to close to. Platform.exit is needed outright once implicit exit is off; before that it
+     * is harmless. A modal dialog open at the time (the tray's Quit while the Add dialog asks)
+     * runs a nested event loop, and leaving from inside one is how the toolkit aborted the JVM:
+     * so the dialogs are cancelled first and the quit carries on once their loops have unwound,
+     * a native file chooser's included, which only the person can close.
      */
     private void quit() {
+        quit(0);
+    }
+
+    private void quit(int waited) {
         quitting = true;
         hiddenToTray = false;
+        if (Platform.isNestedLoopRunning() && waited < QUIT_WAITS) {
+            closeDialogs();
+            javafx.animation.PauseTransition again =
+                    new javafx.animation.PauseTransition(javafx.util.Duration.millis(QUIT_WAIT_MS));
+            again.setOnFinished(e -> quit(waited + 1));
+            again.play();
+            return;
+        }
+        if (System.getProperty("torrenta.capture") != null)
+            System.out.println("capture: quit=after " + waited + " waits, nested=" + Platform.isNestedLoopRunning());
         if (stage.isShowing()) stage.close(); // onHidden tears down
         else shutdown();
         Platform.exit();
@@ -891,11 +996,37 @@ public final class MainWindow {
         shutDown = true;
         rememberDivider();
         rememberWindow();
-        stopPolling();
-        stopWatching();
-        rss.stop();
+        session.close();
+        webApi.close();
         updates.shutdown();
         sync.shutdown();
+    }
+
+    /** FX thread: a remote client changed the settings; an open Settings window shows them. */
+    private void showRemoteSettings() {
+        if (settingsWindow.isShowing()) settingsWindow.reloadFromSettings();
+    }
+
+    /**
+     * Remote access brought in line with the settings, on a worker (it binds a socket, and an
+     * HTTPS file is read); the log hears a change of state, {@code then} the status on the FX thread.
+     */
+    private void applyRemoteAccess(java.util.function.Consumer<WebApiService.Status> then) {
+        WebApiConfig config = settings.webApi();
+        Thread.ofVirtual().name("webapi-configure").start(() -> {
+            WebApiService.Status before = webApi.status();
+            WebApiService.Status after = webApi.configure(config);
+            Platform.runLater(() -> {
+                if (!after.equals(before)
+                        && (after.state() != WebApiService.State.OFF || before.state() != WebApiService.State.OFF)) {
+                    EngineEvent.Level level = after.state() == WebApiService.State.FAILED
+                            ? EngineEvent.Level.WARNING
+                            : EngineEvent.Level.INFO;
+                    log.add(EngineEvent.session(level, after.text()));
+                }
+                then.accept(after);
+            });
+        });
     }
 
     /** Any thread, idempotent; from App.stop, after the engine. */
@@ -931,7 +1062,10 @@ public final class MainWindow {
         return "port=\"" + (portStatus.isVisible() ? portStatus.getText() : "") + "\" dot=" + dot + " dht=\""
                 + (dhtStatus.isVisible() ? dhtStatus.getText() : "") + "\" free=\""
                 + (freeStatus.isVisible() ? freeStatus.getText() : "") + "\" low="
-                + freeStatus.getStyleClass().contains("free-low");
+                + freeStatus.getStyleClass().contains("free-low") + " portTip=\""
+                + (portStatus.isVisible() ? portTip.getText().replace("\n", " / ") : "") + "\" leak=\""
+                + (leakPill.isVisible() ? leakPill.getText() : "") + "\" leakCard=\""
+                + (leakPill.isVisible() ? leakCard.textForCapture() : "") + "\"";
     }
 
     /**
@@ -987,6 +1121,7 @@ public final class MainWindow {
         if (tagsDialog != null && tagsDialog.isShowing()) return tagsDialog.scene();
         if (locationDialog != null && locationDialog.isShowing()) return locationDialog.scene();
         if (linkDialog != null && linkDialog.isShowing()) return linkDialog.scene();
+        if (importDialog != null && importDialog.isShowing()) return importDialog.scene();
         if (promptDialog != null && promptDialog.isShowing())
             return promptDialog.getDialogPane().getScene();
         if (aboutDialog != null && aboutDialog.isShowing())
@@ -1007,7 +1142,7 @@ public final class MainWindow {
      * The menu or context menu open now, or null: a popup is its own window, so its own scene. The
      * last one showing, since a submenu is a second context menu opened after its parent.
      */
-    private static javafx.stage.PopupWindow shownPopup() {
+    private static javafx.stage.@Nullable PopupWindow shownPopup() {
         ContextMenu last = null;
         for (javafx.stage.Window w : javafx.stage.Window.getWindows()) {
             if (w instanceof ContextMenu c && c.isShowing()) last = c;
@@ -1044,6 +1179,14 @@ public final class MainWindow {
 
     /** Dismisses an open Add dialog, so the capture hook can exit outside its nested event loop. */
     public void closeDialogsForCapture() {
+        closeDialogs();
+    }
+
+    /**
+     * Every modal window cancelled, each through its own cancel where it has one (so an Add
+     * dialog's metadata fetch ends with it), the rest hidden, which returns their showAndWait.
+     */
+    private void closeDialogs() {
         if (currentDialog != null && currentDialog.isShowing()) currentDialog.cancel();
         if (createDialog != null && createDialog.isShowing()) createDialog.close();
         if (limitsDialog != null && limitsDialog.isShowing()) limitsDialog.cancel();
@@ -1051,10 +1194,15 @@ public final class MainWindow {
         if (locationDialog != null && locationDialog.isShowing()) locationDialog.cancel();
         linksWaiting.clear(); // or the next one opens as this one closes
         if (linkDialog != null && linkDialog.isShowing()) linkDialog.cancel();
+        if (importDialog != null && importDialog.isShowing()) importDialog.cancel();
         if (promptDialog != null && promptDialog.isShowing()) promptDialog.close();
         if (aboutDialog != null && aboutDialog.isShowing()) aboutDialog.close();
         if (rssPane != null) rssPane.closeDialog();
         settingsWindow.closeDialogsForCapture();
+        for (javafx.stage.Window w : List.copyOf(javafx.stage.Window.getWindows())) {
+            if (w != stage && w.isShowing() && w instanceof Stage s && s.getModality() != javafx.stage.Modality.NONE)
+                s.hide();
+        }
     }
 
     /**
@@ -1065,6 +1213,11 @@ public final class MainWindow {
         List<String> out = new ArrayList<>();
         out.add("statusbar-fit=" + statusBarFit());
         out.add("window=" + windowLine());
+        // Every other window showing: is its footer in view?
+        for (javafx.stage.Window w : javafx.stage.Window.getWindows()) {
+            if (w == stage || !w.isShowing() || !(w instanceof Stage s) || s.getScene() == null) continue;
+            out.add("dialog-fit=" + s.getTitle() + " | " + DialogFit.describe(s.getScene()));
+        }
         if (createDialog != null && createDialog.isShowing()) {
             out.add("dialog=" + createDialog.title());
             out.addAll(createDialog.linesForCapture());
@@ -1076,6 +1229,10 @@ public final class MainWindow {
         if (linkDialog != null && linkDialog.isShowing()) {
             out.add("dialog=" + linkDialog.title());
             out.add("link-dialog=" + linkDialog.describe());
+        }
+        if (importDialog != null && importDialog.isShowing()) {
+            out.add("dialog=" + importDialog.title());
+            out.addAll(importDialog.linesForCapture());
         }
         // After the shot: the window and the tab have had their ticks by then.
         // After the shot: the report is read and redacted on a worker, which has finished by then.
@@ -1148,6 +1305,10 @@ public final class MainWindow {
             logWindow.show();
         } else if (action.equals("stats")) {
             statsWindow.show();
+        } else if (action.equals("leak-card")) {
+            leakCard.show();
+        } else if (action.equals("leak-check")) {
+            exitCheckWanted = true;
         } else if (action.equals("message-log")) {
             messagePopup.show();
         } else if (action.startsWith("message-log:")) {
@@ -1166,6 +1327,12 @@ public final class MainWindow {
         } else if (action.startsWith("settings:")) {
             settingsWindow.show(stage);
             settingsWindow.searchForCapture(action.substring("settings:".length()));
+        } else if (action.startsWith("settings-keys:")) {
+            // Chords pressed into the Keyboard page's rows: settings-keys:recheck:Shortcut+K|Shortcut+K;limits:BS.
+            settingsWindow.show(stage);
+            settingsWindow.selectPageForCapture("KEYBOARD");
+            System.out.println("capture: keys-pressed="
+                    + settingsWindow.pressKeysForCapture(action.substring("settings-keys:".length())));
         } else if (action.startsWith("settings-key:")) {
             // A key in the open Settings window, where its focus is (settings-key:ESCAPE).
             settingsWindow.keyForCapture(KeyCode.valueOf(action.substring("settings-key:".length())));
@@ -1206,6 +1373,10 @@ public final class MainWindow {
         } else if (action.equals("settings-definitions-reload")) {
             settingsWindow.show(stage);
             settingsWindow.reloadDefinitionsForCapture();
+        } else if (action.startsWith("settings-definitions-export:")) {
+            // The Search page's Export to zip, past its native chooser.
+            settingsWindow.show(stage);
+            settingsWindow.exportDefinitions(Path.of(action.substring("settings-definitions-export:".length())));
         } else if (action.startsWith("view:")) {
             ViewSwitch.parse(action.substring("view:".length()))
                     .ifPresentOrElse(this::show, () -> System.err.println("capture: no view " + action));
@@ -1256,6 +1427,14 @@ public final class MainWindow {
             showSearch();
             searchPane.setQuery(action.substring("search:".length()));
             searchPane.runSearch();
+        } else if (action.equals("search-clear")) {
+            // After the running search, if any, so the shot is of a tab that had rows.
+            searchPane.afterSearchForCapture(() -> command("search-clear").run().run());
+        } else if (action.startsWith("search-filter:")) {
+            // The results filter typed once the search has ended, '~' for a space.
+            showSearch();
+            searchPane.setFilterForCapture(
+                    action.substring("search-filter:".length()).replace('~', ' '), this::printSearchForCapture);
         } else if (action.startsWith("search-keys:")) {
             // Keys pressed in the results table (DOWN+ENTER): the keyboard path to the Add dialog.
             showSearch();
@@ -1263,6 +1442,10 @@ public final class MainWindow {
                             action.substring("search-keys:".length()).split("\\+"))
                     .map(key -> KeyCode.valueOf(key.trim().toUpperCase(java.util.Locale.ROOT)))
                     .toList());
+        } else if (action.startsWith("create-publish:")) {
+            // Publish as updatable ticked and the key's name typed, in the dialog create opened.
+            createTorrent();
+            if (createDialog != null) createDialog.publishForCapture(action.substring("create-publish:".length()));
         } else if (action.startsWith("create")) {
             // create, create:<path> (the dialog with the source filled in), create-run:<path> (and
             // created into a temporary file with seeding on, the Save As chooser skipped).
@@ -1283,6 +1466,8 @@ public final class MainWindow {
             }
         } else if (action.equals("dialog-add")) {
             if (currentDialog != null && currentDialog.isShowing()) currentDialog.confirm();
+        } else if (action.equals("content-skip")) {
+            if (currentDialog != null && currentDialog.isShowing()) currentDialog.skipFlaggedForCapture();
         } else if (action.startsWith("dialog-press:")) {
             if (currentDialog != null && currentDialog.isShowing())
                 currentDialog.pressForCapture(action.substring("dialog-press:".length()));
@@ -1296,6 +1481,14 @@ public final class MainWindow {
             else linkNameForCapture = typed;
         } else if (action.equals("link-download")) {
             if (linkDialog != null && linkDialog.isShowing()) linkDialog.confirm();
+        } else if (action.startsWith("import-from:")) {
+            // The Import dialog on this folder, not the ones found on this machine; `~` for a space.
+            importFolderForCapture =
+                    Path.of(action.substring("import-from:".length()).replace('~', ' '));
+            Platform.runLater(this::importFromClient);
+        } else if (action.equals("import-confirm")) {
+            if (importDialog != null && importDialog.isShowing()) importDialog.confirmWhenLoaded();
+            else importConfirmForCapture = true;
         } else if (action.startsWith("set-location:")) {
             // The Set Location dialog with this folder typed in, so its free-space line can be read;
             // the dialog opens on a later pulse, so the folder waits for it.
@@ -1355,6 +1548,35 @@ public final class MainWindow {
             // rename:<name>: the selection's Rename dialog, filled and confirmed ("~" is a space).
             renameForCapture = action.substring("rename:".length()).replace('~', ' ');
             renameTorrent();
+        } else if (action.startsWith("save-view:")) {
+            // save-view:<name>: Save Filter as View on the omnibox's query, named ("~" is a space).
+            saveViewForCapture = action.substring("save-view:".length()).replace('~', ' ');
+            saveView();
+        } else if (action.startsWith("pick-view:")) {
+            // pick-view:<n>: the n-th saved view chosen, as Shortcut+Alt+n does from the list.
+            chooseSavedView(
+                    Integer.parseInt(action.substring("pick-view:".length()).trim()));
+        } else if (action.equals("quit")) {
+            // File → Quit as the tray's and the system's Quit reach it: whatever dialog is open.
+            System.out.println("capture: quit-nested=" + Platform.isNestedLoopRunning());
+            quit();
+        } else if (action.equals("remove-confirmed")) {
+            // Remove (the files kept) on the selection, its question answered yes.
+            RemoveConfirm.answerForCapture = true;
+            remove(false);
+        } else if (action.equals("remove-data-confirmed")) {
+            // Remove with files on the selection, its question answered yes: to the trash by default.
+            RemoveConfirm.answerForCapture = true;
+            remove(true);
+        } else if (action.startsWith("undo-after:")) {
+            // Shortcut+Z, that many milliseconds later: after the worker an undoable action ran on.
+            javafx.animation.PauseTransition later = new javafx.animation.PauseTransition(javafx.util.Duration.millis(
+                    Long.parseLong(action.substring("undo-after:".length()).trim())));
+            later.setOnFinished(e -> {
+                System.out.println("capture: undo=offered " + undoOffer.isVisible() + ", kept " + undoStack.size());
+                undoNewest();
+            });
+            later.play();
         } else if (action.startsWith("export-to:")) {
             // The selection exported into a folder, as Export does past its (native) chooser.
             export(exportTargets(selectedTorrents(), Path.of(action.substring("export-to:".length()))));
@@ -1382,6 +1604,10 @@ public final class MainWindow {
             String[] parts = action.substring("files-rename:".length()).split(":", 2);
             showDetail();
             detail.renameFileForCapture(Integer.parseInt(parts[0]), parts[1].replace('~', ' '));
+        } else if (action.startsWith("files-stream:")) {
+            // files-stream:<row>: Stream in Player on that visible row of the Files tab.
+            showDetail();
+            detail.streamFileForCapture(Integer.parseInt(action.substring("files-stream:".length())));
         } else if (action.startsWith("files-menu")) {
             // files-menu or files-menu:<row>: the Files tab's context menu on that visible row.
             int colon = action.indexOf(':');
@@ -1464,6 +1690,7 @@ public final class MainWindow {
         if (currentDialog != null && currentDialog.isShowing()) {
             System.out.println("capture: dialog=" + currentDialog.title());
             System.out.println("capture: add-dialog=" + currentDialog.summaryForCapture());
+            System.out.println("capture: content-check=" + currentDialog.contentForCapture());
             System.out.println("capture: dialog-hint=" + currentDialog.hint());
         }
         if (limitsDialog != null && limitsDialog.isShowing())
@@ -1483,7 +1710,7 @@ public final class MainWindow {
         System.out.println("capture: focus-sidebar=" + sidebar.hasFocus() + " cursor=" + sidebar.cursorForCapture());
         for (TorrentRow row : table.getItems()) {
             Torrent t = row.torrent();
-            StatusLine line = StatusLine.of(t, row.quietSeconds(), shareLimitFor(t));
+            StatusLine line = StatusLine.of(t, row.quietSeconds(), shareLimitFor(t), settings.filesToPick(t.id()));
             System.out.println("capture: row=" + line.state().glyph() + " " + t.name() + " | " + line.text());
         }
         System.out.println("capture: layout=sidebar:"
@@ -1499,17 +1726,14 @@ public final class MainWindow {
             System.out.println("capture: search=" + settingsWindow.searchStatus());
         if (settingsWindow.isShowing())
             for (String row : settingsWindow.definitionsForCapture()) System.out.println("capture: definition=" + row);
-        if (watcher != null) System.out.println("capture: watch=" + watchStatusText());
+        if (settingsWindow.isShowing()
+                && !settingsWindow.definitionStatusForCapture().isEmpty())
+            System.out.println("capture: definitions-status=" + settingsWindow.definitionStatusForCapture());
+        if (session.watcher() != null) System.out.println("capture: watch=" + watchStatusText());
         System.out.println("capture: view=" + view.id() + " focus=" + focusForCapture());
         System.out.println("capture: view-strip=" + viewStrip.describe());
         System.out.println("capture: search-tab=" + (searchShowing() ? "showing" : "hidden"));
-        if (searchShowing()) {
-            System.out.println("capture: search-query=" + searchPane.queryText());
-            System.out.println("capture: search-chips=" + searchPane.chipsForCapture());
-            System.out.println("capture: search-status=" + searchPane.statusText()
-                    + (searchPane.searching() ? " (searching)" : ""));
-            for (String row : searchPane.rowsForCapture()) System.out.println("capture: search-row=" + row);
-        }
+        if (searchShowing()) printSearchForCapture();
         System.out.println("capture: rss-tab=" + (rssShowing() ? "showing" : "hidden"));
         if (rssShowing()) {
             System.out.println("capture: rss-status=" + rssPane.statusText());
@@ -1525,21 +1749,14 @@ public final class MainWindow {
             for (String row : settingsWindow.rulesForCapture()) System.out.println("capture: rss-rule=" + row);
     }
 
-    /**
-     * Any thread, before {@code engine.start()}: the start itself raises events (engine started,
-     * listening on a port) that a listener attached afterwards would never hear. Events arrive on
-     * the engine's alert thread; the log and the status bar are FX-owned, hence the hop.
-     */
-    public void listenTo(Engine engine) {
-        automation = new Automation(engine, settings::automation, Notifiers.forPlatform(), this::reportFromWorker);
-        engine.addListener(event -> {
-            // The automation decides on the alert thread and does its work on threads of its own.
-            automation.handle(event);
-            Platform.runLater(() -> {
-                log.add(event);
-                setStatus(event.message(), event.level());
-            });
-        });
+    /** The Search tab's lines: after every action, and again once a filter typed by one applies. */
+    private void printSearchForCapture() {
+        System.out.println("capture: search-query=" + searchPane.queryText());
+        System.out.println("capture: search-chips=" + searchPane.chipsForCapture());
+        System.out.println(
+                "capture: search-status=" + searchPane.statusText() + (searchPane.searching() ? " (searching)" : ""));
+        System.out.println("capture: search-filter=" + searchPane.filterForCapture());
+        for (String row : searchPane.rowsForCapture()) System.out.println("capture: search-row=" + row);
     }
 
     /**
@@ -1553,84 +1770,29 @@ public final class MainWindow {
         });
     }
 
-    /** FX thread. The engine has started; flush what was queued and begin polling. */
+    /**
+     * FX thread. The engine has started and the session polls it; the window takes it from here,
+     * and draws its polls from now ({@link #polled} ignores any before).
+     */
     public void engineReady(Engine engine) {
         this.engine = engine;
         this.engineDescription = engine.description();
         applyCapabilities(engine.capabilities());
+        refreshPublications();
         showEngineProblem(null);
         applyTitle();
         engineUp.countDown();
-        globalShareLimit = settings.shareLimit();
         setStatus(engineDescription);
-        List<String> queued = List.copyOf(pendingInputs);
-        pendingInputs.clear();
-        queued.forEach(this::addInput);
-
-        poller = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "engine-poll");
-            t.setDaemon(true);
-            return t;
-        });
-        poller.scheduleAtFixedRate(this::poll, 0, POLL_MS, TimeUnit.MILLISECONDS);
         maybeCheckForUpdates();
-        // The filter from disk first, so no peer slips in while a download runs; the schedule next.
-        // An engine that fetches its own blocklist (a daemon) is told the URL instead.
-        if (capabilities.has(Engine.Capability.IP_FILTER)) {
-            ipFilter.setEngine(engine);
-            Thread.ofVirtual().name("ip-filter").start(() -> {
-                ipFilter.applyStored(this::reportIpFilter);
-                ipFilter.refreshIfDue(this::reportIpFilter);
-            });
-            poller.scheduleAtFixedRate(() -> ipFilter.refreshIfDue(this::reportIpFilter), 1, 1, TimeUnit.HOURS);
-        } else if (capabilities.has(Engine.Capability.BLOCKLIST_URL) && settings.ipFilterEnabled()) {
-            // Only when a blocklist is wanted: the daemon's own state is not worth a status line otherwise.
-            refreshBlocklist();
-        }
-        // The schedule is checked every minute; a change of state applies the other pair.
-        poller.scheduleAtFixedRate(this::refreshLimits, 0, 60, TimeUnit.SECONDS);
-        watcher = new WatchFolders(engine, new WatcherHost());
-        restartWatching();
     }
 
     // ---- watch folders --------------------------------------------------------------------------
-
-    /** What the watcher needs; called on its thread, so everything FX-owned hops. */
-    private final class WatcherHost implements WatchFolders.Host {
-        @Override
-        public Path defaultDownloadDir() {
-            return settings.downloadDir();
-        }
-
-        @Override
-        public Optional<com.torrenta.engine.Category> category(String name) {
-            return labels.category(name);
-        }
-
-        @Override
-        public AddRequest.Storage storage(Path destination) {
-            return settings.storage(destination);
-        }
-
-        @Override
-        public void report(EngineEvent event) {
-            Platform.runLater(() -> {
-                log.add(event);
-                setStatus(event.message(), event.level());
-            });
-        }
-
-        @Override
-        public void statusChanged() {
-            Platform.runLater(settingsWindow::refreshWatchStatus);
-        }
-    }
 
     /** What the Settings page needs. */
     private final class WatchHost implements SettingsWindow.WatchHost {
         @Override
         public void watchFoldersChanged() {
-            restartWatching();
+            session.restartWatching();
         }
 
         @Override
@@ -1640,43 +1802,77 @@ public final class MainWindow {
     }
 
     private String watchStatusText() {
-        WatchFolders w = watcher;
+        WatchFolders w = session.watcher();
         return WatchFolders.statusText(
                 watchStore.entries().size(), w == null ? List.of() : w.missing(), w != null && w.isRunning());
     }
 
-    /** Any thread. (Re)starts the watcher on the stored list; a no-op until the engine is up. */
-    private void restartWatching() {
-        WatchFolders w = watcher;
-        if (w == null) return;
-        List<com.torrenta.engine.WatchFolder> entries = watchStore.entries();
-        // start() waits for a poll in progress, which may be inside the engine: not on the FX thread.
-        Thread.ofVirtual().name("watch-folders-start").start(() -> {
-            w.start(entries);
-            Platform.runLater(settingsWindow::refreshWatchStatus);
-        });
-    }
-
-    private void stopWatching() {
-        WatchFolders w = watcher;
-        if (w != null) Thread.ofVirtual().name("watch-folders-stop").start(w::stop);
-    }
-
     // ---- speed ----------------------------------------------------------------------------------
 
-    private void refreshLimits() {
-        Engine e = engine;
-        if (e == null) return;
-        try {
-            boolean alternative = e.refreshLimits(java.time.LocalDateTime.now());
+    /** What the session tells the window; any thread, so everything hops to the FX thread. */
+    private final class SessionHost implements Session.Host {
+        @Override
+        public void seedingDone(EngineEvent event, Torrent torrent, boolean removed) {
             Platform.runLater(() -> {
-                altSpeedToggle.setText(alternative ? tr("status.altSpeed.on") : tr("status.altSpeed.off"));
+                log.add(event);
+                setStatus(event.message());
+                if (removed) forgetOverride(torrent.id());
+            });
+        }
+
+        @Override
+        public void limitsRefreshed(
+                boolean alternative,
+                com.torrenta.session.SpeedMode.Reason reason,
+                com.torrenta.session.SpeedMode.Reason paused) {
+            Platform.runLater(() -> {
+                // Why, in the pill: "Alt speed: on battery"; a condition's pause says so first.
+                altSpeedToggle.setText(
+                        paused != com.torrenta.session.SpeedMode.Reason.NONE
+                                ? tr("status.heldPaused", paused.pill())
+                                : tr("status.altSpeed", reason.pill()));
                 altSpeedToggle.pseudoClassStateChanged(javafx.css.PseudoClass.getPseudoClass("active"), alternative);
                 altSpeedOn = alternative;
                 if (altSpeedItem != null) altSpeedItem.setSelected(alternative);
             });
-        } catch (EngineException ex) {
-            Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
+        }
+
+        @Override
+        public void problem(EngineEvent event) {
+            Platform.runLater(() -> setStatus(event.message(), event.level()));
+        }
+
+        @Override
+        public void event(EngineEvent event) {
+            Platform.runLater(() -> {
+                log.add(event);
+                setStatus(event.message(), event.level());
+            });
+        }
+
+        @Override
+        public void engineReady(Engine engine) {
+            Platform.runLater(() -> MainWindow.this.engineReady(engine));
+        }
+
+        @Override
+        public void engineFailed(EngineException failure) {
+            Platform.runLater(() -> MainWindow.this.engineFailed(failure));
+        }
+
+        @Override
+        public void report(EngineEvent event) {
+            reportFromWorker(event);
+        }
+
+        @Override
+        public void watchStatusChanged() {
+            Platform.runLater(settingsWindow::refreshWatchStatus);
+        }
+
+        @Override
+        public void ipFilterReport(String text) {
+            reportIpFilter(text);
         }
     }
 
@@ -1704,8 +1900,25 @@ public final class MainWindow {
                     Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
             applyEngineSettings();
             applyAppearance();
+            applyKeybindings();
             refreshIpFilter(false);
             if (settingsWindow.isShowing()) settingsWindow.reloadFromSettings();
+        }
+
+        @Override
+        public void labelsApplied(SyncLabels.Change change) {
+            LabelsHost labelsHost = new LabelsHost();
+            for (String name : change.removedCategories()) labelsHost.categoryDeleted(name);
+            for (String name : change.removedTags()) labelsHost.tagDeleted(name);
+            labelsHost.labelsChanged();
+            settingsWindow.reloadLabels();
+        }
+
+        @Override
+        public void searchApplied() {
+            reportDefinitionProblems();
+            searchPane.reloadProviders();
+            settingsWindow.reloadSearchPage();
         }
 
         @Override
@@ -1717,35 +1930,7 @@ public final class MainWindow {
     // ---- IP filter ------------------------------------------------------------------------------
 
     private void refreshIpFilter(boolean force) {
-        if (capabilities.has(Engine.Capability.IP_FILTER)) {
-            Thread.ofVirtual().name("ip-filter").start(() -> ipFilter.refresh(force, this::reportIpFilter));
-        } else if (capabilities.has(Engine.Capability.BLOCKLIST_URL)) {
-            refreshBlocklist();
-        }
-    }
-
-    /**
-     * Any thread. An engine that fetches its own blocklist is told the URL and the switch from the
-     * IP filter page, and asked to fetch now; what it says lands in the page's status line.
-     */
-    private void refreshBlocklist() {
-        Engine e = engine;
-        if (e == null) return;
-        String url = settings.ipFilterUrl();
-        boolean on = settings.ipFilterEnabled();
-        Thread.ofVirtual().name("blocklist").start(() -> {
-            String text;
-            try {
-                long ranges = e.setBlocklist(url, on);
-                text = !on || url.isBlank()
-                        ? tr("status.blocklist.off")
-                        : tr("status.blocklist.applied", ranges < 0 ? 0 : ranges, ranges < 0 ? 0 : 1);
-            } catch (EngineException ex) {
-                text = tr("status.blocklist.failed", ex.getMessage());
-            }
-            blocklistStatus = text;
-            reportIpFilter(text);
-        });
+        session.refreshIpFilter(force);
     }
 
     private void reportIpFilter(String text) {
@@ -1756,8 +1941,8 @@ public final class MainWindow {
     }
 
     private String ipFilterStatusText() {
-        if (capabilities.lacks(Engine.Capability.IP_FILTER)) return blocklistStatus;
-        IpFilterController.Status s = ipFilter.status();
+        if (capabilities.lacks(Engine.Capability.IP_FILTER)) return session.blocklistStatus();
+        IpFilterController.Status s = session.ipFilter().status();
         long blocked = engine == null ? 0 : engine.blockedPeers();
         if (s.loadedAt() == 0) return s.note().isEmpty() ? tr("status.ipFilter.nothingLoaded") : s.note();
         return tr(
@@ -1787,11 +1972,11 @@ public final class MainWindow {
         if (engine == null) return;
         Engine e = engine;
         var current = settings.engineSettings();
-        globalShareLimit = current.queue().share();
+        session.settingsChanged(current);
         Thread.ofVirtual().name("engine-settings").start(() -> {
             try {
                 e.applySettings(current);
-                refreshLimits();
+                session.refreshLimits();
             } catch (EngineException ex) {
                 Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
             }
@@ -1807,7 +1992,27 @@ public final class MainWindow {
         if (!UpdateCheck.isDue(settings.lastUpdateCheck(), now, UpdateCheck.DEFAULT_INTERVAL_MS)) return;
         settings.setLastUpdateCheck(now);
         settings.saveQuietly();
-        updates.check(AppInfo.VERSION, outcome -> onUpdateOutcome(outcome, false));
+        startUpdateCheck(outcome -> onUpdateOutcome(outcome, false));
+    }
+
+    /** Runs a check, keeping what the About panel shows in step with it. */
+    private void startUpdateCheck(java.util.function.Consumer<UpdateService.Outcome> then) {
+        updateChecking = true;
+        refreshAboutUpdate();
+        updates.check(AppInfo.VERSION, outcome -> {
+            updateChecking = false;
+            updateError = outcome.error();
+            then.accept(outcome);
+            refreshAboutUpdate();
+        });
+    }
+
+    private AboutDialog.UpdateStatus updateStatus() {
+        return new AboutDialog.UpdateStatus(updateChecking, availableUpdate, updateError, settings.lastUpdateCheck());
+    }
+
+    private void refreshAboutUpdate() {
+        if (aboutDialog != null && aboutDialog.isShowing()) AboutDialog.showUpdate(aboutDialog, updateStatus());
     }
 
     /** The user asked: ignores the interval, the setting and the skipped version, and always reports. */
@@ -1815,10 +2020,10 @@ public final class MainWindow {
         setStatus(tr("status.checkingUpdates"));
         settings.setLastUpdateCheck(System.currentTimeMillis());
         settings.saveQuietly();
-        updates.check(AppInfo.VERSION, outcome -> {
+        startUpdateCheck(outcome -> {
             onUpdateOutcome(outcome, true);
             if (outcome.error() != null) setStatus(tr("status.updateFailed", outcome.error()), EngineEvent.Level.ERROR);
-            else if (outcome.available())
+            else if (outcome.latest() != null)
                 setStatus(tr(
                         "status.updateAvailable", AppInfo.NAME, outcome.latest().version()));
             else setStatus(tr("status.upToDate", AppInfo.NAME, AppInfo.VERSION));
@@ -1827,9 +2032,10 @@ public final class MainWindow {
 
     /** FX thread. */
     private void onUpdateOutcome(UpdateService.Outcome outcome, boolean manual) {
-        if (!outcome.available()) return;
-        if (!manual && outcome.latest().version().equals(settings.dismissedUpdate())) return;
-        availableUpdate = outcome.latest();
+        ReleaseInfo latest = outcome.latest();
+        if (!outcome.available() || latest == null) return;
+        if (!manual && latest.version().equals(settings.dismissedUpdate())) return;
+        availableUpdate = latest;
         downloadUpdateItem.setText(tr("menu.help.downloadUpdate", AppInfo.NAME, availableUpdate.version()));
         skipUpdateItem.setText(tr("menu.help.skipVersion", availableUpdate.version()));
         downloadUpdateItem.setVisible(true);
@@ -1846,7 +2052,7 @@ public final class MainWindow {
             aboutDialog.getDialogPane().getScene().getWindow().requestFocus();
             return;
         }
-        aboutDialog = AboutDialog.create(stage, settings.file(), opener, availableUpdate);
+        aboutDialog = AboutDialog.create(stage, settings.file(), opener, updateStatus(), this::checkForUpdatesNow);
         aboutDialog.show();
     }
 
@@ -1866,6 +2072,23 @@ public final class MainWindow {
         skipUpdateItem.setVisible(false);
         updateBadge.setVisible(false);
         updateBadge.setManaged(false);
+        refreshAboutUpdate();
+    }
+
+    /** The About panel's bounds and the window's, or empty when it is closed; read by the capture hook. */
+    public String aboutBoundsForCapture() {
+        if (aboutDialog == null || !aboutDialog.isShowing()) return "";
+        javafx.stage.Window panel = aboutDialog.getDialogPane().getScene().getWindow();
+        return String.format(
+                "panel=%.0f,%.0f %.0fx%.0f window=%.0f,%.0f %.0fx%.0f",
+                panel.getX(),
+                panel.getY(),
+                panel.getWidth(),
+                panel.getHeight(),
+                stage.getX(),
+                stage.getY(),
+                stage.getWidth(),
+                stage.getHeight());
     }
 
     /** The newer version found, or empty; read by the capture hook. */
@@ -1881,7 +2104,7 @@ public final class MainWindow {
     }
 
     /** FX thread. The empty state says why the engine is not there, or nothing when it is. */
-    private void showEngineProblem(String message) {
+    private void showEngineProblem(@Nullable String message) {
         boolean down = message != null;
         engineDown.set(down);
         if (engineProblem == null) return;
@@ -1892,13 +2115,9 @@ public final class MainWindow {
 
     // ---- the engine's life ----------------------------------------------------------------------
 
-    /** Builds the engine for a profile; App's, since the stores and the settings are its to hand over. */
-    public interface EngineFactory {
-        Engine create(EngineProfile profile);
-    }
-
-    public void setEngineFactory(EngineFactory factory) {
-        this.engineFactory = factory;
+    /** How the session builds an engine for a profile; App's, since the stores and the settings are its. */
+    public void setEngineFactory(Session.EngineFactory factory) {
+        session.setEngineFactory(factory);
     }
 
     /** The profile in use; the local engine's until {@link #startEngine} says otherwise. */
@@ -1907,55 +2126,35 @@ public final class MainWindow {
     }
 
     /**
-     * FX thread. Builds the engine for {@code next} and starts it on a worker (loading a native
-     * library or reaching a daemon takes longer than a frame should wait); the status bar says so
-     * meanwhile and the title names a remote profile. {@link #engineReady} or {@link #engineFailed}
-     * follows on the FX thread.
+     * FX thread. The session builds the engine for {@code next} and starts it on a thread of its
+     * own (loading a native library or reaching a daemon takes longer than a frame should wait);
+     * the status bar says so meanwhile and the title names a remote profile. {@link #engineReady}
+     * or {@link #engineFailed} follows on the FX thread.
      */
     public void startEngine(EngineProfile next) {
-        if (engineFactory == null) throw new IllegalStateException("no engine factory");
+        engineStarting(next);
+        session.startEngine(next);
+    }
+
+    /** FX thread: what the window says while an engine for {@code next} comes up. */
+    private void engineStarting(EngineProfile next) {
         profile = next;
         applyTitle();
         showEngineProblem(null);
         setStatus(
                 next.isLocal() ? tr("status.starting") : tr("status.connecting", next.displayName(), next.hostLine()));
-        Engine fresh;
-        try {
-            fresh = engineFactory.create(next);
-        } catch (RuntimeException e) {
-            engineFailed(new EngineException(e.getMessage() == null ? e.toString() : e.getMessage(), e));
-            return;
-        }
-        listenTo(fresh);
-        Thread starter = new Thread(
-                () -> {
-                    try {
-                        fresh.start();
-                        Platform.runLater(() -> engineReady(fresh));
-                    } catch (EngineException e) {
-                        Platform.runLater(() -> engineFailed(e));
-                    } catch (RuntimeException e) {
-                        LOG.log(java.util.logging.Level.WARNING, "The engine failed to start", e);
-                        Platform.runLater(() -> engineFailed(
-                                new EngineException(e.getMessage() == null ? e.toString() : e.getMessage(), e)));
-                    }
-                },
-                "engine-start");
-        starter.setDaemon(true);
-        starter.start();
     }
 
     /** Any thread, from App.stop after the poll: stops the engine in use, if one came up. */
     public void stopEngine() {
-        Engine e = engine;
         engine = null;
-        if (e != null) e.stop();
+        session.stopEngine();
     }
 
     /**
      * FX thread. Another profile was chosen: remembered for the next start, and the engine is
      * replaced in place when it is not the one running. The list empties while the new one comes
-     * up; the poll, the watcher and the old engine stop first, on their own threads.
+     * up; the session stops the poll, the watcher and the old engine first, on their own threads.
      */
     private void switchProfile(EngineProfile next) {
         settings.setEngineProfile(next.id());
@@ -1965,21 +2164,16 @@ public final class MainWindow {
             setStatus(tr("status.profileInUse", next.displayName()));
             return;
         }
-        Engine old = engine;
         engine = null;
         engineDescription = "";
-        stopPolling();
-        poller = null;
-        stopWatching();
-        watcher = null;
         fetchWatch = null;
         long now = System.currentTimeMillis() / 1000;
         rows.apply(List.of(), now);
         refreshSidebar(List.of());
         detail.clear();
         showRates(Engine.Rates.ZERO, 0);
-        if (old != null) Thread.ofVirtual().name("engine-stop").start(old::stop);
-        startEngine(next);
+        engineStarting(next);
+        session.switchTo(next);
     }
 
     /** FX thread. A list of the profiles to pick from; the choice switches at once. */
@@ -2046,26 +2240,20 @@ public final class MainWindow {
      * machine's when the files are not here (a daemon's download folder is a path on its machine).
      * Any thread.
      */
-    private AddDialog.Defaults addDefaults() {
-        AddDialog.Defaults d = AddDialog.Defaults.from(settings);
-        Engine e = engine;
-        if (e != null && capabilities.lacks(Engine.Capability.LOCAL_FILES)) {
-            String remote = e.downloadDir();
-            if (!remote.isEmpty()) return d.withSavePath(Path.of(remote));
-        }
-        return d;
+    private AddDefaults addDefaults() {
+        return session.addDefaults();
     }
 
     /** {@code via} is for the dialog's header; null reads it off the input itself. */
-    private void addInput(String input, AddDialog.Via via) {
+    private void addInput(String input, AddDialog.@Nullable Via via) {
         if (engine == null) {
-            pendingInputs.add(input);
+            session.input(input);
             return;
         }
         String text = input.trim();
         Engine e = engine;
         boolean withoutAsking = settings.addWithoutAsking();
-        AddDialog.Defaults defaults = addDefaults();
+        AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("engine-inspect").start(() -> {
             try {
                 if (Inputs.isDirectLink(text)) {
@@ -2087,23 +2275,95 @@ public final class MainWindow {
                             case FILE -> AddDialog.Via.FILE;
                             case URL -> AddDialog.Via.URL;
                         };
-                AddRequest.Source source =
-                        switch (kind) {
-                            case MAGNET -> new AddRequest.Magnet(text);
-                            case FILE -> {
-                                Path file = Path.of(text);
-                                if (!Files.isRegularFile(file))
-                                    throw new EngineException(tr("status.noSuchFile", text));
-                                yield new AddRequest.TorrentFile(Files.readAllBytes(file), text);
-                            }
-                            case URL -> new AddRequest.TorrentFile(new TorrentFetch().fetch(URI.create(text)), text);
-                        };
+                AddRequest.Source source = session.resolve(text);
                 addSource(e, source, shownVia, withoutAsking, defaults);
             } catch (EngineException | IOException | RuntimeException ex) {
                 String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
                 Platform.runLater(() -> setStatus(message));
             }
         });
+    }
+
+    /**
+     * FX thread. File → Import from another client…: the dialog on the qBittorrent folders found on
+     * this machine (or the capture hook's), each read and planned on a worker, then the chosen
+     * torrents brought over on another; the session logs the summary and each failure.
+     */
+    private void importFromClient() {
+        if (engine == null || (importDialog != null && importDialog.isShowing())) return;
+        Path home = Path.of(System.getProperty("user.home"));
+        List<Path> found = importFolderForCapture != null
+                ? List.of()
+                : ImportText.found(System.getProperty("os.name"), home, System.getenv());
+        ImportDialog dialog = new ImportDialog(stage, found, folder -> loadImport(folder, home));
+        if (importFolderForCapture != null) {
+            dialog.showFolder(importFolderForCapture);
+            importFolderForCapture = null;
+        }
+        if (importConfirmForCapture) {
+            dialog.confirmWhenLoaded();
+            importConfirmForCapture = false;
+        }
+        importDialog = dialog;
+        Optional<List<com.torrenta.migrate.ImportPlan.Item>> chosen = dialog.showAndWait();
+        importDialog = null;
+        table.requestFocus();
+        if (chosen.isEmpty()) return;
+        setStatus(tr("status.importing", chosen.get().size()));
+        Thread.ofVirtual().name("engine-import").start(() -> {
+            try {
+                session.importTorrents(chosen.get());
+            } catch (EngineException ex) {
+                Platform.runLater(() -> setStatus(ex.getMessage(), EngineEvent.Level.ERROR));
+            }
+        });
+    }
+
+    /** Worker. One folder read and planned against the torrents the engine has now: whichever client's it is. */
+    private ImportText.Loaded loadImport(Path folder, Path home) {
+        java.util.Map<String, String> env = System.getenv();
+        Engine e = engine;
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        if (e != null) for (Torrent t : e.torrents()) ids.add(t.id());
+        if (com.torrenta.migrate.TransmissionReader.isConfigFolder(folder)) {
+            com.torrenta.migrate.TransmissionReader.Found found = com.torrenta.migrate.TransmissionReader.read(folder);
+            for (String line : found.unreadable()) LOG.warning("Import: not readable in " + folder + ": " + line);
+            boolean running = com.torrenta.migrate.TransmissionReader.running(folder);
+            return new ImportText.Loaded(
+                    folder,
+                    com.torrenta.migrate.ImportPlan.of(
+                            found.candidates(), ids, com.torrenta.migrate.ImportPlan::sizeOnDisk, running),
+                    false,
+                    running,
+                    found.unreadable(),
+                    com.torrenta.migrate.TransmissionReader.CLIENT);
+        }
+        if (com.torrenta.migrate.DelugeReader.isConfigFolder(folder)) {
+            com.torrenta.migrate.DelugeReader.Found found = com.torrenta.migrate.DelugeReader.read(folder);
+            for (String line : found.unreadable()) LOG.warning("Import: not readable in " + folder + ": " + line);
+            boolean running = com.torrenta.migrate.DelugeReader.running(folder);
+            return new ImportText.Loaded(
+                    folder,
+                    com.torrenta.migrate.ImportPlan.of(
+                            found.candidates(), ids, com.torrenta.migrate.ImportPlan::sizeOnDisk, running),
+                    false,
+                    running,
+                    found.unreadable(),
+                    com.torrenta.migrate.DelugeReader.CLIENT);
+        }
+        com.torrenta.migrate.QbittorrentReader.Found found =
+                com.torrenta.migrate.QbittorrentReader.read(folder, home, env);
+        // The dialog's note counts them; which ones is here, in the debug log.
+        for (String line : found.unreadable()) LOG.warning("Import: not readable in " + found.backup() + ": " + line);
+        boolean running = com.torrenta.migrate.QbittorrentReader.running(found.backup(), home, env);
+        return new ImportText.Loaded(
+                found.backup(),
+                com.torrenta.migrate.ImportPlan.of(
+                        found.candidates(), ids, com.torrenta.migrate.ImportPlan::sizeOnDisk, running),
+                found.sqlite(),
+                running,
+                found.unreadable(),
+                com.torrenta.migrate.QbittorrentReader.CLIENT);
     }
 
     /**
@@ -2143,11 +2403,15 @@ public final class MainWindow {
      * handed to the Add dialog on the FX thread.
      */
     private void addSource(
-            Engine e, AddRequest.Source source, AddDialog.Via via, boolean withoutAsking, AddDialog.Defaults defaults)
+            Engine e, AddRequest.Source source, AddDialog.Via via, boolean withoutAsking, AddDefaults defaults)
             throws EngineException {
         if (withoutAsking) {
-            Torrent added = e.add(AddDialog.withoutAsking(source, defaults));
-            Platform.runLater(() -> setStatus(tr("status.added", added.name())));
+            try {
+                Torrent added = session.add(e, defaults.withoutAsking(source));
+                Platform.runLater(() -> setStatus(tr("status.added", added.name())));
+            } catch (UnsafeContent.Refused refused) {
+                reportFromWorker(EngineEvent.session(EngineEvent.Level.WARNING, refused.line()));
+            }
             return;
         }
         TorrentPreview preview = source instanceof AddRequest.TorrentFile file ? e.inspect(file.bytes()) : null;
@@ -2167,10 +2431,10 @@ public final class MainWindow {
         String fetching = SearchAdd.fetchingText(result);
         if (!fetching.isEmpty()) setStatus(fetching);
         boolean withoutAsking = settings.addWithoutAsking();
-        AddDialog.Defaults defaults = addDefaults();
+        AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("search-add").start(() -> {
             try {
-                AddRequest.Source source = SearchAdd.sourceOf(result, new TorrentFetch()::fetch);
+                AddRequest.Source source = session.resolve(SearchAdd.sourceOf(result, new TorrentFetch()::fetch));
                 if (!fetching.isEmpty()) Platform.runLater(() -> setStatus(tr("status.fetched", result.name())));
                 addSource(e, source, AddDialog.Via.SEARCH, withoutAsking, defaults);
             } catch (EngineException | IOException | RuntimeException ex) {
@@ -2193,10 +2457,10 @@ public final class MainWindow {
         String fetching = RssAdd.fetchingText(article);
         if (!fetching.isEmpty()) setStatus(fetching);
         boolean withoutAsking = settings.addWithoutAsking();
-        AddDialog.Defaults defaults = addDefaults();
+        AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("rss-add").start(() -> {
             try {
-                AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
+                AddRequest.Source source = session.resolve(RuleAdd.sourceOf(article, new TorrentFetch()::fetch));
                 if (!fetching.isEmpty())
                     Platform.runLater(() -> setStatus(tr("status.fetched", article.displayTitle())));
                 addSource(e, source, AddDialog.Via.RSS, withoutAsking, defaults);
@@ -2213,11 +2477,11 @@ public final class MainWindow {
      * FX thread, since cancelling is an engine call.
      */
     private static final class FetchSlot {
-        private Engine.MetadataFetch fetch;
+        private Engine.@Nullable SwarmProbe fetch;
         private boolean closed;
 
         /** False, and the fetch cancelled, if the dialog closed first. */
-        synchronized boolean set(Engine.MetadataFetch f) {
+        synchronized boolean set(Engine.SwarmProbe f) {
             if (closed) {
                 f.cancel();
                 return false;
@@ -2226,28 +2490,28 @@ public final class MainWindow {
             return true;
         }
 
-        synchronized Engine.MetadataFetch get() {
+        synchronized Engine.@Nullable SwarmProbe get() {
             return closed ? null : fetch;
         }
 
         /** Cancelled: the dialog closed without adding. */
         synchronized void close() {
-            Engine.MetadataFetch f = take();
+            Engine.SwarmProbe f = take();
             if (f != null) f.cancel();
         }
 
         /**
-         * Added: the fetch, for {@link Engine#add(AddRequest, Engine.MetadataFetch)} to end and
+         * Added: the fetch, for {@link Engine#add(AddRequest, Engine.SwarmProbe)} to end and
          * take the peers from; null if there was none. A fetch that starts later is cancelled.
          */
-        synchronized Engine.MetadataFetch take() {
+        synchronized Engine.@Nullable SwarmProbe take() {
             closed = true;
             return fetch;
         }
     }
 
     /** The open dialog's fetch, for the poll thread to report peers to; null when there is none. */
-    private volatile FetchWatch fetchWatch;
+    private volatile @Nullable FetchWatch fetchWatch;
 
     private record FetchWatch(FetchSlot slot, AddDialog dialog) {}
 
@@ -2255,7 +2519,7 @@ public final class MainWindow {
     private final List<Runnable> queuedDialogs = new ArrayList<>();
 
     /** FX thread. Shows the dialog and, if confirmed, adds on a worker. */
-    private void openDialog(AddRequest.Source source, TorrentPreview preview, AddDialog.Via via) {
+    private void openDialog(AddRequest.Source source, @Nullable TorrentPreview preview, AddDialog.Via via) {
         if (currentDialog != null) {
             // One dialog at a time: several files chosen at once open one after the other.
             queuedDialogs.add(() -> openDialog(source, preview, via));
@@ -2263,8 +2527,23 @@ public final class MainWindow {
         }
         AddDialog dialog = new AddDialog(stage, source, preview, via, addDefaults(), labels.categories());
         dialog.applyCapabilities(capabilities);
+        Engine current = engine;
+        if (current != null && capabilities.has(Engine.Capability.DEDUP)) {
+            // The names from the latest poll, read when the line is drawn: an input that opens
+            // the dialog at start arrives before the first poll, and each poll redraws the line.
+            dialog.offerFromDisk(
+                    current.contentIndex(),
+                    com.torrenta.engine.DedupMode.byName(settings.addDedup()),
+                    id -> lastSnapshot.stream()
+                            .filter(t -> t.id().equals(id))
+                            .map(Torrent::name)
+                            .findFirst()
+                            .orElse(id));
+        }
         FetchSlot slot = new FetchSlot();
         if (preview == null && source instanceof AddRequest.Magnet magnet) startFetch(magnet, slot, dialog);
+        else if (source instanceof AddRequest.TorrentFile file && preview != null)
+            startProbe(file, preview, slot, dialog);
         currentDialog = dialog;
         Optional<AddDialog.Choice> choice = dialog.showAndWait();
         currentDialog = null;
@@ -2281,10 +2560,17 @@ public final class MainWindow {
         rememberLabels(request.labels());
         if (c.withoutAsking()) rememberAddDefaults(request);
         Thread.ofVirtual().name("engine-add").start(() -> {
-            Engine.MetadataFetch fetch = slot.take();
+            Engine.SwarmProbe fetch = slot.take();
             String outcome;
             try {
-                Torrent added = fetch == null ? e.add(request) : e.add(request, fetch);
+                // The files the dialog offered from disk, placed first: a copy can take a while.
+                AddRequest placing = request;
+                if ((c.dedupLinks() || c.dedupCopies())
+                        && request.source() instanceof AddRequest.TorrentFile
+                        && c.preview() != null)
+                    placing = session.placeFound(e, request, c.preview(), c.dedupLinks(), c.dedupCopies());
+                Torrent added = fetch == null ? e.add(placing) : e.add(placing, fetch);
+                session.attachFollowing(e, added);
                 outcome = tr("status.added", added.name());
                 if (c.firstAndLastFirst()) {
                     TorrentLimits limits = e.limits(added.id());
@@ -2322,10 +2608,15 @@ public final class MainWindow {
             dialog.noFetch(tr("dialog.add.filesAfterAdd"));
             return;
         }
+        if (e == null) {
+            // Gone between the dialog opening and the fetch: a profile switch, a quit.
+            Platform.runLater(() -> dialog.fetchFailed(tr("engine.error.notRunning")));
+            return;
+        }
         Thread.ofVirtual().name("engine-fetch").start(() -> {
-            Engine.MetadataFetch fetch;
+            Engine.SwarmProbe fetch;
             try {
-                fetch = e.fetchMetadata(magnet.uri());
+                fetch = e.probe(magnet, settings.addProbePrivate());
             } catch (EngineException ex) {
                 Platform.runLater(() -> dialog.fetchFailed(ex.getMessage()));
                 return;
@@ -2335,7 +2626,8 @@ public final class MainWindow {
             fetch.torrent().whenComplete((bytes, failure) -> {
                 if (failure != null) {
                     if (!(failure instanceof java.util.concurrent.CancellationException)) {
-                        Platform.runLater(() -> dialog.fetchFailed(failure.getMessage()));
+                        Platform.runLater(() -> dialog.fetchFailed(
+                                java.util.Objects.toString(failure.getMessage(), failure.toString())));
                     }
                     return;
                 }
@@ -2353,6 +2645,30 @@ public final class MainWindow {
         });
     }
 
+    /**
+     * Worker: a {@code .torrent}'s own look at the swarm while the dialog is open, as a magnet's
+     * fetch stays to look once its files are in. Not for a private torrent unless the setting lets
+     * it (a private tracker counts the probe's announce), nor where the engine cannot look. A probe
+     * that cannot start (the torrent is in the list already) leaves the line off; the dialog says
+     * nothing about it, since the add itself will.
+     */
+    private void startProbe(AddRequest.TorrentFile file, TorrentPreview preview, FetchSlot slot, AddDialog dialog) {
+        Engine e = engine;
+        boolean privateToo = settings.addProbePrivate();
+        if (e == null || capabilities.lacks(Engine.Capability.SWARM_PREVIEW) || (preview.isPrivate() && !privateToo))
+            return;
+        Thread.ofVirtual().name("engine-probe").start(() -> {
+            Engine.SwarmProbe probe;
+            try {
+                probe = e.probe(file, privateToo);
+            } catch (EngineException ex) {
+                LOG.log(Level.FINE, "No swarm probe: " + ex.getMessage(), ex);
+                return;
+            }
+            if (slot.set(probe)) fetchWatch = new FetchWatch(slot, dialog);
+        });
+    }
+
     /** "Next time, add with these settings without asking": the dialog's choices become the defaults. */
     private void rememberAddDefaults(AddRequest request) {
         settings.setAddWithoutAsking(true);
@@ -2363,7 +2679,7 @@ public final class MainWindow {
         AddDialog.folderToRemember(request.savePath(), settings.downloadDir(), categoryFolder)
                 .ifPresent(settings::downloadDir);
         settings.saveQuietly();
-        log.add(EngineEvent.info(null, null, tr("log.addWithoutAsking")));
+        log.add(EngineEvent.info(null, "", tr("log.addWithoutAsking")));
     }
 
     /**
@@ -2454,8 +2770,89 @@ public final class MainWindow {
             setStatus(tr("status.engineStarting"));
             return;
         }
-        if (createDialog == null || !createDialog.isShowing()) createDialog = new CreateDialog(stage, e, settings);
+        if (createDialog == null || !createDialog.isShowing())
+            createDialog = new CreateDialog(
+                    stage, e, settings, capabilities.has(Engine.Capability.MUTABLE) ? publisher(e) : null);
         createDialog.show();
+    }
+
+    /** The session's publishing, for the Create dialog; each round refreshes what the commands know. */
+    private CreateDialog.Publisher publisher(Engine e) {
+        return new CreateDialog.Publisher() {
+            @Override
+            public String problem(String name) {
+                return session.publicationProblem(name);
+            }
+
+            @Override
+            public Path keysDir() {
+                return session.keysDir();
+            }
+
+            @Override
+            public Session.Published publish(String name, com.torrenta.engine.CreatedTorrent made)
+                    throws EngineException, IOException {
+                try {
+                    return session.publish(e, name, made);
+                } finally {
+                    refreshPublications();
+                }
+            }
+
+            @Override
+            public Session.Published newVersion(String name, com.torrenta.engine.CreatedTorrent made)
+                    throws EngineException, IOException {
+                try {
+                    return session.newVersion(e, name, made);
+                } finally {
+                    refreshPublications();
+                }
+            }
+        };
+    }
+
+    /** Any thread: what this machine publishes, by the current version's id, read off the FX thread. */
+    private void refreshPublications() {
+        Thread.ofVirtual().name("publications").start(() -> {
+            Map<String, com.torrenta.engine.Publication> byId = new java.util.HashMap<>();
+            for (com.torrenta.engine.Publication p : session.publications())
+                if (!p.torrentId().isEmpty()) byId.put(p.torrentId(), p);
+            Platform.runLater(() -> {
+                publishedById = Map.copyOf(byId);
+                publicationMarks.set(publicationMarks.get() + 1);
+            });
+        });
+    }
+
+    /** The publication of the one torrent selected, if it is a published one's current version. */
+    private java.util.Optional<com.torrenta.engine.Publication> selectedPublication() {
+        List<Torrent> selected = selectedTorrents();
+        return selected.size() == 1
+                ? java.util.Optional.ofNullable(
+                        publishedById.get(selected.getFirst().id()))
+                : java.util.Optional.empty();
+    }
+
+    /**
+     * Torrent → New Version…: the Create dialog on the published torrent's content, publishing what
+     * it makes under the same key as the next version.
+     */
+    private void newVersion() {
+        java.util.Optional<com.torrenta.engine.Publication> p = selectedPublication();
+        if (p.isEmpty()) return;
+        Torrent t = selectedTorrents().getFirst();
+        createTorrent();
+        if (createDialog != null)
+            createDialog.forNewVersion(p.get(), Path.of(t.savePath()).resolve(t.name()));
+    }
+
+    private void copyUpdatableLink() {
+        selectedPublication().ifPresent(p -> {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(p.uri());
+            Clipboard.getSystemClipboard().setContent(content);
+            setStatus(tr("status.copied.updatableLink"));
+        });
     }
 
     private void addTorrentFile() {
@@ -2492,21 +2889,18 @@ public final class MainWindow {
     private void offerClipboard() {
         // The welcome's card says it already, with the link's name.
         if (welcome != null && welcome.isVisible()) return;
+        // The offer is a key to press; with Add from Clipboard on none, there is nothing to offer.
+        String key = chordText("add-clipboard");
+        if (key.isEmpty()) return;
         clipboardCandidate().ifPresent(text -> {
             if (text.equals(lastClipboardOffer)) return;
             lastClipboardOffer = text;
             setStatus(
                     Inputs.classify(text) == Inputs.Kind.MAGNET
-                            ? tr(
-                                    "status.clipboard.magnet",
-                                    Chords.of("add-clipboard").getDisplayText())
+                            ? tr("status.clipboard.magnet", key)
                             : Inputs.isDirectLink(text)
-                                    ? tr(
-                                            "status.clipboard.link",
-                                            Chords.of("add-clipboard").getDisplayText())
-                                    : tr(
-                                            "status.clipboard.torrent",
-                                            Chords.of("add-clipboard").getDisplayText()));
+                                    ? tr("status.clipboard.link", key)
+                                    : tr("status.clipboard.torrent", key));
         });
     }
 
@@ -2545,37 +2939,35 @@ public final class MainWindow {
         e.consume();
     }
 
-    private void poll() {
-        Engine engine = this.engine;
-        if (engine == null) return;
+    /** Poll thread: one poll of the session's, drawn into the window and whatever it watches. */
+    private void polled(Session.Poll poll) {
+        Engine engine = poll.engine();
+        // The session polls from the moment the engine is up; the window draws from engineReady.
+        if (engine != this.engine) return;
+        List<Torrent> snapshot = poll.torrents();
+        Engine.Rates current = poll.rates();
+        long nowSeconds = poll.nowSeconds();
         FetchWatch watch = fetchWatch;
-        Engine.MetadataFetch fetch = watch == null ? null : watch.slot().get();
-        if (fetch != null) {
-            int peers = fetch.peers();
-            Platform.runLater(() -> watch.dialog().showFetching(peers));
+        Engine.SwarmProbe fetch = watch == null ? null : watch.slot().get();
+        if (watch != null && fetch != null) {
+            if (!fetch.torrent().isDone()) {
+                int peers = fetch.peers();
+                Platform.runLater(() -> watch.dialog().showFetching(peers));
+            } else {
+                // The files are in and the fetch stays to look at the swarm, over the ticked files.
+                Optional<SwarmPreview> swarm = fetch.swarm(watch.dialog().wantedFiles());
+                Platform.runLater(() -> watch.dialog().showSwarm(swarm));
+            }
         }
-        List<Torrent> snapshot = engine.torrents();
-        Engine.Rates current = engine.rates();
-        long nowSeconds = System.currentTimeMillis() / 1000;
-        sessionHistory.add(nowSeconds, current.download(), current.upload());
-        Set<String> present = new java.util.HashSet<>();
-        for (Torrent t : snapshot) {
-            present.add(t.id());
-            recentHistories
-                    .computeIfAbsent(t.id(), k -> SpeedHistory.recent())
-                    .add(nowSeconds, t.downloadRate(), t.uploadRate());
-            SpeedHistory h = torrentHistories.get(t.id());
-            if (h != null) h.add(nowSeconds, t.downloadRate(), t.uploadRate());
-        }
-        recentHistories.keySet().retainAll(present);
-        torrentHistories.keySet().retainAll(present);
         // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
         com.torrenta.engine.SessionStats stats = statsWanted ? engine.stats() : null;
-        enforceShareLimits(engine, snapshot);
         TorrentDetail shown = fetchDetail(engine);
         Connectivity connectivity = engine.connectivity();
         long unproven = portClock.tick(connectivity, NetworkStatus.anyRunning(snapshot), nowSeconds);
-        Optional<NetworkStatus.Port> port = NetworkStatus.port(connectivity, unproven);
+        InterfaceWatch.State binding = watchInterface(engine, nowSeconds);
+        Optional<NetworkStatus.Port> port = NetworkStatus.port(connectivity, unproven, binding);
+        Optional<LeakView> leak = checkLeaks(engine, binding, connectivity.externalAddress(), snapshot, nowSeconds);
+        boolean checking = exitChecking;
         Optional<String> dht = NetworkStatus.dht(connectivity, engine.stats().dhtNodes());
         Optional<NetworkStatus.Free> space = freeSpace(nowSeconds);
         pushTray(TrayStatus.of(snapshot, current));
@@ -2585,8 +2977,9 @@ public final class MainWindow {
             refreshSidebar(snapshot);
             showRates(current, nowSeconds);
             showNetwork(port, dht, space);
+            showLeak(leak, checking);
             applyDetail(shown, nowSeconds);
-            if (stats != null) statsWindow.update(stats, sessionHistory, nowSeconds);
+            if (stats != null) statsWindow.update(stats, session.history(), nowSeconds);
         });
     }
 
@@ -2594,7 +2987,7 @@ public final class MainWindow {
      * Poll thread. The detail pane costs a status with the pieces bitfield; only for one shown
      * torrent, and null for none or for one gone between the selection and the poll.
      */
-    private TorrentDetail fetchDetail(Engine engine) {
+    private @Nullable TorrentDetail fetchDetail(Engine engine) {
         String id = detailWanted ? detailId : null;
         if (id == null) return null;
         try {
@@ -2605,13 +2998,15 @@ public final class MainWindow {
     }
 
     /** FX thread. A detail snapshot into the pane, unless the selection has moved on since. */
-    private void applyDetail(TorrentDetail shown, long nowSeconds) {
+    private void applyDetail(@Nullable TorrentDetail shown, long nowSeconds) {
         if (!detailWanted) return;
-        if (shown != null && shown.general().id().equals(detailId)) {
-            TorrentRow row = rows.get(detailId);
+        String id = detailId;
+        if (shown != null && id != null && shown.general().id().equals(id)) {
+            TorrentRow row = rows.get(id);
+            detail.showStreamWindow(session.streamWindow(id).orElse(null));
             detail.show(shown, row == null ? null : row.torrent(), row == null ? 0 : row.quietSeconds(), nowSeconds);
-            detail.showSpeed(torrentHistories.get(detailId), nowSeconds);
-        } else if (detailId == null) detail.clear();
+            detail.showSpeed(session.followed(id), nowSeconds);
+        } else if (id == null) detail.clear();
     }
 
     /**
@@ -2620,76 +3015,16 @@ public final class MainWindow {
      * it never overlaps a poll; requests made while one is queued share it.
      */
     private void refreshDetailNow() {
-        ScheduledExecutorService p = poller;
-        if (p == null || !detailWanted || detailId == null || !detailRefreshQueued.compareAndSet(false, true)) return;
-        try {
-            p.execute(() -> {
-                detailRefreshQueued.set(false);
-                Engine engine = this.engine;
-                TorrentDetail shown = engine == null ? null : fetchDetail(engine);
-                if (shown == null) return;
-                long nowSeconds = System.currentTimeMillis() / 1000;
-                Platform.runLater(() -> applyDetail(shown, nowSeconds));
-            });
-        } catch (java.util.concurrent.RejectedExecutionException e) {
-            detailRefreshQueued.set(false); // stopping: no more polls of any kind
-        }
-    }
-
-    /**
-     * Poll thread. libtorrent ranks seeds by the share limits but pauses nothing by them, so the
-     * rule is applied here, once a second: a finished torrent past its own or the global limit is
-     * paused, removed (with its files or without) or super seeded, and the log says so. A paused one no longer qualifies, so it is done once;
-     * resuming it by hand seeds it until the next tick, raising the limit seeds it for good.
-     */
-    private void enforceShareLimits(Engine engine, List<Torrent> snapshot) {
-        ShareLimit global = globalShareLimit;
-        java.util.Map<String, ShareLimit> overrides = settings.shareOverrides();
-        shareOverrides = overrides;
-        if (!global.limited() && overrides.isEmpty()) return;
-        for (Torrent t : snapshot) {
-            Optional<ShareLimit.Action> due = ShareLimit.decide(t, global, overrides.get(t.id()));
-            if (due.isEmpty()) continue;
-            // A synced setting can ask a daemon for super seeding, which it lacks; failing that
-            // every second would fill the log, so the limit does nothing there.
-            if (due.get() == ShareLimit.Action.SUPER_SEED && capabilities.lacks(Engine.Capability.SUPER_SEEDING))
-                continue;
-            String text;
-            try {
-                text = switch (due.get()) {
-                    case PAUSE -> {
-                        engine.pause(t.id());
-                        yield tr("log.shareLimit.paused", t.name());
-                    }
-                    case REMOVE -> {
-                        engine.remove(t.id(), false);
-                        yield tr("log.shareLimit.removed", t.name());
-                    }
-                    case REMOVE_DATA -> {
-                        engine.remove(t.id(), true);
-                        yield tr("log.shareLimit.removedData", t.name());
-                    }
-                    case SUPER_SEED -> {
-                        engine.setSuperSeeding(t.id(), true);
-                        yield tr("log.shareLimit.superSeeding", t.name());
-                    }
-                };
-            } catch (EngineException e) {
-                text = tr("log.shareLimit.failed", t.name(), e.getMessage());
-            }
-            String message = text;
-            boolean removed = due.get() == ShareLimit.Action.REMOVE || due.get() == ShareLimit.Action.REMOVE_DATA;
-            EngineEvent event =
-                    EngineEvent.of(EngineEvent.Kind.SEEDING_DONE, EngineEvent.Level.INFO, t.id(), t.name(), message);
-            // The snapshot goes along: a removed torrent cannot be looked up for the placeholders.
-            Automation a = automation;
-            if (a != null) a.handle(event, t);
-            Platform.runLater(() -> {
-                log.add(event);
-                setStatus(message);
-                if (removed) forgetOverride(t.id());
-            });
-        }
+        if (!detailWanted || detailId == null || !detailRefreshQueued.compareAndSet(false, true)) return;
+        boolean queued = session.execute(() -> {
+            detailRefreshQueued.set(false);
+            Engine engine = this.engine;
+            TorrentDetail shown = engine == null ? null : fetchDetail(engine);
+            if (shown == null) return;
+            long nowSeconds = System.currentTimeMillis() / 1000;
+            Platform.runLater(() -> applyDetail(shown, nowSeconds));
+        });
+        if (!queued) detailRefreshQueued.set(false); // stopping, or not started: no more polls of any kind
     }
 
     /** FX thread. A graph's window chip was chosen: remembered, and the other graph follows. */
@@ -2763,7 +3098,7 @@ public final class MainWindow {
 
     /** The saved divider of the place the pane is in; see {@link DetailSplit} for what is not restored. */
     private double dividerFromSettings() {
-        return detailPlace.divider(settings.get(dividerKey(detailPlace), null));
+        return detailPlace.divider(settings.raw(dividerKey(detailPlace)));
     }
 
     /**
@@ -2777,7 +3112,7 @@ public final class MainWindow {
                     dividerKey(detailPlace),
                     String.format(java.util.Locale.ROOT, "%.3f", split.getDividerPositions()[0]));
         }
-        settings.set(Settings.DETAIL_TAB, detail.activeTab());
+        settings.set(Settings.DETAIL_TAB, detail.rememberedTab());
         settings.saveQuietly();
     }
 
@@ -2786,15 +3121,9 @@ public final class MainWindow {
      * torrents, and the sidebar would take that for the choices' entries having gone.
      */
     public void stopPolling() {
-        if (poller == null) return;
-        poller.shutdownNow();
         // A poll in flight finishes before the engine is stopped behind it; the engine's own lock
         // guards that too, this just keeps the quit orderly.
-        try {
-            poller.awaitTermination(3, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-        }
+        session.stop();
     }
 
     // ---- commands -------------------------------------------------------------------------------
@@ -2802,6 +3131,243 @@ public final class MainWindow {
     /** An engine action on one torrent. */
     private interface TorrentAction {
         void apply(Engine engine, Torrent torrent) throws EngineException;
+    }
+
+    /** An action on one torrent that hands back how to take it back; null when there is nothing to. */
+    private interface UndoableAction {
+        UndoStack.Undo apply(Engine engine, Torrent torrent) throws EngineException;
+    }
+
+    /** What can be taken back; Shortcut+Z, Torrent → Undo, and the status bar's Undo. */
+    private final UndoStack undoStack = new UndoStack();
+
+    /** The status bar's Undo, shown for {@link UndoStack#OFFER_MS} after something undoable. */
+    private final Label undoOffer = new Label();
+
+    private final javafx.animation.PauseTransition undoOfferTimeout =
+            new javafx.animation.PauseTransition(javafx.util.Duration.millis(UndoStack.OFFER_MS));
+
+    /** Something to undo is kept: Torrent → Undo is live. */
+    private final javafx.beans.property.BooleanProperty canUndo = new javafx.beans.property.SimpleBooleanProperty();
+
+    /**
+     * {@link #onTorrents}, keeping how to take each back: once the worker is done, the inverses
+     * become one undo entry under the outcome's words, taken back newest first.
+     */
+    private void onTorrentsUndoable(String verb, List<Torrent> targets, UndoableAction action) {
+        if (targets.isEmpty() || engine == null) return;
+        Engine e = engine;
+        Thread.ofVirtual().name("engine-action").start(() -> {
+            int done = 0;
+            List<String> failures = new ArrayList<>();
+            List<UndoStack.Undo> inverses = new ArrayList<>();
+            for (Torrent t : targets) {
+                try {
+                    UndoStack.Undo inverse = action.apply(e, t);
+                    if (inverse != null) inverses.add(inverse);
+                    done++;
+                } catch (EngineException ex) {
+                    failures.add(ex.getMessage());
+                }
+            }
+            String text = Actions.outcome(verb, done, failures);
+            Platform.runLater(() -> {
+                setStatus(text);
+                if (!inverses.isEmpty())
+                    remember(text, engine -> {
+                        List<String> refused = new ArrayList<>();
+                        for (UndoStack.Undo inverse : inverses.reversed()) {
+                            try {
+                                inverse.run(engine);
+                            } catch (EngineException ex) {
+                                refused.add(ex.getMessage());
+                            }
+                        }
+                        if (!refused.isEmpty()) throw new EngineException(String.join("; ", refused));
+                    });
+            });
+        });
+    }
+
+    /** A typed command's row is always live: what it can act on is said in its words, not by greying. */
+    private static final ObservableBooleanValue TYPED_ENABLED = new ReadOnlyBooleanWrapper(true);
+
+    /**
+     * The palette's row for a command typed with what it takes ({@code set-category Films}): what it
+     * does and what it acts on, or what does not read; empty when the text names no such command.
+     */
+    private Optional<Command> typedCommand(String text) {
+        return OmniCommand.parse(text).map(parsed -> switch (parsed) {
+            case OmniCommand.Problem problem ->
+                new Command(
+                        "omni",
+                        problem.message(),
+                        null,
+                        "",
+                        TYPED_ENABLED,
+                        () -> setStatus(problem.message(), EngineEvent.Level.WARNING));
+            case OmniCommand.Ready ready -> {
+                boolean filtering = !omnibox.chips().isEmpty();
+                List<Torrent> targets = Actions.targets(
+                        selectedTorrents(),
+                        filtered.stream().map(TorrentRow::torrent).toList(),
+                        filtering);
+                String what = filtering
+                        ? tr("omni.targets.matching", targets.size())
+                        : tr("omni.targets.selected", targets.size());
+                yield new Command(
+                        "omni",
+                        tr("omni.row", ready.command().describe(), what),
+                        null,
+                        "",
+                        TYPED_ENABLED,
+                        () -> runTyped(ready.command(), targets));
+            }
+        });
+    }
+
+    /**
+     * FX thread. A typed command on its targets: asked about first when it removes or acts on
+     * more than {@link OmniCommand#ASK_ABOVE}; undoable where the menu's own command is.
+     */
+    private void runTyped(OmniCommand command, List<Torrent> all) {
+        boolean torrentsOnly =
+                switch (command.verb()) {
+                    case RECHECK, REANNOUNCE, SEQUENTIAL, QUEUE, LIMIT_UP -> true;
+                    default -> false;
+                };
+        List<Torrent> targets = torrentsOnly ? Actions.torrentsOnly(all) : all;
+        if (targets.isEmpty()) {
+            setStatus(tr("omni.nothing"));
+            return;
+        }
+        Engine.Capability needs =
+                switch (command.verb()) {
+                    case SEQUENTIAL -> Engine.Capability.SEQUENTIAL_DOWNLOAD;
+                    case QUEUE -> Engine.Capability.QUEUE_ORDER;
+                    case SET_LOCATION -> Engine.Capability.MOVE_STORAGE;
+                    default -> null;
+                };
+        if (needs != null && capabilities.lacks(needs)) {
+            setStatus(tr("omni.unsupported", command.verb().word()), EngineEvent.Level.WARNING);
+            return;
+        }
+        if (command.verb() == OmniCommand.Verb.REMOVE) {
+            if (!RemoveConfirm.ask(
+                    stage, tr("common.remove"), Actions.removeQuestion(targets.size(), false), tr("common.remove")))
+                return;
+            removeTorrents(targets, false);
+            return;
+        }
+        if (command.asks(targets.size())
+                && !RemoveConfirm.ask(
+                        stage,
+                        tr("omni.confirm.header"),
+                        tr("omni.confirm", command.describe(), targets.size()),
+                        tr("omni.confirm.button"))) return;
+        String text = command.text();
+        switch (command.verb()) {
+            case SET_CATEGORY -> {
+                rememberLabels(new TorrentLabels(text, List.of()));
+                onTorrentsUndoable(tr("actions.verb.filedUnder", text), targets, (e, t) -> {
+                    String was = e.category(t.id());
+                    e.setCategory(t.id(), text);
+                    return engine -> engine.setCategory(t.id(), was);
+                });
+            }
+            case ADD_TAG, REMOVE_TAG -> {
+                boolean add = command.verb() == OmniCommand.Verb.ADD_TAG;
+                if (add) rememberLabels(new TorrentLabels("", List.of(text)));
+                onTorrentsUndoable(tr("actions.verb.tagsSet"), targets, (e, t) -> {
+                    List<String> was = List.copyOf(e.tags(t.id()));
+                    List<String> tags = new ArrayList<>(was);
+                    if (add && !tags.contains(text)) tags.add(text);
+                    if (!add) tags.remove(text);
+                    e.setTags(t.id(), tags);
+                    return engine -> engine.setTags(t.id(), was);
+                });
+            }
+            case SET_LOCATION ->
+                onTorrentsUndoable(tr("actions.verb.moving", text), targets, (e, t) -> {
+                    String was = t.savePath();
+                    e.moveStorage(t.id(), text, true);
+                    return engine -> engine.moveStorage(t.id(), was, true);
+                });
+            case LIMIT_DOWN, LIMIT_UP -> {
+                boolean down = command.verb() == OmniCommand.Verb.LIMIT_DOWN;
+                int rate = (int) command.bytes();
+                onTorrentsUndoable(tr("actions.verb.limitsSet"), targets, (e, t) -> {
+                    TorrentLimits was = e.limits(t.id());
+                    e.setLimits(
+                            t.id(),
+                            new TorrentLimits(
+                                    down ? rate : was.downloadLimit(),
+                                    down ? was.uploadLimit() : rate,
+                                    was.maxConnections(),
+                                    was.maxUploads(),
+                                    was.firstAndLastFirst()));
+                    return engine -> engine.setLimits(t.id(), was);
+                });
+            }
+            case SEQUENTIAL ->
+                onTorrents(
+                        command.on() ? tr("actions.verb.sequentialOn") : tr("actions.verb.sequentialOff"),
+                        targets,
+                        (e, t) -> e.setSequential(t.id(), command.on()));
+            case QUEUE -> {
+                Engine.QueueMove move = Objects.requireNonNull(command.move(), "a queue command has its move");
+                onTorrents(
+                        switch (move) {
+                            case TOP -> tr("actions.verb.queueTop");
+                            case UP -> tr("actions.verb.queueUp");
+                            case DOWN -> tr("actions.verb.queueDown");
+                            case BOTTOM -> tr("actions.verb.queueBottom");
+                        },
+                        targets,
+                        (e, t) -> e.queueMove(t.id(), move));
+            }
+            case PAUSE -> onTorrents(tr("actions.verb.paused"), targets, (e, t) -> e.pause(t.id()));
+            case RESUME -> onTorrents(tr("actions.verb.resumed"), targets, (e, t) -> e.resume(t.id()));
+            case RECHECK -> onTorrents(tr("actions.verb.rechecking"), targets, (e, t) -> e.recheck(t.id()));
+            case REANNOUNCE -> onTorrents(tr("actions.verb.reannounced"), targets, (e, t) -> e.reannounce(t.id()));
+            case REMOVE -> {
+                // Asked and done above.
+            }
+        }
+    }
+
+    /** FX thread. Keeps an undo, and offers it in the status bar for ten seconds. */
+    private void remember(String label, UndoStack.Undo undo) {
+        undoStack.push(label, System.currentTimeMillis(), undo);
+        canUndo.set(true);
+        undoOffer.setVisible(true);
+        undoOfferTimeout.playFromStart();
+    }
+
+    /** Shortcut+Z: the newest undo, taken back on a worker; the status bar says how it went. */
+    private void undoNewest() {
+        Engine e = engine;
+        java.util.Optional<UndoStack.Entry> entry = undoStack.take(System.currentTimeMillis());
+        canUndo.set(undoStack.newest(System.currentTimeMillis()).isPresent());
+        undoOffer.setVisible(false);
+        if (entry.isEmpty()) {
+            setStatus(tr("status.undo.nothing"));
+            return;
+        }
+        if (e == null) {
+            setStatus(tr("status.engineStarting"));
+            return;
+        }
+        String label = entry.get().label();
+        Thread.ofVirtual().name("engine-undo").start(() -> {
+            try {
+                entry.get().undo().run(e);
+                Platform.runLater(() -> setStatus(tr("status.undo.done", label)));
+            } catch (EngineException ex) {
+                Platform.runLater(
+                        () -> setStatus(tr("status.undo.failed", label, ex.getMessage()), EngineEvent.Level.ERROR));
+            }
+        });
     }
 
     private List<Torrent> selectedTorrents() {
@@ -2875,14 +3441,42 @@ public final class MainWindow {
     private void remove(boolean deleteFiles) {
         List<Torrent> selected = selectedTorrents();
         if (selected.isEmpty()) return;
+        Engine e = engine;
+        boolean toTrash = deleteFiles && e != null && session.removesToTrash(e);
         boolean yes = RemoveConfirm.ask(
                 stage,
-                deleteFiles ? tr("window.remove.header.delete") : tr("common.remove"),
-                Actions.removeQuestion(selected.size(), deleteFiles),
-                deleteFiles ? tr("window.remove.button.delete") : tr("common.remove"));
+                !deleteFiles
+                        ? tr("common.remove")
+                        : toTrash ? tr("window.remove.header.trash") : tr("window.remove.header.delete"),
+                Actions.removeQuestion(selected.size(), deleteFiles, toTrash),
+                !deleteFiles
+                        ? tr("common.remove")
+                        : toTrash ? tr("window.remove.button.trash") : tr("window.remove.button.delete"));
         if (!yes) return;
+        removeTorrents(selected, deleteFiles);
+    }
+
+    /** The removal itself, the question asked already: undoable where the engine can take it back. */
+    private void removeTorrents(List<Torrent> selected, boolean deleteFiles) {
+        if (!deleteFiles && capabilities.has(Engine.Capability.UNDO_REMOVE)) {
+            // Taken out whole, so Shortcut+Z can put each back as it was; its own share limit too.
+            onTorrentsUndoable(tr("actions.verb.removed"), selected, (e, t) -> {
+                java.util.Optional<ShareLimit> override = settings.shareOverride(t.id());
+                Engine.Detached detached = e.detach(t.id());
+                Platform.runLater(() -> forgetOverride(t.id()));
+                return engine -> {
+                    engine.reattach(detached);
+                    override.ifPresent(limit -> Platform.runLater(() -> {
+                        settings.setShareOverride(detached.id(), limit);
+                        settings.saveQuietly();
+                    }));
+                };
+            });
+            return;
+        }
         onSelection(tr("actions.verb.removed"), (e, t) -> {
-            e.remove(t.id(), deleteFiles);
+            if (deleteFiles) session.removeWithFiles(e, t);
+            else e.remove(t.id(), false);
             Platform.runLater(() -> forgetOverride(t.id()));
         });
     }
@@ -2969,7 +3563,12 @@ public final class MainWindow {
         if (result.isEmpty()) return;
         String path = result.get().path();
         boolean moveFiles = result.get().moveFiles();
-        onTorrents(tr("actions.verb.moving", path), selected, (e, t) -> e.moveStorage(t.id(), path, moveFiles));
+        onTorrentsUndoable(tr("actions.verb.moving", path), selected, (e, t) -> {
+            String was = t.savePath();
+            e.moveStorage(t.id(), path, moveFiles);
+            // Back where it was, the same way: the files moved back, or the torrent pointed back.
+            return engine -> engine.moveStorage(t.id(), was, moveFiles);
+        });
     }
 
     // ---- categories and tags --------------------------------------------------------------------
@@ -2990,7 +3589,11 @@ public final class MainWindow {
     private void setCategory(String name) {
         rememberLabels(new TorrentLabels(name, List.of()));
         String verb = name.isEmpty() ? tr("actions.verb.categoryCleared") : tr("actions.verb.filedUnder", name);
-        onSelection(verb, (e, t) -> e.setCategory(t.id(), name));
+        onTorrentsUndoable(verb, selectedTorrents(), (e, t) -> {
+            String was = e.category(t.id());
+            e.setCategory(t.id(), name);
+            return engine -> engine.setCategory(t.id(), was);
+        });
     }
 
     /**
@@ -3085,11 +3688,13 @@ public final class MainWindow {
         table.requestFocus();
         if (result.isEmpty()) return;
         rememberLabels(new TorrentLabels("", result.get().add()));
-        onTorrents(tr("actions.verb.tagsSet"), selected, (e, t) -> {
-            List<String> tags = new ArrayList<>(e.tags(t.id()));
+        onTorrentsUndoable(tr("actions.verb.tagsSet"), selected, (e, t) -> {
+            List<String> was = List.copyOf(e.tags(t.id()));
+            List<String> tags = new ArrayList<>(was);
             tags.removeAll(result.get().remove());
             tags.addAll(result.get().add());
             e.setTags(t.id(), tags);
+            return engine -> engine.setTags(t.id(), was);
         });
     }
 
@@ -3132,7 +3737,137 @@ public final class MainWindow {
 
     /** FX thread. The sidebar's entries and counts from the store and this snapshot. */
     private void refreshSidebar(List<Torrent> snapshot) {
-        sidebar.update(labels.categories().stream().map(Category::name).toList(), labels.tags(), snapshot);
+        lastSnapshot = snapshot;
+        // An open Add dialog's files-on-disk line follows the index and the names, which the
+        // first polls after a start are still filling in.
+        if (currentDialog != null) currentDialog.refreshFromDisk();
+        sidebar.update(
+                sidebarViews(java.time.Instant.now().getEpochSecond()),
+                labels.categories().stream().map(Category::name).toList(),
+                labels.tags(),
+                snapshot);
+    }
+
+    /** The saved views as the sidebar lists them, each query read with this clock. */
+    private List<SidebarEntries.View> sidebarViews(long now) {
+        return settings.savedViews().stream()
+                .map(v -> new SidebarEntries.View(v.slug(), v.name(), FilterQuery.parse(v.query(), now)))
+                .toList();
+    }
+
+    /** The n-th saved view (1 first), chosen; nothing when there are fewer. */
+    private void chooseSavedView(int n) {
+        List<com.torrenta.store.SavedView> views = settings.savedViews();
+        if (n < 1 || n > views.size()) return;
+        chooseFilter(SidebarFilter.view(views.get(n - 1).slug()));
+    }
+
+    /**
+     * Save Filter as View (Shortcut+S): the omnibox's query kept under a name asked for, the view
+     * then chosen and the box emptied, so the list stays as it was while the filter moves into
+     * the sidebar.
+     */
+    private void saveView() {
+        String query = omnibox.query().strip();
+        if (query.isEmpty() || (promptDialog != null && promptDialog.isShowing())) return;
+        // On the next pulse: a nested event loop cannot start inside an animation or layout pass.
+        Platform.runLater(() -> {
+            javafx.scene.control.TextInputDialog prompt = new javafx.scene.control.TextInputDialog(query);
+            prompt.initOwner(stage);
+            Fonts.installUiFont(prompt.getDialogPane());
+            prompt.setTitle(tr("window.saveView.title"));
+            prompt.setHeaderText(tr("window.saveView.header", query));
+            StockButtons.translate(prompt);
+            prompt.getEditor().setPrefColumnCount(32);
+            String typed = saveViewForCapture;
+            saveViewForCapture = null;
+            if (typed != null) {
+                Platform.runLater(() -> {
+                    prompt.getEditor().setText(typed);
+                    StockButtons.okButton(prompt).fire();
+                });
+            }
+            promptDialog = prompt;
+            prompt.showAndWait()
+                    .map(String::strip)
+                    .filter(name -> !name.isEmpty())
+                    .ifPresent(name -> {
+                        List<com.torrenta.store.SavedView> views =
+                                com.torrenta.store.SavedView.added(settings.savedViews(), name, query);
+                        settings.setSavedViews(views);
+                        settings.saveQuietly();
+                        setOmnibox(Omnibox.EMPTY);
+                        refreshSidebar(lastSnapshot);
+                        chooseFilter(SidebarFilter.view(views.getLast().slug()));
+                        setStatus(tr("status.viewSaved", name));
+                    });
+        });
+    }
+
+    /** The sidebar's menu on a view: Rename…, Use the Current Filter, Delete…; by slug. */
+    private final class ViewActions implements Sidebar.ViewActions {
+        @Override
+        public void rename(String slug) {
+            com.torrenta.store.SavedView view = savedView(slug);
+            if (view == null || (promptDialog != null && promptDialog.isShowing())) return;
+            Platform.runLater(() -> {
+                javafx.scene.control.TextInputDialog prompt = new javafx.scene.control.TextInputDialog(view.name());
+                prompt.initOwner(stage);
+                Fonts.installUiFont(prompt.getDialogPane());
+                prompt.setTitle(tr("window.renameView.title"));
+                prompt.setHeaderText(tr("window.renameView.header", view.name()));
+                StockButtons.translate(prompt);
+                promptDialog = prompt;
+                prompt.showAndWait()
+                        .map(String::strip)
+                        .filter(name -> !name.isEmpty() && !name.equals(view.name()))
+                        .ifPresent(name ->
+                                changeViews(com.torrenta.store.SavedView.renamed(settings.savedViews(), slug, name)));
+            });
+        }
+
+        @Override
+        public void useCurrentFilter(String slug) {
+            String query = omnibox.query().strip();
+            if (savedView(slug) == null || query.isEmpty()) return;
+            changeViews(com.torrenta.store.SavedView.requeried(settings.savedViews(), slug, query));
+            setOmnibox(Omnibox.EMPTY);
+            chooseFilter(SidebarFilter.view(slug));
+        }
+
+        @Override
+        public boolean canUseCurrentFilter() {
+            return filterSaveable.get();
+        }
+
+        @Override
+        public void delete(String slug) {
+            com.torrenta.store.SavedView view = savedView(slug);
+            if (view == null) return;
+            Platform.runLater(() -> {
+                if (!RemoveConfirm.ask(stage, RemoveConfirm.Kind.VIEW, view.name())) return;
+                changeViews(com.torrenta.store.SavedView.removed(settings.savedViews(), slug));
+            });
+        }
+    }
+
+    private com.torrenta.store.@Nullable SavedView savedView(String slug) {
+        return settings.savedViews().stream()
+                .filter(v -> v.slug().equals(slug))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /** The views replaced, saved, and the sidebar and the list told: a deleted view's choice clears itself. */
+    private void changeViews(List<com.torrenta.store.SavedView> views) {
+        settings.setSavedViews(views);
+        settings.saveQuietly();
+        refreshSidebar(lastSnapshot);
+        if (sidebarSelection.view().kind() == SidebarFilter.Kind.VIEW
+                && views.stream()
+                        .noneMatch(v -> v.slug().equals(sidebarSelection.view().value())))
+            setSidebarSelection(sidebarSelection.cleared(SidebarFilter.Axis.VIEW));
+        else applyFilters();
     }
 
     /** An entry chosen in the sidebar by hand (or a section's All, when its choice vanished). */
@@ -3161,7 +3896,8 @@ public final class MainWindow {
     }
 
     private void applyFilters() {
-        filtered.setPredicate(rowFilter(omnibox.query(), sidebarSelection));
+        filtered.setPredicate(rowFilter(omnibox.query(), sidebarSelection, settings.savedViews()));
+        filterSaveable.set(!omnibox.query().isBlank());
     }
 
     /**
@@ -3278,7 +4014,7 @@ public final class MainWindow {
     }
 
     /** What the capture hook types into the next Rename dialog before pressing OK. */
-    private String renameForCapture;
+    private @Nullable String renameForCapture;
 
     private void renameTo(Torrent t, String name) {
         onTorrents(
@@ -3332,7 +4068,7 @@ public final class MainWindow {
     private void export(Map<Torrent, Path> targets) {
         onTorrents(tr("actions.verb.exported"), List.copyOf(targets.keySet()), (e, t) -> {
             try {
-                CreateDialog.write(targets.get(t), e.exportTorrent(t.id()));
+                CreateDialog.write(Objects.requireNonNull(targets.get(t), "one of the keys"), e.exportTorrent(t.id()));
             } catch (IOException ex) {
                 throw new EngineException(tr("status.export.writeFailed", targets.get(t), ex.getMessage()), ex);
             }
@@ -3348,7 +4084,7 @@ public final class MainWindow {
     }
 
     /** The torrent the detail pane shows, or null with no single selection or none in the list. */
-    private Torrent detailTorrent() {
+    private @Nullable Torrent detailTorrent() {
         String id = detailId;
         TorrentRow row = id == null ? null : rows.get(id);
         return row == null ? null : row.torrent();
@@ -3374,23 +4110,32 @@ public final class MainWindow {
                         settings::filesToPick),
                 table.getSelectionModel().getSelectedItems(),
                 pickFilesMarks);
+        BooleanBinding published = Bindings.createBooleanBinding(
+                () -> selectedPublication().isPresent(),
+                table.getSelectionModel().getSelectedItems(),
+                publicationMarks);
         List<Command> all = new ArrayList<>(List.of(
+                new Command(
+                        "new-version",
+                        tr("command.newVersion"),
+                        null,
+                        gate("new-version", published),
+                        this::newVersion),
+                new Command(
+                        "copy-updatable-link",
+                        tr("command.copyUpdatableLink"),
+                        null,
+                        gate("copy-updatable-link", published),
+                        this::copyUpdatableLink),
                 new Command(
                         "create",
                         tr("command.create"),
                         Chords.of("create"),
-                        null,
                         gate("create", always),
                         this::createTorrent),
+                new Command("add-file", tr("command.addFile"), Chords.of("add-file"), always, this::addTorrentFile),
                 new Command(
-                        "add-file", tr("command.addFile"), Chords.of("add-file"), null, always, this::addTorrentFile),
-                new Command(
-                        "add-magnet",
-                        tr("command.addMagnet"),
-                        Chords.of("add-magnet"),
-                        null,
-                        always,
-                        this::addMagnetLink),
+                        "add-magnet", tr("command.addMagnet"), Chords.of("add-magnet"), always, this::addMagnetLink),
                 // The chord is a scene accelerator, not a menu one: Ctrl+V in a text field must paste.
                 new Command(
                         "add-clipboard",
@@ -3405,14 +4150,12 @@ public final class MainWindow {
                         "force-resume",
                         tr("command.forceResume"),
                         Chords.of("force-resume"),
-                        null,
                         selection,
                         () -> onSelection(tr("actions.verb.forced"), (e, t) -> e.forceResume(t.id()))),
                 new Command(
                         "recheck",
                         tr("command.recheck"),
                         Chords.of("recheck"),
-                        null,
                         torrents,
                         () -> onTorrents(
                                 tr("actions.verb.rechecking"), torrentsSelected(), (e, t) -> e.recheck(t.id()))),
@@ -3420,7 +4163,6 @@ public final class MainWindow {
                         "reannounce",
                         tr("command.reannounce"),
                         Chords.of("reannounce"),
-                        null,
                         torrents,
                         () -> onTorrents(
                                 tr("actions.verb.reannounced"), torrentsSelected(), (e, t) -> e.reannounce(t.id()))),
@@ -3428,58 +4170,50 @@ public final class MainWindow {
                         "sequential",
                         tr("command.sequential"),
                         Chords.of("sequential"),
-                        null,
                         gate("sequential", torrents),
                         this::toggleSequential),
                 new Command(
                         "super-seed",
                         tr("command.superSeed"),
                         null,
-                        null,
                         gate("super-seed", torrents),
                         this::toggleSuperSeeding),
-                new Command("limits", tr("command.limits"), Chords.of("limits"), null, selection, this::editLimits),
+                new Command("limits", tr("command.limits"), Chords.of("limits"), selection, this::editLimits),
                 // The four chords are also taken on the table itself (onTableChord): its own
                 // Ctrl+Shift+arrow bindings would consume them before the accelerators saw them.
                 new Command(
                         "queue-top",
                         tr("command.queueTop"),
                         Chords.of("queue-top"),
-                        null,
                         gate("queue-top", torrents),
                         () -> queueMove(Engine.QueueMove.TOP)),
                 new Command(
                         "queue-up",
                         tr("command.queueUp"),
                         Chords.of("queue-up"),
-                        null,
                         gate("queue-up", torrents),
                         () -> queueMove(Engine.QueueMove.UP)),
                 new Command(
                         "queue-down",
                         tr("command.queueDown"),
                         Chords.of("queue-down"),
-                        null,
                         gate("queue-down", torrents),
                         () -> queueMove(Engine.QueueMove.DOWN)),
                 new Command(
                         "queue-bottom",
                         tr("command.queueBottom"),
                         Chords.of("queue-bottom"),
-                        null,
                         gate("queue-bottom", torrents),
                         () -> queueMove(Engine.QueueMove.BOTTOM)),
                 new Command(
                         "set-location",
                         tr("command.setLocation"),
                         Chords.of("set-location"),
-                        null,
                         gate("set-location", selection),
                         this::setLocation),
                 new Command(
                         "choose-files",
                         tr("command.chooseFiles"),
-                        null,
                         null,
                         filesToChoose,
                         () -> selectedTorrents().stream().findFirst().ifPresent(t -> chooseFiles(t.id()))),
@@ -3487,12 +4221,10 @@ public final class MainWindow {
                         "set-category",
                         tr("command.setCategory"),
                         Chords.of("set-category"),
-                        null,
                         selection,
                         this::chooseCategory),
-                new Command(
-                        "edit-tags", tr("command.editTags"), Chords.of("edit-tags"), null, selection, this::editTags),
-                new Command("manage-categories", tr("command.manageCategories"), null, null, always, () -> {
+                new Command("edit-tags", tr("command.editTags"), Chords.of("edit-tags"), selection, this::editTags),
+                new Command("manage-categories", tr("command.manageCategories"), null, always, () -> {
                     settingsWindow.show(stage);
                     settingsWindow.selectPageForCapture("LABELS");
                 }),
@@ -3500,37 +4232,39 @@ public final class MainWindow {
                         "copy-name",
                         tr("command.copyName"),
                         Chords.of("copy-name"),
-                        null,
                         selection,
                         () -> copyToClipboard("status.copied.name", Torrent::name)),
                 new Command(
                         "copy-hash",
                         tr("command.copyHash"),
                         Chords.of("copy-hash"),
-                        null,
                         torrents,
                         () -> copyToClipboard("status.copied.infoHash", torrentsSelected(), Torrent::id)),
                 new Command(
                         "copy-magnet",
                         tr("command.copyMagnet"),
                         Chords.of("copy-magnet"),
-                        null,
                         torrents,
                         this::copyMagnetLinks),
                 // F2 is handled on the table, like Space and Delete: a text field takes it too.
                 new Command("rename", tr("command.rename"), null, "F2", gate("rename", selection), this::renameTorrent),
                 new Command(
+                        "undo",
+                        tr("command.undo"),
+                        null,
+                        Chords.of("undo").getDisplayText(),
+                        canUndo,
+                        this::undoNewest),
+                new Command(
                         "export-torrent",
                         tr("command.exportTorrent"),
                         Chords.of("export-torrent"),
-                        null,
                         gate("export-torrent", torrents),
                         this::exportTorrents),
                 new Command(
                         "open-folder",
                         tr("command.openFolder"),
                         Chords.of("open-folder"),
-                        null,
                         gate("open-folder", selection),
                         this::openFolder),
                 new Command("remove", tr("command.remove"), null, tr("key.delete"), selection, () -> remove(false)),
@@ -3545,25 +4279,35 @@ public final class MainWindow {
                         "alt-speed",
                         tr("command.altSpeed"),
                         Chords.of("alt-speed"),
-                        null,
                         always,
                         this::toggleAlternativeSpeed),
-                new Command("quit", tr("menu.file.quit"), Chords.of("quit"), null, always, this::quit),
-                new Command("check-updates", tr("command.checkUpdates"), null, null, always, this::checkForUpdatesNow),
-                new Command("about", tr("command.about", AppInfo.NAME), null, null, always, this::showAbout),
+                new Command("quit", tr("menu.file.quit"), Chords.of("quit"), always, this::quit),
+                new Command("check-updates", tr("command.checkUpdates"), null, always, this::checkForUpdatesNow),
+                new Command("about", tr("command.about", AppInfo.NAME), null, always, this::showAbout),
                 new Command(
                         "settings",
                         tr("command.settings"),
                         Chords.of("settings"),
-                        null,
                         always,
                         () -> settingsWindow.show(stage)),
-                new Command("switch-profile", tr("command.switchProfile"), null, null, always, this::chooseProfile),
+                new Command("switch-profile", tr("command.switchProfile"), null, always, this::chooseProfile),
                 new Command(
-                        "retry-engine", tr("command.retryEngine"), null, null, engineDown, () -> startEngine(profile)),
-                new Command("search", tr("command.search"), Chords.of("search"), null, always, this::showSearch),
-                new Command("rss", tr("command.rss"), Chords.of("rss"), null, always, this::showRss),
-                new Command("rss-run-rules", tr("command.rssRunRules"), null, null, always, rss::runRulesNow),
+                        "import-from-client",
+                        tr("command.importFromClient"),
+                        null,
+                        gate("import-from-client", always),
+                        this::importFromClient),
+                new Command("retry-engine", tr("command.retryEngine"), null, engineDown, () -> startEngine(profile)),
+                new Command("search", tr("command.search"), Chords.of("search"), always, this::showSearch),
+                new Command(
+                        "search-clear",
+                        tr("command.searchClear"),
+                        null,
+                        tr("dialog.common.key.esc"),
+                        searchPane.clearableProperty(),
+                        this::clearSearch),
+                new Command("rss", tr("command.rss"), Chords.of("rss"), always, this::showRss),
+                new Command("rss-run-rules", tr("command.rssRunRules"), null, always, rss::runRulesNow),
                 new Command(
                         "transfers",
                         tr("command.transfers"),
@@ -3595,9 +4339,10 @@ public final class MainWindow {
                         always,
                         this::focusFilter),
                 new Command(
+                        "save-view", tr("command.saveView"), Chords.of("save-view"), filterSaveable, this::saveView),
+                new Command(
                         "toggle-density",
                         tr("command.toggleDensity"),
-                        null,
                         null,
                         always,
                         () -> chooseDensity(density.other())),
@@ -3629,12 +4374,11 @@ public final class MainWindow {
                         Chords.of("message-log").getDisplayText(),
                         always,
                         () -> messagePopup.toggle()),
-                new Command("debug-log", tr("command.debugLog"), null, null, always, this::showDebugLog),
-                new Command("report-problem", tr("command.reportProblem"), null, null, always, this::showReportProblem),
+                new Command("debug-log", tr("command.debugLog"), null, always, this::showDebugLog),
+                new Command("report-problem", tr("command.reportProblem"), null, always, this::showReportProblem),
                 new Command(
                         "toggle-toolbar",
                         tr("command.toggleToolbar"),
-                        null,
                         null,
                         always,
                         () -> toolbar.setVisible(!toolbar.isVisible())),
@@ -3642,33 +4386,28 @@ public final class MainWindow {
                         "toggle-sidebar",
                         tr("command.toggleSidebar"),
                         Chords.of("toggle-sidebar"),
-                        null,
                         always,
                         () -> setSidebarVisible(!sidebar.isVisible())),
                 new Command(
                         "focus-sidebar",
                         tr("command.focusSidebar"),
                         Chords.of("focus-sidebar"),
-                        null,
                         always,
                         this::focusSidebar),
-                new Command("sidebar-side", tr("command.sidebarSide"), null, null, always, this::switchSidebarSide),
+                new Command("sidebar-side", tr("command.sidebarSide"), null, always, this::switchSidebarSide),
                 new Command(
                         "toggle-detail",
                         tr("command.toggleDetail"),
                         Chords.of("toggle-detail"),
-                        null,
                         always,
                         this::toggleDetail),
-                new Command("detail-side", tr("command.detailSide"), null, null, always, this::switchDetailSide)));
+                new Command("detail-side", tr("command.detailSide"), null, always, this::switchDetailSide)));
         // One "Show: …" per status, and Show: All, so a filter is picked without the mouse.
-        all.add(new Command(
-                "show-all", tr("command.showAll"), null, null, always, () -> chooseFilter(SidebarFilter.ALL)));
+        all.add(new Command("show-all", tr("command.showAll"), null, always, () -> chooseFilter(SidebarFilter.ALL)));
         for (SidebarStatus status : SidebarStatus.values()) {
             all.add(new Command(
                     "show-" + status.key(),
                     tr("command.show", status.title()),
-                    null,
                     null,
                     always,
                     () -> chooseFilter(SidebarFilter.status(status))));
@@ -3681,6 +4420,7 @@ public final class MainWindow {
      * with Editora's glyphs. Hidden and unmanaged together, so View → Toolbar gives the row back to
      * the list; the choice is kept.
      */
+    @Initializer // from the constructor
     private ToolBar buildToolbar() {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -3719,12 +4459,16 @@ public final class MainWindow {
     /** A toolbar button for a command: its label and chord as the name, its enabled state followed. */
     private Button toolButton(String id, javafx.scene.Node icon) {
         Command c = command(id);
-        String name = c.label().replace("…", "");
-        if (!c.hint().isEmpty()) name = tr("toolbar.withChord", name, c.hint());
-        Button b = Icons.toolbarButton(icon, name, c.run());
+        Button b = Icons.toolbarButton(icon, toolName(c), c.run());
         b.disableProperty().bind(Bindings.not(c.enabled()));
         commandButtons.put(id, b);
         return b;
+    }
+
+    /** A toolbar button's name: the command's label and, when it has one, its chord. */
+    private static String toolName(Command c) {
+        String name = c.label().replace("…", "");
+        return c.hint().isEmpty() ? name : tr("toolbar.withChord", name, c.hint());
     }
 
     private Command command(String id) {
@@ -3743,7 +4487,7 @@ public final class MainWindow {
     }
 
     /** A glyph at the menus' size, or null for none. */
-    private static javafx.scene.Node menuIcon(Icons.Glyph glyph) {
+    private static javafx.scene.@Nullable Node menuIcon(Icons.@Nullable Glyph glyph) {
         return glyph == null ? null : glyph.at(Icons.MENU_SIZE);
     }
 
@@ -3822,6 +4566,7 @@ public final class MainWindow {
         }
     }
 
+    @Initializer // from the constructor
     private MenuBar buildMenuBar() {
         MenuItem addTorrent = menuItem("add-file");
         MenuItem addMagnet = menuItem("add-magnet");
@@ -3838,6 +4583,8 @@ public final class MainWindow {
                         addMagnet,
                         addClipboard,
                         new SeparatorMenuItem(),
+                        menuItem("import-from-client"),
+                        new SeparatorMenuItem(),
                         menuItem("rss-run-rules"),
                         menuItem("settings"),
                         menuItem("switch-profile"),
@@ -3845,25 +4592,29 @@ public final class MainWindow {
                         quit);
 
         Menu torrent = new Menu(tr("menu.torrent"));
+        torrent.getItems().addAll(menuItem("undo"), new SeparatorMenuItem());
         torrent.getItems().addAll(torrentItems());
 
         paletteItem = new MenuItem(tr("menu.view.commandPalette"));
         paletteItem.setGraphic(menuIcon(Icons.palette()));
-        paletteItem.setAccelerator(paletteChord);
+        paletteItem.setAccelerator(chord("palette"));
+        chordItems.put("palette", paletteItem);
         paletteItem.setOnAction(e -> palette.show(CapabilityRules.commands(commands, capabilities)));
         CheckMenuItem toolbarItem = new CheckMenuItem(tr("menu.view.toolbar"));
         toolbarItem.setGraphic(menuIcon(Icons.toolbar()));
         toolbarItem.selectedProperty().bindBidirectional(toolbar.visibleProperty());
         CheckMenuItem sidebarItem = new CheckMenuItem(tr("menu.view.sidebar"));
         sidebarItem.setGraphic(menuIcon(Icons.sidebar()));
-        sidebarItem.setAccelerator(Chords.of("toggle-sidebar"));
+        sidebarItem.setAccelerator(chord("toggle-sidebar"));
+        chordItems.put("toggle-sidebar", sidebarItem);
         sidebarItem.selectedProperty().bindBidirectional(sidebar.visibleProperty());
         sidebarRightItem = new CheckMenuItem(tr("menu.view.sidebarRight"));
         sidebarRightItem.setSelected(SidebarPlace.of(true, settings.sidebarSide()) == SidebarPlace.RIGHT);
         sidebarRightItem.setOnAction(e -> switchSidebarSide());
         detailItem = new CheckMenuItem(tr("menu.view.detail"));
         detailItem.setGraphic(menuIcon(Icons.detailPane()));
-        detailItem.setAccelerator(Chords.of("toggle-detail"));
+        detailItem.setAccelerator(chord("toggle-detail"));
+        chordItems.put("toggle-detail", detailItem);
         detailItem.setSelected(detailPlace.shown());
         detailItem.setOnAction(e -> toggleDetail());
         // Checked while the alternative limits are in force, by hand or by the schedule; the
@@ -3872,6 +4623,7 @@ public final class MainWindow {
         altSpeedItem = new CheckMenuItem(altSpeed.label());
         altSpeedItem.setGraphic(menuIcon(Icons.forCommand("alt-speed")));
         altSpeedItem.setAccelerator(altSpeed.accelerator());
+        chordItems.put("alt-speed", altSpeedItem);
         altSpeedItem.setOnAction(e -> {
             altSpeedItem.setSelected(altSpeedOn);
             altSpeed.run().run();
@@ -3910,6 +4662,7 @@ public final class MainWindow {
                         altSpeedItem,
                         new SeparatorMenuItem(),
                         menuItem("filter"),
+                        menuItem("save-view"),
                         menuItem("focus-sidebar"),
                         menuItem("select-all"),
                         menuItem("event-log"),
@@ -3963,7 +4716,14 @@ public final class MainWindow {
         items.add(categoryMenu());
         items.add(menuItem("edit-tags"));
         items.add(new SeparatorMenuItem());
-        for (String id : List.of("copy-name", "copy-hash", "copy-magnet", "export-torrent", "open-folder")) {
+        for (String id : List.of(
+                "copy-name",
+                "copy-hash",
+                "copy-magnet",
+                "copy-updatable-link",
+                "export-torrent",
+                "new-version",
+                "open-folder")) {
             items.add(menuItem(id));
         }
         items.add(new SeparatorMenuItem());
@@ -4021,8 +4781,8 @@ public final class MainWindow {
 
     // ---- layout ---------------------------------------------------------------------------------
 
+    @Initializer // from the constructor
     private VBox buildCenter() {
-        table = buildTable();
         table.visibleProperty().bind(Bindings.isNotEmpty(rows.list()));
         table.managedProperty().bind(table.visibleProperty());
         // The first torrent makes the table appear; it takes the focus then, unless the person is
@@ -4051,11 +4811,7 @@ public final class MainWindow {
                     detailId = selected.size() == 1 ? selected.get(0).id() : null;
                     // The Speed tab's full history starts with the first selection, from the short one
                     // every torrent keeps, so the tab has the last two minutes to show at once.
-                    if (detailId != null)
-                        torrentHistories.computeIfAbsent(detailId, k -> {
-                            SpeedHistory recent = recentHistories.get(k);
-                            return recent == null ? new SpeedHistory() : recent.widened();
-                        });
+                    if (detailId != null) session.follow(detailId);
                     if (detailId == null && detailWanted) detail.clear();
                     refreshDetailNow();
                 });
@@ -4069,6 +4825,8 @@ public final class MainWindow {
             if (t != null)
                 opener.accept(Path.of(t.savePath()).resolve(row.path()).toUri().toString());
         });
+        detail.setOnStream(row -> streamFile(row, true));
+        detail.setOnCopyStream(row -> streamFile(row, false));
         detail.setOnOpenFolder(row -> {
             Torrent t = detailTorrent();
             if (t == null || t.savePath() == null || t.savePath().isBlank()) return;
@@ -4116,6 +4874,7 @@ public final class MainWindow {
             settings.saveQuietly();
         });
         sidebar.setSidebarWidth(settings.sidebarWidth(SidebarWidth.DEFAULT));
+        sidebar.setViewActions(new ViewActions());
         sidebar.managedProperty().bind(sidebar.visibleProperty());
         sidebar.setVisible(settings.sidebar());
         sidebar.setCollapsed(settings.sidebarCollapsed().stream()
@@ -4131,7 +4890,8 @@ public final class MainWindow {
                 settings.sidebarChoice("status"),
                 settings.sidebarChoice("category"),
                 settings.sidebarChoice("tag"),
-                settings.sidebarChoice("tracker"));
+                settings.sidebarChoice("tracker"),
+                settings.sidebarChoice("view"));
         sidebar.select(sidebarSelection);
         applyFilters();
         transfersFrame = new BorderPane(split);
@@ -4206,29 +4966,6 @@ public final class MainWindow {
      * with the rule's save path, category and paused choice and the rest of the defaults; the
      * engine's refusal is the reason thrown.
      */
-    private void downloadForRule(Rule rule, Article article) throws IOException {
-        // The feeds due at start are fetched before the engine is up; the add waits for it, bounded.
-        try {
-            engineUp.await(60, TimeUnit.SECONDS);
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-        }
-        Engine e = engine;
-        if (e == null) throw new IOException(tr("status.engineNotRunning"));
-        AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
-        Optional<Path> categoryFolder = labels.category(rule.category()).flatMap(Category::path);
-        try {
-            e.add(RuleAdd.request(rule, source, addDefaults(), categoryFolder));
-        } catch (EngineException ex) {
-            throw new IOException(ex.getMessage() == null ? ex.toString() : ex.getMessage(), ex);
-        }
-    }
-
-    /** The fetch thread: a rule's add, or its failure, into the log and the status bar. */
-    private void reportRule(String message, boolean failed) {
-        reportFromWorker(EngineEvent.session(failed ? EngineEvent.Level.WARNING : EngineEvent.Level.INFO, message));
-    }
-
     /**
      * FX thread. The article's torrent added at once with the defaults, no dialog, and the article
      * marked downloaded: the context menu's Download.
@@ -4241,13 +4978,15 @@ public final class MainWindow {
         }
         String fetching = RssAdd.fetchingText(article);
         if (!fetching.isEmpty()) setStatus(fetching);
-        AddDialog.Defaults defaults = addDefaults();
+        AddDefaults defaults = addDefaults();
         Thread.ofVirtual().name("rss-download").start(() -> {
             try {
-                AddRequest.Source source = RssAdd.sourceOf(article, new TorrentFetch()::fetch);
-                Torrent added = e.add(AddDialog.withoutAsking(source, defaults));
+                AddRequest.Source source = session.resolve(RuleAdd.sourceOf(article, new TorrentFetch()::fetch));
+                Torrent added = session.add(e, defaults.withoutAsking(source));
                 rss.markDownloaded(article.feedId(), article.identity());
                 Platform.runLater(() -> setStatus(tr("status.added", added.name())));
+            } catch (UnsafeContent.Refused refused) {
+                reportFromWorker(EngineEvent.session(EngineEvent.Level.WARNING, refused.line()));
             } catch (EngineException | IOException | RuntimeException ex) {
                 String message = ex.getMessage() == null ? ex.toString() : ex.getMessage();
                 Platform.runLater(() -> setStatus(message));
@@ -4359,11 +5098,18 @@ public final class MainWindow {
         show(View.SEARCH);
     }
 
+    /** Clear Search Results, from the palette: the tab emptied and shown, the query focused. */
+    private void clearSearch() {
+        searchPane.clear();
+        show(View.SEARCH);
+    }
+
     /** The folder is re-read when Search opens, so a definition dropped in is a chip at once. */
     private void refreshSearchDefinitions() {
         if (definitionStore.refresh()) {
             reportDefinitionProblems();
             searchPane.reloadProviders();
+            if (sync != null) sync.markDirty();
         }
     }
 
@@ -4437,6 +5183,8 @@ public final class MainWindow {
         // a key badge, read from the same chord the command and the menu use.
         Label badge = new Label(Chords.of("filter").getDisplayText());
         badge.getStyleClass().add("key-badge");
+        badge.managedProperty().bind(badge.visibleProperty());
+        filterBadge = badge;
         HBox box = new HBox(Icons.find(), chipRow, filter, badge);
         box.getStyleClass().add("filter-box");
         box.setAlignment(Pos.CENTER_LEFT);
@@ -4457,12 +5205,40 @@ public final class MainWindow {
 
     /** {@link #rowFilter(String, SidebarSelection)} with the clock that {@code added<7d} counts from. */
     static java.util.function.Predicate<TorrentRow> rowFilter(String text, SidebarSelection sidebar, long now) {
-        FilterQuery query = FilterQuery.parse(text, now);
-        SidebarSelection s = sidebar == null ? SidebarSelection.ALL : sidebar;
-        return row -> query.matches(row.torrent()) && s.matches(row.torrent());
+        return rowFilter(text, sidebar, List.of(), now);
     }
 
+    /** {@link #rowFilter(String, SidebarSelection)} with the saved views a chosen one is read from. */
+    static java.util.function.Predicate<TorrentRow> rowFilter(
+            String text, SidebarSelection sidebar, List<com.torrenta.store.SavedView> views) {
+        return rowFilter(text, sidebar, views, java.time.Instant.now().getEpochSecond());
+    }
+
+    /**
+     * Every filter, the chosen saved view's query among them: the box, the view, the sidebar's
+     * sections, all of them at once. A view chosen and since deleted filters nothing.
+     */
+    static java.util.function.Predicate<TorrentRow> rowFilter(
+            String text, SidebarSelection sidebar, List<com.torrenta.store.SavedView> views, long now) {
+        FilterQuery query = FilterQuery.parse(text, now);
+        SidebarSelection s = sidebar == null ? SidebarSelection.ALL : sidebar;
+        FilterQuery view = viewQuery(s.view(), views, now);
+        return row -> query.matches(row.torrent()) && view.matches(row.torrent()) && s.matches(row.torrent());
+    }
+
+    /** The chosen view's query; {@link FilterQuery#EMPTY} when none is chosen or it is gone. */
+    static FilterQuery viewQuery(SidebarFilter chosen, List<com.torrenta.store.SavedView> views, long now) {
+        if (chosen.kind() != SidebarFilter.Kind.VIEW) return FilterQuery.EMPTY;
+        return views.stream()
+                .filter(v -> v.slug().equals(chosen.value()))
+                .findFirst()
+                .map(v -> FilterQuery.parse(v.query(), now))
+                .orElse(FilterQuery.EMPTY);
+    }
+
+    /** The filter of what shows: the Search tab's results filter once it has results, else the omnibox. */
     private void focusFilter() {
+        if (searchShowing() && searchPane.focusFilter()) return;
         filter.requestFocus();
         filter.selectAll();
     }
@@ -4677,7 +5453,6 @@ public final class MainWindow {
         applyDetailPlace();
         applyDensity(Density.byId(settings.density(), Density.DEFAULT));
         applyWindowStyle();
-        applyPaletteKey();
     }
 
     /**
@@ -4695,27 +5470,194 @@ public final class MainWindow {
     }
 
     private String paletteButtonName() {
-        return tr("toolbar.palette.tooltip", paletteChord.getDisplayText());
+        String chord = chordText("palette");
+        return chord.isEmpty() ? tr("menu.view.commandPalette").replace("…", "") : tr("toolbar.palette.tooltip", chord);
+    }
+
+    // ---- key bindings ---------------------------------------------------------------------------
+
+    /**
+     * The chords a handler of the window's own fires, not a menu item: scene accelerators, by the
+     * {@link Chords} name or command id they answer to. Set Category is a submenu, and a submenu
+     * carries no accelerator; Ctrl+1, 2, 3 show each view by its place on the strip, beside the
+     * views' own chords, which the menus keep showing.
+     */
+    private Map<String, Runnable> sceneActions() {
+        Map<String, Runnable> actions = new java.util.LinkedHashMap<>();
+        actions.put("filter-find", this::focusFilter);
+        actions.put("filter", this::focusFilter);
+        actions.put("palette", () -> palette.show(CapabilityRules.commands(commands, capabilities)));
+        actions.put("event-log", logWindow::show);
+        actions.put("statistics", statsWindow::show);
+        actions.put("message-log", messagePopup::toggle);
+        actions.put("add-clipboard", this::addFromClipboard);
+        actions.put("set-category", this::chooseCategoryByChord);
+        for (View v : View.values()) actions.put(Chords.viewName(v), () -> show(v));
+        return actions;
+    }
+
+    /** The chords the scene's key filters read for themselves ({@link #matches}): they never enter a text field. */
+    private static boolean byFilter(String id) {
+        return id.equals("undo")
+                || id.equals("view-next")
+                || id.equals("view-previous")
+                || id.startsWith("saved-view-");
+    }
+
+    /** The chord {@code id} is on now, or null for none. */
+    private @Nullable KeyCombination chord(String id) {
+        return keyChords.get(id);
+    }
+
+    /** The chord {@code id} is on now as the platform writes it, or empty for none. */
+    private String chordText(String id) {
+        KeyCombination c = chord(id);
+        return c == null ? "" : c.getDisplayText();
+    }
+
+    /** Whether {@code e} is the chord {@code id} is on now. */
+    private boolean matches(String id, KeyEvent e) {
+        KeyCombination c = chord(id);
+        return c != null && c.match(e);
     }
 
     /**
-     * The palette's chord, re-read from the settings: the accelerator moves, and the menu item, the
-     * toolbar tooltip and the palette's chip say the new one. Before the scene exists (the
-     * constructor's first pass) there is no accelerator to move; the scene is built with the chord.
+     * Every command the Keyboard page lists, under the menu it lives in, on its default chord: the
+     * {@link Chords} table in its order (Select All, the list's own key, left out), then every
+     * other command, which has none until the user gives it one. After the menus, which say where
+     * a command is.
      */
-    private void applyPaletteKey() {
-        KeyCombination wanted =
-                PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT).chord();
-        if (wanted.equals(paletteChord)) return;
-        Scene scene = host.getScene();
-        if (scene != null) {
-            scene.getAccelerators().remove(paletteChord);
-            scene.getAccelerators().put(wanted, () -> palette.show(CapabilityRules.commands(commands, capabilities)));
+    private List<Keybindings.Command> keyboardCommands() {
+        Map<MenuItem, String> idOfItem = new java.util.IdentityHashMap<>();
+        commandItems.forEach((id, items) -> items.forEach(item -> idOfItem.put(item, id)));
+        chordItems.forEach((id, item) -> idOfItem.put(item, id));
+        // Each command's menu and its place there, in the menus' order.
+        Map<String, String> menuOf = new LinkedHashMap<>();
+        for (Menu menu : menuBar.getMenus()) collectMenu(menu, menu.getText(), idOfItem, menuOf);
+        List<String> placed = new ArrayList<>(menuOf.keySet());
+        Map<String, String> tableGroups =
+                Map.of("file", tr("menu.file"), "torrent", tr("menu.torrent"), "view", tr("menu.view"));
+        String other = tr("settings.keys.group.other");
+        List<Keybindings.Command> out = new ArrayList<>();
+        Set<String> listed = new HashSet<>();
+        Chords.rebindable().forEach((id, chord) -> {
+            String table = Chords.group(id);
+            String group = menuOf.getOrDefault(id, table == null ? other : tableGroups.getOrDefault(table, other));
+            out.add(new Keybindings.Command(id, group, keyLabel(id), chord));
+            listed.add(id);
+        });
+        for (Command c : baseCommands) {
+            if (listed.contains(c.id()) || Chords.fixed().containsKey(c.id())) continue;
+            out.add(new Keybindings.Command(c.id(), menuOf.getOrDefault(c.id(), other), c.label(), null));
+            listed.add(c.id());
         }
-        paletteChord = wanted;
-        paletteItem.setAccelerator(wanted);
-        Icons.name(paletteButton, paletteButtonName());
-        palette.setOpenerChord(wanted.getDisplayText());
+        // Under each menu in turn, File first, and in the menu's own order within it; what is on
+        // no menu after, in the table's order (the sort is stable).
+        List<String> groups = new ArrayList<>();
+        for (Menu menu : menuBar.getMenus()) groups.add(menu.getText());
+        groups.add(other);
+        List<Keybindings.Command> sorted = new ArrayList<>(out);
+        sorted.sort(java.util.Comparator.<Keybindings.Command>comparingInt(k -> groups.indexOf(k.group()))
+                .thenComparingInt(k -> placed.contains(k.id()) ? placed.indexOf(k.id()) : Integer.MAX_VALUE));
+        return sorted;
+    }
+
+    private static void collectMenu(
+            Menu menu, String title, Map<MenuItem, String> idOfItem, Map<String, String> menuOf) {
+        for (MenuItem item : menu.getItems()) {
+            String id = idOfItem.get(item);
+            if (id != null) menuOf.putIfAbsent(id, title);
+            if (item instanceof Menu sub) collectMenu(sub, title, idOfItem, menuOf);
+        }
+    }
+
+    /** What the Keyboard page calls a table entry: the command's label, or the entry's own words. */
+    private String keyLabel(String id) {
+        for (Command c : baseCommands) if (c.id().equals(id)) return c.label();
+        if (id.equals("palette")) return tr("menu.view.commandPalette").replace("…", "");
+        if (id.equals("filter-find")) return tr("settings.keys.filterFind");
+        for (View v : View.values()) if (id.equals(Chords.viewName(v))) return tr("settings.keys.view", v.label());
+        if (id.startsWith("saved-view-")) return tr("settings.keys.savedView", id.substring("saved-view-".length()));
+        return id;
+    }
+
+    /**
+     * Puts every command on the chord the user's key bindings give it, live: the commands (so the
+     * palette, the detail pane and the table's own chords read the new ones), every menu item's
+     * accelerator, the scene's accelerators and filters, and everything that names a chord in
+     * words (toolbar, view strip, filter badge, welcome, undo offer).
+     *
+     * <p>Menu accelerators are taken off before any is put back on: JavaFX takes an item's old
+     * chord out of the scene when it changes, which would take it from an item that had just moved
+     * onto it.
+     */
+    private void applyKeybindings() {
+        Scene scene = host.getScene();
+        List<Keybindings.Command> keyboard = keyboardCommands();
+        keyChords = Keybindings.resolve(Keybindings.defaults(keyboard), settings.keyBindings(), Keybindings.MAC);
+        Map<String, KeyCombination> withFixed = new java.util.LinkedHashMap<>(keyChords);
+        withFixed.putAll(Chords.fixed());
+        keyChords = java.util.Collections.unmodifiableMap(withFixed);
+        commands = baseCommands.stream()
+                .map(c -> Chords.fixed().containsKey(c.id())
+                        ? c
+                        : c.rebound(
+                                chord(c.id()),
+                                c.accelerator() == null && Chords.all().containsKey(c.id())))
+                .toList();
+
+        if (scene != null) {
+            for (KeyCombination k : sceneChords) scene.getAccelerators().remove(k);
+        }
+        sceneChords.clear();
+        commandItems.values().forEach(items -> items.forEach(item -> item.setAccelerator(null)));
+        chordItems.values().forEach(item -> item.setAccelerator(null));
+        commandItems.forEach((id, items) -> {
+            KeyCombination shown = command(id).menuAccelerator();
+            items.forEach(item -> item.setAccelerator(shown));
+        });
+        chordItems.forEach((id, item) -> item.setAccelerator(chord(id)));
+        if (scene != null) {
+            Map<String, Runnable> actions = sceneActions();
+            actions.forEach((id, action) -> putSceneChord(scene, chord(id), action));
+            for (Command c : commands) {
+                String id = c.id();
+                if (actions.containsKey(id) || byFilter(id) || Chords.fixed().containsKey(id)) continue;
+                if (commandItems.containsKey(id) || chordItems.containsKey(id)) continue;
+                // On no menu (the palette's alone): the scene is the only place its chord can live.
+                putSceneChord(scene, c.accelerator(), () -> {
+                    Command now = command(id);
+                    if (now.enabled().get()) now.run().run();
+                });
+            }
+        }
+
+        commandButtons.forEach((id, button) -> Icons.name(button, toolName(command(id))));
+        if (paletteButton != null) Icons.name(paletteButton, paletteButtonName());
+        palette.setOpenerChord(chordText("palette"));
+        viewStrip.showChords(v -> chordText(Chords.viewName(v)));
+        filterBadge.setText(chordText("filter"));
+        filterBadge.setVisible(!filterBadge.getText().isEmpty());
+        undoOffer.setText(undoOfferText());
+        detail.setCommands(
+                id -> commands.stream().filter(c -> c.id().equals(id)).findFirst());
+        if (welcome != null) {
+            welcome.showChords(
+                    WELCOME_KEYS.stream().map(k -> command(k.getKey()).hint()).toList(),
+                    command("add-clipboard").hint());
+        }
+    }
+
+    private void putSceneChord(Scene scene, @Nullable KeyCombination chord, Runnable action) {
+        if (chord == null) return;
+        scene.getAccelerators().put(chord, action);
+        sceneChords.add(chord);
+    }
+
+    /** The status bar's Undo, with its chord while it has one. */
+    private String undoOfferText() {
+        String chord = chordText("undo");
+        return chord.isEmpty() ? command("undo").label() : tr("status.undo.offer", chord);
     }
 
     /**
@@ -4734,7 +5676,7 @@ public final class MainWindow {
             return row.torrentProperty()
                     .map(t -> new RowView(
                             t.name(),
-                            StatusLine.of(t, row.quietSeconds(), shareLimitFor(t)),
+                            StatusLine.of(t, row.quietSeconds(), shareLimitFor(t), settings.filesToPick(t.id())),
                             t.progress(),
                             t.direct()));
         });
@@ -4833,8 +5775,7 @@ public final class MainWindow {
 
     /** The share limit in force for a torrent: its own, else the global one. */
     private ShareLimit shareLimitFor(Torrent t) {
-        ShareLimit own = shareOverrides.get(t.id());
-        return own != null ? own : globalShareLimit;
+        return session.shareLimitFor(t);
     }
 
     /**
@@ -4848,7 +5789,8 @@ public final class MainWindow {
         column.setPrefWidth(300);
         column.setCellValueFactory(cell -> {
             TorrentRow row = cell.getValue();
-            return row.torrentProperty().map(t -> StatusLine.of(t, row.quietSeconds(), shareLimitFor(t)));
+            return row.torrentProperty()
+                    .map(t -> StatusLine.of(t, row.quietSeconds(), shareLimitFor(t), settings.filesToPick(t.id())));
         });
         column.setCellFactory(c -> new StatusCell());
         return column;
@@ -4896,8 +5838,8 @@ public final class MainWindow {
         private static final javafx.css.PseudoClass INACTIVE = javafx.css.PseudoClass.getPseudoClass("inactive");
         // Invalidation, not change: two equal snapshots fire no change, yet the stall clock moved.
         private final javafx.beans.InvalidationListener onTorrent = o -> restyle();
-        private TorrentRow watched;
-        private RowState shown;
+        private @Nullable TorrentRow watched;
+        private @Nullable RowState shown;
 
         @Override
         protected void updateItem(TorrentRow item, boolean empty) {
@@ -4935,6 +5877,7 @@ public final class MainWindow {
      * When the engine could not start: the reason, and the two ways out, under the welcome's drop
      * zone. Hidden otherwise; the palette offers both as commands as well.
      */
+    @Initializer // from the constructor, through installWelcome
     private VBox buildEngineProblem() {
         engineProblemText = new Label();
         engineProblemText.getStyleClass().addAll("empty-hint", "engine-problem");
@@ -4979,13 +5922,16 @@ public final class MainWindow {
         refreshWelcomeClipboard();
     }
 
+    /** The welcome's four keys: the command, and what the welcome says it does. */
+    private static final List<Map.Entry<String, String>> WELCOME_KEYS = List.of(
+            Map.entry("add-file", "welcome.key.open"),
+            Map.entry("add-clipboard", "welcome.key.clipboard"),
+            Map.entry("filter", "welcome.key.omnibox"),
+            Map.entry("settings", "welcome.key.settings"));
+
     private Welcome buildWelcome() {
         List<Welcome.Key> keys = new ArrayList<>();
-        for (var k : List.of(
-                Map.entry("add-file", "welcome.key.open"),
-                Map.entry("add-clipboard", "welcome.key.clipboard"),
-                Map.entry("filter", "welcome.key.omnibox"),
-                Map.entry("settings", "welcome.key.settings"))) {
+        for (var k : WELCOME_KEYS) {
             Command c = command(k.getKey());
             keys.add(new Welcome.Key(c.hint(), tr(k.getValue()), c.run()));
         }
@@ -5053,7 +5999,7 @@ public final class MainWindow {
         });
         // The alternative-speed toggle: a click flips the manual switch; the schedule shows too.
         altSpeedToggle.getStyleClass().add("alt-speed");
-        altSpeedToggle.setText(tr("status.altSpeed.off"));
+        altSpeedToggle.setText(tr("status.altSpeed", com.torrenta.session.SpeedMode.Reason.NONE.pill()));
         altSpeedToggle.setOnMouseClicked(e -> toggleAlternativeSpeed());
         // The status text is the door to its own history: a click shows what scrolled past.
         status.getStyleClass().add("status-message");
@@ -5086,15 +6032,30 @@ public final class MainWindow {
         freeStatus.setOnMouseClicked(
                 e -> opener.accept(settings.downloadDir().toUri().toString()));
         for (Label l : List.of(portStatus, dhtStatus, freeStatus)) reveal(l, false);
+        // The leak check's shield: only while something is bound; a click opens its card.
+        leakPill.getStyleClass().add("leak-pill");
+        leakPill.setGraphic(Icons.shield().at(14));
+        leakPill.setOnMouseClicked(e -> leakCard.toggle());
+        reveal(leakPill, false);
         // The message is the one that gives way: the rates, the switch and the counts keep their width.
         status.setMinWidth(0);
         status.setMaxWidth(Double.MAX_VALUE);
         HBox.setHgrow(status, Priority.SOMETIMES);
+        // Undo, after the message that said what was done; for ten seconds, then Shortcut+Z alone.
+        undoOffer.setText(undoOfferText());
+        undoOffer.getStyleClass().add("status-undo");
+        undoOffer.setMinWidth(Region.USE_PREF_SIZE);
+        undoOffer.managedProperty().bind(undoOffer.visibleProperty());
+        undoOffer.setVisible(false);
+        undoOffer.setOnMouseClicked(e -> undoNewest());
+        undoOfferTimeout.setOnFinished(e -> undoOffer.setVisible(false));
         HBox bar = new HBox(
                 12,
                 portStatus,
+                leakPill,
                 dhtStatus,
                 status,
+                undoOffer,
                 spacer,
                 down,
                 up,
@@ -5105,8 +6066,16 @@ public final class MainWindow {
                 errorBadge);
         bar.setAlignment(Pos.CENTER_LEFT);
         for (Region r : List.<Region>of(
-                portStatus, dhtStatus, down, up, altSpeedToggle, freeStatus, updateBadge, syncBadge, errorBadge))
-            r.setMinWidth(Region.USE_PREF_SIZE);
+                portStatus,
+                leakPill,
+                dhtStatus,
+                down,
+                up,
+                altSpeedToggle,
+                freeStatus,
+                updateBadge,
+                syncBadge,
+                errorBadge)) r.setMinWidth(Region.USE_PREF_SIZE);
         bar.setPadding(new Insets(4, 10, 4, 10));
         bar.getStyleClass().add("status-bar");
         return bar;
@@ -5163,6 +6132,122 @@ public final class MainWindow {
         return free;
     }
 
+    /**
+     * Poll thread: the leak check (roadmap 1.1, item 8). With the exit check on, its two requests
+     * are asked again every ten minutes, at once when the binding or the swarm's view of this
+     * machine moved, and when Check now was pressed, on a worker of their own; the verdict is
+     * decided every poll from the last answers. {@code connection.pauseWhenExposed} acts on it
+     * ({@link ExposurePause}). Nothing for an unbound session, or a daemon's.
+     */
+    private Optional<LeakView> checkLeaks(
+            Engine engine, InterfaceWatch.State binding, String swarmSees, List<Torrent> torrents, long nowSeconds) {
+        if (capabilities.lacks(Engine.Capability.LISTEN_DETAILS)) return Optional.empty();
+        boolean on = settings.exitCheck();
+        if (on && binding.presence() == InterfaceWatch.Presence.UP && !exitChecking) {
+            String askedFor = binding + "|" + swarmSees;
+            boolean moved = exitCheckWanted || !askedFor.equals(exitAskedFor);
+            if (ExitCheck.due(exits, nowSeconds, moved)) {
+                exitAskedFor = askedFor;
+                exitCheckWanted = false;
+                exitChecking = true;
+                String url = settings.exitCheckUrl().isEmpty() ? ExitCheck.DEFAULT_URL : settings.exitCheckUrl();
+                java.util.Optional<java.net.InetAddress> local = ExitCheck.localAddress(binding);
+                Thread.ofVirtual().name("exit-check").start(() -> {
+                    try {
+                        exits = ExitCheck.ask(url, local, nowSeconds);
+                    } finally {
+                        exitChecking = false;
+                    }
+                });
+            }
+        }
+        if (!on) exitCheckWanted = false;
+        ExitCheck.Exits known = on ? exits : ExitCheck.Exits.NONE;
+        LeakCheck.Verdict verdict = LeakCheck.verdict(binding, swarmSees, known.bound(), known.around());
+        holdWhileExposed(engine, verdict, on && settings.pauseWhenExposed(), torrents);
+        if (verdict == LeakCheck.Verdict.UNBOUND) return Optional.empty();
+        return Optional.of(LeakView.of(verdict, binding, swarmSees, known, on));
+    }
+
+    /** Poll thread: one {@link ExposurePause} step, said in the log when it paused or resumed. */
+    private void holdWhileExposed(Engine engine, LeakCheck.Verdict verdict, boolean enabled, List<Torrent> torrents) {
+        ExposurePause.Step step = ExposurePause.next(verdict, enabled, torrents, exposureHeld);
+        exposureHeld = step.held();
+        if (step.nothing()) return;
+        for (String id : step.pause()) {
+            try {
+                engine.pause(id);
+            } catch (EngineException e) {
+                LOG.log(Level.FINE, "Not paused while exposed: " + id, e);
+            }
+        }
+        for (String id : step.resume()) {
+            try {
+                engine.resume(id);
+            } catch (EngineException e) {
+                LOG.log(Level.FINE, "Not resumed once protected: " + id, e);
+            }
+        }
+        String text = step.pause().isEmpty()
+                ? tr("leak.resumed", step.resume().size())
+                : tr("leak.paused", step.pause().size());
+        EngineEvent.Level level = step.pause().isEmpty() ? EngineEvent.Level.INFO : EngineEvent.Level.WARNING;
+        Platform.runLater(() -> {
+            log.add(EngineEvent.session(level, text));
+            setStatus(text, level);
+        });
+    }
+
+    /** FX thread: the shield and its card as the poll decided them; none hides the pill. */
+    private void showLeak(Optional<LeakView> leak, boolean checking) {
+        reveal(leakPill, leak.isPresent());
+        if (leak.isEmpty()) {
+            leakCard.hide();
+            return;
+        }
+        LeakView view = leak.get();
+        leakPill.setText(view.pill());
+        leakPill.getStyleClass().removeIf(c -> c.startsWith("leak-") && !c.equals("leak-pill"));
+        leakPill.getStyleClass().add(view.styleClass());
+        leakCard.update(view, checking);
+    }
+
+    /** Poll thread: the bound interface as last read; null before the first look. */
+    private InterfaceWatch.@Nullable State bound;
+
+    private long boundCheckedAt;
+
+    /**
+     * Poll thread: the interface the settings bind to, read every five seconds ({@link
+     * InterfaceWatch}). A binding that stops reaching anyone, or comes back, is said in the log
+     * and the status bar; the same binding coming up, going down or changing its addresses binds
+     * the engine again, since libtorrent does not notice an interface that returns. A daemon's
+     * network is not this machine's, so it is never looked at for one.
+     */
+    private InterfaceWatch.State watchInterface(Engine engine, long nowSeconds) {
+        if (capabilities.lacks(Engine.Capability.LISTEN_DETAILS)) return InterfaceWatch.State.UNBOUND;
+        if (bound != null && nowSeconds - boundCheckedAt < 5) return bound;
+        boundCheckedAt = nowSeconds;
+        InterfaceWatch.State before = bound;
+        InterfaceWatch.State now =
+                InterfaceWatch.of(settings.get(Settings.CONN_INTERFACE, ""), InterfaceWatch.system());
+        bound = now;
+        InterfaceWatch.change(before, now)
+                .ifPresent(change -> Platform.runLater(() -> {
+                    EngineEvent.Level level = change.warning() ? EngineEvent.Level.WARNING : EngineEvent.Level.INFO;
+                    log.add(EngineEvent.session(level, change.text()));
+                    setStatus(change.text(), level);
+                }));
+        if (before != null && before.bound().equals(now.bound()) && !before.equals(now)) {
+            try {
+                engine.rebind();
+            } catch (EngineException e) {
+                LOG.log(Level.FINE, "Rebinding after an interface change failed", e);
+            }
+        }
+        return now;
+    }
+
     /** A folder as the welcome and the status bar write it: {@code ~} under home, off Windows. */
     private static String folderText(Path dir) {
         String home = System.getProperty("user.home");
@@ -5176,7 +6261,7 @@ public final class MainWindow {
     private void showRates(Engine.Rates r, long nowSeconds) {
         downRate.setText(tr("status.rateDown", Bytes.rate(r.download())));
         upRate.setText(tr("status.rateUp", Bytes.rate(r.upload())));
-        List<SpeedHistory.Sample> minute = sessionHistory.samples(60, nowSeconds);
+        List<SpeedHistory.Sample> minute = session.history().samples(60, nowSeconds);
         downSpark.show(minute, 60, nowSeconds);
         upSpark.show(minute, 60, nowSeconds);
     }
@@ -5187,6 +6272,51 @@ public final class MainWindow {
         if (freeStatus.isVisible()) parts.add(freeStatus.getText());
         if (errorBadge.isVisible()) parts.add(errorBadge.getText());
         return String.join(" | ", parts);
+    }
+
+    /**
+     * FX thread. A file of the torrent shown, served while it downloads: handed to the player
+     * ({@code stream.player}, else mpv or VLC wherever they are), or its URL put on the clipboard.
+     * The URL and the player are found off the FX thread: the first starts a server, the second
+     * may ask the registry.
+     */
+    private void streamFile(FileRows.Row row, boolean play) {
+        String id = detailId;
+        if (id == null) return;
+        String name = row.name();
+        String chosen = settings.get(Settings.STREAM_PLAYER, "");
+        Thread.ofVirtual().name("stream").start(() -> {
+            String url;
+            try {
+                url = session.streamUrl(id, row.index(), name);
+            } catch (java.io.IOException e) {
+                Platform.runLater(
+                        () -> setStatus(Objects.toString(e.getMessage(), e.toString()), EngineEvent.Level.WARNING));
+                return;
+            }
+            if (!play) {
+                Platform.runLater(() -> {
+                    javafx.scene.input.ClipboardContent content = new javafx.scene.input.ClipboardContent();
+                    content.putString(url);
+                    javafx.scene.input.Clipboard.getSystemClipboard().setContent(content);
+                    setStatus(tr("status.streamCopied", name));
+                });
+                return;
+            }
+            Optional<Path> player = com.torrenta.stream.Player.forThisMachine(chosen);
+            if (player.isEmpty()) {
+                Platform.runLater(() -> setStatus(tr("status.noPlayer"), EngineEvent.Level.WARNING));
+                return;
+            }
+            try {
+                com.torrenta.stream.Player.launch(player.get(), url);
+                String which = com.torrenta.stream.Player.nameOf(player.get());
+                Platform.runLater(() -> setStatus(tr("status.streaming", name, which)));
+            } catch (java.io.IOException e) {
+                Platform.runLater(
+                        () -> setStatus(tr("status.playerFailed", e.getMessage()), EngineEvent.Level.WARNING));
+            }
+        });
     }
 
     private void setStatus(String text) {

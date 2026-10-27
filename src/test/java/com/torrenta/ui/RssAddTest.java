@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.torrenta.engine.AddRequest;
 import com.torrenta.rss.Article;
+import com.torrenta.session.RuleAdd;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -24,7 +25,7 @@ class RssAddTest {
     @Test
     void aMagnetIsTheMagnetSourceAndFetchesNothing() throws IOException {
         List<URI> fetched = new java.util.ArrayList<>();
-        AddRequest.Source source = RssAdd.sourceOf(article(MAGNET), url -> {
+        AddRequest.Source source = RuleAdd.sourceOf(article(MAGNET), url -> {
             fetched.add(url);
             return new byte[0];
         });
@@ -39,7 +40,7 @@ class RssAddTest {
     void aTorrentLinkIsFetchedIntoTheFileSourceWithTheUrlAsItsOrigin() throws IOException {
         String url = "https://tracker.example/download/42.torrent?passkey=abc";
         byte[] bytes = "d8:announce0:e".getBytes();
-        AddRequest.Source source = RssAdd.sourceOf(article(url), u -> {
+        AddRequest.Source source = RuleAdd.sourceOf(article(url), u -> {
             assertEquals(URI.create(url), u);
             return bytes;
         });
@@ -53,14 +54,14 @@ class RssAddTest {
     @Test
     void anArticleWithoutATorrentIsRefusedAndCopiesItsPage() {
         Article none = article("");
-        IOException e = assertThrows(IOException.class, () -> RssAdd.sourceOf(none, u -> new byte[0]));
+        IOException e = assertThrows(IOException.class, () -> RuleAdd.sourceOf(none, u -> new byte[0]));
         assertEquals("No torrent in Debian 12.7.0", e.getMessage());
         assertEquals("", RssAdd.fetchingText(none));
         assertEquals("Copy Link", RssAdd.copyLabel(none));
         assertEquals("https://x/page", RssAdd.copyText(none));
         IOException failure = assertThrows(
                 IOException.class,
-                () -> RssAdd.sourceOf(article("https://x/a.torrent"), u -> {
+                () -> RuleAdd.sourceOf(article("https://x/a.torrent"), u -> {
                     throw new IOException("the server answered 404");
                 }));
         assertEquals("the server answered 404", failure.getMessage());

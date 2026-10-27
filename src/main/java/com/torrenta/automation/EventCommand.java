@@ -6,6 +6,7 @@ import java.util.List;
 
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The command line a person writes for an event, and what it becomes for one torrent. Pure, so it
@@ -35,7 +36,7 @@ public final class EventCommand {
             String category,
             List<String> tags,
             Path contentPath,
-            Path rootPath,
+            @Nullable Path rootPath,
             Path savePath,
             int fileCount,
             long size,
@@ -56,7 +57,7 @@ public final class EventCommand {
      * torrent already removed): the file count is then 0, the content path is the save path plus
      * the name, and the hashes are what the id says.
      */
-    public static Subject subject(Torrent torrent, TorrentDetail detail) {
+    public static Subject subject(Torrent torrent, @Nullable TorrentDetail detail) {
         Path save = Path.of(torrent.savePath() == null ? "" : torrent.savePath());
         List<String> paths = detail == null
                 ? List.of()

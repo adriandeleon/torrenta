@@ -26,6 +26,7 @@ import javafx.stage.Window;
 
 import com.torrenta.engine.Engine.Capabilities;
 import com.torrenta.engine.Engine.Capability;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -51,7 +52,7 @@ final class LocationDialog {
     private final Button move = new Button(tr("dialog.location.move"));
     private final long wanted;
     private boolean localFiles = true;
-    private Result result;
+    private @Nullable Result result;
 
     /**
      * @param subject the torrent's name, or what the selection is ("3 torrents")
@@ -125,6 +126,7 @@ final class LocationDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
     }
 
     /** Hides Browse and the free-space line for an engine whose files are on another machine. Before showing. */

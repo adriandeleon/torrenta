@@ -25,6 +25,7 @@ import javafx.util.StringConverter;
 
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.TorrentLimits;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -39,7 +40,7 @@ import static com.torrenta.i18n.Messages.tr;
 final class LimitsDialog {
 
     /** What Apply hands back: the limits, and the share override or null for the global one. */
-    record Result(TorrentLimits limits, ShareLimit shareOverride) {}
+    record Result(TorrentLimits limits, @Nullable ShareLimit shareOverride) {}
 
     private enum ShareChoice {
         GLOBAL("global"),
@@ -72,7 +73,7 @@ final class LimitsDialog {
     private final Spinner<Integer> minutes = countSpinner(366 * 24 * 60);
     private final ChoiceBox<ShareLimit.Action> action = new ChoiceBox<>();
     private final Button apply = new Button(tr("dialog.common.apply"));
-    private Result result;
+    private @Nullable Result result;
 
     /**
      * @param subject the torrent's name, or what the selection is ("3 torrents")
@@ -85,7 +86,7 @@ final class LimitsDialog {
             Window owner,
             String subject,
             TorrentLimits current,
-            ShareLimit override,
+            @Nullable ShareLimit override,
             ShareLimit global,
             boolean hasMetadata) {
         stage.initOwner(owner);
@@ -124,7 +125,7 @@ final class LimitsDialog {
             }
 
             @Override
-            public ShareChoice fromString(String s) {
+            public @Nullable ShareChoice fromString(String s) {
                 return null;
             }
         });
@@ -145,7 +146,7 @@ final class LimitsDialog {
             }
 
             @Override
-            public ShareLimit.Action fromString(String s) {
+            public ShareLimit.@Nullable Action fromString(String s) {
                 return null;
             }
         });
@@ -189,6 +190,7 @@ final class LimitsDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
     }
 
     /** Blocks on a nested event loop, as a dialog does; empty when cancelled. */

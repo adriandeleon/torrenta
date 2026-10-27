@@ -48,6 +48,7 @@ import javafx.util.StringConverter;
 
 import com.torrenta.AppInfo;
 import com.torrenta.automation.AutomationSettings;
+import com.torrenta.content.UnsafeContent;
 import com.torrenta.engine.Engine;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.EngineProfile;
@@ -68,6 +69,10 @@ import com.torrenta.store.SearchProviderStore;
 import com.torrenta.store.Settings;
 import com.torrenta.store.WatchFolderStore;
 import com.torrenta.sync.SyncEngine;
+import com.torrenta.webapi.Passwords;
+import com.torrenta.webapi.WebApiConfig;
+import com.torrenta.webapi.WebApiService;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -100,12 +105,14 @@ final class SettingsWindow {
     /** The pages. Connection, Speed, BitTorrent and Advanced join as their settings arrive. */
     enum Category {
         GENERAL(Group.APPLICATION, "general"),
+        KEYBOARD(Group.APPLICATION, "keyboard"),
         ADDING(Group.APPLICATION, "adding"),
         WATCH(Group.APPLICATION, "watchFolders"),
         AUTOMATION(Group.APPLICATION, "automation"),
         SEARCH(Group.APPLICATION, "search"),
         RSS(Group.APPLICATION, "rss"),
         SYNC(Group.APPLICATION, "sync"),
+        REMOTE(Group.APPLICATION, "remote"),
         LABELS(Group.APPLICATION, "labels"),
         ENGINE_PROFILES(Group.ENGINE, "engine"),
         CONNECTION(Group.ENGINE, "connection"),
@@ -130,7 +137,8 @@ final class SettingsWindow {
     }
 
     /** {@code capability} is what the row needs of the engine, or null for every engine. */
-    private record Row(Category category, Node node, String keywords, VBox section, Engine.Capability capability) {
+    private record Row(
+            Category category, Node node, String keywords, VBox section, Engine.@Nullable Capability capability) {
         Row(Category category, Node node, String keywords, VBox section) {
             this(category, node, keywords, section, null);
         }
@@ -152,6 +160,10 @@ final class SettingsWindow {
                 Settings.ADD_SEQUENTIAL,
                 Settings.ADD_CONTENT_LAYOUT,
                 Settings.ADD_WITHOUT_ASKING,
+                Settings.REMOVE_TO_TRASH,
+                Settings.ADD_UNSAFE_CONTENT,
+                Settings.ADD_DEDUP,
+                Settings.ADD_PROBE_PRIVATE,
                 Settings.UI_STATE_COLORS,
                 Settings.UI_DENSITY,
                 Settings.UI_SIDEBAR,
@@ -210,7 +222,7 @@ final class SettingsWindow {
         void tagDeleted(String name);
     }
 
-    private LabelStore labelStore;
+    private @Nullable LabelStore labelStore;
     private LabelsHost labelsHost = new LabelsHost() {
         @Override
         public void labelsChanged() {}
@@ -245,7 +257,7 @@ final class SettingsWindow {
         String watchStatus();
     }
 
-    private WatchFolderStore watchStore;
+    private @Nullable WatchFolderStore watchStore;
     private WatchHost watchHost = new WatchHost() {
         @Override
         public void watchFoldersChanged() {}
@@ -257,11 +269,13 @@ final class SettingsWindow {
     };
     private TableView<WatchFolder> watchTable;
     private Label watchStatusLabel;
-    private WatchFolderDialog watchDialog;
+    private @Nullable WatchFolderDialog watchDialog;
 
     private TextField onAdded;
     private TextField onFinished;
     private TextField onSeedingDone;
+    private TextField onUpdated;
+    private CheckBox notifyUpdated;
     private CheckBox notifyAdded;
     private CheckBox notifyFinished;
     private CheckBox notifySeedingDone;
@@ -292,11 +306,11 @@ final class SettingsWindow {
         if (watchStatusLabel != null) watchStatusLabel.setText(watchHost.watchStatus());
     }
 
-    private SearchProviderStore searchStore;
+    private @Nullable SearchProviderStore searchStore;
     private Runnable onSearchProvidersChanged = () -> {};
     private TableView<TorznabEndpoint> searchTable;
     private Label searchStatusLabel;
-    private SearchProviderDialog searchDialog;
+    private @Nullable SearchProviderDialog searchDialog;
     /** Asks a server for the page's Test; a capture swaps a fake in. */
     private SearchProviderDialog.Tester searchTester = endpoint -> new TorznabProvider(endpoint).capabilities();
 
@@ -307,15 +321,15 @@ final class SettingsWindow {
         reloadSearch();
     }
 
-    private RssService rssService;
+    private @Nullable RssService rssService;
     private TableView<Feed> rssTable;
     private Label rssStatusLabel;
-    private FeedDialog rssDialog;
+    private @Nullable FeedDialog rssDialog;
     private Spinner<Integer> rssMinutes;
     private CheckBox rssAutoDownload;
     private TableView<Rule> rulesTable;
     private Label rulesStatusLabel;
-    private RuleDialog ruleDialog;
+    private @Nullable RuleDialog ruleDialog;
 
     /** The reader the RSS page edits; its changes come back through the service's listener (FX thread). */
     void setRss(RssService service) {
@@ -384,7 +398,7 @@ final class SettingsWindow {
         javafx.application.Platform.runLater(() -> addRule(phrase, phrase));
     }
 
-    private DefinitionStore definitionStore;
+    private @Nullable DefinitionStore definitionStore;
     private Runnable openDefinitionFolder = () -> {};
     private TableView<DefinitionStore.Entry> definitionTable;
     private Label definitionStatusLabel;
@@ -430,6 +444,7 @@ final class SettingsWindow {
     }
 
     /** The open watch-folder or search-provider dialog's scene, for a capture; null while none is open. */
+    @Nullable
     Scene dialogScene() {
         if (watchDialog != null && watchDialog.isShowing()) return watchDialog.scene();
         if (searchDialog != null && searchDialog.isShowing()) return searchDialog.scene();
@@ -518,20 +533,29 @@ final class SettingsWindow {
     private ChoiceBox<SidebarPlace> sidebarPlace;
     private ChoiceBox<DetailPlace> detailPlace;
     private CheckBox extendedWindow;
-    private ChoiceBox<PaletteKey> paletteKey;
     private CheckBox tray;
     private CheckBox closeToTray;
     private CheckBox osHandler;
     private CheckBox osBadge;
+    private CheckBox removeToTrash;
     private CheckBox addStartPaused;
     private CheckBox addSequential;
     private ChoiceBox<com.torrenta.engine.FileRenames.Layout> addLayout;
     private CheckBox addWithoutAsking;
+    private CheckBox addProbePrivate;
+    private ChoiceBox<UnsafeContent> addUnsafeContent;
+    private ChoiceBox<com.torrenta.engine.DedupMode> addDedup;
     private TextField directCurl;
+    private TextField streamPlayer;
+    private Spinner<Integer> followHours;
+    private CheckBox followRemoveOld;
     private Spinner<Integer> directActive;
     private Spinner<Integer> port;
     private CheckBox randomPort;
     private TextField listenInterface;
+    private CheckBox exitCheck;
+    private TextField exitCheckUrl;
+    private CheckBox pauseWhenExposed;
     private CheckBox ipv6;
     private CheckBox upnp;
     private Spinner<Integer> maxConnections;
@@ -555,7 +579,7 @@ final class SettingsWindow {
         onEngineSettingsChanged = handler;
     }
 
-    private SettingsSync sync;
+    private @Nullable SettingsSync sync;
     private CheckBox syncEnabled;
     private TextField syncUrl;
     private TextField syncBranch;
@@ -576,6 +600,7 @@ final class SettingsWindow {
         reload();
     }
 
+    @Initializer // build() makes every page
     private void buildSync(VBox page) {
         VBox repository = section(page, tr("settings.sync.repository"));
         syncEnabled = new CheckBox();
@@ -707,8 +732,10 @@ final class SettingsWindow {
                     return;
                 }
             }
-            sync.settingsChanged();
-            sync.syncNow();
+            SettingsSync s = sync;
+            if (s == null) return;
+            s.settingsChanged();
+            s.syncNow();
         });
     }
 
@@ -746,6 +773,285 @@ final class SettingsWindow {
         reload();
     }
 
+    private java.util.function.Supplier<WebApiService.Status> remoteStatusNow = WebApiService.Status::off;
+    private java.util.function.Consumer<java.util.function.Consumer<WebApiService.Status>> remoteApply = then -> {};
+    private CheckBox remoteEnabled;
+    private TextField remoteAddress;
+    private Spinner<Integer> remotePort;
+    private TextField remoteDomains;
+    private TextArea remoteRoots;
+    private TextField remoteRootFolder;
+    private TextField remoteUsername;
+    private PasswordField remotePassword;
+    private Label remotePasswordState;
+    private TextField remoteHttpsFile;
+    private PasswordField remoteHttpsPassword;
+    private Label remoteStatus;
+    private Label remoteWarning;
+    private Button remoteUseFree;
+    /** Typing an address or a port applies once the typing pauses, not at every key. */
+    private final javafx.animation.PauseTransition remotePause =
+            new javafx.animation.PauseTransition(javafx.util.Duration.millis(600));
+
+    /**
+     * The server the Remote access page drives: its status now, and a way to bring it in line with
+     * the settings just saved that answers on the FX thread.
+     */
+    void setRemoteAccess(
+            java.util.function.Supplier<WebApiService.Status> status,
+            java.util.function.Consumer<java.util.function.Consumer<WebApiService.Status>> apply) {
+        this.remoteStatusNow = status;
+        this.remoteApply = apply;
+        remotePause.setOnFinished(e -> applyRemote());
+        showRemoteStatus(status.get());
+    }
+
+    @Initializer // build() makes every page
+    private void buildRemote(VBox page) {
+        VBox server = section(page, tr("settings.remote.server"));
+        remoteEnabled = new CheckBox();
+        remoteEnabled.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setWebApiEnabled(now);
+            settings.saveQuietly();
+            applyRemote();
+        });
+        row(
+                Category.REMOTE,
+                server,
+                tr("settings.remote.enabled"),
+                tr("settings.remote.enabled.desc"),
+                remoteEnabled,
+                tr("settings.remote.enabled.keywords"));
+        remoteAddress = new TextField();
+        remoteAddress.setPrefColumnCount(12);
+        remoteAddress.setPromptText(WebApiConfig.DEFAULT_ADDRESS);
+        remoteAddress.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setWebApiAddress(now);
+            settings.saveQuietly();
+            remotePause.playFromStart();
+        });
+        row(
+                Category.REMOTE,
+                server,
+                tr("settings.remote.address"),
+                tr("settings.remote.address.desc"),
+                remoteAddress,
+                tr("settings.remote.address.keywords"));
+        remotePort = new Spinner<>(1, 65535, WebApiConfig.DEFAULT_PORT, 1);
+        remotePort.setEditable(true);
+        Spinners.commitOnBlur(remotePort);
+        remotePort.setPrefWidth(100);
+        remotePort.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setWebApiPort(now);
+            settings.saveQuietly();
+            remotePause.playFromStart();
+        });
+        row(
+                Category.REMOTE,
+                server,
+                tr("settings.remote.port"),
+                tr("settings.remote.port.desc"),
+                remotePort,
+                tr("settings.remote.port.keywords"));
+        remoteDomains = new TextField();
+        remoteDomains.setPrefColumnCount(14);
+        remoteDomains.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setWebApiDomains(now);
+            settings.saveQuietly();
+            remotePause.playFromStart();
+        });
+        row(
+                Category.REMOTE,
+                server,
+                tr("settings.remote.domains"),
+                tr("settings.remote.domains.desc"),
+                remoteDomains,
+                tr("settings.remote.domains.keywords"));
+        remoteRoots = new TextArea();
+        remoteRoots.setPrefRowCount(3);
+        remoteRoots.setPrefColumnCount(20);
+        remoteRoots.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            // Read at each add: nothing to restart.
+            settings.setWebApiRoots(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.REMOTE,
+                server,
+                tr("settings.remote.roots"),
+                tr("settings.remote.roots.desc"),
+                remoteRoots,
+                tr("settings.remote.roots.keywords"));
+        remoteRootFolder = new TextField();
+        remoteRootFolder.setPrefColumnCount(16);
+        remoteRootFolder.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            // Read at each request: nothing to restart.
+            settings.setWebApiRootFolder(now);
+            settings.saveQuietly();
+        });
+        Button browseRoot = new Button(tr("common.browse"));
+        browseRoot.setOnAction(e -> {
+            javafx.stage.DirectoryChooser chooser = new javafx.stage.DirectoryChooser();
+            chooser.setTitle(tr("settings.remote.rootFolder.chooser"));
+            java.io.File chosen = chooser.showDialog(stage);
+            if (chosen != null) remoteRootFolder.setText(chosen.getAbsolutePath());
+        });
+        row(
+                Category.REMOTE,
+                server,
+                tr("settings.remote.rootFolder"),
+                tr("settings.remote.rootFolder.desc"),
+                new HBox(6, remoteRootFolder, browseRoot),
+                tr("settings.remote.rootFolder.keywords"));
+
+        VBox signIn = section(page, tr("settings.remote.signIn"));
+        remoteUsername = new TextField();
+        remoteUsername.setPrefColumnCount(12);
+        remoteUsername.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setWebApiUsername(now);
+            settings.saveQuietly();
+            remotePause.playFromStart();
+        });
+        row(
+                Category.REMOTE,
+                signIn,
+                tr("settings.remote.username"),
+                tr("settings.remote.username.desc"),
+                remoteUsername,
+                tr("settings.remote.username.keywords"));
+        remotePassword = new PasswordField();
+        remotePassword.setPrefColumnCount(12);
+        remotePassword.setPromptText(tr("settings.remote.password.prompt"));
+        Button setPassword = new Button(tr("settings.remote.password.set"));
+        setPassword.disableProperty().bind(remotePassword.textProperty().isEmpty());
+        setPassword.setOnAction(e -> setRemotePassword());
+        remotePassword.setOnAction(e -> {
+            if (!remotePassword.getText().isEmpty()) setRemotePassword();
+        });
+        remotePasswordState = new Label();
+        remotePasswordState.getStyleClass().add("settings-row-description");
+        VBox passwordBox = new VBox(4, new HBox(6, remotePassword, setPassword), remotePasswordState);
+        row(
+                Category.REMOTE,
+                signIn,
+                tr("settings.remote.password"),
+                tr("settings.remote.password.desc"),
+                passwordBox,
+                tr("settings.remote.password.keywords"));
+
+        VBox https = section(page, tr("settings.remote.https"));
+        remoteHttpsFile = new TextField();
+        remoteHttpsFile.setPrefColumnCount(14);
+        remoteHttpsFile.setPromptText(tr("settings.remote.httpsFile.prompt"));
+        remoteHttpsFile.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setWebApiHttps(now, remoteHttpsPassword.getText());
+            settings.saveQuietly();
+            remotePause.playFromStart();
+        });
+        Button browse = new Button(tr("common.browse"));
+        browse.setOnAction(e -> {
+            javafx.stage.FileChooser chooser = new javafx.stage.FileChooser();
+            chooser.setTitle(tr("settings.remote.httpsFile.chooser"));
+            chooser.getExtensionFilters()
+                    .add(new javafx.stage.FileChooser.ExtensionFilter(
+                            tr("settings.remote.httpsFile.filter"), "*.p12", "*.pfx"));
+            java.io.File chosen = chooser.showOpenDialog(stage);
+            if (chosen != null) remoteHttpsFile.setText(chosen.getAbsolutePath());
+        });
+        row(
+                Category.REMOTE,
+                https,
+                tr("settings.remote.httpsFile"),
+                tr("settings.remote.httpsFile.desc"),
+                new HBox(6, remoteHttpsFile, browse),
+                tr("settings.remote.httpsFile.keywords"));
+        remoteHttpsPassword = new PasswordField();
+        remoteHttpsPassword.setPrefColumnCount(12);
+        remoteHttpsPassword.textProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setWebApiHttps(remoteHttpsFile.getText(), now);
+            settings.saveQuietly();
+            remotePause.playFromStart();
+        });
+        row(
+                Category.REMOTE,
+                https,
+                tr("settings.remote.httpsPassword"),
+                tr("settings.remote.httpsPassword.desc"),
+                remoteHttpsPassword,
+                tr("settings.remote.httpsPassword.keywords"));
+
+        VBox status = section(page, tr("settings.remote.status"));
+        remoteStatus = new Label(tr("webapi.status.off"));
+        remoteStatus.setWrapText(true);
+        remoteStatus.getStyleClass().add("settings-row-description");
+        remoteWarning = new Label(tr("settings.remote.exposed"));
+        remoteWarning.setWrapText(true);
+        remoteWarning.getStyleClass().addAll("settings-row-description", "settings-warning");
+        remoteUseFree = new Button();
+        remoteUseFree.setOnAction(e -> {
+            Object port = remoteUseFree.getUserData();
+            if (port instanceof Integer p) remotePort.getValueFactory().setValue(p);
+        });
+        VBox statusBox = new VBox(8, remoteStatus, remoteWarning, remoteUseFree);
+        status.getChildren().add(statusBox);
+        rows.add(new Row(Category.REMOTE, statusBox, tr("settings.remote.status.keywords"), status));
+        showRemoteStatus(remoteStatusNow.get());
+    }
+
+    /** The password typed is hashed off the FX thread (PBKDF2 is slow on purpose), then kept as the hash. */
+    private void setRemotePassword() {
+        char[] typed = remotePassword.getText().toCharArray();
+        remotePassword.clear();
+        remotePasswordState.setText(tr("settings.remote.password.hashing"));
+        Thread.ofVirtual().name("webapi-hash").start(() -> {
+            String hash = Passwords.hash(typed, new java.security.SecureRandom());
+            java.util.Arrays.fill(typed, '\0');
+            javafx.application.Platform.runLater(() -> {
+                settings.setWebApiPasswordHash(hash);
+                settings.saveQuietly();
+                refreshRemotePasswordState();
+                applyRemote();
+            });
+        });
+    }
+
+    private void refreshRemotePasswordState() {
+        if (remotePasswordState == null) return;
+        remotePasswordState.setText(
+                Passwords.isSet(settings.webApi().passwordHash())
+                        ? tr("settings.remote.password.isSet")
+                        : tr("settings.remote.password.notSet"));
+    }
+
+    private void applyRemote() {
+        remotePause.stop();
+        remoteApply.accept(this::showRemoteStatus);
+    }
+
+    /** FX thread: the Status section, and the warning for an address others reach over plain HTTP. */
+    void showRemoteStatus(WebApiService.Status status) {
+        if (remoteStatus == null) return;
+        remoteStatus.setText(status.text());
+        WebApiConfig config = settings.webApi();
+        boolean exposed = config.enabled() && config.exposed();
+        remoteWarning.setVisible(exposed);
+        remoteWarning.setManaged(exposed);
+        boolean offer = status.freePort() > 0;
+        remoteUseFree.setUserData(offer ? status.freePort() : null);
+        remoteUseFree.setText(offer ? tr("settings.remote.useFree", String.valueOf(status.freePort())) : "");
+        remoteUseFree.setVisible(offer);
+        remoteUseFree.setManaged(offer);
+    }
+
     /** FX thread: the Status section, from the service's state. */
     private void refreshSyncStatus() {
         if (syncStatus == null || sync == null) return;
@@ -775,7 +1081,7 @@ final class SettingsWindow {
         syncDisconnect.setDisable(!on && settings.syncUrl().isEmpty());
     }
 
-    private static String at(java.time.LocalDateTime when) {
+    private static String at(java.time.@Nullable LocalDateTime when) {
         return when == null ? "" : when.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
     }
 
@@ -817,6 +1123,8 @@ final class SettingsWindow {
     private Spinner<Integer> altDown;
     private Spinner<Integer> altUp;
     private CheckBox altOn;
+    private ChoiceBox<com.torrenta.session.SpeedMode.Rule> onBattery;
+    private ChoiceBox<com.torrenta.session.SpeedMode.Rule> onMetered;
     private CheckBox scheduleOn;
     private TextField scheduleFrom;
     private TextField scheduleTo;
@@ -875,6 +1183,7 @@ final class SettingsWindow {
 
     // ---------------------------------------------------------------- shell
 
+    @Initializer // from the constructor
     private void build() {
         stage.setTitle(tr("settings.title", AppInfo.NAME));
         for (Category category : Category.values()) pages.put(category, buildPage(category));
@@ -932,6 +1241,7 @@ final class SettingsWindow {
             e.consume();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
         selectFirstVisible();
     }
 
@@ -987,8 +1297,8 @@ final class SettingsWindow {
                 Category category = (Category) item;
                 setText(category.title());
                 // A square box per glyph, so the titles line up whatever each glyph's own width.
-                StackPane glyph =
-                        new StackPane(Icons.forSettingsPage(category.id).at(Icons.MENU_SIZE));
+                Icons.Glyph icon = Icons.forSettingsPage(category.id);
+                StackPane glyph = icon == null ? new StackPane() : new StackPane(icon.at(Icons.MENU_SIZE));
                 glyph.setMinSize(Icons.MENU_SIZE, Icons.MENU_SIZE);
                 glyph.setMaxSize(Icons.MENU_SIZE, Icons.MENU_SIZE);
                 setGraphic(glyph);
@@ -1038,7 +1348,7 @@ final class SettingsWindow {
 
     private Map<String, String> ownedValues() {
         Map<String, String> values = new java.util.HashMap<>();
-        for (String key : OWNED_KEYS) values.put(key, settings.get(key, null));
+        for (String key : OWNED_KEYS) values.put(key, settings.raw(key));
         return values;
     }
 
@@ -1056,6 +1366,7 @@ final class SettingsWindow {
         if (!StockButtons.confirmed(ask.showAndWait())) return;
         Map<String, String> before = ownedValues();
         settings.reset(OWNED_KEYS);
+        settings.replaceKeyBindings(Map.of());
         settings.saveQuietly();
         Set<ResetHook> hooks = resetHooks(before, ownedValues());
         reload();
@@ -1064,6 +1375,7 @@ final class SettingsWindow {
                     Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
         }
         onAppearanceChanged.run();
+        onKeysChanged.run();
         onEngineSettingsChanged.run();
         onIpFilterChanged.accept(false);
         if (hooks.contains(ResetHook.TRAY)) onTrayChanged.run();
@@ -1187,6 +1499,7 @@ final class SettingsWindow {
         page.setFillWidth(true);
         switch (category) {
             case GENERAL -> buildGeneral(page);
+            case KEYBOARD -> buildKeyboard(page);
             case ENGINE_PROFILES -> buildEngine(page);
             case ADDING -> buildAdding(page);
             case WATCH -> buildWatch(page);
@@ -1197,6 +1510,7 @@ final class SettingsWindow {
             case PROTOCOL -> buildProtocol(page);
             case IP_FILTER -> buildIpFilter(page);
             case SYNC -> buildSync(page);
+            case REMOTE -> buildRemote(page);
             case LABELS -> buildLabels(page);
             case SPEED -> buildSpeed(page);
             case QUEUE -> buildQueue(page);
@@ -1231,7 +1545,7 @@ final class SettingsWindow {
             String description,
             Region control,
             String keywords,
-            Engine.Capability capability) {
+            Engine.@Nullable Capability capability) {
         Label name = new Label(title);
         name.getStyleClass().add("settings-row-title");
         VBox text = new VBox(2, name);
@@ -1298,6 +1612,302 @@ final class SettingsWindow {
 
     // ---------------------------------------------------------------- pages
 
+    // ---------------------------------------------------------------- keyboard
+
+    /** One command's row on the Keyboard page: its recording field, the line under it, and Reset. */
+    private record KeyRow(Keybindings.Command command, TextField field, Label status, Button reset) {}
+
+    private final Map<String, KeyRow> keyRows = new java.util.LinkedHashMap<>();
+
+    private List<Keybindings.Command> keyCommands = List.of();
+    private Map<String, javafx.scene.input.KeyCombination> keyDefaults = Map.of();
+    /** Told after the key bindings changed; the main window moves every chord. */
+    private Runnable onKeysChanged = () -> {};
+    /** The Keyboard page, built empty with the others and filled by {@link #setKeyboard}. */
+    private VBox keyboardPage;
+
+    /** Where a recording field keeps a chord it was refused because another command has it. */
+    private static final Object PENDING_TAKEOVER = new Object();
+
+    /** The Reset All row; the commands' rows follow, under their menus, once {@link #setKeyboard} names them. */
+    @Initializer // build() makes every page
+    private void buildKeyboard(VBox page) {
+        keyboardPage = page;
+        VBox all = section(page, tr("settings.keys.section"));
+        Button resetAll = new Button(tr("settings.keys.resetAll"));
+        resetAll.setOnAction(e -> confirmResetKeys());
+        row(
+                Category.KEYBOARD,
+                all,
+                tr("settings.keys.resetAll.title"),
+                tr("settings.keys.resetAll.desc"),
+                resetAll,
+                tr("settings.keys.keywords"));
+    }
+
+    /**
+     * Every rebindable command, a row each, under the menu it lives in, so the settings search
+     * finds "recheck" the way it finds "port". The main window's table, since its menus are what
+     * define them; given once, after the menus are built.
+     *
+     * <p>Recording is Termina's: focusing a field starts it, the next chord pressed is written
+     * through at once. A chord another command has is not taken on the first press: the row says
+     * whose it is, and the same chord again moves it, which keeps the whole exchange on the
+     * keyboard. Backspace or Delete on its own removes the chord.
+     */
+    void setKeyboard(List<Keybindings.Command> commands, Runnable onChanged) {
+        keyCommands = List.copyOf(commands);
+        keyDefaults = Keybindings.defaults(keyCommands);
+        onKeysChanged = onChanged;
+        Map<String, VBox> sections = new java.util.LinkedHashMap<>();
+        for (Keybindings.Command command : keyCommands) {
+            VBox section = sections.computeIfAbsent(command.group(), group -> section(keyboardPage, group));
+            keyRow(section, command);
+        }
+        reloadKeys();
+        filter(engineQuery);
+    }
+
+    private void keyRow(VBox section, Keybindings.Command command) {
+        TextField field = new TextField();
+        field.setEditable(false);
+        field.setPrefWidth(170);
+        field.getStyleClass().add("shortcut-capture");
+        field.setPromptText(tr("settings.keys.recording"));
+        Label status = new Label();
+        status.getStyleClass().add("settings-row-description");
+        status.setWrapText(true);
+        status.setMaxWidth(260);
+        showKeyStatus(status, null, false);
+        Button reset = new Button(tr("settings.keys.reset"));
+        reset.setOnAction(e -> resetKey(command.id()));
+        KeyRow row = new KeyRow(command, field, status, reset);
+        keyRows.put(command.id(), row);
+
+        // Recording: the field empties so its prompt says what to do, and fills again with the
+        // chord in force when the focus leaves, whether or not anything was recorded.
+        field.focusedProperty().addListener((o, was, focused) -> {
+            field.getProperties().remove(PENDING_TAKEOVER);
+            if (focused) {
+                field.setText("");
+            } else {
+                field.setText(keyText(command.id()));
+                showKeyStatus(status, null, false);
+            }
+        });
+        field.addEventFilter(javafx.scene.input.KeyEvent.KEY_PRESSED, e -> onKeyRecorded(row, e));
+
+        HBox fieldRow = new HBox(6, field, reset);
+        fieldRow.setAlignment(Pos.CENTER_LEFT);
+        VBox control = new VBox(2, fieldRow, status);
+        Node line = row(
+                Category.KEYBOARD,
+                section,
+                command.label(),
+                "",
+                control,
+                command.group() + " " + command.id() + " " + tr("settings.keys.keywords"),
+                CapabilityRules.forCommand(command.id()).orElse(null));
+        // Sixty of them, with no description: the ordinary row's padding made the page screens
+        // long, and its top-aligned title sat above the field it names.
+        line.getStyleClass().add("settings-key-row");
+        ((VBox) ((HBox) line).getChildren().getFirst()).setAlignment(Pos.CENTER_LEFT);
+    }
+
+    private void onKeyRecorded(KeyRow row, javafx.scene.input.KeyEvent e) {
+        boolean modified = e.isControlDown() || e.isAltDown() || e.isMetaDown();
+        // Tab and Shift+Tab leave the field, as they do everywhere; Ctrl+Tab is a chord.
+        if (e.getCode() == KeyCode.TAB && !modified) return;
+        // Escape closes the window, as it does from any other row.
+        if (e.getCode() == KeyCode.ESCAPE && !modified) return;
+        e.consume();
+        TextField field = row.field();
+        String id = row.command().id();
+        if (!modified && (e.getCode() == KeyCode.BACK_SPACE || e.getCode() == KeyCode.DELETE)) {
+            writeKeys(KeybindingEdits.clear(keyDefaults, settings.keyBindings(), id));
+            field.setText(keyText(id));
+            showKeyStatus(row.status(), null, false);
+            return;
+        }
+        switch (ShortcutCapture.decide(e.getCode(), e.isControlDown(), e.isAltDown(), e.isMetaDown())) {
+            case IGNORE -> {}
+            case NEEDS_MODIFIER -> showKeyStatus(row.status(), tr("settings.keys.needsModifier"), true);
+            case OK -> {
+                javafx.scene.input.KeyCombination chord = ShortcutCapture.combination(e);
+                if (chord == null) return; // decide said OK, so there is one
+                String fixed = ShortcutCapture.fixedOwner(chord, Keybindings.MAC);
+                if (fixed != null) {
+                    showKeyStatus(row.status(), tr("settings.keys.fixed", chord.getDisplayText()), true);
+                    return;
+                }
+                String holder = KeybindingEdits.conflict(effectiveKeys(), chord, id, Keybindings.MAC);
+                Object pending = field.getProperties().get(PENDING_TAKEOVER);
+                if (holder != null
+                        && !(pending instanceof javafx.scene.input.KeyCombination p
+                                && Keybindings.same(p, chord, Keybindings.MAC))) {
+                    field.getProperties().put(PENDING_TAKEOVER, chord);
+                    showKeyStatus(
+                            row.status(), tr("settings.keys.taken", chord.getDisplayText(), labelOf(holder)), true);
+                    return;
+                }
+                field.getProperties().remove(PENDING_TAKEOVER);
+                writeKeys(KeybindingEdits.rebind(keyDefaults, settings.keyBindings(), id, chord, Keybindings.MAC));
+                field.setText(chord.getDisplayText());
+                showKeyStatus(row.status(), null, false);
+            }
+        }
+    }
+
+    /**
+     * Puts one command back on its default. When another command has that chord now, asks first:
+     * that command is left with none, and a Reset that quietly unbinds something else is how the
+     * user finds out a chord has stopped working.
+     */
+    private void resetKey(String id) {
+        Map<String, String> stored = settings.keyBindings();
+        String holder = KeybindingEdits.taken(keyDefaults, stored, id, Keybindings.MAC);
+        if (holder != null
+                && !confirmKeys(
+                        tr("settings.keys.reset"),
+                        tr(
+                                "settings.keys.resetTaken.title",
+                                java.util.Optional.ofNullable(keyDefaults.get(id))
+                                        .map(javafx.scene.input.KeyCombination::getDisplayText)
+                                        .orElse(tr("settings.keys.none"))),
+                        tr("settings.keys.resetTaken.detail", labelOf(holder), labelOf(id)))) {
+            return;
+        }
+        writeKeys(KeybindingEdits.reset(keyDefaults, stored, id, Keybindings.MAC));
+    }
+
+    private void confirmResetKeys() {
+        if (confirmKeys(
+                tr("settings.keys.resetAll"),
+                tr("settings.keys.resetAll.confirmTitle"),
+                tr("settings.keys.resetAll.confirmDetail"))) {
+            writeKeys(Map.of());
+        }
+    }
+
+    private boolean confirmKeys(String title, String header, String detail) {
+        Alert ask = new Alert(Alert.AlertType.CONFIRMATION, detail);
+        ask.setTitle(title);
+        ask.setHeaderText(header);
+        ask.initOwner(stage);
+        Fonts.installUiFont(ask.getDialogPane());
+        StockButtons.translate(ask);
+        return StockButtons.confirmed(ask.showAndWait());
+    }
+
+    /** One write and one change: the rows reload, the window moves every chord. */
+    private void writeKeys(Map<String, String> stored) {
+        settings.replaceKeyBindings(stored);
+        settings.saveQuietly();
+        reloadKeys();
+        onKeysChanged.run();
+    }
+
+    private Map<String, javafx.scene.input.KeyCombination> effectiveKeys() {
+        return Keybindings.resolve(keyDefaults, settings.keyBindings(), Keybindings.MAC);
+    }
+
+    /** The chord a command is on, as the platform writes it, or "None". */
+    private String keyText(String id) {
+        javafx.scene.input.KeyCombination chord = effectiveKeys().get(id);
+        return chord == null ? tr("settings.keys.none") : chord.getDisplayText();
+    }
+
+    private String labelOf(String id) {
+        for (Keybindings.Command command : keyCommands) {
+            if (command.id().equals(id)) return command.label();
+        }
+        return id;
+    }
+
+    /** A refusal is red; a note is the warning colour. Hidden when null. */
+    private static void showKeyStatus(Label status, @Nullable String message, boolean refusal) {
+        status.setText(message == null ? "" : message);
+        status.setStyle(refusal ? "-fx-text-fill: -color-danger-fg;" : "-fx-text-fill: -color-warning-fg;");
+        status.setVisible(message != null);
+        status.setManaged(message != null);
+    }
+
+    private void reloadKeys() {
+        Map<String, javafx.scene.input.KeyCombination> effective = effectiveKeys();
+        for (KeyRow row : keyRows.values()) {
+            String id = row.command().id();
+            // Not while recording: the empty field is the prompt.
+            if (!row.field().isFocused()) {
+                javafx.scene.input.KeyCombination chord = effective.get(id);
+                row.field().setText(chord == null ? tr("settings.keys.none") : chord.getDisplayText());
+            }
+            // Disabled is also off the Tab order, which keeps the page to one stop per command.
+            row.reset().setDisable(!KeybindingEdits.isChanged(keyDefaults, effective, id, Keybindings.MAC));
+        }
+    }
+
+    /**
+     * Presses chords into Keyboard rows' recording fields, as a hand would, and reports what each
+     * row then shows: {@code recheck:Shortcut+Shift+K|Shortcut+Shift+K;limits:BS}, rows by id,
+     * presses by {@code |} (the capture's actions are split on commas), chords in {@code
+     * KeyCombination} notation, {@code BS} for a bare Backspace. For the capture hook.
+     */
+    String pressKeysForCapture(String spec) {
+        StringBuilder out = new StringBuilder();
+        for (String part : spec.split(";")) {
+            int colon = part.indexOf(':');
+            if (colon < 0) continue;
+            KeyRow row = keyRows.get(part.substring(0, colon).trim());
+            if (row == null) {
+                out.append(part, 0, colon).append("=no such row; ");
+                continue;
+            }
+            row.field().requestFocus();
+            for (String token : part.substring(colon + 1).split("\\|")) {
+                String t = token.trim();
+                javafx.scene.input.KeyEvent press;
+                if ("BS".equals(t)) {
+                    press = new javafx.scene.input.KeyEvent(
+                            javafx.scene.input.KeyEvent.KEY_PRESSED,
+                            "",
+                            "",
+                            KeyCode.BACK_SPACE,
+                            false,
+                            false,
+                            false,
+                            false);
+                } else if (Keybindings.parse(t) instanceof javafx.scene.input.KeyCodeCombination parsed
+                        && Keybindings.normalize(parsed, Keybindings.MAC)
+                                instanceof javafx.scene.input.KeyCodeCombination chord) {
+                    press = new javafx.scene.input.KeyEvent(
+                            javafx.scene.input.KeyEvent.KEY_PRESSED,
+                            "",
+                            "",
+                            chord.getCode(),
+                            chord.getShift() == javafx.scene.input.KeyCombination.ModifierValue.DOWN,
+                            chord.getControl() == javafx.scene.input.KeyCombination.ModifierValue.DOWN,
+                            chord.getAlt() == javafx.scene.input.KeyCombination.ModifierValue.DOWN,
+                            chord.getMeta() == javafx.scene.input.KeyCombination.ModifierValue.DOWN);
+                } else {
+                    out.append(t).append("=unreadable; ");
+                    continue;
+                }
+                javafx.event.Event.fireEvent(row.field(), press);
+                out.append(row.command().id())
+                        .append(' ')
+                        .append(t)
+                        .append(" -> [")
+                        .append(row.field().getText())
+                        .append("] ")
+                        .append(row.status().isVisible() ? "\"" + row.status().getText() + "\"" : "-")
+                        .append(row.reset().isDisabled() ? "" : " (reset on)")
+                        .append("; ");
+            }
+        }
+        return out.append("stored=").append(settings.keyBindings()).toString();
+    }
+
+    @Initializer // build() makes every page
     private void buildGeneral(VBox page) {
         VBox languageSection = section(page, tr("settings.general.language.section"));
         language = new ChoiceBox<String>();
@@ -1429,23 +2039,6 @@ final class SettingsWindow {
                 extendedWindow,
                 tr("settings.general.extendedWindow.keywords"));
 
-        VBox keyboard = section(page, tr("settings.general.keyboard"));
-        paletteKey = new ChoiceBox<>();
-        paletteKey.getItems().addAll(PaletteKey.values());
-        paletteKey.valueProperty().addListener((o, was, now) -> {
-            if (loading || now == null) return;
-            settings.setPaletteKey(now.id());
-            settings.saveQuietly();
-            onAppearanceChanged.run();
-        });
-        row(
-                Category.GENERAL,
-                keyboard,
-                tr("settings.general.paletteKey"),
-                tr("settings.general.paletteKey.desc"),
-                paletteKey,
-                tr("settings.general.paletteKey.keywords"));
-
         VBox trayBox = section(page, tr("settings.general.systemTray"));
         tray = new CheckBox();
         tray.selectedProperty().addListener((o, was, now) -> {
@@ -1532,6 +2125,20 @@ final class SettingsWindow {
                 tr("settings.general.downloadDir.desc"),
                 new HBox(6, downloadDir, browse),
                 tr("settings.general.downloadDir.keywords"),
+                Engine.Capability.LOCAL_FILES);
+        removeToTrash = new CheckBox();
+        removeToTrash.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setRemoveToTrash(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.GENERAL,
+                downloads,
+                tr("settings.general.removeToTrash"),
+                tr("settings.general.removeToTrash.desc"),
+                removeToTrash,
+                tr("settings.general.removeToTrash.keywords"),
                 Engine.Capability.LOCAL_FILES);
 
         incompleteEnabled = new CheckBox();
@@ -1634,6 +2241,7 @@ final class SettingsWindow {
      * keys: the lists live in {@code categories.json} and {@code tags.json}, through the store,
      * and the window re-files the torrents when one is deleted.
      */
+    @Initializer // build() makes every page
     private void buildLabels(VBox page) {
         VBox categories = section(page, tr("settings.labels.categories"));
         categoryTable = new TableView<>();
@@ -1787,7 +2395,7 @@ final class SettingsWindow {
     }
 
     /** The store's lists into the two controls; keeps the category selection where it can. */
-    private void reloadLabels() {
+    void reloadLabels() {
         if (labelStore == null || categoryTable == null) return;
         com.torrenta.engine.Category selected =
                 categoryTable.getSelectionModel().getSelectedItem();
@@ -1812,6 +2420,7 @@ final class SettingsWindow {
         alert.showAndWait();
     }
 
+    @Initializer // build() makes every page
     private void buildWatch(VBox page) {
         VBox folders = section(page, tr("settings.watchFolders.folders"));
         watchTable = new TableView<>();
@@ -1914,7 +2523,9 @@ final class SettingsWindow {
         saveWatchFolders(list, null);
     }
 
-    private void saveWatchFolders(List<WatchFolder> list, WatchFolder select) {
+    private void saveWatchFolders(List<WatchFolder> list, @Nullable WatchFolder select) {
+        WatchFolderStore watchStore = this.watchStore;
+        if (watchStore == null) return;
         try {
             watchStore.set(list);
         } catch (IOException e) {
@@ -1937,6 +2548,7 @@ final class SettingsWindow {
         refreshWatchStatus();
     }
 
+    @Initializer // build() makes every page
     private void buildRss(VBox page) {
         VBox refresh = section(page, tr("settings.rss.refreshing"));
         rssMinutes = new Spinner<>(Feed.MIN_MINUTES, Feed.MAX_MINUTES, 30, 5);
@@ -2143,14 +2755,16 @@ final class SettingsWindow {
         reloadRules();
     }
 
-    private void saveRule(String replacing, Rule rule) {
+    private void saveRule(@Nullable String replacing, Rule rule) {
+        RssService rssService = this.rssService;
+        if (rssService == null) return;
         try {
             rssService.putRule(replacing, rule);
         } catch (IOException e) {
             report(tr("settings.rss.saveRuleFailed", e.getMessage()));
             return;
         } catch (IllegalArgumentException e) {
-            report(e.getMessage());
+            report(String.valueOf(e.getMessage()));
             return;
         }
         reloadRules();
@@ -2166,12 +2780,14 @@ final class SettingsWindow {
         return new RuleDialog.Articles() {
             @Override
             public List<com.torrenta.rss.Article> all() {
-                return rssService.allArticles();
+                RssService service = rssService;
+                return service == null ? List.of() : service.allArticles();
             }
 
             @Override
             public Map<String, String> namesById() {
-                return rssService.namesById();
+                RssService service = rssService;
+                return service == null ? Map.of() : service.namesById();
             }
         };
     }
@@ -2269,6 +2885,7 @@ final class SettingsWindow {
         rssStatusLabel.setText(feeds.isEmpty() ? "" : tr("settings.rss.status", feeds.size(), unread));
     }
 
+    @Initializer // build() makes every page
     private void buildSearch(VBox page) {
         VBox providers = section(page, tr("settings.search.providers"));
         searchTable = new TableView<>();
@@ -2284,7 +2901,7 @@ final class SettingsWindow {
         url.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().url()));
         TableColumn<TorznabEndpoint, String> key = new TableColumn<>(tr("settings.search.column.apiKey"));
-        key.setPrefWidth(80);
+        key.setPrefWidth(100); // "needed here" on a server whose key is on another machine
         key.setCellValueFactory(c ->
                 new javafx.beans.property.ReadOnlyStringWrapper(c.getValue().maskedKey()));
         TableColumn<TorznabEndpoint, String> enabled = new TableColumn<>(tr("common.enabled"));
@@ -2338,6 +2955,7 @@ final class SettingsWindow {
     }
 
     /** The definition files: listed read-only, switched on or off, reloaded, the folder opened. */
+    @Initializer // build() makes every page
     private void buildDefinitions(VBox page) {
         VBox section = section(page, tr("settings.search.definitions"));
         definitionTable = new TableView<>();
@@ -2390,7 +3008,10 @@ final class SettingsWindow {
         reload.setOnAction(e -> reloadDefinitionsPressed());
         Button open = new Button(tr("settings.search.openFolder"));
         open.setOnAction(e -> openDefinitionFolder.run());
-        HBox buttons = new HBox(6, toggle, reload, open);
+        Button export = new Button(tr("settings.search.export"));
+        export.disableProperty().bind(Bindings.isEmpty(definitionTable.getItems()));
+        export.setOnAction(e -> exportDefinitionsPressed());
+        HBox buttons = new HBox(6, toggle, reload, open, export);
         buttons.setAlignment(Pos.CENTER_LEFT);
         Label hint = new Label(tr("settings.search.definitions.hint"));
         hint.setWrapText(true);
@@ -2408,7 +3029,8 @@ final class SettingsWindow {
     }
 
     private static String definitionType(DefinitionStore.Entry e) {
-        return e.loaded() ? e.definition().type().name().toLowerCase(Locale.ROOT) : "";
+        com.torrenta.search.Definition d = e.definition();
+        return d != null ? d.type().name().toLowerCase(Locale.ROOT) : "";
     }
 
     private static String definitionStatus(DefinitionStore.Entry e) {
@@ -2428,6 +3050,34 @@ final class SettingsWindow {
         reloadDefinitions();
         definitionTable.getSelectionModel().select(selected);
         onSearchProvidersChanged.run();
+    }
+
+    /** Asks where, then writes every definition file into one zip. */
+    private void exportDefinitionsPressed() {
+        if (definitionStore == null) return;
+        javafx.stage.FileChooser chooser = new javafx.stage.FileChooser();
+        chooser.setTitle(tr("settings.search.export.title"));
+        chooser.getExtensionFilters()
+                .add(new javafx.stage.FileChooser.ExtensionFilter(tr("settings.search.export.filter"), "*.zip"));
+        chooser.setInitialFileName(DefinitionStore.exportName(java.time.LocalDate.now()));
+        File chosen = chooser.showSaveDialog(stage);
+        if (chosen != null) exportDefinitions(DefinitionStore.withZipSuffix(chosen.toPath()));
+    }
+
+    /** Writes the zip and says so on the page's status line; the capture's way past the chooser. */
+    void exportDefinitions(Path target) {
+        if (definitionStore == null || definitionStatusLabel == null) return;
+        try {
+            int count = definitionStore.exportZip(target);
+            definitionStatusLabel.setText(tr("settings.search.export.done", count, target));
+        } catch (IOException e) {
+            definitionStatusLabel.setText(tr("settings.search.export.failed", target, e.getMessage()));
+        }
+    }
+
+    /** The definitions' status line, for a capture. */
+    String definitionStatusForCapture() {
+        return definitionStatusLabel == null ? "" : definitionStatusLabel.getText();
     }
 
     private void reloadDefinitionsPressed() {
@@ -2473,6 +3123,8 @@ final class SettingsWindow {
     }
 
     private void addSearchProvider(TorznabEndpoint made) {
+        SearchProviderStore searchStore = this.searchStore;
+        if (searchStore == null) return;
         List<TorznabEndpoint> list = new ArrayList<>(searchStore.entries());
         list.add(made);
         saveSearchProviders(list, made);
@@ -2526,8 +3178,9 @@ final class SettingsWindow {
             String text = line;
             javafx.application.Platform.runLater(() -> {
                 searchStatusLabel.setText(text);
-                if (found == null || found.equals(selected)) return;
-                List<TorznabEndpoint> list = new ArrayList<>(searchStore.entries());
+                SearchProviderStore store = searchStore;
+                if (found == null || found.equals(selected) || store == null) return;
+                List<TorznabEndpoint> list = new ArrayList<>(store.entries());
                 int at = list.indexOf(selected);
                 if (at < 0) return;
                 list.set(at, found);
@@ -2537,7 +3190,9 @@ final class SettingsWindow {
         });
     }
 
-    private void saveSearchProviders(List<TorznabEndpoint> list, TorznabEndpoint select) {
+    private void saveSearchProviders(List<TorznabEndpoint> list, @Nullable TorznabEndpoint select) {
+        SearchProviderStore searchStore = this.searchStore;
+        if (searchStore == null) return;
         try {
             searchStore.set(list);
         } catch (IOException e) {
@@ -2547,6 +3202,12 @@ final class SettingsWindow {
         reloadSearch();
         if (select != null) searchTable.getSelectionModel().select(select);
         onSearchProvidersChanged.run();
+    }
+
+    /** FX thread: the Search page's two tables again, after a sync changed what they show. */
+    void reloadSearchPage() {
+        reloadSearch();
+        reloadDefinitions();
     }
 
     /** The store's list into the table; keeps the selection where it can. */
@@ -2580,12 +3241,12 @@ final class SettingsWindow {
         String engineLine();
     }
 
-    private ProfileStore profileStore;
-    private ProfilesHost profilesHost;
+    private @Nullable ProfileStore profileStore;
+    private @Nullable ProfilesHost profilesHost;
     private TableView<EngineProfile> profileTable;
     private Label profileStatusLabel;
     private Label profileInUseLabel;
-    private EngineProfileDialog profileDialog;
+    private @Nullable EngineProfileDialog profileDialog;
     /** Asks a daemon who it is; swapped for a fake in a capture or a test. */
     private EngineProfileDialog.Tester profileTester = TransmissionEngine::probe;
 
@@ -2601,6 +3262,7 @@ final class SettingsWindow {
         reloadProfiles();
     }
 
+    @Initializer // build() makes every page
     private void buildEngine(VBox page) {
         VBox section = section(page, tr("settings.engine.profiles"));
         profileTable = new TableView<>();
@@ -2756,7 +3418,9 @@ final class SettingsWindow {
         reloadProfiles();
     }
 
-    private void saveProfiles(List<EngineProfile> list, EngineProfile select) {
+    private void saveProfiles(List<EngineProfile> list, @Nullable EngineProfile select) {
+        ProfileStore profileStore = this.profileStore;
+        if (profileStore == null) return;
         try {
             profileStore.set(list);
         } catch (IOException e) {
@@ -2811,6 +3475,7 @@ final class SettingsWindow {
         });
     }
 
+    @Initializer // build() makes every page
     private void buildAutomation(VBox page) {
         VBox run = section(page, tr("settings.automation.runOnEvent"));
         onAdded = commandField(EngineEvent.Kind.ADDED);
@@ -2837,6 +3502,15 @@ final class SettingsWindow {
                 tr("settings.automation.onSeedingDone.desc"),
                 onSeedingDone,
                 tr("settings.automation.onSeedingDone.keywords"));
+        onUpdated = commandField(EngineEvent.Kind.UPDATED);
+        row(
+                Category.AUTOMATION,
+                run,
+                tr("settings.automation.onUpdated"),
+                tr("settings.automation.onUpdated.desc"),
+                onUpdated,
+                tr("settings.automation.onUpdated.keywords"),
+                Engine.Capability.MUTABLE);
         Label legend = new Label(tr("settings.automation.placeholders.legend"));
         legend.setWrapText(true);
         legend.getStyleClass().add("settings-row-description");
@@ -2872,6 +3546,15 @@ final class SettingsWindow {
                 "",
                 notifySeedingDone,
                 tr("settings.automation.notifySeedingDone.keywords"));
+        notifyUpdated = notifyBox(EngineEvent.Kind.UPDATED);
+        row(
+                Category.AUTOMATION,
+                notify,
+                tr("settings.automation.notifyUpdated"),
+                "",
+                notifyUpdated,
+                tr("settings.automation.notifyUpdated.keywords"),
+                Engine.Capability.MUTABLE);
         notifyError = notifyBox(EngineEvent.Kind.ERROR);
         row(
                 Category.AUTOMATION,
@@ -2913,6 +3596,7 @@ final class SettingsWindow {
         return box;
     }
 
+    @Initializer // build() makes every page
     private void buildAdding(VBox page) {
         VBox defaults = section(page, tr("settings.adding.defaults"));
         addStartPaused = new CheckBox();
@@ -2970,6 +3654,49 @@ final class SettingsWindow {
                 tr("settings.adding.withoutAsking.desc"),
                 addWithoutAsking,
                 tr("settings.adding.withoutAsking.keywords"));
+        addUnsafeContent = new ChoiceBox<>();
+        addUnsafeContent.getItems().addAll(UnsafeContent.values());
+        addUnsafeContent.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setAddUnsafeContent(now.name());
+            settings.saveQuietly();
+        });
+        row(
+                Category.ADDING,
+                defaults,
+                tr("settings.adding.unsafe"),
+                tr("settings.adding.unsafe.desc"),
+                addUnsafeContent,
+                tr("settings.adding.unsafe.keywords"));
+        addDedup = new ChoiceBox<>();
+        addDedup.getItems().addAll(com.torrenta.engine.DedupMode.values());
+        addDedup.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.setAddDedup(now.name());
+            settings.saveQuietly();
+        });
+        row(
+                Category.ADDING,
+                defaults,
+                tr("settings.adding.dedup"),
+                tr("settings.adding.dedup.desc"),
+                addDedup,
+                tr("settings.adding.dedup.keywords"),
+                Engine.Capability.DEDUP);
+        addProbePrivate = new CheckBox();
+        addProbePrivate.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setAddProbePrivate(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.ADDING,
+                defaults,
+                tr("settings.adding.probePrivate"),
+                tr("settings.adding.probePrivate.desc"),
+                addProbePrivate,
+                tr("settings.adding.probePrivate.keywords"),
+                Engine.Capability.SWARM_PREVIEW);
 
         // Links that are not torrents: curl downloads them, on this machine, whatever the engine.
         VBox links = section(page, tr("settings.adding.links"));
@@ -2991,8 +3718,49 @@ final class SettingsWindow {
                 tr("settings.adding.linksAtOnce.desc"),
                 directActive,
                 tr("settings.adding.linksAtOnce.keywords"));
+
+        // A file played while it downloads: which player gets it, on this machine.
+        VBox playing = section(page, tr("settings.adding.playing"));
+        streamPlayer = text(Settings.STREAM_PLAYER);
+        streamPlayer.setPromptText(tr("settings.adding.player.prompt"));
+        streamPlayer.setPrefColumnCount(24);
+        row(
+                Category.ADDING,
+                playing,
+                tr("settings.adding.player"),
+                tr("settings.adding.player.desc"),
+                streamPlayer,
+                tr("settings.adding.player.keywords"),
+                Engine.Capability.STREAMING);
+
+        // Updatable torrents (BEP 46): how often a newer version is looked for, and the old one's fate.
+        VBox updatable = section(page, tr("settings.adding.updatable"));
+        followHours = intSpinner(0, 168, Settings.FOLLOW_HOURS);
+        row(
+                Category.ADDING,
+                updatable,
+                tr("settings.adding.followHours"),
+                tr("settings.adding.followHours.desc"),
+                followHours,
+                tr("settings.adding.followHours.keywords"),
+                Engine.Capability.MUTABLE);
+        followRemoveOld = new CheckBox();
+        followRemoveOld.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setFollowRemoveOld(now);
+            settings.saveQuietly();
+        });
+        row(
+                Category.ADDING,
+                updatable,
+                tr("settings.adding.followRemoveOld"),
+                tr("settings.adding.followRemoveOld.desc"),
+                followRemoveOld,
+                tr("settings.adding.followRemoveOld.keywords"),
+                Engine.Capability.MUTABLE);
     }
 
+    @Initializer // build() makes every page
     private void buildConnection(VBox page) {
         VBox listening = section(page, tr("settings.connection.listening"));
         port = intSpinner(1024, 65535, Settings.CONN_PORT);
@@ -3040,6 +3808,37 @@ final class SettingsWindow {
                 listenInterface,
                 tr("settings.connection.interface.keywords"),
                 Engine.Capability.LISTEN_DETAILS);
+        exitCheck = bool(Settings.CONN_EXIT_CHECK);
+        row(
+                Category.CONNECTION,
+                listening,
+                tr("settings.connection.exitCheck"),
+                tr("settings.connection.exitCheck.desc"),
+                exitCheck,
+                tr("settings.connection.exitCheck.keywords"),
+                Engine.Capability.LISTEN_DETAILS);
+        exitCheckUrl = text(Settings.CONN_EXIT_CHECK_URL);
+        exitCheckUrl.setPrefColumnCount(18);
+        exitCheckUrl.setPromptText(com.torrenta.net.ExitCheck.DEFAULT_URL);
+        exitCheckUrl.disableProperty().bind(exitCheck.selectedProperty().not());
+        row(
+                Category.CONNECTION,
+                listening,
+                tr("settings.connection.exitCheckUrl"),
+                tr("settings.connection.exitCheckUrl.desc"),
+                exitCheckUrl,
+                tr("settings.connection.exitCheckUrl.keywords"),
+                Engine.Capability.LISTEN_DETAILS);
+        pauseWhenExposed = bool(Settings.CONN_PAUSE_WHEN_EXPOSED);
+        pauseWhenExposed.disableProperty().bind(exitCheck.selectedProperty().not());
+        row(
+                Category.CONNECTION,
+                listening,
+                tr("settings.connection.pauseWhenExposed"),
+                tr("settings.connection.pauseWhenExposed.desc"),
+                pauseWhenExposed,
+                tr("settings.connection.pauseWhenExposed.keywords"),
+                Engine.Capability.LISTEN_DETAILS);
 
         VBox limits = section(page, tr("settings.connection.limits"));
         maxConnections = intSpinner(2, 10_000, Settings.CONN_MAX_CONNECTIONS);
@@ -3078,7 +3877,7 @@ final class SettingsWindow {
             }
 
             @Override
-            public EngineSettings.ProxyType fromString(String s) {
+            public EngineSettings.@Nullable ProxyType fromString(String s) {
                 return null;
             }
         });
@@ -3151,6 +3950,7 @@ final class SettingsWindow {
         }
     }
 
+    @Initializer // build() makes every page
     private void buildProtocol(VBox page) {
         VBox discovery = section(page, tr("settings.protocol.findingPeers"));
         dht = bool(Settings.PROTO_DHT);
@@ -3196,7 +3996,7 @@ final class SettingsWindow {
             }
 
             @Override
-            public EngineSettings.Protocol.Encryption fromString(String s) {
+            public EngineSettings.Protocol.@Nullable Encryption fromString(String s) {
                 return null;
             }
         });
@@ -3242,6 +4042,7 @@ final class SettingsWindow {
                 tr("settings.protocol.defaultTrackers.keywords"));
     }
 
+    @Initializer // build() makes every page
     private void buildIpFilter(VBox page) {
         VBox list = section(page, tr("settings.ipFilter.blocklist"));
         ipFilterEnabled = new CheckBox();
@@ -3343,6 +4144,7 @@ final class SettingsWindow {
                 tr("settings.ipFilter.status.keywords"));
     }
 
+    @Initializer // build() makes every page
     private void buildSpeed(VBox page) {
         VBox limits = section(page, tr("settings.speed.limits"));
         speedDown = intSpinner(0, 10_000_000, Settings.SPEED_DOWNLOAD);
@@ -3420,6 +4222,29 @@ final class SettingsWindow {
         }
         row(Category.SPEED, schedule, tr("settings.speed.days"), "", days, tr("settings.speed.days.keywords"));
 
+        // What the machine runs on: the battery everywhere, a metered network where it can be read.
+        VBox conditions = section(page, tr("settings.speed.conditions"));
+        onBattery = ruleChoice(Settings.SPEED_ON_BATTERY);
+        row(
+                Category.SPEED,
+                conditions,
+                tr("settings.speed.onBattery"),
+                tr("settings.speed.onBattery.desc"),
+                onBattery,
+                tr("settings.speed.onBattery.keywords"),
+                Engine.Capability.SPEED_CONDITIONS);
+        onMetered = ruleChoice(Settings.SPEED_ON_METERED);
+        if (com.torrenta.os.Conditions.seesMetered(System.getProperty("os.name", ""))) {
+            row(
+                    Category.SPEED,
+                    conditions,
+                    tr("settings.speed.onMetered"),
+                    tr("settings.speed.onMetered.desc"),
+                    onMetered,
+                    tr("settings.speed.onMetered.keywords"),
+                    Engine.Capability.SPEED_CONDITIONS);
+        }
+
         VBox options = section(page, tr("settings.speed.options"));
         countOverhead = bool(Settings.SPEED_COUNT_OVERHEAD);
         row(
@@ -3432,6 +4257,19 @@ final class SettingsWindow {
                 Engine.Capability.OVERHEAD_IN_LIMITS);
     }
 
+    /** A condition's rule: nothing, the alternative pair, or a pause; applied at once. */
+    private ChoiceBox<com.torrenta.session.SpeedMode.Rule> ruleChoice(String key) {
+        ChoiceBox<com.torrenta.session.SpeedMode.Rule> box = new ChoiceBox<>();
+        box.getItems().addAll(com.torrenta.session.SpeedMode.Rule.values());
+        box.valueProperty().addListener((o, was, now) -> {
+            if (loading || now == null) return;
+            settings.set(key, now.name());
+            changed();
+        });
+        return box;
+    }
+
+    @Initializer // build() makes every page
     private void buildQueue(VBox page) {
         VBox queue = section(page, tr("settings.queue.queue"));
         activeDownloads = intSpinner(0, 10_000, Settings.QUEUE_ACTIVE_DOWNLOADS);
@@ -3494,7 +4332,7 @@ final class SettingsWindow {
             }
 
             @Override
-            public ShareLimit.Action fromString(String s) {
+            public ShareLimit.@Nullable Action fromString(String s) {
                 return null;
             }
         });
@@ -3592,6 +4430,7 @@ final class SettingsWindow {
     private void reload() {
         loading = true;
         try {
+            reloadKeys();
             reloadLabels();
             reloadProfiles();
             reloadWatch();
@@ -3612,12 +4451,26 @@ final class SettingsWindow {
             sidebarPlace.setValue(SidebarPlace.of(settings.sidebar(), settings.sidebarSide()));
             detailPlace.setValue(DetailPlace.of(settings.detailVisible(), settings.detailSide()));
             extendedWindow.setSelected(settings.extendedWindow());
-            paletteKey.setValue(PaletteKey.byId(settings.paletteKey(), PaletteKey.DEFAULT));
             tray.setSelected(settings.tray());
             closeToTray.setSelected(settings.closeToTray());
             osHandler.setSelected(settings.osHandler());
             osBadge.setSelected(settings.osBadge());
+            removeToTrash.setSelected(settings.removeToTrash());
             syncEnabled.setSelected(settings.syncEnabled());
+            WebApiConfig remote = settings.webApi();
+            remoteEnabled.setSelected(remote.enabled());
+            remoteAddress.setText(remote.address());
+            remotePort.getValueFactory().setValue(remote.port());
+            remoteDomains.setText(String.join(" ", remote.domains()));
+            remoteRootFolder.setText(
+                    settings.webApiRootFolder().map(Path::toString).orElse(""));
+            remoteRoots.setText(String.join(
+                    "\n", settings.webApiRoots().stream().map(Path::toString).toList()));
+            remoteUsername.setText(remote.username());
+            remoteHttpsFile.setText(
+                    remote.httpsFile() == null ? "" : remote.httpsFile().toString());
+            remoteHttpsPassword.setText(remote.httpsPassword());
+            refreshRemotePasswordState();
             syncUrl.setText(settings.syncUrl());
             syncBranch.setText(settings.syncBranch().equals("main") ? "" : settings.syncBranch());
             syncInterval.getValueFactory().setValue(settings.syncIntervalMinutes());
@@ -3625,7 +4478,13 @@ final class SettingsWindow {
             addSequential.setSelected(settings.addSequential());
             addLayout.setValue(settings.addContentLayout());
             addWithoutAsking.setSelected(settings.addWithoutAsking());
+            addUnsafeContent.setValue(UnsafeContent.byName(settings.addUnsafeContent()));
+            addDedup.setValue(com.torrenta.engine.DedupMode.byName(settings.addDedup()));
+            addProbePrivate.setSelected(settings.addProbePrivate());
             directCurl.setText(settings.directOptions().curl());
+            streamPlayer.setText(settings.get(Settings.STREAM_PLAYER, ""));
+            followHours.getValueFactory().setValue(settings.followHours());
+            followRemoveOld.setSelected(settings.followRemoveOld());
             directActive.getValueFactory().setValue(settings.directOptions().active());
             AutomationSettings a = settings.automation();
             onAdded.setText(a.onAdded());
@@ -3635,12 +4494,17 @@ final class SettingsWindow {
             notifyFinished.setSelected(a.notifyFinished());
             notifySeedingDone.setSelected(a.notifySeedingDone());
             notifyError.setSelected(a.notifyError());
+            onUpdated.setText(a.onUpdated());
+            notifyUpdated.setSelected(a.notifyUpdated());
             EngineSettings e = settings.engineSettings();
             port.getValueFactory().setValue(e.listenPort());
             randomPort.setSelected(e.randomPort());
             upnp.setSelected(e.upnp());
             ipv6.setSelected(e.ipv6());
             listenInterface.setText(e.listenInterface());
+            exitCheck.setSelected(settings.exitCheck());
+            exitCheckUrl.setText(settings.get(Settings.CONN_EXIT_CHECK_URL, ""));
+            pauseWhenExposed.setSelected(settings.pauseWhenExposed());
             maxConnections.getValueFactory().setValue(e.maxConnections());
             maxPerTorrent.getValueFactory().setValue(e.maxConnectionsPerTorrent());
             uploadSlots.getValueFactory().setValue(e.uploadSlots());
@@ -3675,6 +4539,8 @@ final class SettingsWindow {
             scheduleTo.setText(Settings.formatMinutes(sp.scheduleTo()));
             scheduleDays.forEach((day, box) -> box.setSelected(sp.scheduleDays().contains(day)));
             countOverhead.setSelected(sp.countOverhead());
+            onBattery.setValue(com.torrenta.session.SpeedMode.Rule.byName(settings.get(Settings.SPEED_ON_BATTERY, "")));
+            onMetered.setValue(com.torrenta.session.SpeedMode.Rule.byName(settings.get(Settings.SPEED_ON_METERED, "")));
             EngineSettings.Queue q = e.queue();
             activeDownloads.getValueFactory().setValue(q.activeDownloads());
             activeSeeds.getValueFactory().setValue(q.activeSeeds());

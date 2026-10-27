@@ -10,13 +10,19 @@ The files live in `search-providers/` inside the config folder (`~/.torrenta` un
 loads is a provider chip in the Search tab; Settings → Search lists the files with their type and
 whether they loaded (a file that did not says why, and the Event Log says so once), switches each
 on or off (`search.disabled` in the settings file, a space-separated list of ids, which syncs),
-reloads the folder and opens it. The folder is also re-read when the Search tab opens, so a file
-dropped in is a chip at once.
+reloads the folder, opens it, and exports every file in it, loaded or not, to one zip
+(`search-providers/<id>.json` inside, so unpacking it in the config folder puts them back). The
+folder is also re-read when the Search tab opens, so a file dropped in is a chip at once.
 
 Three examples ship and are copied into the folder on the first run. One you have edited is never
 written over: the shipped text goes beside it as `<id>.json.example` instead (and is removed again
 when your file matches the shipped one). Delete an example and it comes back on the next start;
 switch it off in Settings to be rid of it.
+
+With settings sync on (Settings → Sync), the files travel with the settings: one you add, change or
+delete on one computer is added, changed or deleted on the others, a file at a time. An example
+you have not changed is not sent, since every computer has it already; turning an edited example
+back into the shipped text turns it back on the others too.
 
 ## The file
 

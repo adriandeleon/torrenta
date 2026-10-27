@@ -24,6 +24,7 @@ import javafx.stage.Stage;
 import javafx.stage.Window;
 
 import com.torrenta.engine.TorrentLabels;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -44,7 +45,7 @@ final class TagsDialog {
     private final Map<String, CheckBox> boxes = new LinkedHashMap<>();
     private final TextField newTags = new TextField();
     private final Button apply = new Button(tr("dialog.common.apply"));
-    private Result result;
+    private @Nullable Result result;
 
     /**
      * @param subject the torrent's name, or what the selection is ("3 torrents")
@@ -104,6 +105,7 @@ final class TagsDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
     }
 
     /** Blocks on a nested event loop, as a dialog does; empty when cancelled. */

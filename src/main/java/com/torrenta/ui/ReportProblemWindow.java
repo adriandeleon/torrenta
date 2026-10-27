@@ -31,6 +31,7 @@ import javafx.stage.Window;
 
 import com.torrenta.AppInfo;
 import com.torrenta.report.ProblemReport;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -57,7 +58,7 @@ final class ReportProblemWindow {
     private final Button openIssue = new Button(tr("report.openIssue"));
 
     private String systemDetails = "";
-    private ProblemReport.Assembled prepared;
+    private ProblemReport.@Nullable Assembled prepared;
     /** Bumped by each show(): a report still being prepared for an earlier one is dropped. */
     private int generation;
 

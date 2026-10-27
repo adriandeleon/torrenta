@@ -50,9 +50,12 @@ import javafx.scene.text.Text;
 import javafx.scene.text.TextFlow;
 import javafx.util.StringConverter;
 
+import com.torrenta.content.FileKind;
 import com.torrenta.engine.EngineEvent;
 import com.torrenta.engine.Torrent;
 import com.torrenta.engine.TorrentDetail;
+import com.torrenta.session.SpeedHistory;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -70,6 +73,9 @@ import static com.torrenta.i18n.Messages.tr;
 final class DetailPane extends VBox {
 
     static final List<String> TABS = List.of("overview", "files", "peers", "trackers", "log", "speed");
+
+    /** The tabs a download from a link has nothing for: it has no swarm and no trackers. */
+    static final java.util.Set<String> TORRENT_ONLY = java.util.Set.of("peers", "trackers");
 
     /** Wider than this, the Overview and the header use two columns. */
     static final double WIDE = 760;
@@ -104,8 +110,8 @@ final class DetailPane extends VBox {
     /** Pause's glyph: two bars while it pauses, the play triangle while it resumes. */
     private final StackPane pauseGlyph = new StackPane();
 
-    private Boolean pauseShowsResume;
-    private RowState headerState;
+    private @Nullable Boolean pauseShowsResume;
+    private @Nullable RowState headerState;
     private boolean wide;
 
     // ---- overview
@@ -114,13 +120,16 @@ final class DetailPane extends VBox {
     private final Label cardTitle = new Label();
     private final TextFlow cardBody = new TextFlow();
     private final VBox remedies = new VBox(2);
-    private Diagnosis shownDiagnosis;
+    private @Nullable Diagnosis shownDiagnosis;
     /** The capture hook asked for a remedy before a card offered it: pressed when one does. */
-    private Diagnosis.Remedy remedyPending;
+    private Diagnosis.@Nullable Remedy remedyPending;
 
     private boolean remedyPendingAny;
     private final Label piecesValue = new Label();
     private final PieceStrip pieceStrip = new PieceStrip();
+    /** The pieces a player's read-ahead covers in the torrent shown; null while none plays it. */
+    private com.torrenta.engine.PieceMath.@Nullable Span streamWindow;
+
     private final VBox piecesBox = new VBox(8);
     private final Sparkline overviewSpark = new Sparkline(Sparkline.Series.BOTH, 200, 56);
     private final Label speedCaption = new Label();
@@ -142,6 +151,8 @@ final class DetailPane extends VBox {
     private final Label trackerValue = value();
     /** A download's link, in the place a torrent's info-hash has. */
     private final Label sourceValue = value();
+    /** A download's command line for fetching it by hand ({@link TorrentDetail#command}). */
+    private final Label commandValue = value();
     /** The facts' rows only a torrent has, and the one only a download from a link has. */
     private final List<Node> torrentFacts = new java.util.ArrayList<>();
 
@@ -159,19 +170,32 @@ final class DetailPane extends VBox {
     /** The selected torrent's graph; fed every tick, painted only while its tab shows. */
     private final SpeedGraph speed = new SpeedGraph(600, false);
 
-    private SpeedHistory speedHistory;
+    private @Nullable SpeedHistory speedHistory;
     private long speedNow;
     private final Label empty = new Label(tr("detail.empty"));
     private boolean[] lastPieces = new boolean[0];
-    private String shownId;
+    private @Nullable String shownId;
+
+    /**
+     * The tab the person chose, kept while a download from a link shows the Overview in place of
+     * its Peers or Trackers, so the next torrent opens on it again.
+     */
+    private String wantedTab = "overview";
+
+    /** Set while {@link #show} moves off a disabled tab, so the move is not taken as a choice. */
+    private boolean steering;
 
     private Function<String, Optional<Command>> commands = id -> Optional.empty();
     private BiConsumer<Integer, com.torrenta.engine.Priority> onFilePriority = (i, p) -> {};
     private Consumer<FileRows.Row> onOpenFile = r -> {};
     private Consumer<FileRows.Row> onOpenFolder = r -> {};
+    /** Stream in Player and Copy Stream URL, for a file row. */
+    private Consumer<FileRows.Row> onStream = r -> {};
+
+    private Consumer<FileRows.Row> onCopyStream = r -> {};
     private BiConsumer<FileRows.Row, String> onRename = (r, name) -> {};
     /** What the capture hook types into the next file Rename dialog before pressing OK. */
-    private String renameForCapture;
+    private @Nullable String renameForCapture;
 
     private Consumer<List<String>> onAddTrackers = urls -> {};
     private Consumer<List<String>> onAddWebSeeds = urls -> {};
@@ -181,19 +205,28 @@ final class DetailPane extends VBox {
     /** Add and Remove for the web seeds: hidden for an engine that only lists them. */
     private final HBox webSeedBar = new HBox(8);
     /** What the capture hook types into the next Add Web Seeds dialog before pressing OK. */
-    private String webSeedsForCapture;
+    private @Nullable String webSeedsForCapture;
 
     private Consumer<String> onRemoveTracker = url -> {};
     private Runnable onReannounce = () -> {};
     private Consumer<String> onBanPeer = address -> {};
     private Consumer<String> onCopyPeer = address -> {};
+    private Consumer<String> onCopyCommand = command -> {};
     private MenuItem banItem;
     private TableView<TorrentDetail.Peer> peerTable;
     private ContextMenu peerMenu;
     /** The peer the open context menu is about, read when it shows: the list is replaced every tick. */
-    private String peerTarget;
+    private @Nullable String peerTarget;
     /** The files are on this machine (not a remote daemon's): Open File and the folder actions show. */
     private boolean localFiles = true;
+    /** Whether a torrent waits for its files to be chosen: a mark in the settings, the window's. */
+    private java.util.function.Predicate<String> filesToChoose = id -> false;
+
+    void setFilesToChoose(java.util.function.Predicate<String> marked) {
+        filesToChoose = marked;
+    }
+    /** The engine can serve a file while it downloads ({@code Capability.STREAMING}). */
+    private boolean streaming = true;
 
     DetailPane() {
         getStyleClass().add("detail-pane");
@@ -214,6 +247,7 @@ final class DetailPane extends VBox {
                         tab(tr("detail.tab.log"), Icons.history(), null, buildLog()),
                         tab(tr("detail.tab.speed"), Icons.gauge(), null, speed));
         tabs.getSelectionModel().selectedIndexProperty().addListener(o -> {
+            if (!steering) wantedTab = activeTab();
             if (speedShowing()) speed.show(speedHistory, speedNow);
         });
         VBox.setVgrow(tabs, Priority.ALWAYS);
@@ -251,8 +285,21 @@ final class DetailPane extends VBox {
         onFilePriority = handler;
     }
 
+    /** The read-ahead's pieces, marked on the strip from the next show; null for none. */
+    void showStreamWindow(com.torrenta.engine.PieceMath.@Nullable Span window) {
+        streamWindow = window;
+    }
+
     void setOnOpenFile(Consumer<FileRows.Row> handler) {
         onOpenFile = handler;
+    }
+
+    void setOnStream(Consumer<FileRows.Row> handler) {
+        onStream = handler;
+    }
+
+    void setOnCopyStream(Consumer<FileRows.Row> handler) {
+        onCopyStream = handler;
     }
 
     /** A folder row, or a file row whose containing folder is meant; see {@link FileRows#folderOf}. */
@@ -293,12 +340,18 @@ final class DetailPane extends VBox {
         onCopyPeer = handler;
     }
 
+    /** The Overview's Copy beside a download's command line. */
+    void setOnCopyCommand(Consumer<String> handler) {
+        onCopyCommand = handler;
+    }
+
     /**
      * Hides what the engine cannot do here: Open file when the files are not on this machine, Ban
      * Peer when the engine takes no IP filter from us.
      */
     void applyCapabilities(com.torrenta.engine.Engine.Capabilities caps) {
         localFiles = caps.has(com.torrenta.engine.Engine.Capability.LOCAL_FILES);
+        streaming = caps.has(com.torrenta.engine.Engine.Capability.STREAMING);
         openButton.setVisible(localFiles);
         openButton.setManaged(localFiles);
         if (banItem != null) banItem.setVisible(caps.has(com.torrenta.engine.Engine.Capability.IP_FILTER));
@@ -343,7 +396,7 @@ final class DetailPane extends VBox {
      * Overview's half hour is drawn every tick (a few shapes), the Speed tab's graph only while it
      * is the one showing, and when it becomes so.
      */
-    void showSpeed(SpeedHistory history, long nowSeconds) {
+    void showSpeed(@Nullable SpeedHistory history, long nowSeconds) {
         speedHistory = history;
         speedNow = nowSeconds;
         if (history == null) {
@@ -371,6 +424,16 @@ final class DetailPane extends VBox {
         return TABS.get(tabs.getSelectionModel().getSelectedIndex());
     }
 
+    /** The tab to remember: the person's choice, not the Overview a link download stood in with. */
+    String rememberedTab() {
+        return wantedTab;
+    }
+
+    /** The tab to show for {@code wanted}: the Overview where a download from a link has nothing. */
+    static String tabFor(String wanted, boolean direct) {
+        return direct && TORRENT_ONLY.contains(wanted) ? "overview" : wanted;
+    }
+
     /**
      * Selects a tab by name. General and Pieces were folded into the Overview; a remembered one
      * of those opens it.
@@ -387,7 +450,8 @@ final class DetailPane extends VBox {
                 ? 0
                 : fileRows.rootItem().getChildren().size();
         return activeTab() + " files=" + fileCount + " peers=" + peerItems.size() + " trackers=" + trackerItems.size()
-                + " pieces=" + count(lastPieces) + "/" + lastPieces.length + " webseeds=" + webSeedItems;
+                + " pieces=" + count(lastPieces) + "/" + lastPieces.length + " webseeds=" + webSeedItems
+                + " peersTrackers=" + (peersTab.isDisable() ? "off" : "on");
     }
 
     /** The Overview as words, for the capture hook: header, card, map, graph, facts. */
@@ -407,6 +471,7 @@ final class DetailPane extends VBox {
                 "graph=" + overviewDown.getText() + " " + overviewUp.getText(),
                 "facts=" + peersValue.getText() + " | " + downloadedValue.getText() + " | " + uploadedValue.getText()
                         + " | " + hashValue.getText(),
+                "command=" + (commandValue.isManaged() ? commandValue.getText() : "none"),
                 "log=" + (logItems == null ? 0 : logItems.size()));
     }
 
@@ -414,7 +479,7 @@ final class DetailPane extends VBox {
      * FX thread. A fresh snapshot of the selected torrent, with its row's torrent and stall clock
      * (null when the row has not arrived yet: the header and the facts then wait a tick).
      */
-    void show(TorrentDetail detail, Torrent torrent, long quietSeconds, long nowSeconds) {
+    void show(TorrentDetail detail, @Nullable Torrent torrent, long quietSeconds, long nowSeconds) {
         TorrentDetail.General g = detail.general();
         boolean another = !g.id().equals(shownId);
         shownId = g.id();
@@ -432,10 +497,15 @@ final class DetailPane extends VBox {
         showDiagnosis(
                 torrent == null
                         ? Optional.empty()
-                        : Diagnosis.of(torrent, RowState.of(torrent, quietSeconds), detail, quietSeconds));
+                        : Diagnosis.of(
+                                torrent,
+                                RowState.of(torrent, quietSeconds),
+                                detail,
+                                quietSeconds,
+                                filesToChoose.test(torrent.id())));
 
         piecesValue.setText(g.pieceCount() == 0 ? "—" : OverviewText.pieces(g.piecesHave(), g.pieceCount()));
-        pieceStrip.show(detail.pieces(), detail.availability(), PieceStrip.skipped(detail));
+        pieceStrip.show(detail.pieces(), detail.availability(), PieceStrip.skipped(detail), streamWindow);
         if (torrent != null) {
             overviewDown.setText("↓ " + Bytes.rate(torrent.downloadRate()));
             overviewUp.setText("↑ " + Bytes.rate(torrent.uploadRate()));
@@ -444,11 +514,20 @@ final class DetailPane extends VBox {
             uploadedValue.setText(OverviewText.uploaded(torrent));
         }
         // A download from a link has no swarm, pieces or announce: those rows go, its link shows.
-        boolean direct = torrent != null && torrent.direct();
+        boolean direct = com.torrenta.engine.direct.DirectDownload.isId(g.id());
+        peersTab.setDisable(direct);
+        trackersTab.setDisable(direct);
+        String tab = tabFor(wantedTab, direct);
+        if (!tab.equals(activeTab())) {
+            steering = true;
+            selectTab(tab);
+            steering = false;
+        }
         for (Node n : torrentFacts) shown(n, !direct);
         for (Node n : directFacts) shown(n, direct);
         shown(reannounceButton, !direct);
         sourceValue.setText(direct ? g.currentTracker() : "");
+        commandValue.setText(detail.command());
         savePathValue.setText(g.savePath());
         hashValue.setText(OverviewText.shortHash(g.id()));
         availabilityValue.setText(
@@ -492,7 +571,7 @@ final class DetailPane extends VBox {
         trackerItems.clear();
         webSeedItems.clear();
         lastPieces = new boolean[0];
-        pieceStrip.show(lastPieces, new int[0], new boolean[0]);
+        pieceStrip.show(lastPieces, new int[0], new boolean[0], streamWindow);
         if (logItems != null) logItems.setPredicate(e -> false);
         speedHistory = null;
         speed.clear();
@@ -590,7 +669,7 @@ final class DetailPane extends VBox {
     }
 
     /** A command's chord in the muted key face, or nothing for one with none. */
-    private Node keyHint(String id) {
+    private @Nullable Node keyHint(String id) {
         String hint = commands.apply(id).map(Command::hint).orElse("");
         if (hint.isEmpty()) return null;
         Label key = new Label(hint);
@@ -676,6 +755,9 @@ final class DetailPane extends VBox {
         torrentFacts.addAll(fact(row++, tr("detail.general.uploaded"), uploadedValue));
         fact(row++, tr("detail.general.savePath"), savePathValue);
         directFacts.addAll(fact(row++, tr("detail.general.source"), sourceValue));
+        List<Node> command = fact(row++, tr("detail.general.command"), commandBox());
+        GridPane.setValignment(command.get(0), javafx.geometry.VPos.TOP);
+        directFacts.addAll(command);
         torrentFacts.addAll(fact(row++, tr("detail.general.infoHash"), hash));
         Region gap = new Region();
         gap.setMinHeight(6);
@@ -689,6 +771,20 @@ final class DetailPane extends VBox {
         torrentFacts.addAll(fact(row++, tr("detail.general.tracker"), trackerValue));
         torrentFacts.addAll(fact(row, tr("detail.general.private"), privateValue));
         for (Node n : directFacts) shown(n, false);
+    }
+
+    /** The command line, wrapped, with a Copy under it: the line is long and made to be pasted. */
+    private Node commandBox() {
+        commandValue.getStyleClass().add("mono");
+        commandValue.setWrapText(true);
+        commandValue.setMinHeight(Region.USE_PREF_SIZE);
+        Hyperlink copy = new Hyperlink(tr("detail.overview.copy"));
+        copy.getStyleClass().add("overview-copy");
+        copy.setFocusTraversable(false);
+        copy.setOnAction(e -> onCopyCommand.accept(commandValue.getText()));
+        VBox box = new VBox(2, commandValue, copy);
+        box.setAlignment(Pos.TOP_LEFT);
+        return box;
     }
 
     /** The row's name and value, for showing and hiding them together. */
@@ -760,7 +856,13 @@ final class DetailPane extends VBox {
         card.setManaged(d != null);
         if (java.util.Objects.equals(d, shownDiagnosis)) return;
         shownDiagnosis = d;
-        card.getStyleClass().removeAll("diagnosis-stalled", "diagnosis-error", "diagnosis-queued");
+        card.getStyleClass()
+                .removeAll(
+                        "diagnosis-stalled",
+                        "diagnosis-error",
+                        "diagnosis-queued",
+                        "diagnosis-encrypted",
+                        "diagnosis-choose");
         if (d == null) return;
         card.getStyleClass().add("diagnosis-" + d.title().name().toLowerCase(java.util.Locale.ROOT));
         pressPending(d);
@@ -826,7 +928,7 @@ final class DetailPane extends VBox {
      * first when null. The hook acts before a stall has had its minute, so with no card offering it
      * yet, it is pressed when one first does.
      */
-    void pressRemedyForCapture(Diagnosis.Remedy wanted) {
+    void pressRemedyForCapture(Diagnosis.@Nullable Remedy wanted) {
         remedyPending = wanted;
         remedyPendingAny = wanted == null;
         if (shownDiagnosis != null) pressPending(shownDiagnosis);
@@ -886,7 +988,7 @@ final class DetailPane extends VBox {
      * A tab with its glyph before the title, at the menus' size, and a muted count after it when
      * {@code count} is given (Files, Peers, Trackers).
      */
-    private static Tab tab(String title, Icons.Glyph glyph, Label count, Node content) {
+    private static Tab tab(String title, Icons.Glyph glyph, @Nullable Label count, Node content) {
         Tab tab = new Tab(title, content);
         if (count == null) {
             tab.setGraphic(glyph.at(Icons.MENU_SIZE));
@@ -948,7 +1050,7 @@ final class DetailPane extends VBox {
                     }
 
                     @Override
-                    public com.torrenta.engine.Priority fromString(String s) {
+                    public com.torrenta.engine.@Nullable Priority fromString(String s) {
                         return null;
                     }
                 },
@@ -994,13 +1096,25 @@ final class DetailPane extends VBox {
         MenuItem rename = new MenuItem(tr("detail.files.rename"));
         rename.setGraphic(Icons.rename().at(Icons.MENU_SIZE));
         rename.setOnAction(e -> selectedFileRow().ifPresent(this::askRename));
+        // A file played while it downloads: in a player, or its URL for one of the person's choosing.
+        MenuItem stream = new MenuItem(tr("detail.files.stream"));
+        stream.setGraphic(Icons.forKind(com.torrenta.content.FileKind.VIDEO).at(Icons.MENU_SIZE));
+        stream.setOnAction(e -> selectedFileRow().filter(FileRows.Row::isFile).ifPresent(onStream));
+        MenuItem copyStream = new MenuItem(tr("detail.files.copyStream"));
+        copyStream.setGraphic(Icons.copy().at(Icons.MENU_SIZE));
+        copyStream.setOnAction(
+                e -> selectedFileRow().filter(FileRows.Row::isFile).ifPresent(onCopyStream));
         javafx.scene.control.SeparatorMenuItem gap = new javafx.scene.control.SeparatorMenuItem();
-        ContextMenu menu = new ContextMenu(open, folder, gap, rename);
+        javafx.scene.control.SeparatorMenuItem streamGap = new javafx.scene.control.SeparatorMenuItem();
+        ContextMenu menu = new ContextMenu(open, folder, gap, stream, copyStream, streamGap, rename);
         menu.setOnShowing(e -> {
             boolean file = selectedFileRow().map(FileRows.Row::isFile).orElse(false);
             open.setVisible(file && localFiles);
             folder.setVisible(localFiles);
             gap.setVisible(localFiles);
+            stream.setVisible(file && streaming);
+            copyStream.setVisible(file && streaming);
+            streamGap.setVisible(file && streaming);
             folder.setText(tr(file ? "detail.files.openContainingFolder" : "detail.files.openFolder"));
         });
         return menu;
@@ -1070,6 +1184,35 @@ final class DetailPane extends VBox {
      * menu. The hook's actions run before the first detail poll, so with no rows yet it waits for
      * the tree to be rooted and acts then.
      */
+    /**
+     * Capture only: Stream in Player on visible row {@code n}, once the rows are in; then back to
+     * the tab that showed before, so a capture can look at the Overview's strip meanwhile.
+     */
+    void streamFileForCapture(int n) {
+        streamFileForCapture(n, activeTab());
+    }
+
+    private void streamFileForCapture(int n, String back) {
+        selectTab("files");
+        if (files.getRoot() == null) {
+            files.rootProperty().addListener(new javafx.beans.value.ChangeListener<>() {
+                @Override
+                public void changed(
+                        javafx.beans.value.ObservableValue<? extends TreeItem<FileRows.Row>> o,
+                        TreeItem<FileRows.Row> was,
+                        TreeItem<FileRows.Row> now) {
+                    if (now == null) return;
+                    files.rootProperty().removeListener(this);
+                    streamFileForCapture(n, back);
+                }
+            });
+            return;
+        }
+        files.getSelectionModel().clearAndSelect(n);
+        selectedFileRow().filter(FileRows.Row::isFile).ifPresent(onStream);
+        selectTab(back);
+    }
+
     void showFilesMenuForCapture(int n) {
         selectTab("files");
         if (files.getRoot() == null) {
@@ -1093,15 +1236,23 @@ final class DetailPane extends VBox {
     /**
      * The Name column's cell: a small folder or sheet before the name, one node of each kept per
      * cell so a reused cell swaps rather than rebuilds. Long names cut in the middle so the
-     * extension stays, as the Add dialog's tree cuts them.
+     * extension stays, as the Add dialog's tree cuts them. A file that came from disk at the add
+     * (linked, cloned or copied from another torrent) has a link glyph after its own, and says
+     * how and from where in its tooltip.
      */
     private static final class NameCell extends TreeTableCell<FileRows.Row, String> {
         /** One glyph per kind this cell has shown, so a reused cell swaps rather than rebuilds. */
         private final java.util.EnumMap<FileKind, Icons.Glyph> glyphs = new java.util.EnumMap<>(FileKind.class);
 
+        private final Icons.Glyph foundGlyph = Icons.link().at(Icons.MENU_SIZE);
+        private final javafx.scene.layout.HBox withFound = new javafx.scene.layout.HBox(3);
+        private final javafx.scene.control.Tooltip foundTip = new javafx.scene.control.Tooltip();
+
         NameCell() {
             setTextOverrun(javafx.scene.control.OverrunStyle.CENTER_ELLIPSIS);
             setGraphicTextGap(6);
+            foundGlyph.getStyleClass().add("file-found");
+            withFound.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
         }
 
         @Override
@@ -1115,12 +1266,22 @@ final class DetailPane extends VBox {
                 return;
             }
             setText(item);
-            setGraphic(glyphs.computeIfAbsent(FileKind.of(row.name(), !row.isFile()), kind -> {
-                Icons.Glyph glyph = kind.glyph();
+            Icons.Glyph kind = glyphs.computeIfAbsent(FileKind.of(row.name(), !row.isFile()), k -> {
+                Icons.Glyph glyph = Icons.forKind(k);
                 glyph.getStyleClass().add("file-glyph");
-                if (kind == FileKind.FOLDER) glyph.getStyleClass().add("file-glyph-folder");
+                if (k == FileKind.FOLDER) glyph.getStyleClass().add("file-glyph-folder");
                 return glyph;
-            }));
+            });
+            if (row.found() == null) {
+                withFound.getChildren().clear();
+                setGraphic(kind);
+                setTooltip(null);
+            } else {
+                withFound.getChildren().setAll(kind, foundGlyph);
+                setGraphic(withFound);
+                foundTip.setText(row.found().sentence());
+                setTooltip(foundTip);
+            }
         }
     }
 
@@ -1131,11 +1292,13 @@ final class DetailPane extends VBox {
             var item = files.getTreeItem(i);
             FileRows.Row row = item.getValue();
             lines.add("  ".repeat(Math.max(0, files.getTreeItemLevel(item) - 1)) + row.name() + " ["
-                    + FileKind.of(row.name(), !row.isFile()).name().toLowerCase(java.util.Locale.ROOT) + "]");
+                    + FileKind.of(row.name(), !row.isFile()).name().toLowerCase(java.util.Locale.ROOT) + "]"
+                    + (row.found() == null ? "" : " found=" + row.found().sentence()));
         }
         return lines;
     }
 
+    @Initializer // from the constructor
     private javafx.scene.Node buildPeers() {
         TableView<TorrentDetail.Peer> peers = new TableView<>(peerItems);
         peers.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);

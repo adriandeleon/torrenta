@@ -7,6 +7,8 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
 import javafx.stage.Window;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -24,7 +26,8 @@ final class RemoveConfirm {
         SEARCH_PROVIDER,
         ENGINE_PROFILE,
         CATEGORY,
-        TAG;
+        TAG,
+        VIEW;
 
         /** The catalogue segment: {@code confirm.remove.<key>}. */
         String key() {
@@ -54,7 +57,16 @@ final class RemoveConfirm {
     }
 
     /** FX thread. The question itself, for a removal worded its own way; true on {@code button}. */
+    /** The capture hook's answer to the next question, which is then not shown; null for a person's. */
+    static @Nullable Boolean answerForCapture;
+
     static boolean ask(Window owner, String header, String text, String button) {
+        Boolean captured = answerForCapture;
+        if (captured != null) {
+            boolean answer = captured;
+            answerForCapture = null;
+            return answer;
+        }
         Alert confirm = new Alert(Alert.AlertType.CONFIRMATION, text);
         confirm.setTitle(header);
         confirm.setHeaderText(header);

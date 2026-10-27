@@ -29,8 +29,28 @@ public record TorrentPreview(
         boolean v1,
         boolean v2) {
 
-    /** One file: its index in the torrent, its path inside it (forward slashes), its size. */
-    public record FileEntry(int index, String path, long size) {}
+    /**
+     * One file: its index in the torrent, its path inside it (forward slashes), its size, its v2
+     * Merkle root ({@code pieces root}, 64 hex digits) when the torrent has v2 hashes and the file
+     * has bytes, and its {@link ContentKeys#v1 v1 key} when the torrent has v1 hashes and the
+     * file's pieces are its own; each empty otherwise. Either is what {@link ContentIndex} finds a
+     * copy on disk by.
+     */
+    public record FileEntry(int index, String path, long size, String root, String v1Key) {
+        public FileEntry {
+            root = root == null ? "" : root;
+            v1Key = v1Key == null ? "" : v1Key;
+        }
+
+        public FileEntry(int index, String path, long size, String root) {
+            this(index, path, size, root, "");
+        }
+
+        /** No key: a file whose content is not known by any. */
+        public FileEntry(int index, String path, long size) {
+            this(index, path, size, "", "");
+        }
+    }
 
     /** More than one file, or one file inside a folder: the torrent has a root folder. */
     public boolean hasRootFolder() {

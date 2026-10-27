@@ -24,6 +24,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -71,6 +73,23 @@ public final class WatchFolders implements AutoCloseable {
 
         /** The list of missing folders changed; the Settings page's status line wants to know. */
         default void statusChanged() {}
+
+        /**
+         * A source as the add takes it: the application looks an updatable address up for its
+         * current version ({@code Session.resolve}); anything else, and by default, as it is.
+         * Blocks; a failure is an {@link EngineException}, reported like a failed add.
+         */
+        default AddRequest.Source resolve(AddRequest.Source source) throws EngineException {
+            return source;
+        }
+
+        /**
+         * The add itself: the engine's, unless the application screens it first (the content
+         * check). A refusal is an {@link EngineException}, reported like any failed add.
+         */
+        default Torrent add(Engine engine, AddRequest request) throws EngineException {
+            return engine.add(request);
+        }
     }
 
     private final Engine engine;
@@ -85,9 +104,9 @@ public final class WatchFolders implements AutoCloseable {
     private List<WatchFolder> entries = List.of();
     private volatile List<Path> missing = List.of();
     private volatile boolean running;
-    private ScheduledExecutorService scheduler;
-    private Thread watcher;
-    private WatchService service;
+    private @Nullable ScheduledExecutorService scheduler;
+    private @Nullable Thread watcher;
+    private @Nullable WatchService service;
 
     public WatchFolders(Engine engine, Host host) {
         this.engine = engine;
@@ -319,14 +338,19 @@ public final class WatchFolders implements AutoCloseable {
         for (Torrent t : engine.torrents()) present.add(t.id());
         boolean trouble = false;
         for (Candidate candidate : candidates) {
-            if (candidate.id().isPresent() && present.contains(candidate.id().get())) {
-                host.report(EngineEvent.info(candidate.id().get(), "", tr("engine.watch.already", name, where)));
-                continue;
-            }
-            Path destination = entry.destination(host.defaultDownloadDir(), host.category(entry.category()));
-            AddRequest request = entry.request(candidate.source(), destination, host.storage(destination));
             try {
-                Torrent added = engine.add(request);
+                // An updatable address names no torrent until it is looked up.
+                AddRequest.Source source = host.resolve(candidate.source());
+                Optional<String> id = candidate.id().isPresent() || !(source instanceof AddRequest.Magnet m)
+                        ? candidate.id()
+                        : WatchFolder.magnetId(m.uri());
+                if (id.isPresent() && present.contains(id.get())) {
+                    host.report(EngineEvent.info(id.get(), "", tr("engine.watch.already", name, where)));
+                    continue;
+                }
+                Path destination = entry.destination(host.defaultDownloadDir(), host.category(entry.category()));
+                AddRequest request = entry.request(source, destination, host.storage(destination));
+                Torrent added = host.add(engine, request);
                 present.add(added.id());
                 host.report(EngineEvent.info(added.id(), added.name(), tr("engine.watch.added", added.name(), where)));
             } catch (EngineException | RuntimeException e) {

@@ -1,5 +1,7 @@
 package com.torrenta.ui;
 
+import org.jspecify.annotations.Nullable;
+
 import static com.torrenta.i18n.Messages.tr;
 
 /**
@@ -53,7 +55,7 @@ public enum DetailPlace {
      * The divider as written, the list's share of the split, by {@link DetailSplit}'s rule; none,
      * or one that would leave the pane its tabs alone, is this place's default.
      */
-    public double divider(String written) {
+    public double divider(@Nullable String written) {
         return DetailSplit.position(written, defaultDivider);
     }
 

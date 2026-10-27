@@ -8,21 +8,13 @@ import javafx.application.Platform;
 import javafx.stage.Stage;
 
 import com.torrenta.cli.CommandLine;
-import com.torrenta.engine.Engine;
-import com.torrenta.engine.EngineProfile;
-import com.torrenta.engine.direct.DirectDownloads;
-import com.torrenta.engine.direct.WithDownloads;
-import com.torrenta.engine.libtorrent.LibtorrentEngine;
-import com.torrenta.engine.transmission.TransmissionEngine;
 import com.torrenta.os.AwtUse;
 import com.torrenta.os.SingleInstance;
 import com.torrenta.store.ConfigDir;
-import com.torrenta.store.ProfileStore;
 import com.torrenta.store.Settings;
-import com.torrenta.store.StatsStore;
-import com.torrenta.store.TorrentStore;
 import com.torrenta.ui.MainWindow;
 import com.torrenta.ui.Theme;
+import org.jspecify.annotations.Nullable;
 
 /** Torrenta — a keyboard-first BitTorrent client on JavaFX. */
 public final class App extends Application {
@@ -31,9 +23,9 @@ public final class App extends Application {
     private static final String LAUNCH_NAME = "torrenta";
 
     /** The lock on the config folder, held for the life of the process; null when none could be taken. */
-    private static SingleInstance instance;
+    private static @Nullable SingleInstance instance;
 
-    private MainWindow window;
+    private @Nullable MainWindow window;
 
     public static void main(String[] args) {
         // Parsed before anything else starts. --version is what somebody pastes into a bug report,
@@ -61,7 +53,7 @@ public final class App extends Application {
         if (cli.report()) {
             Settings settings = new Settings(configDir.resolve(Settings.FILE_NAME));
             settings.load();
-            String engine = EngineProfile.LOCAL_ID.equals(settings.engineProfile())
+            String engine = com.torrenta.engine.EngineProfile.LOCAL_ID.equals(settings.engineProfile())
                     ? "libtorrent (local)"
                     : "Transmission (remote)";
             System.exit(com.torrenta.report.ReportCommand.run(
@@ -76,6 +68,16 @@ public final class App extends Application {
         // One Torrenta per config folder: a second one hands its command line to the first and is
         // gone before the toolkit would have come up, with nothing printed. A file manager's
         // double-click and a browser's magnet link both arrive this way.
+        // Before the claim, which would hand a running one an empty batch (and bring its window
+        // up): that one saves its own settings over the file, so it is the one to be told.
+        if (cli.setRemotePassword()) {
+            if (SingleInstance.inUse(configDir)) {
+                System.err.println(AppInfo.NAME + ": another Torrenta is running on " + configDir
+                        + "; stop it first, or set the password in its Settings → Remote access");
+                System.exit(1);
+            }
+            System.exit(RemotePassword.run(configDir, System.console(), System.in, System.out, System.err));
+        }
         try {
             SingleInstance.Outcome outcome =
                     SingleInstance.claim(configDir, cli.inputs(), Path.of("").toAbsolutePath());
@@ -85,6 +87,13 @@ public final class App extends Application {
             // A config folder that cannot be written is a bigger problem the window will say;
             // this one runs unlocked rather than not at all.
             System.err.println(AppInfo.NAME + ": no instance lock on " + configDir + ": " + e.getMessage());
+        }
+
+        // A server's run: the session without a window, and without the toolkit ever loading.
+        if (cli.headless(System.getProperty("jpackage.app-path"))) {
+            System.setProperty("java.awt.headless", "true");
+            com.torrenta.ui.DebugLog.install();
+            System.exit(Headless.run(cli, configDir, instance));
         }
 
         // Before any AWT class can load: java.desktop is required for Java2D, and on macOS an
@@ -115,70 +124,38 @@ public final class App extends Application {
         Settings settings = new Settings(configDir.resolve(Settings.FILE_NAME));
         settings.load();
         com.torrenta.ui.DebugLog.attachFile(configDir);
-
-        // The catalogue before any text is built: the window, the dialogs and the palette read it as
-        // they are made, so a change in Settings relabels on restart (Termina's rule). Only an
-        // explicit choice moves the JVM's default locale, so JavaFX's own OK/Cancel and the number
-        // formats follow; "System" keeps the OS locale whole, country and all.
-        String language = com.torrenta.i18n.Messages.resolve(
-                com.torrenta.i18n.Messages.isAutomatic(settings.uiLanguage()) ? null : settings.uiLanguage(),
-                com.torrenta.i18n.Messages.available().keySet(),
-                java.util.Locale.getDefault().getLanguage());
-        com.torrenta.i18n.Messages.init(language);
-        java.util.Locale.setDefault(com.torrenta.i18n.Messages.defaultLocale(
-                settings.uiLanguage(), language, java.util.Locale.getDefault()));
+        // The catalogue before any text is built: the window, the dialogs and the palette read it.
+        Startup.language(settings);
 
         // Applied before any window is built, so the first frame is already themed.
         Application.setUserAgentStylesheet(
                 Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
 
-        window = new MainWindow(
+        MainWindow window = new MainWindow(
                 stage, settings, configDir, uri -> getHostServices().showDocument(uri));
+        this.window = window;
         window.show();
         cli.inputs().forEach(window::addInput);
         // What a second instance sends from here on, and what arrived while the window was being
         // built, goes through the same add path as a dropped file; the window hops to its thread.
+        SingleInstance instance = App.instance;
         if (instance != null) {
             window.setInstanceDescription("primary, port " + instance.port());
             instance.deliverTo(inputs -> Platform.runLater(() -> window.openFromOutside(
                     inputs, com.torrenta.i18n.Messages.tr("app.origin.anotherInstance", AppInfo.NAME))));
         }
 
-        // The unpacked engine lives beside the settings unless a -D says otherwise (the tests do).
-        if (System.getProperty("torrenta.nativeDir") == null) {
-            System.setProperty("torrenta.nativeDir", configDir.resolve("native").toString());
-        }
+        Startup.nativeDir(configDir);
 
         // The engine loads a native library, opens sockets and re-adds every stored torrent, or
         // reaches a daemon over the network: hundreds of milliseconds that the first frame should
         // not wait for. The window is up with "Starting the engine…" meanwhile. Which engine is the
         // profile's (Settings → Engine); a profile that is gone from the file falls back to the
         // local one, said in the status bar.
-        ProfileStore profiles = new ProfileStore(configDir);
-        profiles.load();
-        EngineProfile profile = profiles.byId(settings.engineProfile()).orElse(EngineProfile.LOCAL);
-        window.setEngineFactory(p -> createEngine(p, settings, configDir));
-        window.startEngine(profile);
+        window.setEngineFactory(p -> Startup.createEngine(p, settings, configDir));
+        window.startEngine(Startup.profile(configDir, settings));
 
         if (DevCapture.requested()) DevCapture.schedule(stage, window);
-    }
-
-    /** libtorrent in this process with its stores, or a Transmission daemon reached as the profile says. */
-    static Engine createEngine(EngineProfile profile, Settings settings, Path configDir) {
-        Engine torrents = profile.isLocal()
-                ? new LibtorrentEngine(
-                        settings::downloadDir,
-                        new TorrentStore(configDir.resolve(TorrentStore.FOLDER)),
-                        settings.engineSettings(),
-                        new StatsStore(configDir.resolve(StatsStore.FILE_NAME)))
-                : new TransmissionEngine(profile, settings::downloadDir, settings.engineSettings());
-        // Links that are not torrents go to curl, on this machine, whichever engine has the torrents.
-        DirectDownloads links = new DirectDownloads(
-                configDir,
-                () -> settings.downloadDir().toString(),
-                settings::directOptions,
-                AppInfo.NAME + "/" + AppInfo.VERSION);
-        return new WithDownloads(torrents, links, settings.engineSettings());
     }
 
     @Override

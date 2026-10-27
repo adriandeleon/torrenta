@@ -95,3 +95,24 @@
     -fx-text-fill: -color-fg-emphasis;
     -fx-opacity: 0.7;
 }
+
+/* The swarm's line under the disk sentence: a dot in the verdict's colour, then the sentence. */
+.swarm-dot {
+    -fx-min-width: 8;
+    -fx-pref-width: 8;
+    -fx-max-width: 8;
+    -fx-min-height: 8;
+    -fx-pref-height: 8;
+    -fx-max-height: 8;
+    -fx-background-radius: 4;
+    -fx-background-color: -color-fg-subtle;
+}
+
+.swarm-dot.swarm-healthy { -fx-background-color: -color-success-fg; }
+.swarm-dot.swarm-thin { -fx-background-color: -color-warning-fg; }
+.swarm-dot.swarm-incomplete { -fx-background-color: -color-warning-fg; }
+.swarm-dot.swarm-dead { -fx-background-color: -color-danger-fg; }
+
+.swarm-text {
+    -fx-text-fill: -color-fg-muted;
+}

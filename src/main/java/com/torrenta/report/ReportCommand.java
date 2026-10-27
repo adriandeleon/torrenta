@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Locale;
 
 import com.torrenta.AppInfo;
+import org.jspecify.annotations.Nullable;
 
 /**
  * {@code torrenta --report}: writes a redacted problem report to a file in the current folder,
@@ -66,7 +67,7 @@ public final class ReportCommand {
     }
 
     /** Writes {@code text} to {@code dir/name}, else to the temp folder; the file written, or null. */
-    static Path write(String text, Path dir, String name) {
+    static @Nullable Path write(String text, Path dir, String name) {
         for (Path candidate : List.of(dir, Path.of(System.getProperty("java.io.tmpdir", ".")))) {
             try {
                 return Files.writeString(candidate.toAbsolutePath().resolve(name), text);

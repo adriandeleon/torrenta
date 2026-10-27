@@ -41,6 +41,15 @@ class ActionsTest {
     }
 
     @Test
+    void aTypedCommandActsOnEveryMatchWhileTheBoxFiltersAndOnTheSelectionOtherwise() {
+        List<Torrent> selection = List.of(t(true, false));
+        List<Torrent> matches = List.of(t(false, false), t(false, true), t(true, true));
+        assertEquals(matches, Actions.targets(selection, matches, true));
+        assertEquals(selection, Actions.targets(selection, matches, false));
+        assertEquals(List.of(), Actions.targets(List.of(), matches, false), "no filter, no selection: nothing");
+    }
+
+    @Test
     void spaceResumesOnlyWhenEverythingSelectedIsPaused() {
         assertFalse(Actions.shouldResume(List.of()));
         assertTrue(Actions.shouldResume(List.of(t(true, false), t(true, false))));
@@ -90,6 +99,13 @@ class ActionsTest {
         assertEquals(
                 "Remove these 2 torrents and delete the downloaded files? This cannot be undone.",
                 Actions.removeQuestion(2, true));
+        assertEquals(
+                "Remove this torrent and move the downloaded files to the trash?",
+                Actions.removeQuestion(1, true, true));
+        assertEquals(
+                "Remove this torrent? The downloaded files stay on disk.",
+                Actions.removeQuestion(1, false, true),
+                "no files, no trash");
     }
 
     @Test

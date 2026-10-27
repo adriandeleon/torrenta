@@ -5,7 +5,8 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
 
 ## Commands
 
-- Run: `./mvnw javafx:run`
+- Run: `./mvnw javafx:run`; without a window, `scripts/dev-run.sh -- --headless` (stdout is the
+  log, SIGTERM stops it; `docs/headless.md`)
 - Test + format check: `./mvnw verify` (Spotless/Palantir runs at `verify`; `./mvnw spotless:apply`
   fixes formatting)
 - Native app image: **`./mvnw clean -Pdist -DskipTests package`** ⇒ `target/dist/Torrenta{.app}`;
@@ -26,33 +27,46 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   landed, `view-strip=` reads the strip with the showing one starred), `focus-key:<MOD+…+KEY>`
   (a key pressed where the focus is, through the scene's filters: `focus-key:CTRL+TAB`),
   `dialog-add` to press Add on an open Add dialog (`dialog-press:now|wait|paused`
-for the others, `dialog-key:<KeyCode>` for a key in its file tree), `choose-files` for the
+for the others, `dialog-key:<KeyCode>` for a key in its file tree, `content-skip` for its content
+card's Skip these files; after any action a `content-check=` line has the card's severity and lines), `choose-files` for the
 selected torrent, `select-first`, `message-log` / `message-log:<query>` (the status bar's history card; its visible
   lines are printed), `report-problem` (Help → Report a Problem; the PNG is of it, and after the shot a
   `report=` line has what was replaced, whether it fits the link, and `report-line=`s its first 60 lines), `debug-log` (the Debug Log window; `-Dtorrenta.captureLogProbe=true` pushes a warning and an
   uncaught exception through the real path before the shot and prints what the log caught),
   `detail:<tab>` to show the detail pane on a tab (`detail:overview` prints `overview-header=`,
-  `overview-diagnosis=`, `overview-pieces=`, `overview-graph=`, `overview-facts=` after the shot;
+  `overview-diagnosis=`, `overview-pieces=`, `overview-graph=`, `overview-facts=`, `overview-command=` after the shot;
   every capture prints `status-bar=`), `remedy` / `remedy:<NAME>` to press the diagnosis card's first remedy or a named one (`SKIP_FILE`
   …), waiting for a card that offers it (prints `remedy-pressed=`),
-  `export-to:<folder>` for Export .torrent past its native chooser, `rename:<name>` (`~` for a
+  `create-publish:<name>` (the Create dialog's Publish as updatable ticked, the key's name typed;
+  then `create-run:<path>`, and a `create-publish=` line has the name, the link and what publishing
+  said), `remove-data-confirmed` (Remove with files on the selection, answered yes; run with
+  `XDG_DATA_HOME` pointed at a scratch folder, or the files land in your own trash),
+  `export-to:<folder>` for Export .torrent past its native chooser, `save-view:<name>` (Save Filter as View on the omnibox's query, `~` for a space), `pick-view:<n>` (the n-th saved view), `remove-confirmed` (Remove on the selection, its question answered yes) and `undo-after:<ms>` (Shortcut+Z that much later; an `undo=` line first), `rename:<name>` (`~` for a
   space) to fill and confirm the Rename dialog, `files-rename:<row>:<name>` for a Files-tab row,
   `web-seeds-add:<urls>` (`~` between URLs) and `web-seed-remove:<row>` for the Trackers tab's web
   seeds (a `web-seeds=` line, with `editable=`, while that tab shows),
+  `files-stream:<row>` for Stream in Player on that visible row (back to the tab that showed
+  before, so `detail:overview,files-stream:2` shows the strip's `N in the read-ahead`; a stand-in
+  player in `stream.player` is a script that curls its one argument),
   `files-menu[:<row>]` for the Files tab's context menu on that visible row (it waits for the
   rows, which arrive with the first detail poll; on the Files tab a `file=` line per row shown
   names its `FileKind`, the glyph's rule by extension), `welcome-clipboard:<text>` (the welcome's
   clipboard card as it would read with that text, the real clipboard untouched; a `welcome=` line
-  is printed), `search` / `search:<query>` / `search-keys:<KEY+KEY>`
-  for the Search tab (the keys go where the focus is, once the search has ended; a stand-in server is
+  is printed), `search` / `search:<query>` / `search-keys:<KEY+KEY>` / `search-clear` (Clear Search Results, once the search has ended) /
+  `search-filter:<terms>` (`~` for a space; typed into the results filter once the search has ended,
+  then the `search-filter=` and `search-row=` lines are printed again)
+  for the Search tab (the keys go where the focus is, once the search has ended, `SLASH` typed too; a stand-in server is
   `java scripts/torznab-stub.java 9696 <search.xml> [caps.xml]`), `stats` for the Statistics window
   (the PNG is of it; `stats=` and `stats-graph=` lines after the shot), `detail:speed` for the Speed
   tab (a `speed-tab=` line), `window:<w>x<h>+<x>+<y>` / `window:maximize` to move the main window
   (a `window=` line after every shot has its bounds, what is saved and whether the list's
-  horizontal scrollbar shows; a `statusbar-fit=` line has each status-bar entry as width/needed),
+  horizontal scrollbar shows; an `about=` line has the About panel's bounds beside the window's while
+  it is open; a `statusbar-fit=` line has each status-bar entry as width/needed),
   or `settings` / `settings:<query>` /
   `settings-page:<category>` to open the Settings window (the PNG is then of it) and print the
   visible rows and a `settings-search=` line (query, page), `settings-key:<KeyCode>` for a key in it,
+  `import-from:<folder>` (the Import dialog on that folder, `~` for a space; `import=` and
+  `import-note=` lines) and `import-confirm` (Import, once the rows are in),
   `settings-close`, `settings-layout:<left|right|hidden>/<bottom|right|hidden>` to choose the sidebar's
   and the detail pane's places on the General page (a `layout=` line after every action); the palette's ranking, the
   open dialog's title and the log window's state are printed, and when a dialog is open the PNG is
@@ -65,29 +79,36 @@ to try one on purpose).
 
 | Layer | What | Where |
 |---|---|---|
-| Entry | `--help`/`--version`, toolkit start, theme | `com.torrenta.App`, `com.torrenta.cli` |
+| Entry | `--help`/`--version`, toolkit start, theme; `Startup` (language, native folder, profile, `createEngine`: what the window and headless share, no JavaFX); `Headless` (`--headless`, or the `torrenta-nox` launcher: the `Session` with a stdout/session-log host, every input added without asking, a shutdown hook that stops the engine) | `com.torrenta.App`, `com.torrenta.cli` |
 | Events | `EngineEvent` (level, torrent, message), raised by the engine from libtorrent alerts and by its own start/stop/remove; `Engine.addListener` | `com.torrenta.engine` |
-| Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Engine.fetchMetadata` (a magnet's file list while the dialog is open), `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL), `FileRenames.Layout` (the content layout, `add.contentLayout`); `ui.AddDialog` (rules as statics), `FileTree` (wanted + priority ladder), `FreeSpace` (disk bar and sentence) | `com.torrenta.engine`, `com.torrenta.net`, `ui` |
+| Add | `AddRequest` (source, save path, options, priorities), `TorrentPreview`, `Engine.inspect`/`add(AddRequest)`, `Engine.probe` (a `SwarmProbe`: a magnet's file list, then for either kind a look at the swarm, while the dialog is open), `Inputs` (what a string is), `net.TorrentFetch` (a .torrent from a URL), `FileRenames.Layout` (the content layout, `add.contentLayout`); `ui.AddDialog` (rules as statics), `FileTree` (wanted + priority ladder), `FreeSpace` (disk bar and sentence), `SwarmVerdict` (the Swarm line, from the fetch's `SwarmPreview`), `content.ContentCheck` (pure: what in the wanted files deserves a look — a disguised program, bidi in a name, a shortcut, a program or link in a media torrent, an archive where the name promises media, a bait name from `content.baitWords` — the card above the tree with Skip these files), `content.UnsafeContent` (`add.unsafeContent`, Skip by default: what an add without a dialog does with what the check found — watch folders through `WatchFolders.Host.add`, RSS rules, an article's Download, Add without asking all go through `Session.add`; a `.torrent` is checked before the add, a magnet is added to stop on metadata and marked `torrent.<hash>.unsafeContent`, and `screenPending` in the poll checks it once its files are known: resumed, trimmed, or removed) | `com.torrenta.engine`, `com.torrenta.net`, `ui` |
 | Create | `CreateRequest` (path, `Format` v1/v2/hybrid, piece size or 0, private, tracker tiers, web seeds, comment, `source` tag, align, seed), `CreatedTorrent` (bytes, engine id, both hashes, counts, magnet, the seeding torrent or the add's problem), `PieceSize` (the automatic rule: ~1,500 pieces, 16 KiB … 16 MiB; `count` packed or aligned), `Engine.create(request, CreateProgress)` blocking on the caller's worker, cancellable at the next piece; `libtorrent.PieceHasher` (v1 pieces and v2 piece layers in Java, bit for bit libtorrent's); `ui.CreateDialog` (modeless, sizes the source live, Save as…, atomic write), `CreateText` (tier parser, summary, outcome) | `com.torrenta.engine`, `.libtorrent`, `ui` |
-| Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags, the name a person gave; JSON for the `<hash>.labels` sidecar), `Engine.rename`, `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `ui.FilterQuery` (the filter box's `key:value` language → predicate + chips), `Sidebar` (a tree: All, Categories, Tags; Status and Tracker sections later), `TagsDialog` | `com.torrenta.engine`, `store`, `ui` |
-| Detail | `TorrentDetail` (general, files with their piece range, peers, trackers, pieces, per-piece availability, web seeds) from `Engine.detail(id)`; `ui.Diagnosis` (why it is not moving + remedies), `OverviewText`, `PieceStrip`, `Sparkline`; `setFilePriority`, `renamePath` (`FileRenames.plan`/`problem`), `addTrackers`, `removeTracker`, `webSeeds`/`addWebSeeds`/`removeWebSeed` (`WebSeeds`: an http(s) URL with a host, `fresh` against what the torrent has; `Capability.WEB_SEEDS` to edit); `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
+| Labels | `Category` (name, optional save path), `TorrentLabels` (one category, sorted tags, the name a person gave; JSON for the `<hash>.labels` sidecar), `Engine.rename`, `Engine.category/setCategory/tags/setTags`, `Torrent.category/tags`; `store.LabelStore` (`categories.json`, `tags.json`; the names sync through `sync.SyncLabels`); `ui.SidebarFilter` (the pure rule, `format`/`parse` for `ui.sidebar.filter`), `ui.FilterQuery` (the filter box's `key:value` language → predicate + chips), `Sidebar` (a tree: All, Views, Status, Categories, Tags, Trackers), `TagsDialog`; saved views: `store.SavedView` (name + the omnibox's query, one key per field `ui.view.<slug>.name/.query` and `ui.views.order` so sync merges view by view), `SidebarFilter.view(slug)` on the VIEW axis matches everything itself and `MainWindow.rowFilter` ANDs the view's query in (`viewQuery`), `SidebarEntries.View` counts each by its query and carries a broken one's reason (struck through, `:broken`); Save Filter as View is Shortcut+S, the first nine are Shortcut+Alt+1…9 through a scene filter that stands aside in a text field (Ctrl+Alt is AltGr), the row's menu renames, re-points or deletes | `com.torrenta.engine`, `store`, `ui` |
+| Detail | `TorrentDetail` (general, files with their piece range, peers, trackers, pieces, per-piece availability, web seeds) from `Engine.detail(id)`; `ui.Diagnosis` (why it is not moving + remedies; first after an error, a wanted archive that asks for a password, Skip or Remove), `OverviewText`, `PieceStrip`, `Sparkline`; `engine.ArchiveProbe` (pure: ZIP, RAR 4/5, 7z encryption from the first 64 KiB, a 7z's last too; `Reading` gathers them from pieces) and `TorrentDetail.encryptedArchives`; `setFilePriority`, `renamePath` (`FileRenames.plan`/`problem`), `addTrackers`, `removeTracker`, `webSeeds`/`addWebSeeds`/`removeWebSeed` (`WebSeeds`: an http(s) URL with a host, `fresh` against what the torrent has; `Capability.WEB_SEEDS` to edit); `PeerFlags` letters from libtorrent's own constants | `com.torrenta.engine`, `.libtorrent` |
 | Engine settings | `EngineSettings` (engine-neutral record; `listenInterfaces()` is the tested string), `Settings.engineSettings()` clamps the `connection.*` and `proxy.*` keys, `LibtorrentEngine.toPack` maps onto `settings_pack`; applied at start (`SessionParams`) and live (`applySettings`) | `com.torrenta.engine`, `store`, `.libtorrent` |
-| IP filter | `IpRange` (literals only, never resolves), `Blocklist` (pure parser for .p2p/.dat/CIDR/plain), `net.BlocklistFetch` (gzip by magic), `ui.IpFilterController` (cache, schedule, bans → `Engine.setIpFilter`), `peer_blocked` alerts counted | `com.torrenta.engine`, `net`, `ui` |
+| Binding | `net.InterfaceWatch` (the bound interface: there, up, its addresses; read every 5 s in the poll), `Engine.rebind`, `Connectivity.externalAddress` (`external_ip_alert`), `ui.NetworkStatus.port(…, bound)`; the leak check: `net.LeakCheck.verdict` (pure: Protected, Exposed, Halted, Unbound, Unknown), `net.ExitCheck` (opt-in, two GETs to the person's address-echo URL, one from the bound address), `ui.LeakView` (pill, sentence, the three addresses), `LeakCard` (the shield pill's card), `ExposurePause` (`connection.pauseWhenExposed`) | `com.torrenta.net`, `engine`, `ui` |
+| IP filter | `IpRange` (literals only, never resolves), `Blocklist` (pure parser for .p2p/.dat/CIDR/plain), `net.BlocklistFetch` (gzip by magic), `session.IpFilterController` (cache, schedule, bans → `Engine.setIpFilter`; the session applies it at start and every hour), `peer_blocked` alerts counted | `com.torrenta.engine`, `net`, `session` |
 | Watch folders | `WatchFolder` (entry + pure rules: destination, request, names, `.magnet` lines, magnet id, `Growth`), `WatchFolders` (the service: `configure`, `start`, `stop`, `poll`), `store.WatchFolderStore` (`watch-folders.json`), `ui.WatchFolderDialog`, Settings → Watch folders | `com.torrenta.engine`, `store`, `ui` |
 | Automation | `automation.EventCommand` (pure: `tokens` splits like a shell, `substitute` fills qBittorrent's `%N %L %G %F %R %D %C %Z %T %I %J %K %%` per token, `subject` from a `Torrent` + `TorrentDetail`), `Automation` (the service: `plan` is the rule, `handle(event)` runs on a virtual thread, `Subprocess` with a 10-min ceiling, outcomes back as events), `Notifier` + `Notifiers.forPlatform` (`notify-send` / `osascript` / `toast.ps1` through PowerShell, text as arguments), `AutomationSettings` from `Settings.automation()`; `EngineEvent.Kind` says which events count | `com.torrenta.automation` |
-| Search | `search.SearchProvider` (name + blocking `search(query, category)` throwing `SearchException`), `SearchResult` (sealed `Link`: `Magnet`/`TorrentUrl`; the hash is read off a magnet; `identity()` is hash else link), `SearchCategory` (Newznab numbers), `ResultRanker` (pure: dedupe keeps the better-seeded copy, rank by seeds → query coverage → date → name), `SearchService` (virtual thread per provider, 20 s each, one request per 2 s per provider through a `Ticker`, answers cached for 5 min (`fresh`), `SearchOutcome` with per-provider failures), `TorznabEndpoint` (+ `problem(url)`, the dialog's rule), `TorznabProvider` (`t=caps`/`t=search`, StAX, no entities); `store.SearchProviderStore` (`search-providers.json`, never synced); `ui.SearchProviderDialog`, Settings → Search. Declarative: `Definition` (the file, parsed and validated with the key at fault in `DefinitionException`), `DeclarativeProvider` (the one generic provider: `url`, `extract`, pure), `JsonExtractor` (tree + JSON-pointer paths), `HtmlParser` + `HtmlNode` + `Selector` (the lenient parser and the small CSS subset, no jsoup), `SizeText`/`DateText`, `SearchHttp` (the shared GET); `store.DefinitionStore` (`search-providers/<id>.json`, `refresh()` by size+mtime, `installExamples()` from `search/examples/index.txt`); `search.disabled` in settings (synced); `docs/search-providers.md` is the format | `com.torrenta.search`, `store`, `ui` |
-| Search | `search.SearchProvider`/`SearchResult`/`SearchCategory`, `SearchService` (parallel providers, dedupe through `ResultRanker`, rate limit, a 5-minute cache; `Progress` reports each provider as it answers, in arrival order, on the searching thread), `TorznabProvider` + `TorznabEndpoint`, `store.SearchProviderStore` (`search-providers.json`); `ui.SearchPane` (the tab: query, chips, status line, results table remembered as `search.columns`), `SearchRows` (in-place reconcile by identity), `SearchStatus` (the line), `SearchChips` (which providers are on), `SearchAdd` (result → `AddRequest.Source`) | `com.torrenta.search`, `store`, `ui` |
-| RSS rules | `rss.Rule` (the record; `recordMatch` caps the memory at 1000), `EpisodeFilter` (qBittorrent's `1x2;1x3-5;2x1-` parsed with the term at fault; `find` reads `S01E02`/`1x02`/`Season 1 Episode 2` off a title), `RuleMatcher` (compiled once per rule: feed, phrases or regex, episode filter, age, smart memory; `problem(rule)` is the dialog's rule), `RuleEngine` (`apply`: first enabled rule wins, one copy of an episode per batch; `record`: the memory after the adds that went through; the log lines), `RssService.setDownloader`/`runRulesNow`/`markDownloaded`, `Article.downloaded`; `RssStore` `rules.json`; `ui.RuleDialog` (live Matches on a 250 ms pause, matched on a virtual thread), `RuleAdd` (rule → `AddRequest`), `RuleText` (create-rule-from-title and the table's words) | `com.torrenta.rss`, `ui` |
-| Statistics | `engine.SessionStats` (the record; `UNKNOWN` = -1 for a counter the library lacks), `Engine.stats()` (from the last `session_stats` alert, no session round trip), `store.StatsStore` (`stats.properties`: all-time down/up/active, pure `encode`/`decode`, atomic save), `ui.SpeedHistory` (ring buffers: a second for 10 min, a minute for 24 h), `SpeedPlot` (the pure point mapping and the binary ceiling ladder), `SpeedGraph` (the canvas, theme colours through zero-sized swatches), `StatsText` (the rows), `StatisticsWindow` (`Ctrl+Shift+T`), the detail pane's Speed tab | `com.torrenta.engine`, `store`, `ui` |
-| Direct downloads | `direct.WithDownloads` (an `Engine` around the torrent engine: one list, every id-call routed by `DirectDownload.isId`, `Inputs.isDirectLink` adds, torrent-only calls refused with the reason, a finished `.torrent` handed over), `DirectDownloads` (the service: one curl process per running download, a `direct-downloads` thread ticking each second for sizes, rates and the queue, `downloads.json` + `downloads/<id>.headers/.err`), `DirectDownload` (the record + its JSON; id `url-<sha1 of the link>`), `Curl` (pure: argv, the `--config -` text, `outcome` of an exit), `CurlHeaders` (the last block of `--dump-header`), `DirectNames` (link → safe name, `unused`); `Torrent.direct()`, `Settings.directOptions()` (`download.curl`, `download.linksAtOnce`) | `com.torrenta.engine.direct` |
+| Search | `search.SearchProvider` (name + blocking `search(query, category)` throwing `SearchException`), `SearchResult` (sealed `Link`: `Magnet`/`TorrentUrl`; the hash is read off a magnet; `identity()` is hash else link), `SearchCategory` (Newznab numbers), `ResultRanker` (pure: dedupe keeps the better-seeded copy, rank by seeds → query coverage → date → name), `SearchService` (virtual thread per provider, 20 s each, one request per 2 s per provider through a `Ticker`, answers cached for 5 min (`fresh`), `SearchOutcome` with per-provider failures), `TorznabEndpoint` (+ `problem(url)`, the dialog's rule), `TorznabProvider` (`t=caps`/`t=search`, StAX, no entities); `store.SearchProviderStore` (`search-providers.json`; synced without the keys, `sync.SyncSearch`); `ui.SearchProviderDialog`, Settings → Search. Declarative: `Definition` (the file, parsed and validated with the key at fault in `DefinitionException`), `DeclarativeProvider` (the one generic provider: `url`, `extract`, pure), `JsonExtractor` (tree + JSON-pointer paths), `HtmlParser` + `HtmlNode` + `Selector` (the lenient parser and the small CSS subset, no jsoup), `SizeText`/`DateText`, `SearchHttp` (the shared GET); `store.DefinitionStore` (`search-providers/<id>.json`, `refresh()` by size+mtime, `installExamples()` from `search/examples/index.txt`); `search.disabled` in settings (synced); `docs/search-providers.md` is the format | `com.torrenta.search`, `store`, `ui` |
+| Search | `search.SearchProvider`/`SearchResult`/`SearchCategory`, `SearchService` (parallel providers, dedupe through `ResultRanker`, rate limit, a 5-minute cache; `Progress` reports each provider as it answers, in arrival order, on the searching thread), `TorznabProvider` + `TorznabEndpoint`, `store.SearchProviderStore` (`search-providers.json`); `ui.SearchPane` (the tab: query, chips, status line, results filter, results table remembered as `search.columns`), `SearchRows` (in-place reconcile by identity), `SearchStatus` (the line), `SearchChips` (which providers are on), `SearchAdd` (result → `AddRequest.Source`), `SearchFilter` (the results filter: `FilterQuery`'s tokens and comparisons over a `SearchResult`, `provider: cat: size seeds leechers date`; `SearchCategory.ofNewznab` is a result's category, Torznab's only) | `com.torrenta.search`, `store`, `ui` |
+| RSS rules | `rss.Rule` (the record; `recordMatch` caps the memory at 1000), `EpisodeFilter` (qBittorrent's `1x2;1x3-5;2x1-` parsed with the term at fault; `find` reads `S01E02`/`1x02`/`Season 1 Episode 2` off a title), `RuleMatcher` (compiled once per rule: feed, phrases or regex, episode filter, age, smart memory; `problem(rule)` is the dialog's rule), `RuleEngine` (`apply`: first enabled rule wins, one copy of an episode per batch; `record`: the memory after the adds that went through; the log lines), `RssService.setDownloader`/`runRulesNow`/`markDownloaded`, `Article.downloaded`; `RssStore` `rules.json`; `ui.RuleDialog` (live Matches on a 250 ms pause, matched on a virtual thread), `session.RuleAdd` (rule → `AddRequest`, article → source), `RuleText` (create-rule-from-title and the table's words) | `com.torrenta.rss`, `ui` |
+| Statistics | `engine.SessionStats` (the record; `UNKNOWN` = -1 for a counter the library lacks), `Engine.stats()` (from the last `session_stats` alert, no session round trip), `store.StatsStore` (`stats.properties`: all-time down/up/active, pure `encode`/`decode`, atomic save), `session.SpeedHistory` (ring buffers, kept by the session's poll: a second for 10 min, a minute for 24 h), `SpeedPlot` (the pure point mapping and the binary ceiling ladder), `SpeedGraph` (the canvas, theme colours through zero-sized swatches), `StatsText` (the rows), `StatisticsWindow` (`Ctrl+Shift+T`), the detail pane's Speed tab | `com.torrenta.engine`, `store`, `ui` |
+| Direct downloads | `direct.WithDownloads` (an `Engine` around the torrent engine: one list, every id-call routed by `DirectDownload.isId`, `Inputs.isDirectLink` adds, torrent-only calls refused with the reason, a finished `.torrent` handed over), `DirectDownloads` (the service: one curl process per running download, a `direct-downloads` thread ticking each second for sizes, rates and the queue, `downloads.json` + `downloads/<id>.headers/.err`), `DirectDownload` (the record + its JSON; id `url-<sha1 of the link>`), `Curl` (pure: argv, the `--config -` text, `outcome` of an exit, `shellCommand` for the Overview's command by hand, `TorrentDetail.command`, POSIX or Windows quoting, never the proxy's password), `CurlHeaders` (the last block of `--dump-header`), `DirectNames` (link → safe name, `unused`); `Torrent.direct()`, `Settings.directOptions()` (`download.curl`, `download.linksAtOnce`) | `com.torrenta.engine.direct` |
+| Updatable | BEP 46, following: `engine.MutableSource` (pure: `magnet:?xs=urn:btpk:<key>&s=<salt>`, `infoHash` of an item's value, `magnetOf`), `Engine.lookupMutable` (`Capability.MUTABLE`, libtorrent's `dht_get_item`, the highest `seq` until authoritative or the timeout, waited outside the lock), `Following` in the `.labels` sidecar (`followings`/`setFollowing`); `session.FollowRules` (pure: the step, `idOf`, `replaced`), `Session.resolve` → `resolveUpdatable` (pending until `attachFollowing` after the add, the dialog's too), `lookForVersions` (every 10 min, each one due by `follow.hours`), `addVersion` (same save path and filing, the file list fetched first for the dedup, `EngineEvent.Kind.UPDATED`), `letGoOfOldVersions` (`follow.removeOld`, files kept); `MutableDhtTest` is two loopback DHTs. Publishing: `MutableKey` (the pair, the secret never printed), `Publication` (name, key, salt, current info-hash, `seq` the highest published and only going up, the current version's id), `Engine.newMutableKey` (libtorrent's Ed25519) and `putMutable` (`dht_put_item`, answered by the `dht_put_alert`'s `seq` and node count, waited outside the lock, one per address), `store.KeyStore` (`keys/<name>.key`, owner-only, never synced, `nameProblem`), `session.PublishRules` (pure: `putsNeeded`, 0 when still held, else up to `CLIMB` = 64 to get above the record, since libtorrent signs one above what it finds), `Session.publish`/`newVersion`/`putVersion`/`republish` (hourly, the first a minute after start), `CreateDialog.Publisher` and `forNewVersion`, Torrent → New Version… and Copy Updatable Link (`Capability.MUTABLE`, `publishedById` refreshed off the FX thread) | `com.torrenta.engine`, `store`, `session`, `ui` |
 | Report | `report.Redactor` (pure: Editora's rules — home, user, e-mail, URL credentials, auth headers, token shapes — plus a tracker's passkey in path or query, magnet links, v1/v2 info-hashes, the list's names as numbered `<torrent N>`, public IPv4 with this network's kept; IPv6 left), `ProblemReport` (system block, the two session logs tailed to 200 000 chars, the new-issue link filling `bug_report.yml`'s `environment` and `report` fields under 7 500 chars, else a paste hint), `ReportCommand` (`torrenta --report`: a file in the current folder, the link opened through `xdg-open`/`open`/`rundll32`, never a shell; no names, the list is not loaded); `ui.ReportProblemWindow` (Help → Report a Problem, the Debug Log's button: editable, built on a virtual thread, Open GitHub Issue copies it too); `DebugLog` keeps the last session's file as `torrenta-session.prev.log` — Editora's | `com.torrenta.report`, `ui` |
 | Update | `update.UpdateCheck` (pure: payload, version rules, due), `UpdateService` (GitHub, off the FX thread, `-Dtorrenta.updateEndpoint` for a capture) — Termina's, verbatim | `com.torrenta.update` |
-| Desktop | `os.SingleInstance` (one per config dir: a `FileLock` on `instance.lock` decides, a loopback `ServerSocket` whose port and token are `instance.port`/`instance.token`, owner-only; `claim` hands off or binds, `deliverTo` flushes what arrived first), `InstanceMessage` (pure: token line, one input per line, blank line ends, caps, `absolute` against the sender's cwd), `Handlers` (pure argv: `xdgMimeDefault`, `windowsRegister/Unregister`, `desktopId` by `StartupWMClass`, `apply` with a `Runner`), `MacHandlers` (AWT `Desktop` open handlers), `Badge` + `BadgeState` (pure count + rate + short text) + `Badges.create` (`AwtBadge` dock text on macOS, `UnityBadge` LauncherEntry signal on Linux, none on Windows), `AwtUse.headful` (the one rule for `java.awt.headless`); `Settings.osHandler/osBadge` (`os.*`, never synced); `MainWindow.openFromOutside` | `com.torrenta.os`, `store`, `ui` |
+| Desktop | `os.SingleInstance` (one per config dir: a `FileLock` on `instance.lock` decides, a loopback `ServerSocket` whose port and token are `instance.port`/`instance.token`, owner-only; `claim` hands off or binds, `deliverTo` flushes what arrived first), `InstanceMessage` (pure: token line, one input per line, blank line ends, caps, `absolute` against the sender's cwd), `Handlers` (pure argv: `xdgMimeDefault`, `windowsRegister/Unregister`, `desktopId` by `StartupWMClass`, `apply` with a `Runner`), `MacHandlers` (AWT `Desktop` open handlers), `Badge` + `BadgeState` (pure count + rate + short text) + `Badges.create` (`AwtBadge` dock text on macOS, `UnityBadge` LauncherEntry signal on Linux, none on Windows), `AwtUse.headful` (the one rule for `java.awt.headless`); `Settings.osHandler/osBadge` (`os.*`, never synced); `MainWindow.openFromOutside`; `Trash.forPlatform` (`FreedesktopTrash`, `MacTrash`, `WindowsTrash` + `recycle.ps1`; no AWT), used by `Session.removeWithFiles` when `remove.toTrash` (on by default) and the engine has `LOCAL_FILES`: `Engine.onDisk` before the remove, `session.TrashPlan` (one item per top-level entry), the move on a virtual thread, retried 5 s while the engine lets go | `com.torrenta.os`, `store`, `ui` |
 | Tray | Nux's and Modula's package, free of JavaFX: `TorrentaTray` (update + dispose), `Trays.create` picks `SniTray` (a StatusNotifierItem + `com.canonical.dbusmenu` on the session bus through dbus-java; Linux, no fallback) or `AwtTray` (Windows, macOS) and says why when neither; `TrayDisplay` (pure: what the arrow's colour means), `TrayIconRenderer` (the SVG mark's geometry in Java2D), `SniMenuModel` (pure: ids and properties); `ui.TrayStatus` (pure: snapshot + rates → display + line); `Settings.tray/closeToTray` (`ui.tray`, `ui.closeToTray`); `MainWindow.installTray/hideToTray/quit` | `com.torrenta.tray`, `ui` |
-| UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `MessageLog` + `MessageLogPopup` (the status bar's history: every `setStatus` with its level, a card over the bar in the palette's chrome, Editora's), `DebugLog` + `DebugLogWindow` (Termina's: j.u.l WARNING and above from every logger plus uncaught exceptions, mirrored to `torrenta-session.log`; View → Debug Log and Settings → General → Diagnostics), `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a `SplitPane` under or beside the list (`DetailPlace`; the sidebar's side is `SidebarPlace`, each a shown key plus a side key so hiding keeps the place, each detail place its own divider), the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `NetworkStatus` (the status bar's port dot and words, DHT nodes, free space where downloads go; pure, from `Engine.connectivity()` + `stats().dhtNodes()`) + its `Clock`; `Welcome` + `WelcomeText` (the window before the first torrent: drop zone, the four keys from their commands, the clipboard's magnet or link offered on each focus, the download folder with a "change"); `Command` is one action used by menu, context menu and palette; `Chords` is every chord the window binds, by command id, in one table (`ChordsTest`: no key twice, neither palette key taken); `PaletteKey` (the chord that opens it, `ui.paletteKey`, Alt+X by default, re-applied live by `applyPaletteKey`); `View` (Transfers, Search, RSS; the id is the command that shows it) + `ViewSwitch` (pure: next/previous with wrap, by place, `parse`) + `ViewStrip` (the row above the centre: name, `Ctrl+1/2/3` badge, accent line under the one showing, a click switches; not focus-traversable), `MainWindow.show(View)` the one way a view changes; `Actions` holds the tested rules | `com.torrenta.ui` |
+| UI | The window: menu bar, filter, torrent list, status bar, palette, `EventLog` + `LogWindow`, `MessageLog` + `MessageLogPopup` (the status bar's history: every `setStatus` with its level, a card over the bar in the palette's chrome, Editora's), `DebugLog` + `DebugLogWindow` (Termina's: j.u.l WARNING and above from every logger plus uncaught exceptions, mirrored to `torrenta-session.log`; View → Debug Log and Settings → General → Diagnostics), `AddDialog` (+ `FileTree`, `FreeSpace`, `MagnetNames`), `DetailPane` (+ `FileRows`) in a `SplitPane` under or beside the list (`DetailPlace`; the sidebar's side is `SidebarPlace`, each a shown key plus a side key so hiding keeps the place, each detail place its own divider), the Help menu's update items, `SettingsWindow` (Termina's shell: `Category`/`Group` sidebar, `row()` with keywords, `filter()`, `reload()` under a `loading` guard); `TorrentRows` reconciles snapshots into stable rows; `ColumnLayout` + `ColumnMemory` remember columns; `Format` is the tested column text; `NetworkStatus` (the status bar's port dot and words, DHT nodes, free space where downloads go; pure, from `Engine.connectivity()` + `stats().dhtNodes()`) + its `Clock`; `Welcome` + `WelcomeText` (the window before the first torrent: drop zone, the four keys from their commands, the clipboard's magnet or link offered on each focus, the download folder with a "change"); `Command` is one action used by menu, context menu and palette; `Chords` is every chord the window binds by default, by command id, in one table, each under its menu (`ChordsTest`: no key twice); `Keybindings` (Termina's: `resolve` lays the user's `keys.<id>` lines over the defaults, a stored chord takes a default from whoever had it, `portable` writes the command key as `Shortcut` so a synced line means the same key on a Mac), `KeybindingEdits` (rebind/clear/reset return the whole table), `ShortcutCapture` (what a press into a recording field is; `Chords.fixed` is Select All, the list's own Ctrl+A), Settings → Keyboard (a row per command under its menu, every command listed, chordless ones too), `MainWindow.applyKeybindings` moves every chord live; `View` (Transfers, Search, RSS; the id is the command that shows it) + `ViewSwitch` (pure: next/previous with wrap, by place, `parse`) + `ViewStrip` (the row above the centre: name, `Ctrl+1/2/3` badge, accent line under the one showing, a click switches; not focus-traversable), `MainWindow.show(View)` the one way a view changes; `Actions` holds the tested rules | `com.torrenta.ui` |
 | Engine API | `Engine`, `Torrent`, `TorrentState`: start, add, list, rates, stop. No libtorrent types. | `com.torrenta.engine` |
 | Engine | libtorrent through libtorrent4j; `NativeLibrary` unpacks and points at the native | `com.torrenta.engine.libtorrent` |
 | Remote engine | `TransmissionEngine` over Transmission's RPC (`RpcClient`: POST JSON, the 409 session-id handshake, basic auth; `Json` tree over jackson-core streaming; `Bencode` reads a `.torrent` for `inspect`; `TransmissionLabels` puts the category in a `category:` label); `Engine.Capability`/`Capabilities` say what an engine can do, `ui.CapabilityRules` is the pure rule the window hides by; `EngineProfile` (local or remote, URL, user, password) in `store.ProfileStore` (`profiles.json`, owner-only, never synced), `engine.profile` picks the next start's; Settings → Engine, `ui.EngineProfileDialog`; `MainWindow.startEngine/switchProfile` build the engine through App's `EngineFactory` | `com.torrenta.engine.transmission`, `engine`, `store`, `ui` |
+| HTTP | `WebServer` (the JDK's `jdk.httpserver`, a virtual thread per request, HTTP or HTTPS from `Tls.fromPkcs12`), `Router` (exact path, then the longest prefix; 405 with `Allow`; `Filter`s answer first), `Request` (body read whole under `Limits` before a handler, `form()`, `parts()`, `cookies()`), `Response` (bytes or a file), the pure `Form`, `Multipart` (parts capped), `Cookies` (`HttpOnly; SameSite=Strict`, `Secure` over HTTPS), `Ranges` (one range 206, past the end 416, else whole), `HttpProblem` (400/413) | `com.torrenta.http` |
+| Web API | qBittorrent's WebUI API at `/api/v2` (roadmap 1.2): `WebApi` (the routes over a `Backend`, `SessionBackend` in the app; the filters in order: `Hosts.hostAllowed` against DNS rebinding, `Hosts.sameOrigin` on a browser's `Origin`/`Referer`, a live `SID` for all but `auth/login`; qBittorrent's answers word for word: `Ok.`/`Fails.`, 403 without a session or when banned, 401 for a host or origin refused), `Passwords` (PBKDF2-SHA256, 600,000 iterations, `pbkdf2-sha256$<n>$<salt>$<hash>`; `verify` reads the count off the text, so tests use a cheap one), `LoginGuard` (five in a row ban an hour), `Sessions` (32 random bytes, an idle hour, in memory), `WebApiConfig` (`Settings.webApi()`, the `webapi.*` keys, all local in `SyncKeys`; `problem()`, `exposed()`, `rebinds`), `WebApiService` (`configure` starts, stops, rebinds or hands the routes new credentials; a port in use says so with `freePort`); Settings → Remote access (`REMOTE`, applied after a 600 ms pause on typed fields, the password hashed on a virtual thread); `--set-remote-password` (`RemotePassword`, refused while `SingleInstance.inUse`); the reads: `Reads` (`torrents/info`, `properties`, `files`, `categories`, `tags`, `transfer/info`; a GET's query and a POST's form alike; links' downloads left out), `QbitState` (qBittorrent 5.0's `stoppedDL`/`stoppedUP` words, stalled the moment nothing arrives, and its filters), `QbitTorrent` (the row: `hash` is the v1 hash because Sonarr looks a torrent up by the hash it computed, a hybrid's id being its v2; `content_path` the file, the shared root folder, or the save path), `TorrentQuery` (filter, category/tag where empty means none, hashes, sort by any field, offset, limit), `FactsCache` (hashes, content path, magnet, limits through `detail()` once per torrent, again on a rename, a move, missing metadata or after a minute), `SessionBackend` (the engine asked on the request's virtual thread, last activity from the polls); the writes: `Writes` (`torrents/add`: `urls` are magnets and http(s) links only, a path would read this machine's files; every `.torrent` through `Bencode.check` and a 10 MiB cap; the add is `Session.add`, so the content check applies; an unknown category or tag is created, as qBittorrent does; then the actions by `Reads.targets`, a hash not here skipped; 409 with no engine), `SavePaths` (`savepath` and a new category's folder inside the allowed roots: the download folder, a daemon's own, the categories' folders, `webapi.roots`; compared on real paths, the existing part through its links, so a link or a `..` out of a root is out); Tier 2: `MainData` (`sync/maindata` and `sync/torrentPeers`: whole when the `rid` is not the one this session was last answered with, else the changed fields of changed rows, removals by key; `Memory` keeps one snapshot per session or session-and-torrent, 64 at most), `StaticFiles` (`webapi.rootFolder` at `/` as qBittorrent's alternative WebUI: `public/` to anyone, `private/` to a session, a flat folder to anyone; segments starting with a dot refused, real paths compared; qBittorrent's CSP, `nosniff`, `SAMEORIGIN`), `/api/` answering 404 to any method it has no route for; `Edits` (`filePrio` with qBittorrent's 0/1/6/7, `setLocation` inside the allowed roots, `rename`, `renameFile`/`renameFolder` in place only since `Engine.renamePath` renames the last segment, trackers with `editTracker` as remove-then-add, `setDownloadLimit`/`setUploadLimit` read-modify-write of `TorrentLimits`, the toggles, `increasePrio`/`decreasePrio`/`bottomPrio` through `engine.QueueOrder`, category and tag editing that clears the torrents a removal leaves; a capability the engine lacks is 409; an edit of limits forgets that torrent's `FactsCache` entry so the list shows it at once); `SessionEdits` (`transfer/speedLimitsMode`/`toggleSpeedLimitsMode`/`setSpeedLimitsMode` on `speed.altOn`, the global limits on the pair in force, `app/preferences`/`setPreferences` through `Preferences`, `log/main`), `Preferences` (qBittorrent's keys onto `Settings` both ways, bytes onto KiB rounded up, its numbers for encryption and schedule days; `save_path` inside the allowed roots or the whole request refused; `web_ui_*` and `bypass_*` read-only: the door is changed only on this machine's page), `Backend.settingsChanged` (saved, `Session.applySettings`, the window's open Settings reloaded), `session.SessionLog` (the session's events numbered, the last thousand: every `Host.event`/`report`/`problem`/`seedingDone` goes through `tellEvent`/`tellReport`/`tellProblem`); the contract: `QbittorrentContractTest` (Torrenta through its router against qBittorrent 5.1.0's recorded answers in `src/test/resources/com/torrenta/webapi/qbittorrent-5.1/`: every field, no extra, same kinds, the statuses and words clients test for; qBittorrent's own quirks kept, such as no limit being `0` in the list and `-1` in `properties`, `private` `null` before metadata, no `hash` in a maindata row, the log in seconds), `scripts/webapi-record.py` and `webapi-compare.py`; `docs/webapi.md` | `com.torrenta.webapi`, `session`, `ui` |
+| Session | `Session` (no JavaFX: the poll thread, `Poll` to listeners, share limits, the speed refresh, the watch folders, the RSS service and its rules, the IP filter; `Host` for what the owner hears and the adds it still screens); `IpFilterController`; the window is a listener | `com.torrenta.session` |
+| Import | `migrate.ImportCandidate` (one torrent as another client has it: resume, metainfo or none, save path, category and its folder there, tags, stopped, files with `claimed` from the piece map, pieces, share limits), `QbittorrentReader` (`BT_backup`'s `.fastresume` + `.torrent`, `qBt-*` keys, `categories.json`, `knownLocations` per OS and Flatpak, `running` by `config/lockfile`'s live PID, `torrents.db` said not read), `ImportPlan` (pure but for a `FileProbe`: IMPORT, MAGNET, CHECK, MISSING, ALREADY_HERE, CLIENT_RUNNING); `Engine.adopt(Adoption)` (`Capability.IMPORT_RESUME`, libtorrent's: the resume data read by libtorrent, the metainfo put back, written as this engine's blob and added through `addFromStore`, so no check; `check` clears the pieces so the add checks the files instead), `Session.importTorrents` (categories with the other client's folder, tags, share limits, a summary line); `TransmissionReader` (`resume/` + `torrents/` by the same stem, 3.x's `<name>.<hash16>` too, `.magnet` for no metadata; converted by `libtorrentResume` with `BencodeWriter`: pieces from `progress.blocks` (16 KiB blocks, high bit first, a piece only when all its blocks are; Transmission 4's `progress.pieces` is the check state, not what is there), `dnd`/`priority` onto file priorities, the metainfo's trackers carried in the resume since libtorrent 2.1 keeps them outside `torrent_info`; the `files` list's renamed names as `ImportCandidate.renamed`, which `adopt` writes into the `.storage` sidecar; `category:` labels; `running` by `settings.json`'s RPC port answering); `DelugeReader` (`state/torrents.fastresume`, libtorrent's own resume data by hash, `state/<hash>.torrent`, `torrents.state` for paused, folder, ratio, the name a person gave and a magnet's link, which has no resume data; `label.conf`'s one label as the category; `running` by `core.conf`'s `daemon_port` answering) with `Pickle` (Python's pickle, protocols 0 to 5, read as data: a class is a `Global` name, an object an `Obj` of its type and state, a call never made; lengths checked before anything is allocated); renamed files from `mapped_files` (qBittorrent's too) as `ImportCandidate.renamed`, without which `detail()` showed the old name; the import tests run on `QuietEngine` (loopback, any port, no DHT, LSD or PeX: the three clients' fixtures are the same torrents); File → Import from another client… (`import-from-client`, `Capability.IMPORT_RESUME`): `ui.ImportDialog` (a source picker of `ImportText.found` plus a chosen folder, read and planned on a worker through the window's `loadImport`, a tick per row as the plan advises, `Verdict.choosable`, the notes under the table), `ImportText` (pure words and rules) | `com.torrenta.migrate`, `engine`, `session`, `ui` |
+| Dedup | `ContentIndex` (complete files by v2 Merkle root, or by `ContentKeys.v1` key (SHA-256 of piece length, size and the file's piece SHA-1s; only a file whose pieces are its own, the padding after it counted in: a single file, a hybrid's, BEP 47's) → torrent, index, path on disk, size; a hybrid's file under both, `of` and `size` count it once; thread-safe, never stored; `EMPTY` takes nothing), `Engine.contentIndex()` (libtorrent's keeps it in `indexContent` on the alert thread: a file completed, finished, checked, renamed, moved, and dropped in `remove` under the store's lock against a late alert; libtorrent posts a file-completed alert for every whole file as it loads a torrent, so a start rebuilds it, and only a recheck says a file stopped being whole), `TorrentPreview.FileEntry.root` (from `file_storage.root`, empty for v1), `DedupPlan.of(preview, index, skipped, start, layout, disk)` (pure but for `Disk`: each wanted file with a root found complete elsewhere, its target where the add will look, the incomplete folder and the layout's renames, never a `.part`, nothing already at a target, never the torrent itself; `LINK` on one volume, preferred, else `COPY`); the add: `DedupFiles.place(plan, links, copies, cloner, names)` (a hard link, else with copies allowed a clone through `Cloner.SYSTEM`, `cp --reflink=always` on Linux and `cp -c` on macOS, none on Windows, else a full copy, under `.torrenta-copy` and moved into place only at its size, never over a file that appeared, never `ATOMIC_MOVE`, which would replace one), `Session.placeFound(engine, request, preview, links, copies)` (any thread but a toolkit's, blocking: from the dialog's `engine-add` thread with its ticks, and from `Session.add` with `DedupMode` from `add.dedup`: links without asking, copies only under `COPY`; a log line, the request back with `Storage.found`), `FoundFile` (how, from) in the `.storage` sidecar's `found`, `TorrentDetail.FileStatus.found`, the Files tab's link glyph and tooltip (`file=` lines end in `found=`); `ui.DedupText` (the dialog's lines), `AddDialog.offerFromDisk` (the index, the mode and the names, read live; each poll redraws an open dialog's line, since a start's input arrives before the first poll), the capture's `add-dialog=` line has `dedup=`; `Capability.DEDUP` | `com.torrenta.engine`, `.libtorrent`, `session`, `ui` |
 | Store | `ConfigDir` (`~/.torrenta`), `Settings` (properties), `TorrentStore` (one opaque blob per torrent) | `com.torrenta.store` |
 | i18n | Termina's: `Messages.tr(key)` / `tr(key, args…)` (MessageFormat in the active locale), English `messages.properties` as base and fallback, `messages_<de|es|fr|it|pt>.properties` as overlays, UTF-8 through `getResourceAsStream`; `ui.language` (`system` by default) chosen in `App.start` after the settings load, before any window, applied on restart; a missing key shows itself and is logged once | `com.torrenta.i18n` |
 
@@ -97,8 +118,105 @@ resume data (with the info dict), writes them on add, on metadata, on finish, ev
 modified, and on stop, and re-adds them on start. Removing a torrent deletes its blob.
 
 **Nothing on the FX thread calls the engine.** `App` starts it on a worker after the window is
-shown; `MainWindow` polls it once a second on its own thread and hands the FX thread an immutable
-list; `addInput` runs on a virtual thread. Inputs that arrive before the engine is up are queued.
+shown; `session.Session` polls it once a second on its own thread (`engine-poll`) and hands each
+poll to its listeners there, `MainWindow.polled` among them, which hands the FX thread an
+immutable list; `addInput` runs on a virtual thread. Inputs that arrive before the engine is up are
+queued by the session (`Session.input`) and handed to the window's input handler once one is.
+
+**Headless never loads the toolkit.** `App.main` sends `--headless` to `Headless.run` before
+`launch`, with `java.awt.headless` set; `Headless` and `Startup` use nothing of JavaFX (`App`
+extends `Application`, which is why `createEngine` left it). jpackage hands a launcher's own
+`arguments` only when the person gives none, so `torrenta-nox --config-dir …` arrives without
+`--headless` and once opened the window; the launcher is known by `jpackage.app-path`
+(`CommandLine.headless(launcherPath)`), the `arguments=--headless` in `src/jpackage/` covers no
+arguments at all. Windows gets `win-console=true` (`torrenta-nox-windows.properties`, the
+`os-windows` profile), which no other platform accepts. SIGTERM runs the shutdown hook:
+`stopEngine` (the engine's bounded resume-data wait), `close`, the instance lock; an engine that
+cannot start returns 1. Remote access starts with the session and closes in the hook before the
+engine stops. A run of the packaged launcher is `target/dist/Torrenta/bin/torrenta-nox`
+under `timeout -s TERM`; `dev-run.sh` execs the JVM, so the signal reaches it there too.
+
+**The HTTP plumbing is the API's and streaming's, and nothing else's yet** (roadmap 1.2 item 3).
+`module-info` requires `jdk.httpserver` now, so the image carries it (the tests' `--add-reads`
+for it stays for the fetch test's stub). A body is read whole, capped by `Limits` (32 MiB, 64
+parts by default): a `Content-Length` past the cap is 413 before a byte is read, a body that
+runs past it is 413 too. A file response honours one `Range`; several ranges, another unit or a
+range that does not read get the whole file, which RFC 9110 allows. `WebServerTest` drives it
+over loopback with the JDK's client, HTTPS included from a PKCS#12 that `keytool` (from
+`java.home`) makes for the test. Its one user so far is `webapi.WebApi`, whose doors (the
+`Host` check, the `Origin` check, the session) are `Router` filters in that order; the allowed
+roots come with `torrents/add`. A test of the API goes through `router().dispatch` with a built
+`Request`, since the JDK's client will not send a forged `Host`; `WebApiTest` adds one real
+socket for the service. Port 8080 is often taken on a developer's machine, which is the offer's
+case, not a failure. Its second user is `stream.StreamServer` (roadmap 1.4), on loopback and a
+port of the system's, started by the session's first `streamUrl`: `/s/<token>/<id>/<fileIndex>/<name>`,
+a new token per URL handed out, everything else 404. Its body is `Response.Ranged` (a size and a
+writer of any range, planned by `Ranges` as a file is, HEAD answered with the length alone), and
+the writer goes a piece at a time: `StreamFile.await` (the engine's: a future per missing piece,
+registered before a second `havePiece`, then `set_piece_deadline`, completed by
+`piece_finished_alert`, failed when the torrent goes or the engine stops), then the bytes through
+`StreamFile.read`, libtorrent's `read_piece` (a future per piece, completed in `onPieceRead` before
+the archive probe's reading), never the file on disk: a piece is announced once it is verified,
+which can be before its bytes reach the file (Windows CI read zeros right after the alert). The wait is sliced (250 ms) so a close does
+not wait out `PIECE_TIMEOUT` (60 s), after which the answer is cut short and a player asks again.
+A skipped file's pieces go into libtorrent's part file, not the file, so `Engine.stream` raises a
+skipped file to low priority: a file played is a file wanted. The read-ahead is the server's: a
+`Playback` per file (its connections counted, a player opens several) follows the playhead (each
+range's first byte, then each piece written), plans `Readahead` again at most once a second or at
+once on a seek, sets the deadlines through `StreamFile.deadlines`, and clears them
+(`clearDeadlines`, libtorrent's `reset_piece_deadline`) when the last connection closes;
+`Session.streamWindow(id)` is the strip's mark (`PieceStrip.marks`, a ring in the text's ink: the
+accent was too close to the pieces' green). The Files tab's Stream in Player and Copy Stream URL
+go through `MainWindow.streamFile`, the URL and the player found off the FX thread;
+`stream.Player` (the setting, else mpv then VLC on the `PATH`, the app bundles, the registry's
+`InstallDir` and Program Files on Windows, Flatpak's exports on Linux) runs the player with the URL
+as its one argument and no shell.
+
+**The session is the window's toolkit-free half** (roadmap 1.2, item 1, in steps). `Session` owns
+the poll thread, the share limits and the minute's speed refresh; its `Host` hears a share limit
+done (`SEEDING_DONE` with the snapshot) and which speed pair is in force, on any thread, so the
+window hops. `schedule`/`execute` put work on the poll thread (the IP filter's hourly refresh, the
+detail pane's immediate fetch) so it never overlaps a poll. A listener or a poll that throws is
+logged and the next poll still runs: a `scheduleAtFixedRate` task that throws is never run again,
+which used to stop the window's polling for good. `SessionTest` fails on any `javafx.` under
+`com.torrenta.session`, and drives the session with an `Engine` made by `java.lang.reflect.Proxy`
+(the few calls it makes, anything else refused). The second step moved the watch folders, the
+RSS service with its rules, and the IP filter (`session.IpFilterController`, the class unchanged):
+`open()` starts the feeds, which need no engine; `start(engine)` the poll, the IP filter (from disk
+first) and the watch folders; `stop()` ends the poll and the watching; `close()` the feeds too. An
+add without a dialog was still the window's to screen then, and an RSS rule's request its to
+build. The third step moved the
+engine's life: `Session.startEngine(profile)` builds it through the `EngineFactory` (App's
+`createEngine`), tells the host `engineCreated` (to listen from its first event) and starts it on
+an `engine-start` thread, then `start`s it and says `engineReady`, or `engineFailed`;
+`switchTo(profile)` stops the poll and the watcher, stops the old engine on a virtual thread and
+starts the next; `stopEngine()` is the quit. A generation counter stops an engine that finishes
+starting after a newer start was asked for (a switch while it was still connecting), and its
+failure says nothing; the window had that race too. The session polls from the moment an engine
+is up and the window takes it in `engineReady` on the FX thread a moment later, so
+`MainWindow.polled` draws only polls of `this.engine`, and the screened add asks the engine for
+its capabilities rather than the window's copy, which a watch folder's add can precede. The fourth
+step moved the add pipeline: `Session.add(engine, request)` is the screened add (the content check
+on a `.torrent` before it is added; a magnet added to stop at its metadata and marked), the poll's
+`screenPending` checks a marked magnet once its files are known, and `Session.addDefaults()` is
+the defaults with a daemon's own folder. The marks are written under the session's own lock and
+saved from its threads, where the window hopped to the FX thread. The rules themselves left `ui`
+for `com.torrenta.content` (`FileKind`, `ContentCheck`, `UnsafeContent`, with their tests; a file
+kind's glyph is `Icons.forKind`, the one thing of the UI's they had); `AddDialog.Defaults` is
+`session.AddDefaults` (with `withoutAsking`), and `RuleAdd` (with `sourceOf`, from `RssAdd`, which
+keeps the RSS tab's words) is the session's. `Host` no longer adds or builds requests. The fifth
+step finished it. The session builds the `Automation` with each engine and attaches its own
+listener before the start: the automation hears every event, then `Host.event` (the window's log
+and status line), and a share limit's `SEEDING_DONE` goes through the automation with its
+snapshot before `Host.seedingDone`; Test notification is `Session.testNotification`. The speed
+histories are the session's (`session.SpeedHistory`, moved with its test): the session-wide one,
+every torrent's recent one, and a followed torrent's (`follow(id)` from the selection, `followed`
+for the Speed tab), kept in the poll before the listeners hear it. The inputs: `input(text)` holds
+one while no engine is up and hands it to the input handler once one is (after `engineReady`, so
+the window's handler, which hops to the FX thread, runs behind the window's own), `resolve(text)`
+is a magnet, a `.torrent` read or fetched, and `addWithoutAsking(text)` is the add a headless run
+needs, a link that is not a torrent going to curl. Nothing of the session's is left in the window:
+it draws, asks and listens.
 
 ## Releasing
 
@@ -146,7 +264,11 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   `save_resume_data_alert` (or `..._failed_alert`, which is also the normal reply to an
   only-if-modified request that found nothing modified) on libtorrent4j's alert thread. That is
   where the store gets written. `stop()` counts outstanding requests and waits, bounded to 5 s, so
-  the last state lands before the session goes.
+  the last state lands before the session goes. A request answered before the torrent's resume
+  check is done comes back with no pieces at all, so a torrent added from the store (a start, an
+  import, an undo) is never asked on its add: a paused one, never modified again, kept that empty
+  blob, and the next start found files without resume data and wanted a full check, which a paused
+  torrent never runs, so it sat in Checking (one import in thirty on Linux, more on Windows).
 - **The add alert's params are enough to bring a magnet back.** `add_torrent_alert.params()` written
   as resume data holds the hashes, name, trackers and save path, so a magnet survives a crash before
   its metadata arrives; the real resume data replaces the blob later.
@@ -166,6 +288,14 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   `App.start`), and attached per scene and per dialog pane (`Fonts.installUiFont`), never in
   app.css: every window and dialog is its own scene, and a scene sheet survives a theme switch.
   A new Stage or Dialog without the call shows the system face.
+- **A dialog's window grows to its content, never the other way.** Each dialog `Stage` opens at a
+  size chosen for its usual content and calls `DialogFit.install(stage)` after `setScene`: on
+  showing and after every layout pulse the window grows to the root's `minHeight` at its width
+  (the screen's height at most) and its `minHeight` follows, so a longer sentence, a card that
+  appears or another language cannot push the footer out (the Limits dialog's did). A new dialog
+  stage needs the call. JavaFX `Dialog`s and `Alert`s size themselves. Every capture prints a
+  `dialog-fit=` line per window showing besides the main one: the scene's height, how far down its
+  lowest button reaches (a `ScrollPane`'s content not counted) and `fits=`.
 - **Nothing in the chrome may be focus-traversable** (Termina's rule holds here). The filter box
   took initial focus on a fresh launch because the table is hidden until the first torrent, so it
   was the first traversable node. It is `setFocusTraversable(false)`; Ctrl+K (and Ctrl+F) reach it.
@@ -250,8 +380,12 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   native jars are excluded from the module path altogether.
 - **Exiting while a modal dialog's nested event loop runs aborts the JVM** (`SIGSEGV` in
   `libglassgtk3` `destroy_and_delete_ctx` during `Application.terminate`). The capture hook closes
-  any dialog and exits on the next pulse; a Quit while the Add dialog is open goes the same way and
-  is a known gap until Quit is intercepted before `Platform.exit`.
+  any dialog and exits on the next pulse. `MainWindow.quit` does the same: with a nested loop
+  running (the tray's Quit while the Add dialog asks) it cancels every modal window
+  (`closeDialogs`, each dialog's own cancel, then any modal `Stage` hidden) and tries again every
+  100 ms, up to 10 s (a native file chooser only the person can close), so `Platform.exit` runs
+  outside every nested loop. `App.stop`'s `System.exit(0)` had already hidden the abort; the
+  capture action `quit` (with an Add dialog open) prints `quit-nested=` and `quit=after N waits`.
 - **`settings_pack` enum constants are SWIG objects**, like every other libtorrent4j constant:
   `toPack` runs only after the native has loaded. Keys are set by `swigValue()` through the pack's
   generic `setBoolean`/`setInteger`/`setString`; the typed setters cover only a few.
@@ -286,17 +420,21 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   CI prints it, the crash report and the core's stacks.
 - **Run-on-event is driven by `EngineEvent.Kind`, not by parsing messages.** The engine tags
   `ADDED` (never a torrent restored at start: `restoring.remove(id)` decides), `FINISHED`
-  (`torrent_finished_alert`, which also fires after a check that finds every piece), `ERROR`
+  (`torrent_finished_alert`, which also fires after a check that finds every piece, but not for a
+  torrent brought back complete: libtorrent posts the alert when it loads one, so `broughtBack`
+  plus no payload downloaded this session keeps every seed from re-running on-finished at every
+  start or import), `ERROR`
   (torrent, file and tracker errors; the tracker's is level WARNING); `SEEDING_DONE` is raised by
-  the window's share-limit poll, which hands the snapshot along because a REMOVE has already taken
+  the session's share-limit poll, which hands the snapshot along because a REMOVE has already taken
   the torrent out of the session. `Automation.handle` is called on the alert thread and returns at
   once; the command runs on a virtual thread with no shell (`ProcessBuilder` on the substituted
   tokens), stdin from the null device, output capped. `TorrentBuilder` makes hybrids, so the id
   (`getBest()`, the v2 hash cut to 20 bytes) is neither `%I` nor `%J`; `TorrentDetail.General`
   carries both full hashes. Notifier scripts never see the text inline: `osascript` reads
   `argv`, `toast.ps1` its parameters.
-- **Watch folders are a thread of the window, not of the engine** (`engine.WatchFolders`, owned by
-  `MainWindow`, started in `engineReady`, stopped on hide, restarted by the Settings page): one
+- **Watch folders are a thread of the session, not of the engine** (`engine.WatchFolders`, owned by
+  `session.Session`, started in `start(engine)`, stopped with the poll, restarted by the Settings
+  page through `Session.restartWatching`): one
   `WatchService` thread plus a poll every minute as the safety net, every engine call on the
   watcher's own scheduler thread. A file is read once its size has held for two looks
   (`WatchFolder.Growth`), a second apart after an event; a file that is not a torrent is renamed
@@ -311,13 +449,52 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   proxy password). Automatic rounds run git with no prompt of any kind (`QuietGit`); a `gh` account
   that can read an https repository is pinned in the clone's config (`SyncAccount`, adl has two).
   `Settings.setOnSaved` is how a change reaches the service; its own saves set `applying` first.
-- **Speed limits are re-evaluated every minute** (`Engine.refreshLimits(now)`, from the window's
-  poller) and after any settings change; the pair in force is `Speed.alternativeActive(now)`,
-  a pure rule with the overnight case tested. Limits are KiB/s in settings and bytes/s in the
-  pack; 0 is "none" on both sides.
+  Category names and tags travel too, in `labels.properties` beside the settings (`SyncLabels`:
+  `category.<lower case>=<name>`, so two spellings are one key, never two deletions), merged the same
+  way against a base of their own, `refs/torrenta/labels-base`: a machine whose last sync was by a
+  build without labels has a base holding a labels file it never applied, and its own lists would
+  read as removals against it; no labels base is a first merge, which only adds. Names only: a
+  category that arrives has no save path, one already here keeps its own, and a name removed
+  elsewhere is let go of here as a deletion in Settings would (`Host.labelsApplied`, the torrents
+  carrying it cleared). `LabelStore.setOnChanged` is the store's `setOnSaved`. An older build keeps
+  the file (its checkout has it, and it writes only `settings.properties`), so the format stays 1.
+  Each such file is a `SyncEngine.Part` (base ref, target, reader of a `RepoTree`, writer), and the
+  search providers are the second: `SyncSearch`, base `refs/torrenta/search-base`. A Torznab server
+  is `torznab.<url>` (name, URL, enabled, `keyNeeded` when it takes a key) in the repository's
+  `search-providers.json`, **never the key** and never the Test's count; a machine that receives
+  one keeps its own key for that URL, else the entry is `TorznabEndpoint.keyNeeded` (the Settings
+  row says "needed here", `TorznabProvider` refuses without a request, the round's status line
+  counts them) until a key is typed, and its `takesKey()` makes it send what the keyed machine
+  sends meanwhile. A definition file is `definition.<id>`, its text, in `search-providers/`; one
+  equal to the shipped example is left out like a default (two unchanged copies would otherwise
+  out-vote an edit on the first merge), so a removal of an example writes the shipped text back
+  (`DefinitionStore.remove`). An endpoints file that does not parse fails the round: read as empty
+  it would remove every server everywhere. The URL is the identity, so a URL edited on one machine
+  is a removal and an addition elsewhere, and the key is typed again there.
+- **The session decides the speed pair; the engines only apply it.** `Session.refreshLimits()`
+  runs every minute, after any settings change and when a condition changes
+  (`Conditions.Source.onChange`), under a lock of its own (`start`/`stop` hold the session's, and
+  `stop` waits for the poll thread). `session.SpeedMode` is the rule: `auto` (the battery's, then
+  the network's, then the schedule's alternative pair, and a condition's pause apart), `next` (the
+  one switch `speed.altOn`, flipped to the decision only when the decision differs from
+  `speed.autoWas`, so a person's flip holds until the next change, as qBittorrent's does, and a
+  boundary passed while closed is caught up at start; nothing recorded is "none", so an upgrade
+  mid-schedule keeps the old behaviour), `shown` (the pill's reason). `Engine.refreshLimits(boolean)`
+  puts the pair in force (libtorrent keeps it for `toPack`; `WithDownloads` shares its download
+  limit among the links); the Transmission daemon keeps its own schedule and answers with its own.
+  `ConditionPause` pauses what runs when a condition starts and resumes exactly those when it ends,
+  held ids in `speed.conditionHeld`; unlike the leak check's pause, nothing is paused again while it
+  holds. `os.SystemConditions`: UPower `OnBattery` and NetworkManager `Metered` (1 or 3) on the
+  system bus with `PropertiesChanged`, `pmset -g batt` on macOS (no metered there:
+  `Conditions.seesMetered`), `GetSystemPowerStatus` through FFM and Windows PowerShell 5.1's
+  `NetworkCostType` every five minutes on Windows; created on a virtual thread. `Capability.SPEED_CONDITIONS`
+  is libtorrent's. `-Dtorrenta.conditions=battery,metered` fixes them for a capture; the pill is
+  in `status-bar=`. `speed.altOn`, `speed.autoWas` and the pause's keys are this machine's
+  (`SyncKeys.LOCAL_KEYS`). Limits are KiB/s in settings and bytes/s in the pack; 0 is "none" on
+  both sides.
 - **libtorrent's share limits pause nothing.** `share_ratio_limit` and `seed_time_limit` only rank
-  seeds for the queue (`seed_rank`); the pausing or removing is `ShareLimit.decide` in the window's
-  poll, once a second, against `Torrent.seedingTime` (`finished_duration`, so a torrent with files
+  seeds for the queue (`seed_rank`); the pausing or removing is `ShareLimit.decide` in the session's
+  poll (`Session.enforceShareLimits`), once a second, against `Torrent.seedingTime` (`finished_duration`, so a torrent with files
   left out counts). Active counts are `-1` for "no limit" in the pack; `0` would park every torrent.
   A torrent's own share limit is `torrent.<hash>.share` in the settings file (the `torrent.` prefix
   never syncs); its rate caps and counts are the handle's and travel in the resume data.
@@ -330,6 +507,58 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   the connection tests did not have to grow seven arguments.
 - **A proxy with a username is a different libtorrent type** (`socks5_pw`, `http_pw`); the record
   decides with `proxyAuthenticated()`. `proxy_hostnames` is on, so lookups go through the proxy.
+- **Binding needs `outgoing_interfaces` as well as `listen_interfaces`.** The listen string binds
+  only the listening sockets; with `outgoing_interfaces` empty, every peer the session dials leaves
+  by the system's route, so a session "bound" to a VPN interface dialled from the LAN address,
+  and one bound to an interface that had gone dialled through the default route (measured:
+  `aPeerIsDialledFromTheBoundAddressNotTheRoutesChoice`, `aBindingToAMissingInterfaceDialsNobody`).
+  `EngineSettings.outgoingInterfaces()` is the same binding without port or brackets. Windows
+  refuses a loopback-bound connection to the machine's own LAN address where Linux and macOS
+  route it, so the first test asserts "never from the other address" everywhere and "from
+  loopback" only off Windows. Tracker
+  hostnames still resolve through the system's resolver unless a proxy is set.
+- **A binding that reaches no one is said, and the same binding coming back binds again.**
+  `net.InterfaceWatch` (pure: `of(bound, nics)` finds an address by comparing parsed literals,
+  never resolving, and a name exactly then ignoring case; `change` is the log line; `system()`
+  reads `NetworkInterface`, IPv6 compacted, zone ids dropped) runs every five seconds in the
+  window's poll (`watchInterface`, where the engine has `LISTEN_DETAILS`, so never for a daemon).
+  A binding down or missing turns the port entry red with the interface's name ("tun0 missing ·
+  reaching no one"), said without a port: libtorrent opens nothing on an interface that is not
+  there and sends no listen alert either way, so the port stays 0. The same binding going up or
+  down or changing its addresses calls `Engine.rebind()`: the settings again and
+  `reopen_network_sockets`, since an unchanged `listen_interfaces` is not looked at twice.
+  `Connectivity.externalAddress` is libtorrent's `external_ip_alert` (its vote of what peers,
+  trackers and the DHT report), said in the log when it moves and in the port's tooltip as "Peers
+  see this machine as …"; libtorrent changes its mind only after many votes or about fifteen
+  minutes, so a short capture never shows it. The capture's `statusbar=` line ends in `portTip=`.
+- **"Exposed" needs proof, and a full-tunnel VPN is never a leak.** `LeakCheck.verdict` calls it
+  Exposed only when the swarm sees the default route's address and the bound path, checked, leaves
+  by another; with the bound exit unknown, a full tunnel (both exits the VPN's) would look the same,
+  so it is Unknown, never a guess. The exit check (`connection.exitCheck`, off: it tells a third
+  party this machine's addresses) asks `connection.exitCheckUrl` (empty means `ExitCheck.DEFAULT_URL`,
+  https://api.ipify.org) twice on a virtual thread from the poll (`checkLeaks`): once with
+  `HttpClient.Builder.localAddress` set to the binding (an address as written, else the
+  interface's first non-link-local IPv4, else its first address), once without, no proxy, no
+  redirects; only a 200 whose body is a bare address literal counts. Asked every ten minutes, and
+  at once when the binding or the swarm's view moved or Check now was pressed. The verdict is
+  decided every poll from the last answers; `pauseWhenExposed` pauses what runs (never a person's
+  pause, never a link's curl) and resumes exactly those on Protected, Unbound or the switch off,
+  holding through Halted and Unknown. `ExitCheckTest` proves the bound request's source address
+  against a loopback echo server from 127.0.0.2 (Linux only: macOS has 127.0.0.1 alone). The
+  capture action `leak-card` opens the card, `leak-check` presses Check now, and `statusbar=` ends
+  in `leak=` and `leakCard=`; a stand-in exit server is a few lines of Python's `http.server`
+  answering `client_address[0]`.
+- **libtorrent 2 trusts resume data over the disk.** It keeps no file sizes in resume data, so
+  another client's "complete" over a truncated file is believed, and the torrent would seed bad
+  data (`aTruncatedFileComesUpShortNeverWrong` saw it hold at 100 %). The import looks first:
+  `ImportPlan` compares sizes for every file whose pieces the resume data claims (an incomplete
+  torrent's untouched files may be absent, its sparse ones short), and a torrent that does not
+  match is adopted with `have_pieces`, `verified_pieces` and the unfinished pieces cleared and seed
+  mode off, so the add checks the files as any add over existing data does: not `force_recheck`.
+  The fixtures in `src/test/resources/com/torrenta/migrate/qbittorrent-5.1/` were written by a
+  real qBittorrent 5.1.0 (off-screen, a profile of its own, shut down through its API so it saved
+  resume data); only the save paths were rewritten, by a re-encoder that first reproduced the
+  files byte for byte.
 - **Engine events arrive on libtorrent4j's alert thread.** `MainWindow` hops to the FX thread
   before touching the log or the status bar; `EventLog.add` is FX-only. The j.u.l bridge takes
   the hop as a parameter so tests run it inline.
@@ -338,24 +567,57 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   the caller's thread the moment it changes (never through the resume-data alert), read back in
   `restore()`, deleted by `TorrentStore.delete`. The engine holds them in a map by id for the
   snapshots. The sidebar is not focus-traversable for the same reason as the filter box.
-- **The Add dialog's magnet fetch is a real torrent, hidden.** `fetchMetadata` adds the magnet in
-  upload mode, out of the queue, and keeps it in `fetches`: `handles()` skips it (so no snapshot,
-  flush or settings walk sees it), its events are dropped, and its add alert is swallowed by id
-  (`fetchAddAlerts`) so no blob is written even if it was cancelled before the alert came. On
-  metadata it writes the `.torrent` (`write_torrent_file` with the link's trackers,
-  `allow_missing_piece_layer` for v2) and leaves the session. The real add goes through
+- **The Add dialog's swarm probe is a real torrent, hidden.** `Engine.probe(source, privateToo)`
+  (an `Engine.SwarmProbe`; inside the engine still a `Fetch`, kept in `fetches`) adds a magnet,
+  or a `.torrent` whose file list is in from the start (`listed`), in upload mode, out of the
+  queue: `handles()` skips it (so no snapshot,
+  flush or settings walk sees it), its alerts are dropped (`ofAFetch`: all but its metadata, its
+  add and its peers, so its check never runs the suffix and move handlers), and its add alert is
+  swallowed by id (`fetchAddAlerts`) so no blob is written even if it was cancelled before the
+  alert came. Its save path is an empty `torrenta-probe-*` temp folder of its own, deleted when it
+  ends, so the check at the metadata never hashes a copy in the download folder. On metadata it
+  writes the `.torrent` (`write_torrent_file` with the link's trackers,
+  `allow_missing_piece_layer` for v2) and completes `torrent()`, but stays in the swarm to look,
+  downloading nothing, until it is added or cancelled (`ended` is its own flag: the future being
+  done no longer means the fetch is over). A private torrent is looked at only with `privateToo`
+  (`add.probePrivate`, off: a private tracker counts the probe's announce): a magnet's leaves at
+  its metadata, a `.torrent`'s never joins and hands back its own bytes. `Capability.SWARM_PREVIEW`
+  gates the `.torrent` probe and the Settings row. `swarm(wanted)` is `SwarmPreview`: seeds as the
+  most anyone knows (`num_complete`, which libtorrent keeps as the highest of the trackers'
+  scrapes; `list_seeds`; the seeds met, by address), and with none the pieces peers were seen to
+  hold, a `BitSet` gathered
+  over the fetch's life from each peer's bitfield; `ui.SwarmVerdict` (pure, first rule wins) is
+  the Add dialog's Swarm line, polled with the ticked files' indices. The real add goes through
   `Engine.add(request, fetch)`, which ends the fetch first (libtorrent hands back the existing
   handle for a duplicate, silently) and gives the new torrent the peers the fetch dialled, in
   `add_torrent_params.peers`. Those are recorded from `peer_connect_alert` (direction out) as they
   connect, not read at the end: once the metadata is in, the fetch is upload-only and a seed
   drops it at once. A loopback test of this has to look at progress, not at peers: the new
   torrent downloads the test payload in a moment and the two seeds part. A v1 magnet of a hybrid torrent gets a new best hash (the v2 one) when its metadata
-  arrives, so the fetch is matched by either hash (`fetchOf`), never by `id()`.
+  arrives, so the fetch is matched by either hash (`fetchOf`), never by `id()`. **A seed and an
+  upload-only probe drop each other at the handshake** ("upload to upload connection"), before
+  libtorrent's peer list marks the seed: a magnet's probe meets its seeds before the metadata, a
+  `.torrent`'s never does, and saw no one until that disconnect was counted as a seed met
+  (`onPeerDisconnected`, matched on libtorrent's own message, `UPLOAD_TO_UPLOAD`, since
+  libtorrent4j exposes no error enum or category). libtorrent never serves a private torrent's
+  metadata to a magnet, so the private rule is tested with a `.torrent`
+  (`aPrivateTorrentIsLookedAtOnlyWhenLetIn`). A capture of the Swarm line needs a seed: a second `dev-run.sh` on its own config
+  folder (fixed `connection.port`, DHT and LSD off, `add.withoutAsking=true`, the data already in
+  its `download.dir`) given the `.torrent`, and the captured one given the magnet with
+  `x.pe=127.0.0.1:<port>`; the `add-dialog=` line then ends in `swarm=`. A `.torrent` has no
+  `x.pe`, and LSD between two instances found nothing in 40 s: give it a stand-in HTTP tracker
+  that answers every announce with the seed's compact address (and `complete` for the scrape).
 - **"Add now, pick files when ready"** adds with stop-after-metadata and marks
   `torrent.<hash>.pickFiles` in the settings; `MainWindow.chooseFiles(id)` opens the dialog's
   tree for a torrent in the list and clears the mark. Torrent → Choose Files… (`choose-files`) is
   live for one marked torrent (`Actions.canChooseFiles`); the settings are not observable, so
-  setting or clearing a mark bumps `pickFilesMarks`. Nothing shows the mark on the row yet.
+  setting or clearing a mark bumps `pickFilesMarks`, which also refreshes the table. The row says
+  it (`StatusLine.of(…, filesToChoose)`: "Files to choose · its file list is in, waiting for
+  you", or "then you choose its files" while the metadata comes) and the Overview has a card
+  (`Diagnosis.Title.CHOOSE`, `Remedy.CHOOSE_FILES` runs `choose-files`). The stop itself is
+  libtorrent's engine's: an in-memory set, so it is also `TorrentStorage.stopOnMetadata` in the
+  `.storage` sidecar, read back by `restoreStorage` — a restart before the metadata came used to
+  download every file.
 - **libtorrent's mmap disk I/O takes the JVM's SIGSEGV handler.** Once a file of
   `mmap_file_size_cutoff` pieces (40 by default) is mapped, libtorrent installs a SIGSEGV/SIGBUS
   guard of its own in place of the JVM's (`sigaction`, no chaining); a fault that is not its own,
@@ -372,6 +634,40 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   holder). There is no setter for the info dictionary's `source` key: it is put into the `entry`
   by hand before bencoding, which is why the hashes are read off the final bytes with `load`. A
   duplicate seed add hands back the torrent already in the list, silently.
+- **An archive's password is read off its first piece, which libtorrent hands over by address.**
+  On add (and on a magnet's metadata) the first volume of each wanted archive, at most eight, gets
+  `set_piece_deadline(…, ALERT_WHEN_AVAILABLE)`: the piece comes first, and a `read_piece_alert`
+  follows when it is in (at once, from disk, if it already is). libtorrent4j gives that alert's
+  buffer only as `bufferPtr()`, so `NativeBytes` copies it with FFM inside the callback; that is a
+  restricted method, which is why `com.torrenta` is in every `--enable-native-access` (javafx:run,
+  the packaged launcher, dev-run.sh; the tests run as ALL-UNNAMED). A finished torrent is skipped
+  only when restored at start (no reading every seed's pieces); a new one is read finished or not,
+  because a small torrent can be complete before its metadata alert is even handled (measured: a
+  one-piece magnet was SEEDING when the alert thread got to it). The verdicts are not stored;
+  a restart of an unfinished torrent reads them again. The RAR fixtures in the test resources
+  were built to the format by hand and checked with unrar (`unrar lt` calls them encrypted, `t`
+  passes the plain ones); there is no RAR creator here.
+- **Undo takes back Remove (its files kept), Set Location, a category and tags** (`ui.UndoStack`:
+  the last ten, the status bar's Undo for ten seconds, Shortcut+Z for ten minutes, Torrent → Undo).
+  Each is an `onTorrentsUndoable` action that hands back its inverse. A removal goes through
+  `Engine.detach`/`reattach` (`Capability.UNDO_REMOVE`, libtorrent's): detach asks for resume data
+  with the disk cache flushed and waits for that torrent's own answer (`saveWaits`, bounded as
+  `stop()` is), since the periodic blob can be two minutes old; reattach writes blob and sidecars
+  back and adds through `addFromStore`, the path `restore()` uses, so it reads "Restored", run-on-
+  added does not fire, and there is no recheck (`aDetachedTorrentComesBackAsItWasWithoutARecheck`
+  changes a byte while it is out, and it stays complete). The detached torrent is held in memory
+  only: the blob leaves the store at once, so a quit ends the undo rather than a crash bringing the
+  torrent back. Rename is not undoable: the window cannot tell a given name from the torrent's own.
+  Shortcut+Z is a scene filter that stands aside in a text field, which has an undo of its own.
+- **A command typed with its argument is a palette row of its own** (`ui.OmniCommand`: `>set-category
+  Films`, `>add-tag keep`, `>limit-down 500k`, `>queue top`, `>pause` …). `parse` is empty unless
+  the first word is a verb, so the palette's own search is untouched; otherwise it is `Ready` or a
+  `Problem` whose row says what does not read. `CommandPalette.setResolver` puts that row first.
+  The targets are `Actions.targets`: every match while the omnibox holds chips, else the selection,
+  counted when the row is built and acted on as counted. A removal always asks, anything over
+  `ASK_ABOVE` (20) asks; category, tags, location and limits go through `onTorrentsUndoable`, so
+  one Enter is one undo entry. The capture drives it as `omnibox:>add-tag~keep,focus-key:ENTER`;
+  the `sidebar=` line printed right after is a poll older than the change.
 - **A remote engine is a second `Engine`, and the window hides what it lacks.** `Engine.capabilities()`
   is valid after `start()` (a daemon's depends on its RPC version); `MainWindow.applyCapabilities`
   runs in `engineReady` and sets one `BooleanProperty` per capability that the gated commands'
@@ -398,10 +694,12 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   `@AfterAll`; it is `@EnabledIf` the daemon and `transmission-create` are on the PATH.
 - **Profiles are machine-local secrets.** `profiles.json` is written owner-only where POSIX modes
   exist, `EngineProfile.toString()` never prints the password, `engine.*` is in `SyncKeys`'s local
-  prefixes. `App.createEngine` is the one place an engine is built; `MainWindow.switchProfile` stops
-  the poll, the watcher and the old engine (on a worker), empties the list and runs `startEngine`,
-  which ends in `engineReady` again; `engineUp` stays counted down, so a rule's add during the gap
-  sees `engine == null` and fails plainly.
+  prefixes. `App.createEngine` is the one place an engine is built (the session's `EngineFactory`);
+  `MainWindow.switchProfile` empties the list and asks `Session.switchTo`, which stops the poll, the
+  watcher and the old engine (on a worker) and starts the next, ending in `engineReady` again; the
+  session's `engineUp` stays counted down, so a rule's add during the gap sees no engine and fails
+  plainly. The capture action `switch-profile:<id>` switches; a remote profile at an address
+  nothing listens on fails at once with Retry.
 - **"Open" means a peer from outside reached the port, and nothing less.** `engine.Connectivity`
   is kept on the alert thread from `listen_succeeded`/`listen_failed` (TCP only), `portmap`/
   `portmap_error` (either transport mapping is enough), `incoming_connection` (an address on this
@@ -412,6 +710,17 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   Transmission engine), which hides the port and the DHT; free space needs `LOCAL_FILES`.
 - **A removed torrent's alert carries only the hash.** `remove()` reads the name first and raises
   the event itself; the `TORRENT_REMOVED` alert is not listened to.
+- **A rebind moves every chord live, and menu accelerators come off before any goes back on.**
+  `applyKeybindings` rebuilds `commands` from `baseCommands` (`Command.rebound`: a chord the
+  scene's own handler fires stays a hint, any other becomes the accelerator), sets every menu
+  item's accelerator to null and then to the new one (JavaFX takes an item's old chord out of the
+  scene when it changes, which took it from an item that had just moved onto it), re-puts the
+  scene accelerators it owns (`sceneActions`, plus any command on no menu), and the key filters
+  (undo, saved views, Ctrl+Tab) read `matches(id, e)` live. Anything that shows a chord in words
+  reads `chordText(id)`; a command left with none shows nothing (the clipboard offer is not made).
+  `ui.paletteKey` from the first releases is read as `keys.palette` until the first edit drops
+  it. The capture hook's `settings-keys:<id>:<chord>|<chord>;<id>:BS` presses into the rows and
+  prints `keys-pressed=` with what was stored.
 - **Ctrl+Tab is a scene event filter, not an accelerator**: focus traversal owns Tab, and a
   control would take it first. It is `Ctrl` on every platform (`Cmd+Tab` never reaches the window
   on macOS). `Shortcut+1/2/3` are scene accelerators beside the view commands' own chords (a
@@ -460,6 +769,20 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
   write under `~/.torrenta`. `LibtorrentEngineTest` starts a real session on purpose: it is the one
   test that proves the native loads on each CI platform.
+- **A loopback test binds port 0 and waits for its seeder to listen.** The Windows flakes (a
+  loopback download with no peer for two minutes, a different test each time) were a seeder
+  listening on nothing: tests picked a port with a `ServerSocket(0)`, closed it, and had libtorrent
+  bind the number later, which Windows can refuse in between, and the engine added its alert
+  listener after starting the session, so the `listen_failed` was lost (it is added before now).
+  Sessions in `LibtorrentEngineTest` use `isolated(ANY_PORT)`, which listens on `127.0.0.1` only,
+  and read `listenPortForTest()`; seeders pass `awaitListening`. Never `0.0.0.0` with port 0:
+  libtorrent on Windows then gives each local address its own socket and port, `listen_port()`
+  names one that is not loopback's, and every dial of 127.0.0.1 is refused (measured, every run). Two more things the harness knows: libtorrent stops dialling an
+  address after three failed attempts and no `connect_peer` revives it (measured; `max_failcount`
+  through the session does not change it), so `awaitDownload`/`awaitFetch` clear the peer list
+  (`clear_peers`) after five seconds without a peer; and a timeout prints both sides' peer logs
+  (`recordPeersForTest`). To find or rule out a flake, `engine-soak.yml` runs the class in eight
+  parallel shards: Actions → Engine soak from master, or push any commit to a `soak/…` branch.
 - **On macOS the test JVM ends with `_exit`, because libtorrent4j's OpenSSL can abort at `exit()`.**
   libtorrent4j 2.1.0-39 links OpenSSL 3.5.5 statically, and OpenSSL registers its cleanup with
   `atexit`. About one macOS CI run in twenty, that cleanup freed a pointer that was not allocated
@@ -487,10 +810,12 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   difference when none is given outright. The capture hook's `settings-search-add[:<url>]`,
   `settings-search-dialog-test:<url>` (Test pressed in the dialog) and `settings-search-test`
   (the page's Test on the first row) drive the page; a stub serving the caps fixture is enough.
+  `settings-definitions-export:<zip>` is the definitions' Export to zip past its chooser
+  (`DefinitionStore.exportZip`), with a `definitions-status=` line after the shot.
 
 - **The RSS rules run on the fetch thread, under their own lock, after the merge and before the
   feed's listeners hear.** `RssService.finish` hands the articles new by identity to `runRules`
-  only when the switch is on; the downloader (the window's `downloadForRule`) waits on
+  only when the switch is on; the downloader (the session's `downloadForRule`) waits on
   `engineUp` because the feeds due at start are fetched before the engine is up, and a rule's
   failure is reported, not retried: the article is no longer new. The service stamps the feed's
   id on every article a source hands over (a stub's items had none, and the log line then had
@@ -607,6 +932,24 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   English catalogue lacks, and on a dead key; `MessagesTest` keeps the six catalogues to one key
   set with matching placeholders. In a choice limb that carries a `{0}` an apostrophe needs four
   quotes (`''''`), in one without a brace two; a new key goes into all six files.
+
+## Null annotations (JSpecify, checked by NullAway; Editora's)
+
+- **Every package is `@NullMarked`** in its `package-info.java`, and NullAway (an Error Prone plugin,
+  NullAway only, main compile only, not the tests) fails `mvn compile` on a null it cannot prove
+  safe. `NullMarkedPackagesTest` fails for a new package without the file. JSpecify is `provided`
+  and `requires static org.jspecify`, so nothing ships; `.mvn/jvm.config` opens javac to Error Prone.
+- **Non-null unless it says `@Nullable`** (`org.jspecify.annotations`, type-use: `Outer.@Nullable
+  Inner`, `byte @Nullable []`, `java.nio.file.@Nullable Path`). Mark what really may be null; prefer a
+  shape that is not null (a parameter instead of re-reading a nullable field, a local copy of a
+  volatile field, an accessor that fails clearly: `Reads.Found.torrent()`, `Sidebar.section`).
+- **NullAway does not follow a boolean that holds a null check**, nor a record whose compact
+  constructor replaces a null: pass the normalised value at the call (`TorrentLabels`, `Detached`),
+  or add a constructor without it (`Command` without a hint).
+- **`@Initializer`** (`ui.Initializer`) marks a method the constructor always runs that assigns
+  fields (`MainWindow.buildCenter`/`buildToolbar`/`buildMenuBar`, `SettingsWindow`'s page builders,
+  `DetailPane.buildPeers`); a field set later stays `@Nullable`. An exception class whose message is
+  shown overrides `getMessage()` to never be null (`EngineException`, `SearchException`, …).
 
 ## Not done
 

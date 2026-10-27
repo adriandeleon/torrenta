@@ -6,6 +6,8 @@ import javafx.scene.layout.Region;
 import javafx.scene.shape.Polygon;
 import javafx.scene.shape.Polyline;
 
+import com.torrenta.session.SpeedHistory;
+
 /**
  * A small rate graph with no axes: the status bar's minute of download or upload, the Overview's
  * half hour of both. Shapes rather than a canvas, so app.css colours them from the theme

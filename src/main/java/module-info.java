@@ -1,4 +1,6 @@
 module com.torrenta {
+    // The null annotations NullAway reads; compile-time only (pom.xml).
+    requires static org.jspecify;
     requires javafx.controls;
     requires javafx.graphics;
     // The Nord and Cupertino control themes; the module opens its theme package, so the
@@ -18,6 +20,8 @@ module com.torrenta {
 
     // Fetching a .torrent from a URL for the Add dialog, and the update check.
     requires java.net.http;
+    // The HTTP plumbing (com.torrenta.http) the qBittorrent-compatible API and streaming sit on.
+    requires jdk.httpserver;
     // The Torznab client reads RSS with StAX.
     requires java.xml;
     // The update check's release payload gets a real parser.

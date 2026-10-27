@@ -70,6 +70,41 @@ class CommandLineTest {
         assertTrue(usage.startsWith("Usage: torrenta"));
         assertTrue(usage.contains("--version"));
         assertTrue(usage.contains("--config-dir"));
+        assertTrue(usage.contains("--headless"));
+        assertTrue(usage.contains("--set-remote-password"));
+    }
+
+    @Test
+    void theRemotePasswordIsAFlagOfItsOwn() {
+        CommandLine cli = CommandLine.parse("--set-remote-password", "--config-dir", "/srv/torrenta");
+        assertTrue(cli.setRemotePassword());
+        assertEquals("/srv/torrenta", cli.configDir());
+        assertTrue(cli.inputs().isEmpty(), "the password is never an argument, where ps would show it");
+        assertFalse(CommandLine.parse("a.torrent").setRemotePassword());
+    }
+
+    @Test
+    void headlessIsAFlagBesideTheInputs() {
+        CommandLine cli = CommandLine.parse("--headless", "--config-dir", "/srv/torrenta", "magnet:?xt=urn:btih:a");
+        assertTrue(cli.headless());
+        assertTrue(cli.shouldRun(), "headless runs; it is not an answer that stops");
+        assertEquals("/srv/torrenta", cli.configDir());
+        assertEquals(java.util.List.of("magnet:?xt=urn:btih:a"), cli.inputs());
+        assertFalse(CommandLine.parse("a.torrent").headless());
+    }
+
+    /**
+     * jpackage passes a launcher's own arguments only when none are given, so the headless
+     * launcher is known by its path, with arguments or without.
+     */
+    @Test
+    void theHeadlessLauncherIsHeadlessWhateverItIsGiven() {
+        CommandLine given = CommandLine.parse("--config-dir", "/srv/torrenta");
+        assertTrue(given.headless("/opt/torrenta/bin/torrenta-nox"));
+        assertTrue(given.headless("C:\\Program Files\\Torrenta\\torrenta-nox.exe"));
+        assertFalse(given.headless("/opt/torrenta/bin/Torrenta"), "the window's launcher");
+        assertFalse(given.headless(null), "not packaged: dev-run, the tests");
+        assertTrue(CommandLine.parse("--headless").headless(null));
     }
 
     @Test

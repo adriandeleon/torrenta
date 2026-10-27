@@ -16,6 +16,33 @@ class StatusLineTest {
         return StatusLine.of(t.build(), quiet, limit).text();
     }
 
+    /** Added to pick its files later: stopped once the list is in, which is waiting, not a pause. */
+    @Test
+    void aTorrentWhoseFilesAreToBeChosenSaysSo() {
+        StatusLine s = StatusLine.of(T.downloading().paused().build(), 0, NONE, true);
+        assertEquals("Files to choose", s.lead());
+        assertEquals(" · its file list is in, waiting for you", s.rest());
+        assertEquals(RowState.PAUSED, s.state(), "its colour stays the pause's");
+        assertEquals(
+                "Fetching metadata · then you choose its files",
+                StatusLine.of(
+                                T.downloading()
+                                        .state(TorrentState.FETCHING_METADATA)
+                                        .build(),
+                                0,
+                                NONE,
+                                true)
+                        .text());
+        assertEquals(
+                "Error · disk full",
+                StatusLine.of(T.downloading().error("disk full").build(), 0, NONE, true)
+                        .text(),
+                "an error says itself first");
+        assertEquals(
+                "Paused by you · 0%",
+                StatusLine.of(T.downloading().paused().build(), 0, NONE, false).text());
+    }
+
     @Test
     void aDownloadLeadsWithItsProgressAndNamesTheSwarm() {
         StatusLine s = StatusLine.of(

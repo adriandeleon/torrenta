@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Locale;
 
 import com.torrenta.AppInfo;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A problem report: the system details and the latest two session logs, redacted, as one
@@ -40,7 +41,7 @@ public final class ProblemReport {
     private static final DateTimeFormatter FILE_STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
     /** One log in the report: its heading and its text ({@code null} when the file was not there). */
-    public record Log(String heading, String text) {}
+    public record Log(String heading, @Nullable String text) {}
 
     /** A report ready to show: the redacted system block, the redacted full text, and how many values went. */
     public record Assembled(String systemDetails, String text, int redacted) {}
@@ -70,7 +71,7 @@ public final class ProblemReport {
     }
 
     /** How this copy runs: an installed app (jpackage sets the property), a development build, or a jar. */
-    static String installKind(String jpackageAppPath, boolean snapshot) {
+    static String installKind(@Nullable String jpackageAppPath, boolean snapshot) {
         if (jpackageAppPath != null && !jpackageAppPath.isBlank()) return "installed app";
         return snapshot ? "development build" : "jar";
     }
@@ -81,7 +82,7 @@ public final class ProblemReport {
      * redacted by {@code redactor}.
      */
     public static Assembled assemble(
-            Path latestLog, Path previousLog, String engine, String fallbackLog, Redactor redactor) {
+            Path latestLog, Path previousLog, String engine, @Nullable String fallbackLog, Redactor redactor) {
         String latest = readLog(latestLog);
         List<Log> logs = List.of(
                 new Log(latestLog.getFileName() + " (the latest session)", latest != null ? latest : fallbackLog),
@@ -122,7 +123,7 @@ public final class ProblemReport {
      * The log file's text, its last {@link #MAX_LOG_CHARS} characters when longer (cut at a line
      * start, with a note saying so); {@code null} when the file is missing or unreadable.
      */
-    public static String readLog(Path file) {
+    public static @Nullable String readLog(@Nullable Path file) {
         if (file == null || !Files.isRegularFile(file)) return null;
         try {
             return tail(Files.readString(file, StandardCharsets.UTF_8), MAX_LOG_CHARS);

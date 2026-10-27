@@ -1,0 +1,32 @@
+[
+ {
+  "msg": "",
+  "num_downloaded": 0,
+  "num_leeches": 0,
+  "num_peers": 0,
+  "num_seeds": 0,
+  "status": 0,
+  "tier": -1,
+  "url": "** [DHT] **"
+ },
+ {
+  "msg": "",
+  "num_downloaded": 0,
+  "num_leeches": 0,
+  "num_peers": 0,
+  "num_seeds": 0,
+  "status": 0,
+  "tier": -1,
+  "url": "** [PeX] **"
+ },
+ {
+  "msg": "",
+  "num_downloaded": 0,
+  "num_leeches": 0,
+  "num_peers": 0,
+  "num_seeds": 0,
+  "status": 0,
+  "tier": -1,
+  "url": "** [LSD] **"
+ }
+]

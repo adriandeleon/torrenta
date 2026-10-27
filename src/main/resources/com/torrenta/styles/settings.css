@@ -69,6 +69,17 @@
     -fx-padding: 13 2 13 2;
 }
 
+/* The Keyboard page's rows: one line each, and sixty of them. Termina's. */
+.settings-row.settings-key-row {
+    -fx-padding: 4 2 4 2;
+}
+
+/* The chord-recording field: while it has the focus it is empty and its prompt says what to do,
+   so the prompt must stay readable rather than fade as a focused prompt does. */
+.shortcut-capture:focused {
+    -fx-prompt-text-fill: -color-fg-muted;
+}
+
 /*
  * Sizes in px rather than em, and stated for both lines. Editora's settings pin them the same way:
  * a title left at the inherited size sets the scale for the page, and the description then has to

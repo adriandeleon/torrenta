@@ -7,6 +7,270 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Report a Problem, a GitHub issue from the debug log.** Help → Report a Problem… (also a
+  button in the Debug Log window) shows a report of this session's and the last session's logs
+  with the version, engine, Java and OS, already cleaned of home-folder paths, the user name,
+  the torrents' names, magnet links, info-hashes, tracker passkeys, public peer addresses,
+  e-mail addresses and tokens. It is editable; Open GitHub Issue copies it and opens a new issue
+  with it filled in (or, when it is too long for the link, says to paste it). Copy and Save… are
+  there too. `torrenta --report` does the same without starting Torrenta, for when it will not
+  start: it writes the report to the current folder and opens the issue. Torrenta sends nothing
+  itself.
+
+### Fixed
+
+- **The log of a session that crashed survives the next launch.** Each launch emptied
+  `torrenta-session.log`, so the record of a crash was gone by the time Torrenta was reopened to
+  report it; the last session's is now kept as `torrenta-session.prev.log`.
+
+## 0.3.0 — 2026-10-26
+
+### Added
+
+- **A torrent waiting for you to pick its files says so.** One added with "Add now, pick files
+  when ready" reads "Files to choose" in the list once its file list is in, instead of "Paused by
+  you", and its Overview offers Choose files… .
+
+- **Files already on disk are found for v1 torrents too.** The Add dialog's "Already on disk"
+  used to know only v2 and hybrid torrents' files. Now a file of a v1-only torrent is found as
+  well when its pieces hold nothing else (a single-file torrent, or a padded one) and the other
+  torrent was made with the same piece size: the common case of the same film or image under
+  another name.
+
+- **Removed files go to the trash.** Remove with files now moves a torrent's files to the
+  desktop's trash (the Recycle Bin on Windows) instead of deleting them, so a mistake can be
+  undone from the file manager; a whole torrent folder goes as one item. Settings → General →
+  Move removed files to the trash turns it off. A drive without a trash keeps the files and says
+  so. The share limit's "remove with files" and the web API's delete do the same.
+
+- **Filter search results.** Once a search has results, a Filter box above them narrows the table
+  by its columns in the omnibox's language: `provider:jack`, `cat:movies`, `size>1g`, `seeds>=10`,
+  `leechers<5`, `date<7d` or `date>=2026-01-01` (a range is two terms), words for the name, `-`
+  for "not". Each term shows as a chip, a red one saying why when it does not read, and the box
+  says how many results it lets through. The results' menu has Show Only and Hide for a
+  provider and Show Only for a category; `/` in the results or `Ctrl+K` goes to the box. Results
+  from a Torznab server now carry their category, in a new Category column.
+
+- **Updatable torrents.** A `magnet:?xs=urn:btpk:…` link (BEP 46), typed, opened, dropped into a
+  watch folder's `.magnet` file or found in an RSS feed, is looked up in the DHT and its current
+  version added; from then on Torrenta looks for a newer version every six hours
+  (Settings → Adding torrents → Updatable torrents) and adds it into the same folder, filed the
+  same way, with the files that did not change linked rather than downloaded again. Once the new
+  version is complete the old one is no longer followed, and leaves the list (its files kept)
+  if you choose. Settings → Automation can run a program or notify on a new version.
+
+- **Publish an updatable torrent.** The Create Torrent dialog's Publish as updatable makes a key
+  under a name you choose, seeds the torrent and puts it in the DHT; the updatable link it shows
+  is what others follow. Torrent → New Version… on it creates the next version under the same key,
+  and whoever follows gets it the next time they look; Copy Updatable Link gives the link again.
+  The key is kept in `keys/<name>.key` in Torrenta's folder, on this computer only: anyone with it
+  can publish versions, and without it there will be no more, so keep a copy. While Torrenta runs
+  it puts the link back in the DHT every hour when it is no longer found there.
+
+- **Play a file while it downloads.** The Files tab's Stream in Player opens a file in mpv or VLC
+  (wherever they are installed, or the player chosen in Settings → Adding torrents) as it
+  downloads; Copy Stream URL gives the address for any other player on this computer. The pieces
+  the player is about to reach come first, the file's first and last at the start (where a
+  video's index sits), and a jump ahead waits for its piece rather than plays garbage. The
+  Overview's pieces map rings the pieces being read ahead.
+
+- **Slower, or paused, on battery and on a metered network.** Settings → Speed → Battery and
+  network: while the computer runs on its battery, or the network is one paid by the byte (a
+  phone's hotspot), use the alternative speed limits or pause the torrents, resumed when it ends.
+  The status bar's pill says why ("Alt speed: on battery"). Turning the alternative limits on or
+  off by hand now holds until the schedule, the battery or the network next changes, as in
+  qBittorrent, where before the schedule kept them on whatever the pill said. The switch is this
+  machine's and no longer travels with Settings sync. Read from UPower and NetworkManager on
+  Linux, `pmset` on macOS (which has no way to tell a metered network) and the system on Windows.
+
+- **Files you already have are not downloaded again.** When a new torrent holds a file that
+  another torrent in the list has complete (v2 and hybrid torrents, matched by content, whatever
+  the names), the Add dialog offers to link it into place: no bytes written, the two torrents
+  share the file, and the add's own check verifies every byte. A file on another drive can be
+  copied instead (a clone where the file system can make one, so no space is used either); the
+  dialog asks first unless Settings → Adding → Files already on disk says to copy. Watch folders,
+  RSS rules and adds without a dialog link without asking. The Files tab marks such a file and
+  says where it came from.
+
+- **Bring your torrents over from qBittorrent, Transmission or Deluge.** File → Import from
+  another client… finds qBittorrent, Transmission (the daemon or the app) and Deluge on this
+  machine, Flatpak's too, or reads a folder you choose, and lists its torrents
+  with what will happen to each: complete or part done, they come over at their progress without a
+  check, stopped ones stopped, with their categories (and qBittorrent's folders for them; Deluge's label is the category), tags,
+  the names you gave them and their files, and their own share limits; one whose files do not match is checked as
+  it is added and comes up short rather than wrong; one Torrenta has, or one the other client is
+  still writing, is left alone. A qBittorrent that keeps its torrents in its SQLite database is told how
+  to switch it back to files. The event log has the summary.
+
+- **A phone interface through a web UI written for qBittorrent.** Settings → Remote access → Web
+  interface folder serves a folder at the server's address the way qBittorrent serves an
+  alternative WebUI: unpack VueTorrent there and a phone's browser runs Torrenta. Its public half
+  is open to anyone (the login page), its private half only after signing in; nothing outside the
+  folder, hidden in it, or behind a link out of it is served. The API gains what such interfaces
+  poll: `sync/maindata` (the whole picture once, then only the fields that changed) and
+  `sync/torrentPeers`. And what their detail screens edit: file priorities, the location (inside
+  the allowed folders), a torrent's name, a file's or folder's name, trackers, per-torrent limits,
+  sequential and first-and-last-piece, super seeding, the queue, and the categories and tags
+  themselves; with the trackers, web seeds and piece states to read. And the session's: the
+  alternative speed limits switched and the limits in force set, the preferences Torrenta has read
+  and written (live, as from the Settings page; the save path inside the allowed folders, and
+  Remote access's own password, address and port never changed through it), and the event log.
+  Held to a real qBittorrent 5.1.0's recorded answers field by field, and tried with Sonarr and
+  Radarr through a whole grab, import and removal after seeding: `docs/webapi.md`.
+
+- **Remote access, the door for Sonarr, Radarr and the phone apps.** Settings → Remote access
+  speaks qBittorrent's WebUI API at `/api/v2`, off until switched on and on `127.0.0.1:8080` until
+  an address is chosen. Sign-in always (no localhost bypass); the password kept only as a salted
+  PBKDF2 hash, on this machine, never synced; five wrong tries ban an address for an hour; the
+  `Host` header checked against DNS rebinding and a browser's `Origin` against the server itself;
+  the session cookie `HttpOnly` and `SameSite=Strict`; HTTPS from a PKCS#12 file, and a warning for
+  an address other machines reach over plain HTTP. A port in use is said, with a free one offered.
+  It answers sign-in, the `app/*` endpoints (version, preferences, the default save path) and
+  the reading ones: `torrents/info` with qBittorrent's states, filters, sort and paging, a torrent's
+  `properties` and `files`, the categories, the tags and `transfer/info`. A torrent is listed by its
+  v1 hash where it has one (what Sonarr and Radarr look it up by) and `content_path` is the file or
+  the root folder they import from. And the acting ones: `torrents/add` (magnets and http(s) links
+  in `urls`, `.torrent` files uploaded, with category, tags, stopped, save path, layout, rename,
+  limits and share limits) through the same content check as any add without a dialog, delete,
+  stop/start (and 4.x's pause/resume), recheck, categories, tags, share limits, top of the queue and
+  force start. A save path outside the allowed folders (the download folder, the categories', and
+  any added on the page) is refused, as is a new category's folder outside them. Headless runs it too, and
+  `--set-remote-password` sets the password without a window.
+
+- **Torrenta without a window.** `torrenta --headless`, or the `torrenta-nox` launcher beside the
+  app's own, runs everything the window does but the window: torrents, watch folders, RSS rules,
+  the IP filter, share limits, the speed schedule, run-on-event commands. What arrives (the command
+  line, another Torrenta, a watch folder, a rule) is added without asking, through the content
+  check; the log is stdout and `torrenta-session.log`; SIGTERM or Ctrl+C stops it cleanly, the last
+  resume data written first. `docs/headless.md` has a systemd user unit.
+
+- **Shortcuts you can change.** Settings → Keyboard lists every command under its menu with the
+  chord it is on: click one and press the new chord, press a chord another command has twice to
+  move it, Backspace to leave a command with none, Reset to put it back. Commands with no chord
+  can be given one. Applied at once to the menus, the palette, the toolbar's tooltips and the
+  view strip, and synced with the other settings (`keys.<command>=Shortcut+Shift+K`, with
+  Shortcut meaning Cmd on a Mac and Ctrl elsewhere). The palette's chord moved here from General;
+  a Ctrl+Shift+P chosen there is kept.
+
+- **A leak check you can see.** With a binding set, a shield beside the port says Protected,
+  Exposed, Halted (the interface is down, so nothing goes out) or Unchecked; a click shows the
+  three addresses it decided from. Settings → Connection → "Check where traffic leaves" (off: it
+  tells the server you choose this machine's addresses) asks an address-echo server, by default
+  https://api.ipify.org, every ten minutes where traffic through the binding leaves and where the
+  default route leaves. Exposed means peers see the default route's address while the binding
+  leaves elsewhere; a VPN that carries everything is never called a leak. "Pause torrents when
+  exposed" pauses what runs while exposed and resumes exactly those once protected again.
+
+- **A VPN that drops is said at once.** With Settings → Connection bound to an interface or an
+  address, Torrenta looks at it every five seconds: when it goes down or disappears, the port in
+  the status bar turns red ("tun0 missing · reaching no one") and the log says so; nothing goes
+  out another way in the meantime. When it comes back, or its address changes, Torrenta binds to
+  it again by itself. The port's tooltip names the interface and its addresses, and the address
+  peers see this machine as, once libtorrent has settled on one.
+
+- **Commands for many torrents at once, typed.** In the omnibox, `>` and a command with what it
+  takes: `>set-category Films`, `>add-tag keep`, `>remove-tag old`, `>set-location /srv/media`,
+  `>limit-down 500k` (or `none`), `>limit-up 1m`, `>sequential on`, `>queue top`, `>pause`,
+  `>resume`, `>recheck`, `>reannounce`, `>remove`. While a filter is in the box it acts on every
+  torrent the filter shows, otherwise on the selection, and the palette's row says which and how
+  many before Enter. A removal asks first, and so does anything on more than 20 torrents; a
+  category, tags, a location or a limit set this way can be undone.
+
+- **The Add dialog says how the swarm looks before you add.** For a `.torrent` at once, for a
+  magnet once its file list is in, a Swarm line under the free space reads Healthy (three seeds and up), Thin (a seed or two, or no
+  seed but every piece among the peers), Incomplete (no seed, and pieces of the chosen files that
+  no peer has), or Dead (no one at all), with the counts, and follows the files you tick. It looks
+  without downloading anything, from the trackers' counts and the peers it meets, and gives no
+  time estimate, since there is nothing to measure one from. A private torrent is not looked at,
+  since a private tracker counts every announce, unless Settings → Adding torrents → "Look at a
+  private torrent's swarm" is on.
+
+- **Undo.** Remove (keeping the files), Set Location, a category and tags can be taken back: the
+  status bar offers Undo for ten seconds after each, and Ctrl+Z (Torrent → Undo) takes back the
+  last ten for ten minutes. A removed torrent comes back exactly as it was, with its category,
+  tags, place in the queue and share limit, and without a recheck. Removing with the files stays
+  final.
+
+- **Search providers sync with the settings.** The Torznab servers in Settings → Search travel to
+  your other computers, but their API keys never do. A server that arrives says "needed here"
+  until you type its key once on that computer; until then a search names it and asks for the key
+  instead of being refused by the server. The definition files you added or changed travel too, a
+  file at a time (the shipped examples you left alone stay out of it), and so does a deletion.
+
+- **Saved views.** Type a filter in the omnibox (`state:seeding ratio<1 added<30d`, say), press
+  Ctrl+S (View → Save Filter as View…) and name it: it joins a Views section at the top of the
+  sidebar with a live count, and choosing it filters the list as the query does, together with
+  the box and the other sections. Ctrl+Alt+1 to 9 choose the first nine. A view's menu renames it,
+  replaces its query with the current filter, or deletes it. Views sync with the settings, each on
+  its own; a view whose query no longer reads is struck through, the reason in its tooltip.
+
+- **Four more filter keys**: `seeding>2d` (time spent seeding, in all), `eta<30m` (the time left
+  the ETA column shows), `seeds<3` (connected seeds) and `uploaded>10g` (sent over the torrent's
+  life). Durations take m, h, d or w; `added` keeps its h, d and w.
+
+- **The Add dialog says when a torrent's files deserve a look.** A card above the file tree names
+  what it found: a program named like a video or a document (`Film.mkv.exe`, spaces before the
+  last dot included), a name whose real extension is hidden by right-to-left characters, a
+  Windows shortcut, a program or a link to a web page in a film or an album, an archive where the
+  name promises a film and nothing else is there, a file named for a password or a codec. Red for
+  danger, amber for a caution; Skip these files unticks them and keeps the rest. A program in a
+  software torrent is not flagged, and a file you skip stops being reported.
+- **Adds without a dialog run the same check.** Watch folders, RSS rules, an article's Download
+  and Add without asking follow Settings → Adding torrents → Flagged files when adding without a
+  dialog: skip those files (the default), refuse the torrent, or add them anyway; the event log
+  says which, and what was found. A magnet has no file list yet, so it stops once its metadata is
+  in, is checked, and then starts, starts without the flagged files, or is removed before
+  anything was downloaded; a restart in between keeps it waiting.
+- **An archive that asks for a password is found within seconds of starting.** A torrent's
+  first `.rar`, `.zip` or `.7z` gets its first piece before anything else, and if the archive
+  is encrypted (its files, or its names too) the Overview shows a red card saying so, with Skip
+  that file and Remove the torrent; the event log says it once. A torrent that hides its content
+  behind a password usually sells the password.
+
+- **Settings sync carries the category names and tags.** A category or tag added on one computer
+  appears on the others, and one deleted is deleted everywhere (torrents filed under it there let
+  go of it, as a deletion in Settings does). Names only: each computer keeps its own folder for a
+  category, and one that arrives downloads to the default folder until it is given one. The
+  first sync after updating only adds, so nothing that exists on just one computer is lost.
+
+### Fixed
+
+- **"Add now, pick files when ready" holds across a restart.** A magnet added that way and
+  closed before its file list arrived used to download every file once it came back; it now
+  stops for you to choose, as it would have without the restart.
+
+- **Quitting with a dialog open is clean.** Quit from the tray menu (or the system's) while a
+  dialog such as Add Torrent was asking now cancels the dialog first and quits once it has gone,
+  rather than ending the program from inside it.
+
+- **Fewer ways to fail on a missing value.** The code is now checked for nulls as it is built,
+  which turned up a few: the Add dialog no longer waits forever for a magnet's files when the
+  engine went away as it opened, the Event Log's Copy no longer writes "null" for two of the
+  window's own lines, importing from Transmission says "neither a .torrent nor a magnet" for a
+  torrent that has neither, and a message from the engine with no text of its own shows its cause.
+
+- **Every dialog shows its buttons.** A dialog now grows to fit what it holds, when it opens and
+  whenever something appears in it, up to the screen's height, and cannot be dragged shorter than
+  that. The torrent Limits dialog cut its Cancel and Apply buttons off the bottom of the window.
+
+- **A finished torrent no longer "finishes" again at every start.** libtorrent reports a complete
+  torrent as finished when it loads one, so each seed ran your on-finished command and showed its
+  notification again every time Torrenta started (and an import would have done it for every
+  complete torrent brought over). Only a download that finishes now counts.
+
+- **Binding to an interface now binds the connections Torrenta makes, not only the ones it
+  accepts.** With Settings → Connection → Interface set (a VPN's, say), peers Torrenta dialled
+  still left by the system's own route: from the LAN address, and through the default route once
+  the VPN interface had gone. Now every dialled peer leaves from the bound address or interface,
+  and none is dialled when it is missing.
+- **The port's state is no longer missed at startup.** The engine heard libtorrent only once the
+  session had started, so the answer to opening the listening port (open, or refused because
+  another program has it) could come and go unheard, and the status bar kept checking.
+
+## 0.2.0 — 2026-10-24
+
+### Added
+
 - **Links that are not torrents are downloaded by curl.** Paste, type or drop a link to any file
   (http, https, ftp, ftps, sftp) and it joins the list beside the torrents: progress, rate, pause
   and resume (which carries on from where it stopped), remove with or without the file, a category,
@@ -30,15 +294,6 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   alternative one while it is on or scheduled, is shared by the downloads from links among
   themselves (the torrents keep theirs): each gets an equal part, or its own limit when that is
   lower, and a change takes within a second.
-- **Report a Problem, a GitHub issue from the debug log.** Help → Report a Problem… (also a
-  button in the Debug Log window) shows a report of this session's and the last session's logs
-  with the version, engine, Java and OS, already cleaned of home-folder paths, the user name,
-  the torrents' names, magnet links, info-hashes, tracker passkeys, public peer addresses,
-  e-mail addresses and tokens. It is editable; Open GitHub Issue copies it and opens a new issue
-  with it filled in (or, when it is too long for the link, says to paste it). Copy and Save… are
-  there too. `torrenta --report` does the same without starting Torrenta, for when it will not
-  start: it writes the report to the current folder and opens the issue. Torrenta sends nothing
-  itself.
 
 ### Changed
 
@@ -47,16 +302,21 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   chevron at the right edge says which. Drag the sidebar's edge that faces the list to make it
   wider or narrower (150 to 480 px); a double-click on the edge goes back to the default. Both
   are remembered.
+- **Settings pages have glyphs.** Each page in the Settings window's sidebar leads with a glyph;
+  a page that holds what a command does shows that command's own (Search, RSS, Speed, Queue,
+  Categories and tags), so the menus and the sidebar agree.
+- **The detail header's buttons have coloured glyphs.** Pause in amber (Resume, in green, while
+  the torrent is paused), Reannounce in indigo, Open folder in the accent, in both themes.
 
 ### Fixed
 
-- **The log of a session that crashed survives the next launch.** Each launch emptied
-  `torrenta-session.log`, so the record of a crash was gone by the time Torrenta was reopened to
-  report it; the last session's is now kept as `torrenta-session.prev.log`.
 - **`Ctrl+Shift+D` was both Set Location and the details pane**, so only one of them fired. Set
   Location keeps it; View → Details Pane (and the palette's Toggle Details Pane) is now `Ctrl+I`.
   Every chord the window binds is now one table (`ui.Chords`), and a test fails when two actions
   are given the same key.
+- **The detail pane showed the previous torrent for up to a second after a click.** It waited
+  for the next once-a-second poll; a selection change now fetches the detail at once (about
+  20 ms instead of up to a whole tick).
 
 ## 0.1.0 — 2026-10-22
 

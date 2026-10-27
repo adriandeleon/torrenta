@@ -17,6 +17,8 @@ import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * What went wrong, kept somewhere a user can reach it. Termina's.
  *
@@ -50,7 +52,7 @@ public final class DebugLog {
 
     private static final Deque<String> ENTRIES = new ArrayDeque<>();
 
-    private static Path file;
+    private static @Nullable Path file;
     private static boolean installed;
 
     private DebugLog() {}
@@ -120,6 +122,11 @@ public final class DebugLog {
         return configDir.resolve(PREVIOUS_FILE_NAME);
     }
 
+    /** A line of the application's own, stamped: a headless run's events, which no window shows. */
+    public static void note(String text) {
+        append(stamp(text));
+    }
+
     static synchronized void append(String line) {
         ENTRIES.addLast(line);
         while (ENTRIES.size() > MAX_ENTRIES) ENTRIES.removeFirst();
@@ -150,7 +157,7 @@ public final class DebugLog {
     }
 
     /** The file being mirrored to, or null when there is none. */
-    public static synchronized Path file() {
+    public static synchronized @Nullable Path file() {
         return file;
     }
 

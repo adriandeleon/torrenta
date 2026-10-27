@@ -26,6 +26,7 @@ import javafx.stage.Window;
 
 import com.torrenta.engine.LinkRequest;
 import com.torrenta.engine.direct.DirectNames;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -48,7 +49,7 @@ final class LinkDialog {
     private final Label nameProblem = new Label();
     private final CheckBox paused = new CheckBox(tr("dialog.link.paused"));
     private final Button download = new Button(tr("dialog.link.download"));
-    private LinkRequest result;
+    private @Nullable LinkRequest result;
 
     LinkDialog(Window owner, String url, Path defaultFolder, boolean startPaused) {
         this.url = url.strip();
@@ -128,6 +129,7 @@ final class LinkDialog {
             if (e.getCode() == KeyCode.ESCAPE) cancel();
         });
         stage.setScene(scene);
+        DialogFit.install(stage);
     }
 
     /**

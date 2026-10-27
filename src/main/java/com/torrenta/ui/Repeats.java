@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.function.Function;
 
 import com.torrenta.engine.EngineEvent;
+import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
 
@@ -29,7 +30,7 @@ final class Repeats {
     private Repeats() {}
 
     /** What makes two lines the same one; {@code torrent} is the id, or null for the session. */
-    record Key(EngineEvent.Level level, String torrent, String text) {}
+    record Key(EngineEvent.Level level, @Nullable String torrent, String text) {}
 
     /**
      * The index in {@code lines} (oldest first) of the line that {@code key}, said at {@code at},

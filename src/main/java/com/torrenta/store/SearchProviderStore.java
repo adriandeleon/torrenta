@@ -22,7 +22,8 @@ import com.torrenta.search.TorznabEndpoint;
  * Torznab endpoint.
  *
  * <p>Written whole and atomically on every change, as the watch-folder store is. Not in the
- * settings file, and never synced: an API key is a secret and this machine's. Each entry carries
+ * settings file. Settings sync carries the entries but never their keys ({@code SyncSearch}): an
+ * API key is a secret and this machine's. Each entry carries
  * a {@code type}, {@code torznab} today, so the declarative providers can share the file later;
  * an entry of a type this build does not know is skipped on read and lost on the next write.
  * Synchronized: the Settings window writes on the FX thread while a search reads from its own.
@@ -92,7 +93,8 @@ public final class SearchProviderStore {
 
     /**
      * {@code [{"type":"torznab","name":"…","url":"…","apiKey":"…","enabled":true,"categories":-1},
-     * …]}, one entry per line.
+     * …]}, one entry per line; {@code "keyNeeded":true} after the categories on an entry still
+     * waiting for its key.
      */
     public static String format(Collection<TorznabEndpoint> entries) {
         // One object per line, the comma at the line's end: each is generated on its own, since
@@ -116,6 +118,7 @@ public final class SearchProviderStore {
             g.writeStringField("apiKey", e.apiKey());
             g.writeBooleanField("enabled", e.enabled());
             g.writeNumberField("categories", e.categories());
+            if (e.keyNeeded()) g.writeBooleanField("keyNeeded", true);
             g.writeEndObject();
         } catch (IOException ex) {
             throw new IllegalStateException(ex);
@@ -144,6 +147,7 @@ public final class SearchProviderStore {
                 String apiKey = "";
                 boolean enabled = true;
                 int categories = -1;
+                boolean keyNeeded = false;
                 while (p.nextToken() == JsonToken.FIELD_NAME) {
                     String field = p.currentName();
                     JsonToken value = p.nextToken();
@@ -158,6 +162,9 @@ public final class SearchProviderStore {
                     } else if (field.equals("enabled")
                             && (value == JsonToken.VALUE_TRUE || value == JsonToken.VALUE_FALSE)) {
                         enabled = p.getBooleanValue();
+                    } else if (field.equals("keyNeeded")
+                            && (value == JsonToken.VALUE_TRUE || value == JsonToken.VALUE_FALSE)) {
+                        keyNeeded = p.getBooleanValue();
                     } else if (field.equals("categories") && value == JsonToken.VALUE_NUMBER_INT) {
                         categories = p.getIntValue();
                     } else {
@@ -165,7 +172,7 @@ public final class SearchProviderStore {
                     }
                 }
                 if (type.equals(TYPE_TORZNAB) && !url.isBlank())
-                    out.add(new TorznabEndpoint(name, url, apiKey, enabled, categories));
+                    out.add(new TorznabEndpoint(name, url, apiKey, enabled, categories, keyNeeded));
             }
         } catch (RuntimeException e) {
             throw new IOException("not a list of search providers: " + e.getMessage(), e);
