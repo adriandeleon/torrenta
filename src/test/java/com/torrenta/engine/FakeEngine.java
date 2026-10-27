@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
@@ -346,7 +347,7 @@ public class FakeEngine implements Engine {
     }
 
     @Override
-    public synchronized TorrentDetail detail(String id) throws EngineException {
+    public synchronized TorrentDetail detail(String id, Set<TorrentDetail.Part> parts) throws EngineException {
         Torrent torrent = existing(id);
         TorrentDetail.General general = new TorrentDetail.General(
                 id,
