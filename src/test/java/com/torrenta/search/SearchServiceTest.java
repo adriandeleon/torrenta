@@ -211,6 +211,41 @@ class SearchServiceTest {
         assertEquals(2, a.calls.get(), "the new answer starts its own five minutes");
     }
 
+    /** A stale answer once went only when the same search was asked again. */
+    @Test
+    void staleAnswersAreSweptWhenAnotherIsKept() {
+        HandTicker clock = new HandTicker();
+        SearchService service = new SearchService(Duration.ofSeconds(5), Duration.ZERO, clock, Duration.ofMinutes(5));
+        Fake a = Fake.answering("A", hit("a", 5, H1, "A"));
+        service.search("one", SearchCategory.ALL, List.of(a));
+        service.search("two", SearchCategory.ALL, List.of(a));
+        clock.advance(Duration.ofMinutes(3));
+        service.search("three", SearchCategory.ALL, List.of(a));
+        assertEquals(3, service.cachedAnswers());
+        clock.advance(Duration.ofMinutes(2));
+        service.search("four", SearchCategory.ALL, List.of(a));
+        assertEquals(2, service.cachedAnswers(), "one and two went, unasked; three and four stay");
+        service.search("three", SearchCategory.ALL, List.of(a));
+        assertEquals(4, a.calls.get(), "three is still answered from the cache");
+    }
+
+    @Test
+    void theCacheHoldsAtMostItsCapTheOldestGoingFirst() {
+        HandTicker clock = new HandTicker();
+        SearchService service = new SearchService(Duration.ofSeconds(5), Duration.ZERO, clock, Duration.ofMinutes(5));
+        Fake a = Fake.answering("A", hit("a", 5, H1, "A"));
+        int asked = SearchService.CACHE_ANSWERS + 10;
+        for (int i = 0; i < asked; i++) {
+            service.search("q" + i, SearchCategory.ALL, List.of(a));
+            clock.advance(Duration.ofMillis(1));
+        }
+        assertEquals(SearchService.CACHE_ANSWERS, service.cachedAnswers());
+        service.search("q" + (asked - 1), SearchCategory.ALL, List.of(a));
+        assertEquals(asked, a.calls.get(), "the newest is held");
+        service.search("q0", SearchCategory.ALL, List.of(a));
+        assertEquals(asked + 1, a.calls.get(), "the oldest went to make room");
+    }
+
     /** Writes down each call as it comes, with the thread it came on. */
     private static final class Notes implements SearchService.Progress {
         final List<String> lines = java.util.Collections.synchronizedList(new ArrayList<>());
