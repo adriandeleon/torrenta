@@ -134,6 +134,8 @@ public final class Settings {
     public static final String WEBAPI_ROOT_FOLDER = "webapi.rootFolder";
     /** Whether the icon toolbar under the menu bar shows; View → Toolbar flips it. */
     public static final String UI_TOOLBAR = "ui.toolbar";
+    /** Simple mode: the window with the essentials only; View → Simple Mode flips it. */
+    public static final String UI_SIMPLE = "ui.simple";
     /** Whether the sidebar of filters shows beside the list; View → Sidebar flips it. */
     public static final String UI_SIDEBAR = "ui.sidebar";
     /**
@@ -691,6 +693,14 @@ public final class Settings {
 
     public void setToolbar(boolean shown) {
         properties.setProperty(UI_TOOLBAR, String.valueOf(shown));
+    }
+
+    public boolean simple() {
+        return readBoolean(UI_SIMPLE, false);
+    }
+
+    public void setSimple(boolean on) {
+        properties.setProperty(UI_SIMPLE, String.valueOf(on));
     }
 
     /** The row density as written, trimmed; empty when unset. */

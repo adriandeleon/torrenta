@@ -21,7 +21,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `pause-resume`, `menu:<File|Torrent|View|Help>` or `context-menu` or `peer-menu` (the Peers tab's; `peer-ban` presses Ban Peer on the first peer) (opens that menu; the PNG is
   then of the popup and `menu=` lines list its items, `[icon]` after those with a glyph, a
   submenu's items indented under it; `menu:Torrent>Queue` opens the submenu itself, from the
-  keyboard), `set-location[:<folder>]` (the Set Location dialog, the folder typed in; a
+  keyboard), `toggle-simple` (Simple mode; every capture prints a `simple=` line: in force, `saved=`,
+  `session=` for `--simple`, sidebar, strip, the detail tabs, the toolbar's buttons, the palette's
+  count), `set-location[:<folder>]` (the Set Location dialog, the folder typed in; a
   `location-hint=` line has its free-space sentence),
   `view:<transfers|search|rss>` (shows that view; a `view=` line names it and where the focus
   landed, `view-strip=` reads the strip with the showing one starred), `focus-key:<MOD+…+KEY>`
@@ -29,7 +31,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `dialog-add` to press Add on an open Add dialog (`dialog-press:now|wait|paused`
 for the others, `dialog-key:<KeyCode>` for a key in its file tree, `content-skip` for its content
 card's Skip these files; after any action a `content-check=` line has the card's severity and lines), `choose-files` for the
-selected torrent, `select-first`, `message-log` / `message-log:<query>` (the status bar's history card; its visible
+selected torrent, `select-first`, `select-rows:<i>+<j>…`, `sort:<column id>[:desc]` (a `table=` line
+after every shot has the sort, the shown rows in order with `*` on the selected ones, and the focused
+one), `message-log` / `message-log:<query>` (the status bar's history card; its visible
   lines are printed), `report-problem` (Help → Report a Problem; the PNG is of it, and after the shot a
   `report=` line has what was replaced, whether it fits the link, and `report-line=`s its first 60 lines), `debug-log` (the Debug Log window; `-Dtorrenta.captureLogProbe=true` pushes a warning and an
   uncaught exception through the real path before the shot and prints what the log caught),
@@ -776,8 +780,11 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   command shows which glyph; `MainWindow.menuItem(id)` applies it, so a command added to a menu
   through `command(id).menuItem()` directly would be the one item without an icon (`IconsTest`
   lists the menus' ids). macOS's system menu bar takes only `ImageView` graphics, so it shows none.
-- **Rows are `TorrentRow` objects, never `Torrent` snapshots.** The list has an extractor on the
-  row's torrent property, which is what makes the `SortedList` re-sort on an in-place update.
+- **Rows are `TorrentRow` objects, never `Torrent` snapshots, and a tick is one update change.**
+  `TorrentRows.apply` sets each row's torrent property (the cells observe it themselves), then fires
+  a single update over every row it kept, which is what makes the `FilteredList` re-test and the
+  `SortedList` re-sort, once each. Never an extractor on that list: it fired one change per row and
+  the sorted list re-sorted everything for each (N² compares, 442 ms a tick at 5,000 rows).
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
   write under `~/.torrenta`. `LibtorrentEngineTest` starts a real session on purpose: it is the one
   test that proves the native loads on each CI platform.
@@ -868,7 +875,7 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   the menu's first item. The capture prints `tray=` (`sni`, `awt`, or the reason), `trayLine=` and
   `showing=`; `-Dtorrenta.captureAction=close-request` sends the window a real close request
   (`close-window` is `stage.close()`, which skips the handler), so `showing=false` with `tray=sni`
-  is close-to-tray working. `busctl --user` can read the item (`org.kde.StatusNotifierItem-<pid>-1`:
+  is close-to-tray working. Off screen (hidden to the tray or minimised, `PollWork`) the poll keeps the port clock, the interface watch, the leak check, the tray and the badge, and skips the detail fetch, the free-space read and the FX hand-off; the Statistics window, its own stage, is updated while it shows (it hides with the main window but stays up when that is minimised), and the way back draws the last frame at once (`drawNow`). `iconify`, `deiconify`, `tray-show` and `wait:<ms>` (the actions after it run that much later) drive it; a `poll=` line counts ticks drawn and skipped and the catch-up's delay. `busctl --user` can read the item (`org.kde.StatusNotifierItem-<pid>-1`:
   `ToolTip`, `/MenuBar GetLayout`) and click its items (`Event isvu <id> clicked s "" 0`).
 
 - **Downloads from links are curl processes, and everything about them goes in on stdin.**
@@ -920,6 +927,21 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   wraps the image as it is, so on macOS `scripts/add-mac-types.sh` patches
   `CFBundleDocumentTypes` and `CFBundleURLTypes` (`magnet`, which jpackage cannot declare at all)
   into `Info.plist` with PlistBuddy and re-signs, as the version fix does. The capture prints `instance=`, `badge=`, `handler=` and `openHandlers=`.
+
+- **Simple mode is a rule, `ui.SimpleMode`, laid over the window, never a second window.** It is
+  a whitelist (`COMMANDS`): a command not named there is and-ed with `simpleOn.not()` in
+  `MainWindow.simpleGate`, so its menu item, chord and palette row are dead with it, as a missing
+  capability's are; `applyCommandVisibility` shows an item when both the capability and the mode
+  allow it, then `MenuSeparators.tidy` hides the separators an emptied group leaves. The detail
+  header's buttons and `Diagnosis.Remedy` run commands by id, so theirs must stay in the list
+  (`SimpleModeTest` checks every remedy). It never writes a preference: the sidebar is taken out of
+  `transfersFrame` rather than hidden (its visibility is `ui.sidebar`, saved by a listener), its
+  selection is not applied while it is away, `show(View)` refuses Search and RSS, and
+  `DetailPane.setSimple` takes tabs out of the strip while `wantedTab` keeps the person's. The
+  saved switch is `ui.simple`; `--simple` is `simpleForSession`, OR'd with it, and any toggle in
+  the window (View, toolbar, palette, the Settings box) ends the session flag and saves the
+  opposite of what showed (`SimpleMode.toggled`), so one toggle always does something. A new
+  dialog that a newcomer meets gets an `applySimple` like `AddDialog`'s.
 
 ## Conventions (carried from Termina)
 

@@ -7,6 +7,19 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Simple mode, Editora's Simple UI mode for a torrent client.** View → Simple Mode, the toolbar's
+  new switch beside Settings, Settings → General, or `torrenta --simple` for one session leaves
+  the list, the ways a torrent arrives (file, magnet, clipboard, a drop) and the actions a person
+  new to it needs: pause and resume, remove, choose files, open the folder, copy the magnet, and
+  the diagnosis card's remedies. The sidebar, the Search and RSS views, the rarer commands (in the
+  menus, the right-click menu, the toolbar, the palette and on their chords), the status bar's port
+  and DHT, the detail pane's Peers, Trackers, Log and Speed tabs, and the Add dialog's category,
+  tags, stop condition, layout and options are put away. Nothing is changed by it: the sidebar
+  keeps its place and its choice (which stops narrowing the list while it cannot be seen), the
+  detail pane its tab, and turning it off brings each back as it was. RSS rules, watch folders and
+  automation keep running. A menu whose group empties, in this mode or for an engine that lacks a
+  capability, no longer shows two separators together.
+
 - **Report a Problem, a GitHub issue from the debug log.** Help → Report a Problem… (also a
   button in the Debug Log window) shows a report of this session's and the last session's logs
   with the version, engine, Java and OS, already cleaned of home-folder paths, the user name,
@@ -32,6 +45,11 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Fixed
 
+- **Hidden to the tray or minimised, Torrenta stops drawing a window nobody sees.** The
+  once-a-second poll used to fetch the detail pane's torrent (pieces, files, peers) and redraw the
+  list, the sidebar and the status bar even with the window out of sight; now it keeps only what
+  goes on without one (share limits, speed history, the tray icon and badge, the port and leak
+  checks) and draws the latest state at once when the window comes back.
 - **The log of a session that crashed survives the next launch.** Each launch emptied
   `torrenta-session.log`, so the record of a crash was gone by the time Torrenta was reopened to
   report it; the last session's is now kept as `torrenta-session.prev.log`.

@@ -8,7 +8,7 @@ import org.jspecify.annotations.Nullable;
 /**
  * The command line: {@code --help}, {@code --version}, {@code --report}, {@code --config-dir},
  * {@code --headless}, {@code --set-remote-password} (a headless server has no Settings window to set
- * it in), and
+ * it in), {@code --simple} (Simple mode for this session, the saved switch untouched), and
  * anything else is a torrent to add — a {@code .torrent} path or a {@code magnet:} link.
  *
  * <p>Pure parsing with no side effects, so it is fully testable and can run before the toolkit.
@@ -19,6 +19,7 @@ public record CommandLine(
         boolean report,
         boolean headless,
         boolean setRemotePassword,
+        boolean simple,
         @Nullable String configDir,
         List<String> inputs,
         @Nullable String error) {
@@ -29,6 +30,7 @@ public record CommandLine(
         boolean report = false;
         boolean headless = false;
         boolean setRemotePassword = false;
+        boolean simple = false;
         String configDir = null;
         List<String> inputs = new ArrayList<>();
         for (int i = 0; i < args.length; i++) {
@@ -39,6 +41,7 @@ public record CommandLine(
                 case "--report" -> report = true;
                 case "--headless" -> headless = true;
                 case "--set-remote-password" -> setRemotePassword = true;
+                case "--simple" -> simple = true;
                 case "--config-dir" -> {
                     if (i + 1 >= args.length) return error("--config-dir needs a directory");
                     configDir = args[++i];
@@ -56,11 +59,11 @@ public record CommandLine(
             }
         }
         return new CommandLine(
-                help, version, report, headless, setRemotePassword, configDir, List.copyOf(inputs), null);
+                help, version, report, headless, setRemotePassword, simple, configDir, List.copyOf(inputs), null);
     }
 
     private static CommandLine error(String message) {
-        return new CommandLine(false, false, false, false, false, null, List.of(), message);
+        return new CommandLine(false, false, false, false, false, false, null, List.of(), message);
     }
 
     /** True when the application should come up; false when an option answered and stopped. */
@@ -103,6 +106,8 @@ public record CommandLine(
                       --config-dir DIR   Keep settings and resume data in DIR (default ~/.torrenta)
                       --headless         Run without a window: add what arrives without asking, log
                                          to stdout, stop on SIGTERM
+                      --simple           Start in Simple mode, the essentials only, for this
+                                         session; the saved setting is left as it is
                       --set-remote-password
                                          Read a password for Remote access from the terminal (or
                                          a line of stdin), keep its hash in the settings and exit

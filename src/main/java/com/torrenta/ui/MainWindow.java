@@ -341,6 +341,24 @@ public final class MainWindow {
     private CheckMenuItem detailItem;
     private CheckMenuItem detailBottomItem;
     private CheckMenuItem sidebarRightItem;
+    /**
+     * Simple mode in force ({@link SimpleMode#active}): the saved switch or {@code --simple}. The
+     * commands it leaves out are and-ed with its negation, so their chords and palette rows are
+     * dead too, not only their menu items.
+     */
+    private final javafx.beans.property.BooleanProperty simpleOn = new javafx.beans.property.SimpleBooleanProperty();
+    /** {@code --simple}: on for this session, the saved switch untouched; a toggle in the window ends it. */
+    private boolean simpleForSession;
+
+    private @Nullable CheckMenuItem simpleItem;
+    private @Nullable Button simpleButton;
+    /** The menu items that are not commands and that Simple mode hides: the sidebar's, the density's. */
+    private final List<MenuItem> fullOnlyItems = new ArrayList<>();
+    /** The list's context menu and the detail header's ···, tidied with the menu bar's. */
+    private final List<ContextMenu> torrentMenus = new ArrayList<>();
+    /** On the Simple mode button while the mode is on, as a toggle reads. */
+    private static final javafx.css.PseudoClass ON = javafx.css.PseudoClass.getPseudoClass("on");
+
     private volatile @Nullable String detailId;
     private volatile boolean detailWanted;
     /** What the showing tab needs read ({@link DetailParts}); set on the FX thread, read by the poll. */
@@ -348,6 +366,26 @@ public final class MainWindow {
     /** A {@link #refreshDetailNow} waiting on the poll thread; later requests ride on it. */
     private final java.util.concurrent.atomic.AtomicBoolean detailRefreshQueued =
             new java.util.concurrent.atomic.AtomicBoolean();
+    /**
+     * The main window is showing and not minimised ({@link PollWork#onScreen}); set on the FX
+     * thread from the stage's showing and iconified properties, read by the poll, which draws
+     * nothing while it is false.
+     */
+    private volatile boolean windowOnScreen;
+    /** The last poll's frame, drawn or not, for {@link #drawNow} when the window comes back. */
+    private volatile @Nullable Frame lastFrame;
+    /** A {@link #drawNow} waiting on the poll thread; later requests ride on it. */
+    private final java.util.concurrent.atomic.AtomicBoolean drawQueued =
+            new java.util.concurrent.atomic.AtomicBoolean();
+    /** For the capture hook: ticks drawn and skipped, catch-ups and how long the last one took. */
+    private final java.util.concurrent.atomic.AtomicInteger ticksDrawn =
+            new java.util.concurrent.atomic.AtomicInteger();
+
+    private final java.util.concurrent.atomic.AtomicInteger ticksSkipped =
+            new java.util.concurrent.atomic.AtomicInteger();
+    private final java.util.concurrent.atomic.AtomicInteger catchUps = new java.util.concurrent.atomic.AtomicInteger();
+    private volatile long backOnScreenAt;
+    private volatile long catchUpMillis = -1;
     /** The global share limit as the poll thread applies it; refreshed with the engine settings. */
     /** Per-torrent share limits as of the last poll, for the status sentences ("ratio 1.2 of 2"). */
 
@@ -434,6 +472,8 @@ public final class MainWindow {
         this.settings = settings;
         this.opener = opener;
         this.configDir = configDir;
+        // Before anything is built: the commands are gated on it and the sidebar placed by it.
+        simpleOn.set(settings.simple());
         for (Engine.Capability c : Engine.Capability.values()) {
             capabilityOn.put(c, new javafx.beans.property.SimpleBooleanProperty(true));
         }
@@ -517,6 +557,11 @@ public final class MainWindow {
         settingsWindow.setLabels(labels, new LabelsHost());
         settingsWindow.setOnIpFilterChanged(this::refreshIpFilter, this::ipFilterStatusText);
         settingsWindow.setOnAppearanceChanged(this::applyAppearance);
+        // The page's switch is the saved one; set there, it takes over from --simple as a toggle does.
+        settingsWindow.setOnSimpleChanged(() -> {
+            simpleForSession = false;
+            applySimple();
+        });
         settingsWindow.setOnTrayChanged(this::applyTraySetting);
         settingsWindow.setOnHandlerChanged(() -> applyHandlerSetting(true));
         settingsWindow.setOnBadgeChanged(this::applyBadgeSetting);
@@ -639,6 +684,11 @@ public final class MainWindow {
             if (hiddenToTray) return;
             shutdown();
         });
+        // Every way the window leaves or comes back (to the tray and from it, minimised and
+        // restored, a second instance's hand-off) goes through these two properties.
+        javafx.beans.InvalidationListener onScreen = o -> onScreenChanged();
+        stage.showingProperty().addListener(onScreen);
+        stage.iconifiedProperty().addListener(onScreen);
         setStatus(tr("status.starting"));
         showRates(Engine.Rates.ZERO, 0);
     }
@@ -1160,11 +1210,12 @@ public final class MainWindow {
         if (!(shownPopup() instanceof ContextMenu menu)) return List.of();
         List<String> lines = new ArrayList<>();
         for (MenuItem item : menu.getItems()) {
+            // A hidden separator is one the menu does not draw (MenuSeparators).
+            if (!item.isVisible()) continue;
             if (item instanceof SeparatorMenuItem) {
                 lines.add("---");
                 continue;
             }
-            if (!item.isVisible()) continue;
             String line = (item instanceof Menu ? "> " : "") + item.getText();
             if (item.getGraphic() != null) line += " [icon]";
             lines.add(line);
@@ -1255,6 +1306,8 @@ public final class MainWindow {
         if (detailWanted && detail.activeTab().equals("overview"))
             for (String line : detail.overviewLines()) out.add("overview-" + line);
         out.add("status-bar=" + statusBarForCapture());
+        out.add("simple=" + simpleForCapture());
+        out.add("table=" + tableLineForCapture());
         if (!settingsWindow.profileDialogStatusForCapture().isEmpty()) {
             out.add("dialog=" + settingsWindow.dialogTitle());
             out.add("profile-test=" + settingsWindow.profileDialogStatusForCapture());
@@ -1267,6 +1320,24 @@ public final class MainWindow {
         return out;
     }
 
+    /**
+     * The list as the ticks left it: the sort, the shown rows' names in order with {@code *} on
+     * the selected ones, and the focused row's name.
+     */
+    private String tableLineForCapture() {
+        String sort = table.getSortOrder().stream()
+                .map(c -> c.getId() + (c.getSortType() == TableColumn.SortType.DESCENDING ? ":desc" : ""))
+                .collect(java.util.stream.Collectors.joining("+"));
+        var selected = table.getSelectionModel().getSelectedItems();
+        String shown = table.getItems().stream()
+                .map(r -> (selected.contains(r) ? "*" : "") + r.torrent().name())
+                .collect(java.util.stream.Collectors.joining(","));
+        TorrentRow focused = table.getFocusModel().getFocusedItem();
+        return "sort:" + (sort.isEmpty() ? "none" : sort) + " shown="
+                + table.getItems().size() + " rows=" + shown + " focus="
+                + (focused == null ? "none" : focused.torrent().name());
+    }
+
     /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
     public List<String> eventLines() {
         return log.events().stream()
@@ -1276,7 +1347,9 @@ public final class MainWindow {
 
     /**
      * Drives the window from the capture hook, by name: {@code close-window} (the quit path a
-     * person takes, where the hook itself exits through Platform.exit), {@code select-all}, {@code palette},
+     * person takes, where the hook itself exits through Platform.exit), {@code close-request},
+     * {@code iconify}, {@code deiconify}, {@code tray-show} (the tray icon's activation), {@code
+     * select-all}, {@code palette},
      * {@code palette:<query>}, {@code sidebar:<filter>} (as {@link SidebarFilter#parse} reads it),
      * {@code sidebar-keys:<KEY+KEY+…>} (focus the sidebar and press them),
      * {@code sidebar-click:<section>} (a click on a heading folds it), {@code sidebar-drag:<px>}
@@ -1299,6 +1372,11 @@ public final class MainWindow {
                 stage.setX(Double.parseDouble(p[2]));
                 stage.setY(Double.parseDouble(p[3]));
             }
+        } else if (action.equals("iconify") || action.equals("deiconify")) {
+            stage.setIconified(action.equals("iconify"));
+        } else if (action.equals("tray-show")) {
+            // What the tray icon's activation runs.
+            showFromTray();
         } else if (action.equals("close-request")) {
             // What the title bar's button sends: the close-to-tray rule runs, stage.close() skips it.
             stage.fireEvent(new javafx.stage.WindowEvent(stage, javafx.stage.WindowEvent.WINDOW_CLOSE_REQUEST));
@@ -1597,6 +1675,26 @@ public final class MainWindow {
             export(exportTargets(selectedTorrents(), Path.of(action.substring("export-to:".length()))));
         } else if (action.equals("select-first")) {
             table.getSelectionModel().clearAndSelect(0);
+        } else if (action.startsWith("select-rows:")) {
+            // select-rows:<i>+<j>…: those shown rows selected, the last one focused.
+            table.getSelectionModel().clearSelection();
+            for (String index : action.substring("select-rows:".length()).split("\\+"))
+                table.getSelectionModel().select(Integer.parseInt(index));
+        } else if (action.startsWith("sort:")) {
+            // sort:<column id>[:desc]: the list sorted by that column, as a click on its header.
+            String[] spec = action.substring("sort:".length()).split(":");
+            table.getColumns().stream()
+                    .filter(c -> spec[0].equals(c.getId()))
+                    .findFirst()
+                    .ifPresentOrElse(
+                            c -> {
+                                c.setSortType(
+                                        spec.length > 1 && spec[1].equals("desc")
+                                                ? TableColumn.SortType.DESCENDING
+                                                : TableColumn.SortType.ASCENDING);
+                                table.getSortOrder().setAll(List.of(c));
+                            },
+                            () -> System.err.println("capture: no column " + spec[0]));
         } else if (action.startsWith("detail:")) {
             showDetail();
             detail.selectTab(action.substring("detail:".length()));
@@ -1685,9 +1783,9 @@ public final class MainWindow {
             // The list's context menu, as a right-click on it would open it.
             table.getContextMenu().show(table, javafx.geometry.Side.BOTTOM, 0, 0);
         } else if (action.equals("palette")) {
-            palette.show(CapabilityRules.commands(commands, capabilities));
+            palette.show(offeredCommands());
         } else if (action.startsWith("palette:")) {
-            palette.show(CapabilityRules.commands(commands, capabilities));
+            palette.show(offeredCommands());
             palette.setQueryForCapture(action.substring("palette:".length()));
         } else {
             commands.stream()
@@ -2542,6 +2640,7 @@ public final class MainWindow {
         }
         AddDialog dialog = new AddDialog(stage, source, preview, via, addDefaults(), labels.categories());
         dialog.applyCapabilities(capabilities);
+        dialog.applySimple(simpleOn.get());
         Engine current = engine;
         if (current != null && capabilities.has(Engine.Capability.DEDUP)) {
             // The names from the latest poll, read when the line is drawn: an input that opens
@@ -2974,28 +3073,100 @@ public final class MainWindow {
                 Platform.runLater(() -> watch.dialog().showSwarm(swarm));
             }
         }
-        // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
-        com.torrenta.engine.SessionStats stats = statsWanted ? engine.stats() : null;
-        TorrentDetail shown = fetchDetail(engine);
+        PollWork work = PollWork.of(windowOnScreen, detailWanted, statsWanted);
+        // What goes on with no window: the port clock, the interface watch (which rebinds), the
+        // leak check (which pauses while exposed), the tray and the badge. The session has
+        // already applied the share limits and filled the speed histories.
         Connectivity connectivity = engine.connectivity();
         long unproven = portClock.tick(connectivity, NetworkStatus.anyRunning(snapshot), nowSeconds);
         InterfaceWatch.State binding = watchInterface(engine, nowSeconds);
         Optional<NetworkStatus.Port> port = NetworkStatus.port(connectivity, unproven, binding);
         Optional<LeakView> leak = checkLeaks(engine, binding, connectivity.externalAddress(), snapshot, nowSeconds);
-        boolean checking = exitChecking;
         Optional<String> dht = NetworkStatus.dht(connectivity, engine.stats().dhtNodes());
-        Optional<NetworkStatus.Free> space = freeSpace(nowSeconds);
+        Frame frame = new Frame(engine, snapshot, current, nowSeconds, port, dht, leak, exitChecking);
+        lastFrame = frame;
         pushTray(TrayStatus.of(snapshot, current));
         pushBadge(BadgeState.of(snapshot, current.download()));
+        // The counters are a copy of the last stats alert, cheap; still, only while someone looks.
+        com.torrenta.engine.SessionStats stats = work.stats() ? engine.stats() : null;
+        if (work.window()) {
+            ticksDrawn.incrementAndGet();
+            draw(engine, frame, stats, work.detail());
+        } else {
+            ticksSkipped.incrementAndGet();
+            if (stats != null) Platform.runLater(() -> statsWindow.update(stats, session.history(), nowSeconds));
+        }
+    }
+
+    /**
+     * What one poll found, for the window to draw: kept as {@link #lastFrame} while nothing is on
+     * screen, so the window can be drawn from it the moment it comes back.
+     */
+    private record Frame(
+            Engine engine,
+            List<Torrent> snapshot,
+            Engine.Rates rates,
+            long nowSeconds,
+            Optional<NetworkStatus.Port> port,
+            Optional<String> dht,
+            Optional<LeakView> leak,
+            boolean checking) {}
+
+    /**
+     * Poll thread: a frame into the window, with the detail pane's torrent and the free space read
+     * now; both are read only to be drawn, so neither is read while the window is off screen.
+     */
+    private void draw(Engine engine, Frame f, com.torrenta.engine.@Nullable SessionStats stats, boolean withDetail) {
+        TorrentDetail shown = withDetail ? fetchDetail(engine) : null;
+        Optional<NetworkStatus.Free> space = freeSpace(f.nowSeconds());
+        long nowSeconds = f.nowSeconds();
         Platform.runLater(() -> {
-            rows.apply(snapshot, nowSeconds);
-            refreshSidebar(snapshot);
-            showRates(current, nowSeconds);
-            showNetwork(port, dht, space);
-            showLeak(leak, checking);
+            rows.apply(f.snapshot(), nowSeconds);
+            refreshSidebar(f.snapshot());
+            showRates(f.rates(), nowSeconds);
+            showNetwork(f.port(), f.dht(), space);
+            showLeak(f.leak(), f.checking());
             applyDetail(shown, nowSeconds);
             if (stats != null) statsWindow.update(stats, session.history(), nowSeconds);
         });
+    }
+
+    /** FX thread: the stage was shown, hidden, minimised or restored. */
+    private void onScreenChanged() {
+        boolean now = PollWork.onScreen(stage.isShowing(), stage.isIconified());
+        boolean was = windowOnScreen;
+        windowOnScreen = now;
+        if (PollWork.catchUp(was, now)) {
+            backOnScreenAt = System.nanoTime();
+            drawNow();
+        }
+    }
+
+    /**
+     * FX thread. The window is back on screen: the latest poll drawn at once, not up to a second
+     * later at the next one, with a fresh detail fetch. Run on the poll thread like {@link
+     * #refreshDetailNow}, so it never overlaps a poll; requests made while one is queued share it.
+     */
+    private void drawNow() {
+        if (!drawQueued.compareAndSet(false, true)) return;
+        boolean queued = session.execute(() -> {
+            drawQueued.set(false);
+            Frame frame = lastFrame;
+            Engine current = this.engine;
+            // Nothing polled yet, or the poll of an engine a profile switch has since replaced.
+            if (frame == null || current == null || frame.engine() != current) return;
+            catchUps.incrementAndGet();
+            draw(current, frame, statsWanted ? current.stats() : null, detailWanted);
+            long asked = backOnScreenAt;
+            Platform.runLater(() -> catchUpMillis = (System.nanoTime() - asked) / 1_000_000);
+        });
+        if (!queued) drawQueued.set(false); // stopping, or not started: no more polls of any kind
+    }
+
+    /** The poll's drawing as counted, for the capture hook. */
+    public String pollDescription() {
+        return "onScreen=" + windowOnScreen + " drawn=" + ticksDrawn.get() + " skipped=" + ticksSkipped.get()
+                + " catchUps=" + catchUps.get() + " catchUpMs=" + catchUpMillis + " stats=" + statsWanted;
     }
 
     /**
@@ -3773,6 +3944,8 @@ public final class MainWindow {
 
     /** The n-th saved view (1 first), chosen; nothing when there are fewer. */
     private void chooseSavedView(int n) {
+        // The views live in the sidebar, which Simple mode takes away.
+        if (simpleOn.get()) return;
         List<com.torrenta.store.SavedView> views = settings.savedViews();
         if (n < 1 || n > views.size()) return;
         chooseFilter(SidebarFilter.view(views.get(n - 1).slug()));
@@ -3912,7 +4085,9 @@ public final class MainWindow {
     }
 
     private void applyFilters() {
-        filtered.setPredicate(rowFilter(omnibox.query(), sidebarSelection, settings.savedViews()));
+        // The sidebar's choice narrows the list only where it can be seen: not in Simple mode.
+        SidebarSelection chosen = SimpleMode.chrome(simpleOn.get()) ? sidebarSelection : SidebarSelection.ALL;
+        filtered.setPredicate(rowFilter(omnibox.query(), chosen, settings.savedViews()));
         filterSaveable.set(!omnibox.query().isBlank());
     }
 
@@ -3925,8 +4100,11 @@ public final class MainWindow {
         // Out of both slots first: a node in one slot cannot be put in the other.
         transfersFrame.setLeft(null);
         transfersFrame.setRight(null);
-        if (right) transfersFrame.setRight(sidebar);
-        else transfersFrame.setLeft(sidebar);
+        // Out of the frame in Simple mode, rather than hidden: its visibility is the saved choice.
+        if (SimpleMode.chrome(simpleOn.get())) {
+            if (right) transfersFrame.setRight(sidebar);
+            else transfersFrame.setLeft(sidebar);
+        }
         sidebar.pseudoClassStateChanged(BESIDE, right);
         sidebar.setRight(right);
         if (sidebarRightItem != null) sidebarRightItem.setSelected(right);
@@ -4417,7 +4595,8 @@ public final class MainWindow {
                         Chords.of("toggle-detail"),
                         always,
                         this::toggleDetail),
-                new Command("detail-side", tr("command.detailSide"), null, always, this::switchDetailSide)));
+                new Command("detail-side", tr("command.detailSide"), null, always, this::switchDetailSide),
+                new Command("toggle-simple", tr("command.toggleSimple"), null, always, this::toggleSimple)));
         // One "Show: …" per status, and Show: All, so a filter is picked without the mouse.
         all.add(new Command("show-all", tr("command.showAll"), null, always, () -> chooseFilter(SidebarFilter.ALL)));
         for (SidebarStatus status : SidebarStatus.values()) {
@@ -4428,7 +4607,24 @@ public final class MainWindow {
                     always,
                     () -> chooseFilter(SidebarFilter.status(status))));
         }
-        return List.copyOf(all);
+        return all.stream().map(this::simpleGate).toList();
+    }
+
+    /** A command Simple mode leaves out, dead while the mode is on; a kept one as it is. */
+    private Command simpleGate(Command c) {
+        if (SimpleMode.COMMANDS.contains(c.id())) return c;
+        return new Command(
+                c.id(), c.label(), c.accelerator(), c.hint(), Bindings.and(c.enabled(), simpleOn.not()), c.run());
+    }
+
+    /** Whether a scene chord's action may run: anything but a command Simple mode leaves out. */
+    private boolean simpleAllows(String id) {
+        return SimpleMode.keeps(id, simpleOn.get()) || baseCommands.stream().noneMatch(c -> c.id().equals(id));
+    }
+
+    /** The palette's commands: the ones this engine can run and the mode offers. */
+    private List<Command> offeredCommands() {
+        return SimpleMode.commands(CapabilityRules.commands(commands, capabilities), simpleOn.get());
     }
 
     /**
@@ -4440,11 +4636,11 @@ public final class MainWindow {
     private ToolBar buildToolbar() {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
-        paletteButton = Icons.toolbarButton(
-                Icons.palette(),
-                paletteButtonName(),
-                () -> palette.show(CapabilityRules.commands(commands, capabilities)));
-        // Settings alone at the right end, as Editora keeps it; the palette with the other views.
+        paletteButton =
+                Icons.toolbarButton(Icons.palette(), paletteButtonName(), () -> palette.show(offeredCommands()));
+        // Settings alone at the right end, as Editora keeps it, Simple mode's switch beside it in
+        // either mode, so the way back is one click; the palette with the other views.
+        simpleButton = toolButton("toggle-simple", Icons.simpleMode());
         toolbar = new ToolBar(
                 toolButton("create", Icons.newFile()),
                 toolButton("add-file", Icons.open()),
@@ -4461,6 +4657,7 @@ public final class MainWindow {
                 toolButton("event-log", Icons.history()),
                 paletteButton,
                 spacer,
+                simpleButton,
                 toolButton("settings", Icons.settings()));
         toolbar.getStyleClass().add("main-toolbar");
         toolbar.setVisible(settings.toolbar());
@@ -4524,18 +4721,85 @@ public final class MainWindow {
     private void applyCapabilities(Engine.Capabilities caps) {
         capabilities = caps;
         capabilityOn.forEach((c, on) -> on.set(caps.has(c)));
-        commandItems.forEach((id, items) -> {
-            boolean shown = CapabilityRules.commandShown(id, caps);
-            for (MenuItem item : items) item.setVisible(shown);
-        });
-        commandButtons.forEach((id, button) -> {
-            boolean shown = CapabilityRules.commandShown(id, caps);
-            button.setVisible(shown);
-            button.setManaged(shown);
-        });
+        applyCommandVisibility();
         detail.applyCapabilities(caps);
         settingsWindow.applyCapabilities(caps);
         if (welcome != null) showDownloadFolder(welcome);
+    }
+
+    /**
+     * FX thread. Every menu item and toolbar button shown when the engine can run its command and
+     * Simple mode keeps it; the separators then tidied, so an emptied group leaves no pair behind.
+     */
+    private void applyCommandVisibility() {
+        boolean simple = simpleOn.get();
+        commandItems.forEach((id, items) -> {
+            boolean shown = CapabilityRules.commandShown(id, capabilities) && SimpleMode.keeps(id, simple);
+            for (MenuItem item : items) item.setVisible(shown);
+        });
+        commandButtons.forEach((id, button) -> {
+            boolean shown = CapabilityRules.commandShown(id, capabilities) && SimpleMode.onToolbar(id, simple);
+            button.setVisible(shown);
+            button.setManaged(shown);
+        });
+        for (MenuItem item : fullOnlyItems) item.setVisible(SimpleMode.chrome(simple));
+        for (Menu menu : menuBar.getMenus()) MenuSeparators.tidy(menu.getItems());
+        for (ContextMenu menu : torrentMenus) MenuSeparators.tidy(menu.getItems());
+    }
+
+    /**
+     * FX thread. Simple mode as the saved switch and {@code --simple} say: the commands, the
+     * sidebar and its filter, the view strip, the status bar's port and DHT, the detail pane's
+     * tabs. It hides and never saves, so turning it off puts each back as the settings have it.
+     */
+    private void applySimple() {
+        boolean simple = SimpleMode.active(settings.simple(), simpleForSession);
+        simpleOn.set(simple);
+        applyCommandVisibility();
+        boolean chrome = SimpleMode.chrome(simple);
+        placeSidebar(SidebarPlace.of(true, settings.sidebarSide()));
+        reveal(viewStrip, chrome);
+        if (!SimpleMode.viewShown(view, simple)) show(View.TRANSFERS);
+        // The poll shows them again within a second of the mode's end.
+        if (!chrome) {
+            reveal(portStatus, false);
+            reveal(dhtStatus, false);
+        }
+        detail.setSimple(simple);
+        applyFilters();
+        if (simpleItem != null) simpleItem.setSelected(simple);
+        if (simpleButton != null) simpleButton.pseudoClassStateChanged(ON, simple);
+    }
+
+    /** {@code --simple}: the mode for this session, the saved switch left as it is. */
+    public void useSimpleForSession() {
+        simpleForSession = true;
+        applySimple();
+    }
+
+    /** View → Simple Mode, the toolbar's button, the palette: the opposite of what shows, saved. */
+    private void toggleSimple() {
+        boolean next = SimpleMode.toggled(simpleOn.get());
+        simpleForSession = false;
+        settings.setSimple(next);
+        settings.saveQuietly();
+        applySimple();
+        if (settingsWindow.isShowing()) settingsWindow.reloadFromSettings();
+        setStatus(tr(next ? "status.simple.on" : "status.simple.off"));
+    }
+
+    /** Simple mode, one line for the capture hook: in force, why, and what it left. */
+    private String simpleForCapture() {
+        List<String> buttons = commandButtons.entrySet().stream()
+                .filter(e -> e.getValue().isVisible())
+                .map(Map.Entry::getKey)
+                .sorted()
+                .toList();
+        return simpleOn.get() + " saved=" + settings.simple() + " session=" + simpleForSession
+                + " sidebar=" + (transfersFrame.getLeft() != null || transfersFrame.getRight() != null)
+                + " strip=" + viewStrip.isVisible() + " detail-tabs=" + String.join(",", detail.shownTabs())
+                + " toolbar=" + String.join(",", buttons) + " palette="
+                + offeredCommands().size();
     }
 
     /** The capabilities the engine lacks, one line, for the capture hook; empty for libtorrent. */
@@ -4615,7 +4879,7 @@ public final class MainWindow {
         paletteItem.setGraphic(menuIcon(Icons.palette()));
         paletteItem.setAccelerator(chord("palette"));
         chordItems.put("palette", paletteItem);
-        paletteItem.setOnAction(e -> palette.show(CapabilityRules.commands(commands, capabilities)));
+        paletteItem.setOnAction(e -> palette.show(offeredCommands()));
         CheckMenuItem toolbarItem = new CheckMenuItem(tr("menu.view.toolbar"));
         toolbarItem.setGraphic(menuIcon(Icons.toolbar()));
         toolbarItem.selectedProperty().bindBidirectional(toolbar.visibleProperty());
@@ -4648,6 +4912,14 @@ public final class MainWindow {
         detailBottomItem.setSelected(
                 !DetailPlace.of(true, settings.detailSide()).beside());
         detailBottomItem.setOnAction(e -> switchDetailSide());
+        // Checked while the mode is on, by the switch or by --simple; in both modes' View menu,
+        // so whoever entered it from here finds the way out here.
+        simpleItem = new CheckMenuItem(tr("menu.view.simple"));
+        simpleItem.setGraphic(menuIcon(Icons.simpleMode()));
+        chordItems.put("toggle-simple", simpleItem);
+        simpleItem.setSelected(simpleOn.get());
+        simpleItem.setOnAction(e -> toggleSimple());
+        fullOnlyItems.addAll(List.of(sidebarItem, sidebarRightItem, detailBottomItem));
         for (Density d : Density.values()) {
             javafx.scene.control.RadioMenuItem item =
                     new javafx.scene.control.RadioMenuItem(tr("menu.view.densityRows", d.toString()));
@@ -4656,6 +4928,7 @@ public final class MainWindow {
             item.setSelected(d == density);
             item.setOnAction(e -> chooseDensity(d));
             densityItems.put(d, item);
+            fullOnlyItems.add(item);
         }
         Menu view = new Menu(tr("menu.view"));
         view.getItems()
@@ -4671,6 +4944,7 @@ public final class MainWindow {
                         sidebarRightItem,
                         detailItem,
                         detailBottomItem,
+                        simpleItem,
                         new SeparatorMenuItem(),
                         densityItems.get(Density.COMFORTABLE),
                         densityItems.get(Density.COMPACT),
@@ -4764,6 +5038,7 @@ public final class MainWindow {
     private Menu categoryMenu() {
         Menu menu = new Menu(tr("menu.torrent.setCategory"));
         menu.setGraphic(menuIcon(Icons.forCommand("set-category")));
+        fullOnlyItems.add(menu);
         menu.disableProperty().bind(Bindings.not(command("set-category").enabled()));
         menu.setOnShowing(e -> {
             List<Torrent> selected = selectedTorrents();
@@ -4792,6 +5067,7 @@ public final class MainWindow {
     private ContextMenu buildContextMenu() {
         ContextMenu menu = new ContextMenu();
         menu.getItems().addAll(torrentItems());
+        torrentMenus.add(menu);
         return menu;
     }
 
@@ -5075,6 +5351,7 @@ public final class MainWindow {
      * all come here.
      */
     private void show(View wanted) {
+        if (!SimpleMode.viewShown(wanted, simpleOn.get())) return;
         if (wanted == View.SEARCH) refreshSearchDefinitions();
         place(wanted);
         switch (wanted) {
@@ -5272,7 +5549,7 @@ public final class MainWindow {
         if (next.mode() == Omnibox.Mode.COMMAND) {
             // The prefix typed: the palette is the command box, and takes what followed it.
             setOmnibox(next.withText(""));
-            palette.show(CapabilityRules.commands(commands, capabilities), next.commandQuery());
+            palette.show(offeredCommands(), next.commandQuery());
             return;
         }
         if (next.mode() == Omnibox.Mode.ADD && Omnibox.pasted(was, text)) {
@@ -5361,7 +5638,7 @@ public final class MainWindow {
 
     private TableView<TorrentRow> buildTable() {
         // Sorted over filtered over the live rows: the table's comparator drives the sort, and the
-        // rows list's extractor makes a changed rate re-sort its row without a sort() call.
+        // tick's one update change (TorrentRows) re-filters and re-sorts once, without a sort() call.
         SortedList<TorrentRow> sorted = new SortedList<>(filtered);
         TableView<TorrentRow> table = new TableView<>(sorted);
         sorted.comparatorProperty().bind(table.comparatorProperty());
@@ -5475,6 +5752,7 @@ public final class MainWindow {
         applyDetailPlace();
         applyDensity(Density.byId(settings.density(), Density.DEFAULT));
         applyWindowStyle();
+        applySimple();
     }
 
     /**
@@ -5508,7 +5786,7 @@ public final class MainWindow {
         Map<String, Runnable> actions = new java.util.LinkedHashMap<>();
         actions.put("filter-find", this::focusFilter);
         actions.put("filter", this::focusFilter);
-        actions.put("palette", () -> palette.show(CapabilityRules.commands(commands, capabilities)));
+        actions.put("palette", () -> palette.show(offeredCommands()));
         actions.put("event-log", logWindow::show);
         actions.put("statistics", statsWindow::show);
         actions.put("message-log", messagePopup::toggle);
@@ -5641,7 +5919,10 @@ public final class MainWindow {
         chordItems.forEach((id, item) -> item.setAccelerator(chord(id)));
         if (scene != null) {
             Map<String, Runnable> actions = sceneActions();
-            actions.forEach((id, action) -> putSceneChord(scene, chord(id), action));
+            actions.forEach((id, action) -> putSceneChord(scene, chord(id), () -> {
+                // These run their action, not a command, so Simple mode's gate is asked here.
+                if (simpleAllows(id)) action.run();
+            }));
             for (Command c : commands) {
                 String id = c.id();
                 if (actions.containsKey(id) || byFilter(id) || Chords.fixed().containsKey(id)) continue;
@@ -6111,7 +6392,8 @@ public final class MainWindow {
     /** FX thread: the network entries as the poll found them; an absent one is hidden. */
     private void showNetwork(
             Optional<NetworkStatus.Port> port, Optional<String> dht, Optional<NetworkStatus.Free> space) {
-        reveal(portStatus, port.isPresent());
+        boolean chrome = SimpleMode.chrome(simpleOn.get());
+        reveal(portStatus, chrome && port.isPresent());
         port.ifPresent(p -> {
             portStatus.setText(p.text());
             portTip.setText(p.tooltip());
@@ -6119,7 +6401,7 @@ public final class MainWindow {
             for (NetworkStatus.Dot d : NetworkStatus.Dot.values()) if (d != p.dot()) classes.remove(d.styleClass);
             if (!classes.contains(p.dot().styleClass)) classes.add(p.dot().styleClass);
         });
-        reveal(dhtStatus, dht.isPresent());
+        reveal(dhtStatus, chrome && dht.isPresent());
         dht.ifPresent(dhtStatus::setText);
         reveal(freeStatus, space.isPresent());
         space.ifPresent(f -> {

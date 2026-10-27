@@ -31,6 +31,11 @@ are listed with live columns, can be paused, resumed, rechecked, reannounced and
 their files, peers, trackers and pieces in a detail pane, and come back after a restart. No settings
 window or limits yet; see [docs/ROADMAP.md](docs/ROADMAP.md).
 
+**Simple mode** (View → Simple Mode, the toolbar's switch, or `torrenta --simple` for one session)
+is the same window with the essentials only: the list, adding, pausing and removing, a torrent's
+Overview and Files. The sidebar, Search, RSS and the rarer commands are put away, never changed,
+and come back as they were when it is turned off.
+
 ## Running
 
 ```bash

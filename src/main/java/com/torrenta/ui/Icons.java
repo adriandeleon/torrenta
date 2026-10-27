@@ -171,6 +171,7 @@ final class Icons {
             case "toggle-toolbar" -> toolbar();
             case "toggle-sidebar", "focus-sidebar" -> sidebar();
             case "toggle-detail" -> detailPane();
+            case "toggle-simple" -> simpleMode();
             default -> null;
         };
     }
@@ -421,6 +422,15 @@ final class Icons {
     /** A window with a band down its left: the sidebar. */
     static Glyph sidebar() {
         return line("M2 3.5h12v9H2zM5.5 3.5v9");
+    }
+
+    /**
+     * Simple mode: Editora's glyph, a window whose side rail and lines are short dashes, chrome
+     * stripped back to the content.
+     */
+    static Glyph simpleMode() {
+        return line("M1.8 2.6h12.4a1 1 0 0 1 1 1v8.8a1 1 0 0 1 -1 1h-12.4a1 1 0 0 1 -1 -1v-8.8a1 1 0 0 1 1 -1z"
+                + "M1.0 5.6h14M4.4 5.6v7.8M2.6 8.2h0.6M2.6 10.2h0.6");
     }
 
     /** A window with a band across its foot: the detail pane. */
