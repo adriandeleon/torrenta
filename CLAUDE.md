@@ -120,8 +120,8 @@ to try one on purpose).
 
 **Persistence is the engine's job, the store's format is not the engine's business.** `TorrentStore`
 holds bytes by info-hash and never looks inside; `LibtorrentEngine` decides that the bytes are
-resume data (with the info dict), writes them on add, on metadata, on finish, every two minutes if
-modified, and on stop, and re-adds them on start. Removing a torrent deletes its blob.
+resume data (with the info dict), writes them on add, on metadata, on finish, every two minutes (in slices) if
+modified, and on stop, and re-adds them on start without writing them again. Removing a torrent deletes its blob.
 
 **Nothing on the FX thread calls the engine.** `App` starts it on a worker after the window is
 shown; `session.Session` polls it once a second on its own thread (`engine-poll`) and hands each
@@ -275,6 +275,13 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   import, an undo) is never asked on its add: a paused one, never modified again, kept that empty
   blob, and the next start found files without resume data and wanted a full check, which a paused
   torrent never runs, so it sat in Checking (one import in thirty on Linux, more on Windows).
+  Nor on the finished alert libtorrent posts for a seed once its resume data is checked, when the
+  blob held every piece (`restoredWhole`, `savesOnFinish`): that rewrote every seed at every
+  start. The periodic only-if-modified flush asks a twelfth of the torrents every ten seconds
+  (`inFlushSlice`), not all at once; `stop()` still asks all. `alert_queue_size` is 20,000
+  (libtorrent's default is 2,000, and libtorrent4j subscribes to every category but the logs): a
+  full queue drops alerts silently, a dropped resume answer holds `stop()` its full 5 s, so
+  `alerts_dropped_alert` is a WARNING, once a minute.
 - **The add alert's params are enough to bring a magnet back.** `add_torrent_alert.params()` written
   as resume data holds the hashes, name, trackers and save path, so a magnet survives a crash before
   its metadata arrives; the real resume data replaces the blob later.
@@ -339,7 +346,13 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   in the compiler plugin's test execution. At run time the tests are on the classpath.
 - **The detail pane is polled only for the one selected torrent**, on the poll thread, with the
   pieces bitfield (`QUERY_PIECES`): a status copy per piece, which is why it is not fetched for
-  every row. `detailId` and `detailWanted` are volatile hand-offs from the FX thread.
+  every row. `detailId`, `detailWanted` and `detailParts` are volatile hand-offs from the FX
+  thread. Only the showing tab's parts are read (`TorrentDetail.Part`, `ui.DetailParts`: the
+  Overview needs files, peers and trackers too, for `Diagnosis` and the map's skipped pieces); a
+  list of a part not read is empty and the pane keeps what it showed (`TorrentDetail.has`). A tab
+  switch refreshes at once. `LibtorrentEngine` keeps the shown torrent's file layout (paths,
+  sizes, piece ranges) and reads only progress and priorities per tick; `PeerRows` and `FileRows`
+  update in place, touching only what changed.
 - **libtorrent 2.1 keeps trackers, comment, creator and web seeds outside `torrent_info`.** A
   `.torrent` is read with `load_torrent_parsed` (via `BDecodeNode.bdecode`), which fills them into
   the add parameters; `new TorrentInfo(bytes)` reads the info dictionary alone and the torrent is
@@ -374,8 +387,11 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   minute's `Sparkline` each (zero before the session's first sample: it starts idle), the
   alternative-speed pill, free space on the download folder's volume (read every ten polls on the
   poll thread, `FreeSpace.sentence(disk, -1)`), the error pill.
-- **A resume-data answer can arrive after the torrent was removed.** The engine marks removed ids
-  and ignores late writes for them; without that, the remove test saw the blob come back.
+- **A resume-data answer can arrive after the torrent was removed.** The engine keeps the removed
+  torrent's handle by id and ignores late writes about that handle; without that, the remove test
+  saw the blob come back. By handle, never by id alone: libtorrent compares handles by the torrent
+  they point at, so the same torrent added again writes under its own, and an id-only mark kept
+  it out of the store for good (gone after a restart).
 - **The image does not contain the native library; it sits beside it.** The per-OS jar is
   resources only, and a resource in a named module is encapsulated unless its package is opened,
   so `-Pdist` unpacks `lib/<arch>/libtorrent4j.*` and hands it to jpackage as app content;
@@ -511,6 +527,12 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
 - **The IP filter is replaced whole, never merged**: `set_ip_filter` takes a complete
   `ip_filter`, so the controller rebuilds it from cache + local file + bans every time. A filter
   set before `start()` is applied at start, so no peer slips in while the first download runs.
+  The engine keeps no copy once a session has it (40 MiB for a common list), and builds the native
+  filter outside its lock (half a second for 300k ranges), setting it under the lock; a turn
+  counter stops a late build from replacing a newer one. The controller parses a list file once
+  per change (`Stamp`: path, size, mtime, file key; `fresh` is the rule) and keeps it packed
+  (`engine.PackedRanges`, a `long` per IPv4 range), so a ban rebuilds without parsing. Dotted
+  quads are read by hand (`IpRange.v4`): `InetAddress` sent `1.2.3.256` to the resolver.
 - **PEX has no session switch in libtorrent**, only the per-torrent `disable_pex` flag, and there
   is no session-wide default tracker list: `applySettings` walks the handles for both, and `add`
   sets the flag and appends the trackers on their own tier. `EngineSettings.Protocol` is nested so

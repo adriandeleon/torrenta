@@ -255,6 +255,66 @@ class DiagnosisTest {
         assertTrue(Diagnosis.Remedy.ADD_TRACKERS.command().isEmpty());
     }
 
+    /**
+     * Files that share pieces (a v1 torrent's boundaries fall inside pieces): a missing piece on no
+     * peer counts once, and every wanted file it holds bytes of is named; a piece only skipped
+     * files touch is not counted, even when a wanted file's neighbour shares the next one.
+     */
+    @Test
+    void sharedPiecesCountOnceAndNameEveryWantedFileInThem() {
+        List<TorrentDetail.FileStatus> files = List.of(
+                new TorrentDetail.FileStatus(0, "a", 2500, 0, Priority.NORMAL, 0, 2),
+                new TorrentDetail.FileStatus(1, "b", 1000, 0, Priority.NORMAL, 2, 3),
+                new TorrentDetail.FileStatus(2, "empty", 0, 0, Priority.NORMAL, -1, -1),
+                new TorrentDetail.FileStatus(3, "c", 2000, 0, Priority.IGNORE, 3, 5),
+                new TorrentDetail.FileStatus(4, "d", 3000, 0, Priority.NORMAL, 6, 9));
+        // 2 (a and b), 4 (c alone, skipped), 9 (d): missing and on nobody. 7 is missing but held.
+        boolean[] have = have(2, 4, 7, 9);
+        int[] availability = availability(2, 4, 9);
+        Diagnosis.Unavailable u =
+                Diagnosis.unavailable(detail(files, List.of(peer("dI", 0)), List.of(), have, availability));
+        assertEquals(2, u.pieces(), "2 and 9; 4 is skipped files' only");
+        assertEquals(List.of(0, 1, 4), List.copyOf(u.files()));
+        assertEquals(2 * 1024L, u.bytes());
+
+        // Only the shared piece: both its files, so skipping one is no remedy.
+        Diagnosis.Unavailable shared =
+                Diagnosis.unavailable(detail(files, List.of(peer("dI", 0)), List.of(), have(2), availability(2)));
+        assertEquals(1, shared.pieces());
+        assertEquals(List.of(0, 1), List.copyOf(shared.files()));
+    }
+
+    /**
+     * 100,000 pieces under 50,000 wanted files of two pieces each, every other piece on no peer:
+     * a search of every file per piece is five billion steps, the sweep a few hundred thousand.
+     * The bound is a sanity check only, generous for a slow CI machine.
+     */
+    @Test
+    void aLargeTorrentIsOneSweep() {
+        int pieces = 100_000;
+        int fileCount = 50_000;
+        List<TorrentDetail.FileStatus> files = new ArrayList<>(fileCount);
+        for (int i = 0; i < fileCount; i++)
+            files.add(new TorrentDetail.FileStatus(i, "f" + i, 2048, 0, Priority.NORMAL, 2 * i, 2 * i + 1));
+        boolean[] have = new boolean[pieces];
+        int[] availability = new int[pieces];
+        for (int i = 0; i < pieces; i++) {
+            have[i] = i % 4 == 0;
+            availability[i] = i % 2 == 0 ? 3 : 0;
+        }
+        TorrentDetail d = new TorrentDetail(
+                new TorrentDetail.General("id", "/data", false, pieces, 1024, 0, 0.5, 0, 0, 0, 0, 0, 0, 1, "", "", ""),
+                files,
+                List.of(peer("dI", 0)),
+                List.of(),
+                have,
+                availability);
+        Diagnosis.Unavailable u = org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+                java.time.Duration.ofSeconds(5), () -> Diagnosis.unavailable(d));
+        assertEquals(pieces / 2, u.pieces(), "every odd piece");
+        assertEquals(fileCount, u.files().size(), "each file has an odd piece");
+    }
+
     @Test
     void anAvailabilityCountOfAnotherLengthIsIgnored() {
         TorrentDetail d = detail(files(Priority.NORMAL), List.of(peer("dI", 0)), List.of(), have(9), new int[3]);

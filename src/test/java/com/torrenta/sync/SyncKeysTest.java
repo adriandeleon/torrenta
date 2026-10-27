@@ -52,6 +52,25 @@ class SyncKeysTest {
     }
 
     @Test
+    void aSaveOfThisMachinesKeysAloneChangesNothingThatTravels() {
+        Properties before = new Properties();
+        before.setProperty("ui.theme", "dark");
+        before.setProperty("detail.divider", "0.600");
+        Properties after = new Properties();
+        after.putAll(before);
+        after.setProperty("ui.window.bounds", "10,10,900,600");
+        after.setProperty("torrent.0123abcd.share", "2.0;0;PAUSE");
+        after.setProperty("ipfilter.lastRefreshEpochMs", "1700000000000");
+        after.setProperty("sync.lastEpochMs", "1700000000000");
+        assertFalse(SyncKeys.changed(SyncKeys.synced(before), SyncKeys.synced(after)));
+        after.setProperty("detail.divider", "0.550");
+        assertTrue(SyncKeys.changed(SyncKeys.synced(before), SyncKeys.synced(after)), "the divider travels");
+        after.setProperty("detail.divider", "0.600");
+        after.remove("ui.theme");
+        assertTrue(SyncKeys.changed(SyncKeys.synced(before), SyncKeys.synced(after)), "a key gone is a change");
+    }
+
+    @Test
     void renderIsSortedCanonicalAndRoundTrips() {
         Map<String, String> entries = Map.of(
                 "z.last", "1",

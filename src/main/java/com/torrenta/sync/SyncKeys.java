@@ -91,6 +91,15 @@ public final class SyncKeys {
         return sb.toString();
     }
 
+    /**
+     * Whether a save gave the other machines anything: the synced entries now against the ones last
+     * seen (synced, applied or already waiting for a round). A divider, the window or a torrent's
+     * own entries change the file and nothing that travels.
+     */
+    public static boolean changed(Map<String, String> seen, Map<String, String> now) {
+        return !seen.equals(now);
+    }
+
     /** The entries of a repository file, synced keys only; an unreadable text is empty. */
     public static Map<String, String> parse(String text) {
         Properties p = new Properties();

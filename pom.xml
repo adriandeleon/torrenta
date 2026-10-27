@@ -240,8 +240,14 @@
                     </execution>
                     <execution>
                         <!-- A regression net, not a target: each floor sits well below the coverage
-                             actually measured. Only packages whose coverage does not depend on the
-                             platform or on a display are gated. -->
+                             actually measured (line coverage on Linux, 2026-10-27, in the comment
+                             over each rule). Only packages whose coverage does not depend on the
+                             platform or on a display are gated: not ui, tray, os or the App; not
+                             engine.libtorrent or migrate (a real session, and tests that need an
+                             address besides loopback); not stream (the platform's player); not the
+                             packages whose tests need a tool on the PATH (engine.transmission the
+                             daemon, engine.direct curl, sync git). session (72.7 %) is not there
+                             yet. -->
                         <id>jacoco-check</id>
                         <phase>verify</phase>
                         <goals>
@@ -261,6 +267,74 @@
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
                                             <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <!-- The HTTP server (98.6 %) and the content check (98.5 %). -->
+                                <rule>
+                                    <element>PACKAGE</element>
+                                    <includes>
+                                        <include>com.torrenta.http</include>
+                                        <include>com.torrenta.content</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.85</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <!-- Search (93.8 %), RSS (90.9 %), the catalogues (94.6 %) and the
+                                     problem report (91.6 %). -->
+                                <rule>
+                                    <element>PACKAGE</element>
+                                    <includes>
+                                        <include>com.torrenta.search</include>
+                                        <include>com.torrenta.rss</include>
+                                        <include>com.torrenta.i18n</include>
+                                        <include>com.torrenta.report</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <!-- The engine API (89.5 %), automation (87.4 %), the update check
+                                     (88.7 %) and the web API (87.0 %; two symbolic-link tests skip
+                                     where links cannot be made). -->
+                                <rule>
+                                    <element>PACKAGE</element>
+                                    <includes>
+                                        <include>com.torrenta.engine</include>
+                                        <include>com.torrenta.automation</include>
+                                        <include>com.torrenta.update</include>
+                                        <include>com.torrenta.webapi</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.75</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <!-- The store (84.1 %) and the network checks (84.0 %; one exit-check
+                                     test is Linux only). -->
+                                <rule>
+                                    <element>PACKAGE</element>
+                                    <includes>
+                                        <include>com.torrenta.store</include>
+                                        <include>com.torrenta.net</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.70</minimum>
                                         </limit>
                                     </limits>
                                 </rule>

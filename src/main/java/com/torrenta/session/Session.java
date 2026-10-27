@@ -1120,7 +1120,8 @@ public final class Session {
             }
             if (t.state() == TorrentState.FETCHING_METADATA || !screening.add(id)) continue;
             try {
-                List<TorrentDetail.FileStatus> files = engine.detail(id).files();
+                List<TorrentDetail.FileStatus> files =
+                        engine.detail(id, Set.of(TorrentDetail.Part.FILES)).files();
                 if (files.isEmpty()) {
                     screening.remove(id);
                     continue;
@@ -1340,7 +1341,8 @@ public final class Session {
     private static boolean names(Engine e, String id, String infoHash) {
         if (FollowRules.idOf(infoHash).equals(id)) return true;
         try {
-            com.torrenta.engine.TorrentDetail.General g = e.detail(id).general();
+            com.torrenta.engine.TorrentDetail.General g =
+                    e.detail(id, com.torrenta.engine.TorrentDetail.Part.NONE).general();
             return infoHash.equalsIgnoreCase(g.infoHashV1()) || infoHash.equalsIgnoreCase(g.infoHashV2());
         } catch (EngineException | RuntimeException ex) {
             return false;
