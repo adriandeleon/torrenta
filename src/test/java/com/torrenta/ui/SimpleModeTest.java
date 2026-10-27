@@ -1,7 +1,9 @@
 package com.torrenta.ui;
 
 import java.util.List;
+import java.util.Set;
 
+import com.torrenta.store.Settings;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -102,6 +104,46 @@ class SimpleModeTest {
     void theChromeGoesInTheMode() {
         assertFalse(SimpleMode.chrome(true));
         assertTrue(SimpleMode.chrome(false));
+    }
+
+    @Test
+    void theModeDrawsComfortableRowsAndLeavesTheSavedDensityOutsideIt() {
+        for (Density saved : Density.values()) {
+            assertEquals(Density.COMFORTABLE, SimpleMode.density(saved, true), saved.toString());
+            assertEquals(saved, SimpleMode.density(saved, false), saved.toString());
+        }
+    }
+
+    @Test
+    void eachPlaceRemembersItsColumnsUnderItsOwnKey() {
+        assertEquals(Settings.TABLE_COLUMNS_SIMPLE, SimpleMode.columnsKey(Density.COMFORTABLE, true));
+        assertEquals(Settings.TABLE_COLUMNS_COMFORTABLE, SimpleMode.columnsKey(Density.COMFORTABLE, false));
+        assertEquals(Settings.TABLE_COLUMNS, SimpleMode.columnsKey(Density.COMPACT, false));
+        assertEquals(
+                3,
+                Set.of(
+                                SimpleMode.columnsKey(Density.COMFORTABLE, true),
+                                SimpleMode.columnsKey(Density.COMFORTABLE, false),
+                                SimpleMode.columnsKey(Density.COMPACT, false))
+                        .size());
+    }
+
+    /** Every column is named, so a column hidden in the mode stays hidden, wherever it was. */
+    @Test
+    void theModesColumnsNameEveryColumnAndShowFew() {
+        var simple = ColumnLayout.parse(SimpleMode.COLUMNS);
+        var comfortable = ColumnLayout.parse(Density.COMFORTABLE.defaultLayout());
+        assertEquals(ids(comfortable), ids(simple));
+        assertEquals(
+                List.of("name", "size", "down", "up", "eta"),
+                simple.stream()
+                        .filter(ColumnLayout.Column::visible)
+                        .map(ColumnLayout.Column::id)
+                        .toList());
+    }
+
+    private static Set<String> ids(List<ColumnLayout.Column> columns) {
+        return columns.stream().map(ColumnLayout.Column::id).collect(java.util.stream.Collectors.toSet());
     }
 
     private static Command command(String id) {

@@ -252,6 +252,8 @@ public final class MainWindow {
     private Density density = Density.DEFAULT;
     /** The columns as built, before any remembered layout: compact's default. */
     private String builtInLayout = "";
+    /** The key the columns showing are remembered under: {@link SimpleMode#columnsKey}. */
+    private String columnsKey = Settings.TABLE_COLUMNS_COMFORTABLE;
 
     private final javafx.scene.control.ToggleGroup densityGroup = new javafx.scene.control.ToggleGroup();
     private final java.util.Map<Density, javafx.scene.control.RadioMenuItem> densityItems =
@@ -1315,6 +1317,7 @@ public final class MainWindow {
         out.add("status-bar=" + statusBarForCapture());
         out.add("simple=" + simpleForCapture());
         out.add("table=" + tableLineForCapture());
+        out.add("columns=" + columnsForCapture());
         if (!settingsWindow.profileDialogStatusForCapture().isEmpty()) {
             out.add("dialog=" + settingsWindow.dialogTitle());
             out.add("profile-test=" + settingsWindow.profileDialogStatusForCapture());
@@ -1343,6 +1346,15 @@ public final class MainWindow {
         return "sort:" + (sort.isEmpty() ? "none" : sort) + " shown="
                 + table.getItems().size() + " rows=" + shown + " focus="
                 + (focused == null ? "none" : focused.torrent().name());
+    }
+
+    /** The columns showing, for the capture hook: the rows, the key they are kept under, the shown ids. */
+    private String columnsForCapture() {
+        String shown = table.getColumns().stream()
+                .filter(TableColumn::isVisible)
+                .map(TableColumn::getId)
+                .collect(java.util.stream.Collectors.joining(","));
+        return density.id() + " key=" + columnsKey + " shown=" + shown;
     }
 
     /** The log's lines, oldest first, for the capture hook: what a screenshot cannot show. */
@@ -4811,6 +4823,7 @@ public final class MainWindow {
         boolean simple = SimpleMode.active(settings.simple(), simpleForSession);
         simpleOn.set(simple);
         applyCommandVisibility();
+        applyRows();
         boolean chrome = SimpleMode.chrome(simple);
         placeSidebar(SidebarPlace.of(true, settings.sidebarSide()));
         reveal(viewStrip, chrome);
@@ -5740,25 +5753,26 @@ public final class MainWindow {
 
         Headers.uppercase(table);
         builtInLayout = ColumnLayout.format(ColumnMemory.capture(table));
-        density = Density.byId(settings.density(), Density.DEFAULT);
-        ColumnMemory.apply(table, ColumnLayout.parse(layoutFor(density)));
+        density = SimpleMode.density(Density.byId(settings.density(), Density.DEFAULT), simpleOn.get());
+        columnsKey = SimpleMode.columnsKey(density, simpleOn.get());
+        ColumnMemory.apply(table, ColumnLayout.parse(layoutFor(columnsKey)));
         styleForDensity(table);
         ColumnMemory.watch(table, () -> {
-            settings.set(layoutKey(density), ColumnLayout.format(ColumnMemory.capture(table)));
+            settings.set(columnsKey, ColumnLayout.format(ColumnMemory.capture(table)));
             settings.saveQuietly();
         });
         return table;
     }
 
-    private static String layoutKey(Density d) {
-        return d == Density.COMFORTABLE ? Settings.TABLE_COLUMNS_COMFORTABLE : Settings.TABLE_COLUMNS;
-    }
-
-    /** The remembered layout for a density, else its default (compact's is the columns as built). */
-    private String layoutFor(Density d) {
-        String saved = settings.get(layoutKey(d), "");
+    /**
+     * The layout remembered under a {@link SimpleMode#columnsKey}, else that place's default:
+     * Simple mode's few, comfortable rows' own, compact's the columns as built.
+     */
+    private String layoutFor(String key) {
+        String saved = settings.get(key, "");
         if (!saved.isBlank()) return saved;
-        return d == Density.COMPACT ? builtInLayout : d.defaultLayout();
+        if (key.equals(Settings.TABLE_COLUMNS_SIMPLE)) return SimpleMode.COLUMNS;
+        return key.equals(Settings.TABLE_COLUMNS) ? builtInLayout : Density.COMFORTABLE.defaultLayout();
     }
 
     private void styleForDensity(TableView<TorrentRow> t) {
@@ -5768,18 +5782,23 @@ public final class MainWindow {
     }
 
     /**
-     * Switches the rows' density: the columns as they are now are kept for the density being left,
-     * the other density's own come back, and the cells redraw. The menu follows.
+     * The rows and columns the saved density and Simple mode call for: the columns as they are now
+     * are kept under the key being left, the next place's own come back, and the cells redraw. The
+     * menu shows the saved density, which the mode never changes.
      */
-    private void applyDensity(Density next) {
+    private void applyRows() {
+        Density saved = Density.byId(settings.density(), Density.DEFAULT);
         densityItems
-                .getOrDefault(next, new javafx.scene.control.RadioMenuItem())
+                .getOrDefault(saved, new javafx.scene.control.RadioMenuItem())
                 .setSelected(true);
-        if (next == density) return;
-        settings.set(layoutKey(density), ColumnLayout.format(ColumnMemory.capture(table)));
+        Density next = SimpleMode.density(saved, simpleOn.get());
+        String key = SimpleMode.columnsKey(next, simpleOn.get());
+        if (next == density && key.equals(columnsKey)) return;
+        settings.set(columnsKey, ColumnLayout.format(ColumnMemory.capture(table)));
         density = next;
+        columnsKey = key;
         styleForDensity(table);
-        ColumnMemory.apply(table, ColumnLayout.parse(layoutFor(next)));
+        ColumnMemory.apply(table, ColumnLayout.parse(layoutFor(key)));
         // A refresh() reuses the cells, and a progress cell built at the other height keeps its
         // bar where that height put it; a new factory makes new cells.
         for (TableColumn<TorrentRow, ?> column : table.getColumns()) renewCells(column);
@@ -5797,7 +5816,7 @@ public final class MainWindow {
     private void chooseDensity(Density next) {
         settings.setDensity(next.id());
         settings.saveQuietly();
-        applyDensity(next);
+        applyRows();
     }
 
     /** Everything Settings → Appearance drives in this window. */
@@ -5805,7 +5824,6 @@ public final class MainWindow {
         applyStateColors();
         applySidebarPlace();
         applyDetailPlace();
-        applyDensity(Density.byId(settings.density(), Density.DEFAULT));
         applyWindowStyle();
         applySimple();
     }

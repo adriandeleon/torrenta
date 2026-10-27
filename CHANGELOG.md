@@ -20,6 +20,11 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   automation keep running. A menu whose group empties, in this mode or for an engine that lacks a
   capability, no longer shows two separators together.
 
+- **Simple mode has its own columns.** Comfortable rows, whatever the saved density, with the
+  name (its progress bar and status sentence inside), the size, the two rates and the time left;
+  every other column stays in the table's column menu. Columns moved or shown in the mode are
+  remembered for it alone (`table.columns.simple`), and the full list's are left as they were.
+
 - **Report a Problem, a GitHub issue from the debug log.** Help → Report a Problem… (also a
   button in the Debug Log window) shows a report of this session's and the last session's logs
   with the version, engine, Java and OS, already cleaned of home-folder paths, the user name,
