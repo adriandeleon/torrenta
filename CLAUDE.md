@@ -116,8 +116,8 @@ to try one on purpose).
 
 **Persistence is the engine's job, the store's format is not the engine's business.** `TorrentStore`
 holds bytes by info-hash and never looks inside; `LibtorrentEngine` decides that the bytes are
-resume data (with the info dict), writes them on add, on metadata, on finish, every two minutes if
-modified, and on stop, and re-adds them on start. Removing a torrent deletes its blob.
+resume data (with the info dict), writes them on add, on metadata, on finish, every two minutes (in slices) if
+modified, and on stop, and re-adds them on start without writing them again. Removing a torrent deletes its blob.
 
 **Nothing on the FX thread calls the engine.** `App` starts it on a worker after the window is
 shown; `session.Session` polls it once a second on its own thread (`engine-poll`) and hands each
@@ -271,6 +271,13 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   import, an undo) is never asked on its add: a paused one, never modified again, kept that empty
   blob, and the next start found files without resume data and wanted a full check, which a paused
   torrent never runs, so it sat in Checking (one import in thirty on Linux, more on Windows).
+  Nor on the finished alert libtorrent posts for a seed once its resume data is checked, when the
+  blob held every piece (`restoredWhole`, `savesOnFinish`): that rewrote every seed at every
+  start. The periodic only-if-modified flush asks a twelfth of the torrents every ten seconds
+  (`inFlushSlice`), not all at once; `stop()` still asks all. `alert_queue_size` is 20,000
+  (libtorrent's default is 2,000, and libtorrent4j subscribes to every category but the logs): a
+  full queue drops alerts silently, a dropped resume answer holds `stop()` its full 5 s, so
+  `alerts_dropped_alert` is a WARNING, once a minute.
 - **The add alert's params are enough to bring a magnet back.** `add_torrent_alert.params()` written
   as resume data holds the hashes, name, trackers and save path, so a magnet survives a crash before
   its metadata arrives; the real resume data replaces the blob later.

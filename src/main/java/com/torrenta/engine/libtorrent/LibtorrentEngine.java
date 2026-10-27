@@ -171,6 +171,26 @@ public final class LibtorrentEngine implements Engine {
     private static final Logger LOG = Logger.getLogger(LibtorrentEngine.class.getName());
 
     private static final long PERIODIC_FLUSH_SECONDS = 120;
+    /**
+     * The periodic flush is spread over its window in this many slices, one every
+     * {@code PERIODIC_FLUSH_SECONDS / FLUSH_SLICES} seconds: each torrent is still asked once per
+     * window, but a few thousand do not answer into the alert queue in one burst.
+     */
+    static final int FLUSH_SLICES = 12;
+
+    /**
+     * Alerts libtorrent queues between two pops before it drops new ones (2,000 by default in
+     * 2.1; resume-data answers are critical and get three times that, a finished torrent's high
+     * and gets twice). A flush or a stop asks every torrent at once, and libtorrent4j subscribes
+     * to every category but the logs, so a few thousand torrents filled the default and the
+     * metadata and finished alerts dropped behind it went unheard. The limit costs nothing until
+     * it is reached.
+     */
+    static final int ALERT_QUEUE_SIZE = 20_000;
+
+    /** A burst of dropped alerts is said once, then not again for this long. */
+    static final long DROP_WARNING_MS = 60_000;
+
     private static final long STOP_FLUSH_TIMEOUT_MS = 5000;
     /** How often the all-time totals are written; a crash costs at most this much counting. */
     private static final long STATS_SAVE_SECONDS = 300;
@@ -241,6 +261,26 @@ public final class LibtorrentEngine implements Engine {
     private final AtomicInteger pendingSaves = new AtomicInteger();
 
     private final List<Consumer<EngineEvent>> listeners = new CopyOnWriteArrayList<>();
+
+    /**
+     * Torrents brought back from a blob that held every piece. Its finished alert, which
+     * libtorrent posts once the resume data is checked, has nothing to add to that blob: asking
+     * for resume data then rewrote every seed in the store at every start.
+     */
+    private final Set<String> restoredWhole = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Each torrent's own name, by id, from the snapshots and the add alerts, so an event on the
+     * alert thread (tracker warnings come by the thousand) names it without a status call. Written
+     * under the monitor and on the alert thread, read on the alert thread.
+     */
+    private final Map<String, String> ownNames = new ConcurrentHashMap<>();
+
+    /** When dropped alerts were last said; the alert thread's alone. */
+    private long lastDropWarningMs = Long.MIN_VALUE;
+
+    /** The periodic flush's next slice; the flusher's alone, under the monitor. */
+    private long flushTick;
 
     /** Ids re-added from the store at start, so their add alert reads "Restored", not "Added". */
     private final Set<String> restoring = ConcurrentHashMap.newKeySet();
@@ -381,7 +421,8 @@ public final class LibtorrentEngine implements Engine {
             t.setDaemon(true);
             return t;
         });
-        flusher.scheduleAtFixedRate(this::flush, PERIODIC_FLUSH_SECONDS, PERIODIC_FLUSH_SECONDS, TimeUnit.SECONDS);
+        long slice = PERIODIC_FLUSH_SECONDS / FLUSH_SLICES;
+        flusher.scheduleAtFixedRate(this::flushSlice, slice, slice, TimeUnit.SECONDS);
         flusher.scheduleAtFixedRate(this::saveStats, STATS_SAVE_SECONDS, STATS_SAVE_SECONDS, TimeUnit.SECONDS);
     }
 
@@ -414,9 +455,16 @@ public final class LibtorrentEngine implements Engine {
             return false;
         }
         restoreNames(id, params);
+        org.libtorrent4j.swig.torrent_info info = params.ti_ptr();
+        if (info != null
+                && info.is_valid()
+                && holdsEveryPiece((int) params.get_have_pieces().count(), info.num_pieces())) restoredWhole.add(id);
+        else restoredWhole.remove(id);
+        Reference.reachabilityFence(info);
         error_code added = new error_code();
         s.swig().add_torrent(params, added);
         if (added.value() != 0) {
+            restoredWhole.remove(id);
             LOG.warning("Could not bring back " + id + ": " + added.message());
             return false;
         }
@@ -831,6 +879,21 @@ public final class LibtorrentEngine implements Engine {
         } catch (RuntimeException e) {
             return a.equals(b);
         }
+    }
+
+    /** The session's alert queue limit, for the test. */
+    int alertQueueSizeForTest() throws EngineException {
+        return running().settings().alertQueueSize();
+    }
+
+    /** A queue small enough to overflow, for the test of what a full queue says. */
+    synchronized void alertQueueSizeForTest(int size) throws EngineException {
+        running().applySettings(new SettingsPack().alertQueueSize(size));
+    }
+
+    /** Resume-data requests not answered yet, for the test. */
+    int pendingSavesForTest() {
+        return pendingSaves.get();
     }
 
     /** The torrent's storage record, for the test; {@link TorrentStorage#NONE} when nothing is owed. */
@@ -1713,6 +1776,8 @@ public final class LibtorrentEngine implements Engine {
             moving.remove(id);
             trackerHosts.remove(id);
             trackerErrors.remove(id);
+            ownNames.remove(id);
+            restoredWhole.remove(id);
             failWaits(id, tr("engine.error.streamGone", name));
             try {
                 store.delete(id);
@@ -2732,6 +2797,19 @@ public final class LibtorrentEngine implements Engine {
         for (TorrentHandle handle : handles(s)) requestSave(handle, true);
     }
 
+    /** The flusher's: {@link #flush()} for one slice of the torrents, the next slice next time. */
+    private synchronized void flushSlice() {
+        SessionManager s = session;
+        if (s == null || !s.isRunning()) return;
+        long tick = flushTick++;
+        for (TorrentHandle handle : handles(s, id -> inFlushSlice(id, tick, FLUSH_SLICES))) requestSave(handle, true);
+    }
+
+    /** Whether the torrent is asked at this tick: each id falls in one slice of {@code slices}. */
+    static boolean inFlushSlice(String id, long tick, int slices) {
+        return Math.floorMod(id.hashCode(), slices) == Math.floorMod(tick, slices);
+    }
+
     @Override
     public synchronized void applySettings(EngineSettings settings) throws EngineException {
         engineSettings = settings;
@@ -2793,6 +2871,7 @@ public final class LibtorrentEngine implements Engine {
         // such as the JVM's next safepoint poll, is reset to the default action and the process
         // dies. With the cutoff above every file, the same disk I/O reads with pread, handler-free.
         pack.setInteger(settings_pack.int_types.mmap_file_size_cutoff.swigValue(), Integer.MAX_VALUE);
+        pack.setInteger(settings_pack.int_types.alert_queue_size.swigValue(), ALERT_QUEUE_SIZE);
 
         settings_pack.proxy_type_t type =
                 switch (s.proxy()) {
@@ -3026,6 +3105,11 @@ public final class LibtorrentEngine implements Engine {
      * are left out.
      */
     private List<TorrentHandle> handles(SessionManager s) {
+        return handles(s, id -> true);
+    }
+
+    /** The same, for the ids the filter takes; the others cost no {@code find_torrent}. */
+    private List<TorrentHandle> handles(SessionManager s, java.util.function.Predicate<String> wanted) {
         session_handle session = s.swig();
         torrent_handle_vector vector = session.get_torrents();
         try {
@@ -3034,6 +3118,7 @@ public final class LibtorrentEngine implements Engine {
                 // A magnet the Add dialog is fetching, or one on its way out, is not the person's.
                 sha1_hash best = bestHash(vector.get(i));
                 if (fetchOf(vector.get(i)) != null || endedFetches.contains(best.to_hex())) continue;
+                if (!wanted.test(best.to_hex())) continue;
                 TorrentHandle handle = new TorrentHandle(session.find_torrent(best));
                 if (handle.isValid()) out.add(handle);
             }
@@ -3193,9 +3278,32 @@ public final class LibtorrentEngine implements Engine {
      */
     private String nameOf(TorrentHandle handle) {
         if (!handle.isValid()) return "";
+        // The hash is the handle's own, no call; the name is a status round trip, known already.
+        String known = ownNames.get(id(handle));
+        if (known != null) return displayName(id(handle), known);
         TorrentStatus status = handle.status(StatusQuery.FLAGS);
         String id = status.getInfoHashes().getBest().toHex();
         return displayName(id, status.name());
+    }
+
+    /** A blob whose piece list is whole: the torrent it brings back is a seed already. */
+    static boolean holdsEveryPiece(int have, int pieces) {
+        return pieces > 0 && have == pieces;
+    }
+
+    /**
+     * Whether a finished alert asks for resume data. Not for a torrent brought back from a blob
+     * that held every piece and that has downloaded nothing since (-1: not brought back): the
+     * blob already says so. A recheck that found the pieces again (file times that differ, as on
+     * NTFS) leaves the torrent modified, and the periodic flush and the stop write it.
+     */
+    static boolean savesOnFinish(boolean restoredWhole, long downloadedThisSession) {
+        return !(restoredWhole && downloadedThisSession == 0);
+    }
+
+    /** Whether dropped alerts are said now: the first time, and then once per {@link #DROP_WARNING_MS}. */
+    static boolean dropWarningDue(long lastMs, long nowMs) {
+        return lastMs == Long.MIN_VALUE || nowMs - lastMs >= DROP_WARNING_MS;
     }
 
     private String displayName(String id, String own) {
@@ -3311,6 +3419,8 @@ public final class LibtorrentEngine implements Engine {
         TorrentStatus status = handle.status(StatusQuery.FLAGS);
         torrent_flags_t flags = status.flags();
         String id = status.getInfoHashes().getBest().toHex();
+        // Not for one removed while the session still lists it: the prune would be undone.
+        if (!removed.contains(id)) ownNames.put(id, status.name() == null ? "" : status.name());
         String name = displayName(id, status.name());
         String tracker = status.currentTracker();
         TorrentLabels l = labels.getOrDefault(id, TorrentLabels.NONE);
@@ -3402,6 +3512,7 @@ public final class LibtorrentEngine implements Engine {
             AlertType.READ_PIECE.swig(),
             AlertType.PEER_DISCONNECTED.swig(),
             AlertType.PEER_ERROR.swig(),
+            AlertType.ALERTS_DROPPED.swig(),
         };
 
         @Override
@@ -3424,6 +3535,8 @@ public final class LibtorrentEngine implements Engine {
                             return;
                         }
                         requestSave(t.handle(), false);
+                        // A magnet's name was the link's, or none: the metadata's is asked for once.
+                        if (t.handle().isValid()) ownNames.remove(id(t.handle()));
                         if (t.handle().isValid() && stopAfterMetadata.remove(id(t.handle()))) {
                             t.handle().unsetFlags(Flags.AUTO_MANAGED);
                             t.handle().pause();
@@ -3439,12 +3552,14 @@ public final class LibtorrentEngine implements Engine {
                     }
                     case TORRENT_FINISHED -> {
                         TorrentAlert<?> t = (TorrentAlert<?>) alert;
-                        requestSave(t.handle(), false);
+                        String finished = t.handle().isValid() ? id(t.handle()) : "";
+                        long downloaded = t.handle().isValid() && broughtBack.contains(finished)
+                                ? t.handle().status().totalPayloadDownload()
+                                : -1;
+                        if (savesOnFinish(restoredWhole.remove(finished), downloaded)) requestSave(t.handle(), false);
                         // Brought back complete, not finished now: no download, so nothing to run on.
                         // One brought back part done that finishes this session has downloaded.
-                        boolean wasComplete = t.handle().isValid()
-                                && broughtBack.contains(id(t.handle()))
-                                && t.handle().status().totalPayloadDownload() == 0;
+                        boolean wasComplete = downloaded == 0;
                         if (!wasComplete)
                             torrentEvent(t, EngineEvent.Level.INFO, EngineEvent.Kind.FINISHED, "engine.event.finished");
                         if (t.handle().isValid()) {
@@ -3651,6 +3766,7 @@ public final class LibtorrentEngine implements Engine {
                     case READ_PIECE -> onPieceRead((ReadPieceAlert) alert);
                     case DHT_MUTABLE_ITEM -> onMutableItem((org.libtorrent4j.alerts.DhtMutableItemAlert) alert);
                     case DHT_PUT -> onMutablePut((org.libtorrent4j.alerts.DhtPutAlert) alert);
+                    case ALERTS_DROPPED -> onDropped((org.libtorrent4j.alerts.AlertsDroppedAlert) alert);
                     default -> {}
                 }
             } catch (RuntimeException e) {
@@ -3701,6 +3817,7 @@ public final class LibtorrentEngine implements Engine {
                 return;
             }
             String id = alert.params().getInfoHashes().getBest().toHex();
+            rememberName(id, alert.params());
             // A torrent restored at start is not new to the person; nothing runs on it.
             boolean restored = restoring.remove(id);
             // One from the store (a start, an import, an undo) has its blob there already, and asking
@@ -3720,6 +3837,35 @@ public final class LibtorrentEngine implements Engine {
             if (restored) torrentEvent(alert, EngineEvent.Level.INFO, "engine.event.restored");
             else torrentEvent(alert, EngineEvent.Level.INFO, EngineEvent.Kind.ADDED, "engine.event.added");
             probeArchives(alert.handle(), restored);
+        }
+
+        /** The params' name, else the metadata's; a magnet with neither is asked for later. */
+        private void rememberName(String id, AddTorrentParams params) {
+            String name = params.getName();
+            if (name == null || name.isEmpty()) {
+                TorrentInfo info = params.getTorrentInfo();
+                name = info != null && info.isValid() ? info.name() : "";
+                Reference.reachabilityFence(info);
+            }
+            if (!name.isEmpty()) ownNames.put(id, name);
+        }
+
+        /**
+         * libtorrent's queue was full and alerts were thrown away: a resume-data answer among them
+         * leaves a stop waiting its full bound, a finished or metadata one is never heard. Said once
+         * per burst, to the Debug Log, with the kinds that went.
+         */
+        private void onDropped(org.libtorrent4j.alerts.AlertsDroppedAlert alert) {
+            long now = System.currentTimeMillis();
+            if (!dropWarningDue(lastDropWarningMs, now)) return;
+            lastDropWarningMs = now;
+            org.libtorrent4j.swig.bitset_128 dropped = alert.swig().getDropped_alerts();
+            List<String> kinds = new ArrayList<>();
+            for (int i = 0; i < dropped.size(); i++) {
+                if (dropped.test(i)) kinds.add(String.valueOf(AlertType.fromSwig(i)));
+            }
+            Reference.reachabilityFence(alert);
+            LOG.warning("libtorrent's alert queue (" + ALERT_QUEUE_SIZE + ") overflowed; dropped: " + kinds);
         }
 
         /**

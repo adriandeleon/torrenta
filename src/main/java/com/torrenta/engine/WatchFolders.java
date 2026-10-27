@@ -13,7 +13,6 @@ import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -100,6 +99,9 @@ public final class WatchFolders implements AutoCloseable {
 
     private final AtomicBoolean relookDue = new AtomicBoolean();
     private final AtomicBoolean eventDue = new AtomicBoolean();
+
+    /** The session's ids for the pass running, read on its first file; null between passes. */
+    private @Nullable Set<String> inSession;
 
     private List<WatchFolder> entries = List.of();
     private volatile List<Path> missing = List.of();
@@ -265,6 +267,7 @@ public final class WatchFolders implements AutoCloseable {
      * waiting for its second look, so the caller knows to come back soon rather than in a minute.
      */
     public synchronized boolean poll() {
+        inSession = null;
         boolean lookAgain = false;
         List<Path> present = new ArrayList<>();
         List<Path> absent = new ArrayList<>();
@@ -300,6 +303,7 @@ public final class WatchFolders implements AutoCloseable {
         List<Path> before = missing;
         missing = List.copyOf(absent);
         if (!before.equals(missing)) host.statusChanged();
+        inSession = null;
         return lookAgain;
     }
 
@@ -334,8 +338,7 @@ public final class WatchFolders implements AutoCloseable {
             setAside(file, name, where, e.getMessage() == null ? e.toString() : e.getMessage());
             return;
         }
-        Set<String> present = new LinkedHashSet<>();
-        for (Torrent t : engine.torrents()) present.add(t.id());
+        Set<String> present = inSession();
         boolean trouble = false;
         for (Candidate candidate : candidates) {
             try {
@@ -382,6 +385,20 @@ public final class WatchFolders implements AutoCloseable {
                                     where,
                                     e.getMessage())));
         }
+    }
+
+    /**
+     * The ids in the session, read once per pass and kept up to date by the pass's own adds: a
+     * snapshot is every torrent's status, and a folder of a hundred files asked for a hundred.
+     */
+    private Set<String> inSession() {
+        Set<String> present = inSession;
+        if (present == null) {
+            present = new HashSet<>();
+            for (Torrent t : engine.torrents()) present.add(t.id());
+            inSession = present;
+        }
+        return present;
     }
 
     private record Candidate(AddRequest.Source source, Optional<String> id) {}
