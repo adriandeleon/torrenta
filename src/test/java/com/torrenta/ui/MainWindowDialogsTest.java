@@ -267,8 +267,12 @@ class MainWindowDialogsTest {
                 f.window.addInput(MAGNET);
             });
             Fx.waitUntil("the add", () -> anyCall(engine, "add "));
+            // Each add says so from a worker of its own: wait for one before the next, or a
+            // slower one's line (Windows) lands over the next one's.
+            f.awaitStatus(tr("status.added", ""));
             Fx.run(() -> f.window.addInput("https://example.org/files/disc.iso"));
             f.awaitCall("addLink https://example.org/files/disc.iso");
+            f.awaitStatus(tr("status.directAdded", "https://example.org/files/disc.iso"));
             Fx.run(() -> f.window.addInput(dir.resolve("missing.torrent").toString()));
             f.awaitStatus("missing.torrent");
         }

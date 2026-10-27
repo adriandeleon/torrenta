@@ -173,6 +173,12 @@ class MainWindowCommandsTest {
         String target = dir.resolve("moved").toString().replace(' ', '~');
         try (WindowFixture f = WindowFixture.open(dir, engine)) {
             f.action("select-all");
+            // A typed command that does not read says why and does nothing. First: the workers of
+            // the ones below say their outcomes later, over any line of the window's own.
+            f.action("omnibox:>limit-down~fast");
+            f.action("focus-key:ENTER");
+            assertTrue(f.status().contains("limit-down"), f.status());
+            f.action("select-all");
             for (String typed : List.of(
                     ">set-category~Films",
                     ">add-tag~keep",
@@ -208,10 +214,6 @@ class MainWindowCommandsTest {
                 Fx.waitUntil("the engine asked " + call, () -> anyCall(engine, call));
             }
             Fx.waitUntil("two limits per torrent", () -> count(engine, "setLimits aaaa") == 2);
-            // A typed command that does not read says why and does nothing.
-            f.action("omnibox:>limit-down~fast");
-            f.action("focus-key:ENTER");
-            assertTrue(f.status().contains("limit-down"), f.status());
             // A typed removal always asks.
             RemoveConfirm.answerForCapture = true;
             f.action("omnibox:>remove");
@@ -231,6 +233,8 @@ class MainWindowCommandsTest {
             f.action("omnibox:>pause");
             f.action("focus-key:ENTER");
             f.awaitCall("pause aaaa");
+            // The pause says its outcome from its worker: wait for it, or it lands over the next line.
+            f.awaitStatus(tr("actions.outcome", tr("actions.verb.paused"), 1));
             assertFalse(anyCall(engine, "pause bbbb"));
             f.action("omnibox-key:ESCAPE");
             f.action("omnibox-key:ESCAPE");

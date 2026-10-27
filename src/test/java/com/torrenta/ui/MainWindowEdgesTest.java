@@ -402,6 +402,7 @@ class MainWindowEdgesTest {
             Platform.runLater(add::fire);
             f.pressDefault(tr("detail.trackers.addDialog.title"), "https://t2.example.org/announce");
             f.awaitCall("addTrackers aaaa [https://t2.example.org/announce]");
+            f.awaitStatus(tr("status.trackersAdded", "Film"));
             // Peers: copy an address from the peer's menu.
             f.action("peer-menu");
             Fx.waitUntil("the peer menu", () -> !f.window.menuLines().isEmpty());
