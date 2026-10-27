@@ -179,8 +179,8 @@ public final class Session {
      * so a torrent's graph is not empty the first time it is followed. Gone with the torrent.
      */
     private final ConcurrentMap<String, SpeedHistory> recent = new ConcurrentHashMap<>();
-    /** The rates of every torrent that has been followed ({@link #follow}), by id; gone with the torrent. */
-    private final ConcurrentMap<String, SpeedHistory> followed = new ConcurrentHashMap<>();
+    /** The full rates of the torrents followed last ({@link #follow}), by id; gone with the torrent. */
+    private final FollowedHistories followed = new FollowedHistories();
     /** Inputs that arrived with no engine up, for {@link #inputs} once one is. */
     private final List<String> queuedInputs = new java.util.ArrayList<>();
     /** What an input is given to: the owner's, a dialog or an add without one. */
@@ -1181,11 +1181,10 @@ public final class Session {
             present.add(t.id());
             recent.computeIfAbsent(t.id(), k -> SpeedHistory.recent())
                     .add(nowSeconds, t.downloadRate(), t.uploadRate());
-            SpeedHistory h = followed.get(t.id());
-            if (h != null) h.add(nowSeconds, t.downloadRate(), t.uploadRate());
+            followed.add(t.id(), nowSeconds, t.downloadRate(), t.uploadRate());
         }
         recent.keySet().retainAll(present);
-        followed.keySet().retainAll(present);
+        followed.retainAll(present);
     }
 
     /** The session's rates over time. */
@@ -1195,16 +1194,17 @@ public final class Session {
 
     /**
      * Any thread. A torrent's full history from now, started from the short one every torrent
-     * keeps, so its graph has the last two minutes at once. Kept until the torrent goes.
+     * keeps, so its graph has the last two minutes at once. Kept while it is among the {@link
+     * FollowedHistories#KEPT} followed last, and the torrent is there.
      */
     public void follow(String id) {
-        followed.computeIfAbsent(id, k -> {
-            SpeedHistory r = recent.get(k);
+        followed.follow(id, () -> {
+            SpeedHistory r = recent.get(id);
             return r == null ? new SpeedHistory() : r.widened();
         });
     }
 
-    /** A followed torrent's history; null for one never followed, or gone. */
+    /** A followed torrent's history; null for one never followed, followed too long ago, or gone. */
     public @Nullable SpeedHistory followed(String id) {
         return followed.get(id);
     }
