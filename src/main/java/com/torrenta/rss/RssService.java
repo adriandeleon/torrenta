@@ -413,6 +413,14 @@ public final class RssService {
         }
     }
 
+    private void saveFacts(String feedId, FeedState state) {
+        try {
+            store.setFacts(feedId, state);
+        } catch (IOException e) {
+            LOG.log(Level.WARNING, "Could not write the refresh of feed " + feedId, e);
+        }
+    }
+
     private void save(String feedId, FeedState state) {
         try {
             store.setState(feedId, state);
@@ -502,7 +510,10 @@ public final class RssService {
             } else {
                 after = before.answered(before.etag(), before.lastModified(), now, before.articles());
             }
-            save(feed.id(), after);
+            // A 304, a failure or an answer with nothing new changes the facts alone: five hundred
+            // articles are not written again to note the time.
+            if (after.articles().equals(before.articles())) saveFacts(feed.id(), after);
+            else save(feed.id(), after);
             if (result != null
                     && result.changed()
                     && feed.name().isEmpty()
