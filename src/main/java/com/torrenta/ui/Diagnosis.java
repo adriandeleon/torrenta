@@ -4,7 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.Set;
 import java.util.TreeSet;
 
 import com.torrenta.engine.Priority;
@@ -205,25 +204,41 @@ public record Diagnosis(Title title, String body, String file, int fileIndex, Li
     static Unavailable unavailable(TorrentDetail d) {
         boolean[] have = d.pieces();
         int[] availability = d.availability();
+        int n = have.length;
         TreeSet<Integer> files = new TreeSet<>();
         // No count (a seed, a paused torrent) or a count from another moment: nothing to say.
-        if (availability.length == 0 || availability.length != have.length) return new Unavailable(0, 0, files);
+        if (availability.length == 0 || availability.length != n) return new Unavailable(0, 0, files);
         List<TorrentDetail.FileStatus> wanted = new ArrayList<>();
         for (TorrentDetail.FileStatus f : d.files()) if (f.priority() != Priority.IGNORE) wanted.add(f);
         boolean ranges = !wanted.isEmpty() && wanted.stream().allMatch(f -> f.firstPiece() >= 0 || f.size() == 0);
-        int count = 0;
-        for (int i = 0; i < have.length; i++) {
-            if (have[i] || availability[i] > 0) continue;
-            if (!ranges) {
-                count++;
-                continue;
-            }
-            Set<Integer> in = new TreeSet<>();
-            for (TorrentDetail.FileStatus f : wanted) if (f.touches(i)) in.add(f.index());
-            if (in.isEmpty()) continue; // a piece of skipped files only: never going to be fetched
-            count++;
-            files.addAll(in);
+        if (!ranges) {
+            int count = 0;
+            for (int i = 0; i < n; i++) if (!have[i] && availability[i] == 0) count++;
+            return new Unavailable(count, (long) count * Math.max(0, d.general().pieceLength()), files);
         }
+        // A sweep, not a search per piece: how many wanted files touch each piece (a difference
+        // array over their ranges), then a running count of the pieces that are missing, on no
+        // peer and wanted. A file is one they fall in when that count grows across its range.
+        int[] cover = new int[n + 1];
+        for (TorrentDetail.FileStatus f : wanted) {
+            if (f.firstPiece() < 0 || f.firstPiece() >= n) continue;
+            cover[f.firstPiece()]++;
+            cover[Math.min(f.lastPiece(), n - 1) + 1]--;
+        }
+        // before[i]: how many counted pieces lie before piece i.
+        int[] before = new int[n + 1];
+        int covering = 0;
+        for (int i = 0; i < n; i++) {
+            covering += cover[i];
+            // A piece of skipped files only is never going to be fetched: not counted.
+            boolean counted = !have[i] && availability[i] == 0 && covering > 0;
+            before[i + 1] = before[i] + (counted ? 1 : 0);
+        }
+        for (TorrentDetail.FileStatus f : wanted) {
+            if (f.firstPiece() < 0 || f.firstPiece() >= n) continue;
+            if (before[Math.min(f.lastPiece(), n - 1) + 1] > before[f.firstPiece()]) files.add(f.index());
+        }
+        int count = before[n];
         return new Unavailable(count, (long) count * Math.max(0, d.general().pieceLength()), files);
     }
 }

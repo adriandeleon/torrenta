@@ -21,7 +21,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `pause-resume`, `menu:<File|Torrent|View|Help>` or `context-menu` or `peer-menu` (the Peers tab's; `peer-ban` presses Ban Peer on the first peer) (opens that menu; the PNG is
   then of the popup and `menu=` lines list its items, `[icon]` after those with a glyph, a
   submenu's items indented under it; `menu:Torrent>Queue` opens the submenu itself, from the
-  keyboard), `set-location[:<folder>]` (the Set Location dialog, the folder typed in; a
+  keyboard), `toggle-simple` (Simple mode; every capture prints a `simple=` line: in force, `saved=`,
+  `session=` for `--simple`, sidebar, strip, the detail tabs, the toolbar's buttons, the palette's
+  count), `set-location[:<folder>]` (the Set Location dialog, the folder typed in; a
   `location-hint=` line has its free-space sentence),
   `view:<transfers|search|rss>` (shows that view; a `view=` line names it and where the focus
   landed, `view-strip=` reads the strip with the showing one starred), `focus-key:<MOD+…+KEY>`
@@ -29,7 +31,9 @@ module `com.torrenta`). Same author, layout and conventions as Termina and Edito
   `dialog-add` to press Add on an open Add dialog (`dialog-press:now|wait|paused`
 for the others, `dialog-key:<KeyCode>` for a key in its file tree, `content-skip` for its content
 card's Skip these files; after any action a `content-check=` line has the card's severity and lines), `choose-files` for the
-selected torrent, `select-first`, `message-log` / `message-log:<query>` (the status bar's history card; its visible
+selected torrent, `select-first`, `select-rows:<i>+<j>…`, `sort:<column id>[:desc]` (a `table=` line
+after every shot has the sort, the shown rows in order with `*` on the selected ones, and the focused
+one), `message-log` / `message-log:<query>` (the status bar's history card; its visible
   lines are printed), `report-problem` (Help → Report a Problem; the PNG is of it, and after the shot a
   `report=` line has what was replaced, whether it fits the link, and `report-line=`s its first 60 lines), `debug-log` (the Debug Log window; `-Dtorrenta.captureLogProbe=true` pushes a warning and an
   uncaught exception through the real path before the shot and prints what the log caught),
@@ -116,8 +120,8 @@ to try one on purpose).
 
 **Persistence is the engine's job, the store's format is not the engine's business.** `TorrentStore`
 holds bytes by info-hash and never looks inside; `LibtorrentEngine` decides that the bytes are
-resume data (with the info dict), writes them on add, on metadata, on finish, every two minutes if
-modified, and on stop, and re-adds them on start. Removing a torrent deletes its blob.
+resume data (with the info dict), writes them on add, on metadata, on finish, every two minutes (in slices) if
+modified, and on stop, and re-adds them on start without writing them again. Removing a torrent deletes its blob.
 
 **Nothing on the FX thread calls the engine.** `App` starts it on a worker after the window is
 shown; `session.Session` polls it once a second on its own thread (`engine-poll`) and hands each
@@ -271,6 +275,13 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   import, an undo) is never asked on its add: a paused one, never modified again, kept that empty
   blob, and the next start found files without resume data and wanted a full check, which a paused
   torrent never runs, so it sat in Checking (one import in thirty on Linux, more on Windows).
+  Nor on the finished alert libtorrent posts for a seed once its resume data is checked, when the
+  blob held every piece (`restoredWhole`, `savesOnFinish`): that rewrote every seed at every
+  start. The periodic only-if-modified flush asks a twelfth of the torrents every ten seconds
+  (`inFlushSlice`), not all at once; `stop()` still asks all. `alert_queue_size` is 20,000
+  (libtorrent's default is 2,000, and libtorrent4j subscribes to every category but the logs): a
+  full queue drops alerts silently, a dropped resume answer holds `stop()` its full 5 s, so
+  `alerts_dropped_alert` is a WARNING, once a minute.
 - **The add alert's params are enough to bring a magnet back.** `add_torrent_alert.params()` written
   as resume data holds the hashes, name, trackers and save path, so a magnet survives a crash before
   its metadata arrives; the real resume data replaces the blob later.
@@ -335,7 +346,13 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   in the compiler plugin's test execution. At run time the tests are on the classpath.
 - **The detail pane is polled only for the one selected torrent**, on the poll thread, with the
   pieces bitfield (`QUERY_PIECES`): a status copy per piece, which is why it is not fetched for
-  every row. `detailId` and `detailWanted` are volatile hand-offs from the FX thread.
+  every row. `detailId`, `detailWanted` and `detailParts` are volatile hand-offs from the FX
+  thread. Only the showing tab's parts are read (`TorrentDetail.Part`, `ui.DetailParts`: the
+  Overview needs files, peers and trackers too, for `Diagnosis` and the map's skipped pieces); a
+  list of a part not read is empty and the pane keeps what it showed (`TorrentDetail.has`). A tab
+  switch refreshes at once. `LibtorrentEngine` keeps the shown torrent's file layout (paths,
+  sizes, piece ranges) and reads only progress and priorities per tick; `PeerRows` and `FileRows`
+  update in place, touching only what changed.
 - **libtorrent 2.1 keeps trackers, comment, creator and web seeds outside `torrent_info`.** A
   `.torrent` is read with `load_torrent_parsed` (via `BDecodeNode.bdecode`), which fills them into
   the add parameters; `new TorrentInfo(bytes)` reads the info dictionary alone and the torrent is
@@ -507,6 +524,12 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
 - **The IP filter is replaced whole, never merged**: `set_ip_filter` takes a complete
   `ip_filter`, so the controller rebuilds it from cache + local file + bans every time. A filter
   set before `start()` is applied at start, so no peer slips in while the first download runs.
+  The engine keeps no copy once a session has it (40 MiB for a common list), and builds the native
+  filter outside its lock (half a second for 300k ranges), setting it under the lock; a turn
+  counter stops a late build from replacing a newer one. The controller parses a list file once
+  per change (`Stamp`: path, size, mtime, file key; `fresh` is the rule) and keeps it packed
+  (`engine.PackedRanges`, a `long` per IPv4 range), so a ban rebuilds without parsing. Dotted
+  quads are read by hand (`IpRange.v4`): `InetAddress` sent `1.2.3.256` to the resolver.
 - **PEX has no session switch in libtorrent**, only the per-torrent `disable_pex` flag, and there
   is no session-wide default tracker list: `applySettings` walks the handles for both, and `add`
   sets the flag and appends the trackers on their own tier. `EngineSettings.Protocol` is nested so
@@ -770,8 +793,11 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   command shows which glyph; `MainWindow.menuItem(id)` applies it, so a command added to a menu
   through `command(id).menuItem()` directly would be the one item without an icon (`IconsTest`
   lists the menus' ids). macOS's system menu bar takes only `ImageView` graphics, so it shows none.
-- **Rows are `TorrentRow` objects, never `Torrent` snapshots.** The list has an extractor on the
-  row's torrent property, which is what makes the `SortedList` re-sort on an in-place update.
+- **Rows are `TorrentRow` objects, never `Torrent` snapshots, and a tick is one update change.**
+  `TorrentRows.apply` sets each row's torrent property (the cells observe it themselves), then fires
+  a single update over every row it kept, which is what makes the `FilteredList` re-test and the
+  `SortedList` re-sort, once each. Never an extractor on that list: it fired one change per row and
+  the sorted list re-sorted everything for each (N² compares, 442 ms a tick at 5,000 rows).
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
   write under `~/.torrenta`. `LibtorrentEngineTest` starts a real session on purpose: it is the one
   test that proves the native loads on each CI platform.
@@ -862,7 +888,7 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   the menu's first item. The capture prints `tray=` (`sni`, `awt`, or the reason), `trayLine=` and
   `showing=`; `-Dtorrenta.captureAction=close-request` sends the window a real close request
   (`close-window` is `stage.close()`, which skips the handler), so `showing=false` with `tray=sni`
-  is close-to-tray working. `busctl --user` can read the item (`org.kde.StatusNotifierItem-<pid>-1`:
+  is close-to-tray working. Off screen (hidden to the tray or minimised, `PollWork`) the poll keeps the port clock, the interface watch, the leak check, the tray and the badge, and skips the detail fetch, the free-space read and the FX hand-off; the Statistics window, its own stage, is updated while it shows (it hides with the main window but stays up when that is minimised), and the way back draws the last frame at once (`drawNow`). `iconify`, `deiconify`, `tray-show` and `wait:<ms>` (the actions after it run that much later) drive it; a `poll=` line counts ticks drawn and skipped and the catch-up's delay. `busctl --user` can read the item (`org.kde.StatusNotifierItem-<pid>-1`:
   `ToolTip`, `/MenuBar GetLayout`) and click its items (`Event isvu <id> clicked s "" 0`).
 
 - **Downloads from links are curl processes, and everything about them goes in on stdin.**
@@ -914,6 +940,21 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   wraps the image as it is, so on macOS `scripts/add-mac-types.sh` patches
   `CFBundleDocumentTypes` and `CFBundleURLTypes` (`magnet`, which jpackage cannot declare at all)
   into `Info.plist` with PlistBuddy and re-signs, as the version fix does. The capture prints `instance=`, `badge=`, `handler=` and `openHandlers=`.
+
+- **Simple mode is a rule, `ui.SimpleMode`, laid over the window, never a second window.** It is
+  a whitelist (`COMMANDS`): a command not named there is and-ed with `simpleOn.not()` in
+  `MainWindow.simpleGate`, so its menu item, chord and palette row are dead with it, as a missing
+  capability's are; `applyCommandVisibility` shows an item when both the capability and the mode
+  allow it, then `MenuSeparators.tidy` hides the separators an emptied group leaves. The detail
+  header's buttons and `Diagnosis.Remedy` run commands by id, so theirs must stay in the list
+  (`SimpleModeTest` checks every remedy). It never writes a preference: the sidebar is taken out of
+  `transfersFrame` rather than hidden (its visibility is `ui.sidebar`, saved by a listener), its
+  selection is not applied while it is away, `show(View)` refuses Search and RSS, and
+  `DetailPane.setSimple` takes tabs out of the strip while `wantedTab` keeps the person's. The
+  saved switch is `ui.simple`; `--simple` is `simpleForSession`, OR'd with it, and any toggle in
+  the window (View, toolbar, palette, the Settings box) ends the session flag and saves the
+  opposite of what showed (`SimpleMode.toggled`), so one toggle always does something. A new
+  dialog that a newcomer meets gets an `applySimple` like `AddDialog`'s.
 
 ## Conventions (carried from Termina)
 

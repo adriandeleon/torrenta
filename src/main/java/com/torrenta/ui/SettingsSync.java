@@ -36,6 +36,7 @@ import com.torrenta.sync.GitHubCli;
 import com.torrenta.sync.QuietGit;
 import com.torrenta.sync.SyncAccount;
 import com.torrenta.sync.SyncEngine;
+import com.torrenta.sync.SyncKeys;
 import com.torrenta.sync.SyncLabels;
 import com.torrenta.sync.SyncReport;
 import com.torrenta.sync.SyncSearch;
@@ -124,6 +125,11 @@ final class SettingsSync {
     private boolean again;
     /** True while a round's result is being written: those saves are not "the user changed something". */
     private boolean applying;
+    /**
+     * The synced entries as this service last saw them: at start, when a save moved them, after a
+     * good round. A save that leaves them so is no reason for a round.
+     */
+    private Map<String, String> seen;
     /** Torznab servers the round brought that wait for their key here; said with the round's line. */
     private int keysNeeded;
     /** The failure already reported, so an automatic round that fails the same way every interval says it once. */
@@ -148,6 +154,7 @@ final class SettingsSync {
         this.definitions = definitions;
         this.configDir = configDir;
         this.host = host;
+        this.seen = settings.syncedEntries();
         dirty.setOnFinished(e -> request(false));
         startup.setOnFinished(e -> request(false));
         worker.execute(() -> machine = machineName());
@@ -221,6 +228,19 @@ final class SettingsSync {
     /** The settings or the label lists were saved: sync soon, unless the save was a sync's own. */
     void markDirty() {
         if (!applying && active()) dirty.playFromStart();
+    }
+
+    /**
+     * The settings file was saved: sync soon only if something that travels changed. Most saves
+     * are of this machine's keys alone (the divider's place, the window, a torrent's share
+     * limit, a refresh clock), and each used to cost a git round 30 s later for nothing.
+     */
+    void settingsSaved() {
+        if (applying || !active()) return;
+        Map<String, String> now = settings.syncedEntries();
+        if (!SyncKeys.changed(seen, now)) return;
+        seen = now;
+        dirty.playFromStart();
     }
 
     /** "Sync now". */
@@ -327,6 +347,7 @@ final class SettingsSync {
                 report.status() == SyncReport.Status.FETCH_FAILED || report.status() == SyncReport.Status.PUSH_FAILED;
         String line = null;
         if (report.ok()) {
+            seen = settings.syncedEntries(); // what the remote has now, a merge's arrivals included
             settings.setSyncLastEpochMs(System.currentTimeMillis());
             saveOwn();
             reportedFailure = null;

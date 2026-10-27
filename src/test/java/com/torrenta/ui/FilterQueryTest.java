@@ -287,6 +287,20 @@ class FilterQueryTest {
     }
 
     @Test
+    void oneQueryAnswersEachAnnounceUrlTheSameEveryTime() {
+        // The list keeps one query and asks it of every row each poll; the URL's host is kept.
+        FilterQuery q = FilterQuery.parse("tracker:opentrackr", NOW);
+        Torrent yes =
+                T.of("a").tracker("udp://tracker.opentrackr.org:1337/announce").torrent();
+        Torrent no =
+                T.of("b").tracker("udp://tracker.example.org:1337/opentrackr").torrent();
+        for (int round = 0; round < 3; round++) {
+            assertTrue(q.matches(yes));
+            assertFalse(q.matches(no), "the path is not the host, the second time either");
+        }
+    }
+
+    @Test
     void hashIsAPrefixOfTheId() {
         T t = T.of("a").id("abcdef0123");
         assertTrue(matches("hash:abc", t));

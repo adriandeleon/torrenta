@@ -195,22 +195,23 @@ final class SidebarEntries {
             tags.entries = labelled(Axis.TAG, t, SidebarFilter::tag, SidebarFilter.UNTAGGED);
             rebuilt.add(tags);
         }
+        // One pass for every count; the filters' own count is what the test holds it to.
+        SidebarCounts counts = SidebarCounts.of(torrents);
         // "Tracker error" is listed only while some torrent has one: part of the section's shape.
-        List<String> hosts = new ArrayList<>(SidebarFilter.trackerHosts(torrents));
-        if (torrents.stream().anyMatch(Torrent::trackerError)) hosts.add(SidebarFilter.TRACKER_ERROR.format());
+        List<String> hostNames = SidebarFilter.trackerHosts(torrents);
+        List<String> hosts = new ArrayList<>(hostNames);
+        if (counts.anyTrackerError()) hosts.add(SidebarFilter.TRACKER_ERROR.format());
         if (!hosts.equals(trackers.names)) {
             trackers.names = List.copyOf(hosts);
             List<Entry> entries = new ArrayList<>();
             entries.add(new Entry(SidebarFilter.ALL, Axis.TRACKER));
-            for (String host : SidebarFilter.trackerHosts(torrents))
-                entries.add(new Entry(SidebarFilter.tracker(host), Axis.TRACKER));
+            for (String host : hostNames) entries.add(new Entry(SidebarFilter.tracker(host), Axis.TRACKER));
             entries.add(new Entry(SidebarFilter.TRACKERLESS, Axis.TRACKER));
-            if (hosts.size() > SidebarFilter.trackerHosts(torrents).size())
-                entries.add(new Entry(SidebarFilter.TRACKER_ERROR, Axis.TRACKER));
+            if (counts.anyTrackerError()) entries.add(new Entry(SidebarFilter.TRACKER_ERROR, Axis.TRACKER));
             trackers.entries = List.copyOf(entries);
             rebuilt.add(trackers);
         }
-        for (Entry e : entries()) e.count.set(e.filter.count(torrents));
+        for (Entry e : entries()) e.count.set(counts.of(e.filter));
         for (int i = 0; i < savedViews.size(); i++) {
             FilterQuery q = savedViews.get(i).query();
             // The section's own All comes first; the views follow in order.

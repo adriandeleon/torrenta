@@ -3,6 +3,7 @@ package com.torrenta.engine;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import org.jspecify.annotations.Nullable;
@@ -21,6 +22,9 @@ import org.jspecify.annotations.Nullable;
  * two hundred thousand must not cost the other ones.
  */
 public final class Blocklist {
+
+    /** An eMule line without the spaced comma: a range, then a comma. Compiled once, not per line. */
+    private static final Pattern DAT = Pattern.compile(".*\\d\\s*-\\s*\\d.*,.*");
 
     /** What came of a parse: the ranges, and how many lines were not understood. */
     public record Parsed(List<IpRange> ranges, int skipped) {}
@@ -45,7 +49,7 @@ public final class Blocklist {
         try {
             String s = line;
             // eMule .dat: "first - last , access , name". Access 0 blocks; anything else is allowed.
-            if (s.contains(" , ") || s.matches(".*\\d\\s*-\\s*\\d.*,.*")) {
+            if (s.indexOf(',') >= 0 && (s.contains(" , ") || DAT.matcher(s).matches())) {
                 String[] parts = s.split(",");
                 if (parts.length >= 2) {
                     int access = Integer.parseInt(parts[1].trim());
@@ -65,28 +69,32 @@ public final class Blocklist {
             if (s.contains("/")) return IpRange.cidr(s);
             int dash = s.indexOf('-');
             if (dash > 0) {
-                return new IpRange(
-                        unpad(s.substring(0, dash).trim()),
-                        unpad(s.substring(dash + 1).trim()));
+                String first = s.substring(0, dash);
+                String last = s.substring(dash + 1);
+                long a = IpRange.v4(first, true);
+                long b = IpRange.v4(last, true);
+                if (a >= 0 && b >= 0) return v4(a, b);
+                return new IpRange(unpad(first.trim()), unpad(last.trim()));
             }
+            long single = IpRange.v4(s, true);
+            if (single >= 0) return v4(single, single);
             return IpRange.single(unpad(s));
         } catch (RuntimeException e) {
             return null;
         }
     }
 
-    /** {@code 001.002.003.004} is how eMule writes {@code 1.2.3.4}. */
+    private static IpRange v4(long first, long last) {
+        if (first > last) throw new IllegalArgumentException("range out of order");
+        return new IpRange(IpRange.v4Text(first), IpRange.v4Text(last));
+    }
+
+    /**
+     * {@code 001.002.003.004} is how eMule writes {@code 1.2.3.4}. A quad is read padded by
+     * {@link IpRange#v4} before it gets here; what is left is IPv6, lowercased, or not an address.
+     */
     static String unpad(String ip) {
-        if (ip.contains(":")) return ip.toLowerCase(Locale.ROOT);
-        String[] parts = ip.split("\\.");
-        if (parts.length != 4) return ip;
-        StringBuilder out = new StringBuilder();
-        for (int i = 0; i < 4; i++) {
-            if (i > 0) out.append('.');
-            String p = parts[i].replaceFirst("^0+(?=\\d)", "");
-            out.append(p);
-        }
-        return out.toString();
+        return ip.contains(":") ? ip.toLowerCase(Locale.ROOT) : ip;
     }
 
     private static String strip(String raw) {

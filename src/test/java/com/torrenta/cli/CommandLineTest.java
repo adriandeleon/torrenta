@@ -72,6 +72,16 @@ class CommandLineTest {
         assertTrue(usage.contains("--config-dir"));
         assertTrue(usage.contains("--headless"));
         assertTrue(usage.contains("--set-remote-password"));
+        assertTrue(usage.contains("--simple"));
+    }
+
+    @Test
+    void simpleIsAFlagBesideTheInputs() {
+        CommandLine cli = CommandLine.parse("--simple", "a.torrent");
+        assertTrue(cli.simple());
+        assertTrue(cli.shouldRun());
+        assertEquals(java.util.List.of("a.torrent"), cli.inputs());
+        assertFalse(CommandLine.parse("a.torrent").simple());
     }
 
     @Test

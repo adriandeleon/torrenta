@@ -134,6 +134,8 @@ public final class Settings {
     public static final String WEBAPI_ROOT_FOLDER = "webapi.rootFolder";
     /** Whether the icon toolbar under the menu bar shows; View → Toolbar flips it. */
     public static final String UI_TOOLBAR = "ui.toolbar";
+    /** Simple mode: the window with the essentials only; View → Simple Mode flips it. */
+    public static final String UI_SIMPLE = "ui.simple";
     /** Whether the sidebar of filters shows beside the list; View → Sidebar flips it. */
     public static final String UI_SIDEBAR = "ui.sidebar";
     /**
@@ -419,6 +421,12 @@ public final class Settings {
     private final Path file;
     private final Properties properties = new Properties();
     private @Nullable Runnable onSaved;
+    /**
+     * Every torrent's own share limit, parsed: the poll thread reads it each second, so it is not
+     * a walk of the file's keys each time. Rebuilt by the writer whenever a share key changes,
+     * under {@link #rebuildShareOverrides}' lock, and published whole.
+     */
+    private volatile Map<String, ShareLimit> shareOverrides = Map.of();
 
     public Settings(Path file) {
         this.file = file;
@@ -442,6 +450,8 @@ public final class Settings {
         } catch (IOException e) {
             LOG.log(Level.WARNING, "Could not read " + file + "; using defaults", e);
             properties.clear();
+        } finally {
+            rebuildShareOverrides();
         }
     }
 
@@ -479,6 +489,7 @@ public final class Settings {
         merged.forEach((key, value) -> {
             if (com.torrenta.sync.SyncKeys.isSynced(key) && value != null) properties.setProperty(key, value);
         });
+        rebuildShareOverrides(); // none of them travels today; cheap enough not to rely on it
     }
 
     /** Remote access as set; off, on {@code 127.0.0.1:8080}, until someone changes it. */
@@ -652,6 +663,7 @@ public final class Settings {
 
     public void set(String key, String value) {
         properties.setProperty(key, value);
+        if (isShareKey(key)) rebuildShareOverrides();
     }
 
     /** For callers that have nowhere to report a failed write but the log: a UI change listener. */
@@ -691,6 +703,14 @@ public final class Settings {
 
     public void setToolbar(boolean shown) {
         properties.setProperty(UI_TOOLBAR, String.valueOf(shown));
+    }
+
+    public boolean simple() {
+        return readBoolean(UI_SIMPLE, false);
+    }
+
+    public void setSimple(boolean on) {
+        properties.setProperty(UI_SIMPLE, String.valueOf(on));
     }
 
     /** The row density as written, trimmed; empty when unset. */
@@ -1231,17 +1251,30 @@ public final class Settings {
         String key = TORRENT_PREFIX + torrentId + SHARE_SUFFIX;
         if (limit == null) properties.remove(key);
         else properties.setProperty(key, limit.format());
+        rebuildShareOverrides();
     }
 
-    /** Every torrent's own share limit, by id. */
+    /** Every torrent's own share limit, by id; immutable, and cheap from any thread. */
     public Map<String, ShareLimit> shareOverrides() {
+        return shareOverrides;
+    }
+
+    private static boolean isShareKey(String key) {
+        return key.startsWith(TORRENT_PREFIX) && key.endsWith(SHARE_SUFFIX);
+    }
+
+    /**
+     * Re-reads the share keys after a write that may have touched one. Locked, so two writers on
+     * different threads publish in order and the last map read every write before it.
+     */
+    private synchronized void rebuildShareOverrides() {
         Map<String, ShareLimit> out = new java.util.HashMap<>();
         for (String key : properties.stringPropertyNames()) {
-            if (!key.startsWith(TORRENT_PREFIX) || !key.endsWith(SHARE_SUFFIX)) continue;
+            if (!isShareKey(key)) continue;
             String id = key.substring(TORRENT_PREFIX.length(), key.length() - SHARE_SUFFIX.length());
             ShareLimit.parse(properties.getProperty(key)).ifPresent(limit -> out.put(id, limit));
         }
-        return out;
+        shareOverrides = Map.copyOf(out);
     }
 
     /** A decimal between the bounds; anything unreadable or outside them is the default. */
@@ -1308,7 +1341,12 @@ public final class Settings {
 
     /** Forgets the given keys, so their getters fall back to the defaults. */
     public void reset(String... keys) {
-        for (String key : keys) properties.remove(key);
+        boolean share = false;
+        for (String key : keys) {
+            properties.remove(key);
+            share |= isShareKey(key);
+        }
+        if (share) rebuildShareOverrides();
     }
 
     /** A boolean as a person might have typed it: anything that is not {@code false} is true. */
