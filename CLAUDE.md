@@ -814,7 +814,11 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
 - **Window tests run on JavaFX's own headless platform, not Xvfb.** `@ExtendWith(FxToolkit.class)`
   starts the toolkit once per test JVM with `glass.platform=Headless` and `prism.order=sw` (in
   javafx-graphics since 25), the English catalogue, Inter and the default theme, and hides every
-  window after each test. `Fx.call`/`run` hand the FX thread work and wait, bounded, rethrowing what
+  window after each test. The two properties are surefire's `systemPropertyVariables`, set before
+  any test class loads: making any `Node` loads `QuantumToolkit` and `PrismSettings`, which read
+  them once, so a test like `IconsTest` running earlier in the fork had already chosen ES2, and on
+  an NVIDIA GLX desktop the toolkit's start then crashed the fork in `libGLX_nvidia` (exit 134;
+  CI's runners have no GPU). `Fx.call`/`run` hand the FX thread work and wait, bounded, rethrowing what
   it threw; `Fx.pulse()` waits a frame; `Fx.waitUntil` looks once a pulse, never sleeps.
   `Fx.quietSettings(dir)` turns off everything that reaches outside a test (the update check, the
   tray and badge on the session bus, the desktop's file-type handler). `WindowFixture.open(dir,
