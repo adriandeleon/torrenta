@@ -1,0 +1,31 @@
+name: Bug report
+description: Something in Torrenta went wrong. Help → Report a Problem (or `torrenta --report`) fills in the details.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what Torrenta did instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: If you can make it happen again, how?
+      placeholder: |
+        1. Add …
+        2. Press …
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Torrenta version, engine, Java, OS. Filled in when you report from Torrenta; otherwise copy it from Help → About → Copy details.
+      render: text
+  - type: textarea
+    id: report
+    attributes:
+      label: Problem report
+      description: The debug log from Torrenta, redacted. Read it before you submit — anything left in it becomes public.
+      render: text

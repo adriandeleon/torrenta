@@ -5,6 +5,24 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Added
+
+- **Report a Problem, a GitHub issue from the debug log.** Help → Report a Problem… (also a
+  button in the Debug Log window) shows a report of this session's and the last session's logs
+  with the version, engine, Java and OS, already cleaned of home-folder paths, the user name,
+  the torrents' names, magnet links, info-hashes, tracker passkeys, public peer addresses,
+  e-mail addresses and tokens. It is editable; Open GitHub Issue copies it and opens a new issue
+  with it filled in (or, when it is too long for the link, says to paste it). Copy and Save… are
+  there too. `torrenta --report` does the same without starting Torrenta, for when it will not
+  start: it writes the report to the current folder and opens the issue. Torrenta sends nothing
+  itself.
+
+### Fixed
+
+- **The log of a session that crashed survives the next launch.** Each launch emptied
+  `torrenta-session.log`, so the record of a crash was gone by the time Torrenta was reopened to
+  report it; the last session's is now kept as `torrenta-session.prev.log`.
+
 ## 0.3.0 — 2026-10-26
 
 ### Added

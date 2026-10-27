@@ -167,6 +167,7 @@ final class Icons {
             case "statistics" -> gauge();
             case "message-log" -> history();
             case "debug-log" -> info();
+            case "report-problem" -> external();
             case "toggle-toolbar" -> toolbar();
             case "toggle-sidebar", "focus-sidebar" -> sidebar();
             case "toggle-detail" -> detailPane();

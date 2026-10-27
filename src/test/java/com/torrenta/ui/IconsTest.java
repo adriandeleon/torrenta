@@ -122,6 +122,7 @@ class IconsTest {
                 "select-all",
                 "event-log",
                 "check-updates",
+                "report-problem",
                 "about",
                 "alt-speed",
                 "quit"

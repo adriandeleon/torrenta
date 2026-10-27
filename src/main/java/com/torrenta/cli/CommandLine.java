@@ -6,8 +6,9 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The command line: {@code --help}, {@code --version}, {@code --config-dir}, {@code --headless},
- * {@code --set-remote-password} (a headless server has no Settings window to set it in), and
+ * The command line: {@code --help}, {@code --version}, {@code --report}, {@code --config-dir},
+ * {@code --headless}, {@code --set-remote-password} (a headless server has no Settings window to set
+ * it in), and
  * anything else is a torrent to add — a {@code .torrent} path or a {@code magnet:} link.
  *
  * <p>Pure parsing with no side effects, so it is fully testable and can run before the toolkit.
@@ -15,6 +16,7 @@ import org.jspecify.annotations.Nullable;
 public record CommandLine(
         boolean help,
         boolean version,
+        boolean report,
         boolean headless,
         boolean setRemotePassword,
         @Nullable String configDir,
@@ -24,6 +26,7 @@ public record CommandLine(
     public static CommandLine parse(String... args) {
         boolean help = false;
         boolean version = false;
+        boolean report = false;
         boolean headless = false;
         boolean setRemotePassword = false;
         String configDir = null;
@@ -33,6 +36,7 @@ public record CommandLine(
             switch (arg) {
                 case "-h", "--help" -> help = true;
                 case "-v", "-V", "--version" -> version = true;
+                case "--report" -> report = true;
                 case "--headless" -> headless = true;
                 case "--set-remote-password" -> setRemotePassword = true;
                 case "--config-dir" -> {
@@ -51,16 +55,17 @@ public record CommandLine(
                 }
             }
         }
-        return new CommandLine(help, version, headless, setRemotePassword, configDir, List.copyOf(inputs), null);
+        return new CommandLine(
+                help, version, report, headless, setRemotePassword, configDir, List.copyOf(inputs), null);
     }
 
     private static CommandLine error(String message) {
-        return new CommandLine(false, false, false, false, null, List.of(), message);
+        return new CommandLine(false, false, false, false, false, null, List.of(), message);
     }
 
     /** True when the application should come up; false when an option answered and stopped. */
     public boolean shouldRun() {
-        return !help && !version && error == null;
+        return !help && !version && !report && error == null;
     }
 
     /** The packaged image's headless launcher, beside the window's: {@code bin/torrenta-nox}. */
@@ -92,6 +97,9 @@ public record CommandLine(
                 Options:
                   -h, --help             Show this help and exit
                   -v, --version          Print the version and exit
+                      --report           Write a problem report (system details and the last two
+                                         session logs, redacted) to the current folder and open
+                                         a GitHub issue for it, without starting Torrenta
                       --config-dir DIR   Keep settings and resume data in DIR (default ~/.torrenta)
                       --headless         Run without a window: add what arrives without asking, log
                                          to stdout, stop on SIGTERM
