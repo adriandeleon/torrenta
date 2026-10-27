@@ -782,6 +782,17 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
 - **Surefire runs on the classpath** and points `torrenta.nativeDir` into `target/`, so tests never
   write under `~/.torrenta`. `LibtorrentEngineTest` starts a real session on purpose: it is the one
   test that proves the native loads on each CI platform.
+- **Window tests run on JavaFX's own headless platform, not Xvfb.** `@ExtendWith(FxToolkit.class)`
+  starts the toolkit once per test JVM with `glass.platform=Headless` and `prism.order=sw` (in
+  javafx-graphics since 25), the English catalogue, Inter and the default theme, and hides every
+  window after each test. `Fx.call`/`run` hand the FX thread work and wait, bounded, rethrowing what
+  it threw; `Fx.pulse()` waits a frame; `Fx.waitUntil` looks once a pulse, never sleeps.
+  `Fx.quietSettings(dir)` turns off everything that reaches outside a test (the update check, the
+  tray and badge on the session bus, the desktop's file-type handler). `WindowFixture.open(dir,
+  engine)` is the real `MainWindow` on a test `FakeEngine` (records in a map, every action in
+  `calls()`), returned once the first poll has drawn; `action(...)` runs a capture action, so the
+  capture hook's whole vocabulary is a test's too. Close it with try-with-resources: it stops the
+  poll and the engine as `App.stop` does.
 - **A loopback test binds port 0 and waits for its seeder to listen.** The Windows flakes (a
   loopback download with no peer for two minutes, a different test each time) were a seeder
   listening on nothing: tests picked a port with a `ServerSocket(0)`, closed it, and had libtorrent
