@@ -1,11 +1,15 @@
 package com.torrenta.engine;
 
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 
 import org.jspecify.annotations.Nullable;
 
 /**
- * Everything the detail pane shows about one torrent, read in one go.
+ * Everything the detail pane shows about one torrent, read in one go: the general facts always,
+ * the costly lists only as {@link #parts} says. A list of a part not asked for is empty and means
+ * nothing; the pane keeps what it showed.
  *
  * @param general the facts for the General tab
  * @param files per-file progress and priority, in index order (padding files left out)
@@ -19,6 +23,9 @@ import org.jspecify.annotations.Nullable;
  *     password ({@link ArchiveProbe}); empty until read, and always for an engine that cannot
  * @param command a download from a link: the command line that fetches the same file by hand
  *     ({@code Curl.shellCommand}); empty for a torrent
+ * @param parts what was read besides the general facts; see {@link Part}
+ * @param fileCount how many real files the torrent has, padding left out: {@code files().size()}
+ *     when {@link Part#FILES} was read, else what the engine knows cheaply, {@code -1} for nothing
  */
 public record TorrentDetail(
         General general,
@@ -29,13 +36,58 @@ public record TorrentDetail(
         int[] availability,
         List<String> webSeeds,
         java.util.Set<Integer> encryptedArchives,
-        String command) {
+        String command,
+        Set<Part> parts,
+        int fileCount) {
+
+    /**
+     * The parts of a detail that cost the engine something per file, peer or piece. The general
+     * facts are always read; a tab asks for the rest it shows ({@code ui.DetailParts}).
+     */
+    public enum Part {
+        /** {@link #files}, and the archives found locked. */
+        FILES,
+        PEERS,
+        TRACKERS,
+        /** {@link #pieces} and {@link #availability}: a copy per piece. */
+        PIECES,
+        WEB_SEEDS;
+
+        /** Every part: what a caller outside the pane gets from {@link Engine#detail(String)}. */
+        public static final Set<Part> ALL = java.util.Collections.unmodifiableSet(EnumSet.allOf(Part.class));
+
+        /** The general facts alone. */
+        public static final Set<Part> NONE = java.util.Collections.unmodifiableSet(EnumSet.noneOf(Part.class));
+    }
 
     public TorrentDetail {
         availability = availability == null ? new int[0] : availability;
         webSeeds = webSeeds == null ? List.of() : List.copyOf(webSeeds);
         encryptedArchives = encryptedArchives == null ? java.util.Set.of() : java.util.Set.copyOf(encryptedArchives);
         command = command == null ? "" : command;
+        parts = parts == null || parts.isEmpty()
+                ? Part.NONE
+                : java.util.Collections.unmodifiableSet(EnumSet.copyOf(parts));
+        if (parts.contains(Part.FILES)) fileCount = files.size();
+    }
+
+    /** Every part read. */
+    public TorrentDetail(
+            General general,
+            List<FileStatus> files,
+            List<Peer> peers,
+            List<Tracker> trackers,
+            boolean[] pieces,
+            int[] availability,
+            List<String> webSeeds,
+            java.util.Set<Integer> encryptedArchives,
+            String command) {
+        this(general, files, peers, trackers, pieces, availability, webSeeds, encryptedArchives, command, Part.ALL, -1);
+    }
+
+    /** Whether {@code part} was read, so that its list says what the torrent has. */
+    public boolean has(Part part) {
+        return parts.contains(part);
     }
 
     public TorrentDetail(

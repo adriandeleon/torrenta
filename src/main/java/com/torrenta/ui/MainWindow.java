@@ -343,6 +343,8 @@ public final class MainWindow {
     private CheckMenuItem sidebarRightItem;
     private volatile @Nullable String detailId;
     private volatile boolean detailWanted;
+    /** What the showing tab needs read ({@link DetailParts}); set on the FX thread, read by the poll. */
+    private volatile Set<TorrentDetail.Part> detailParts = DetailParts.OVERVIEW;
     /** A {@link #refreshDetailNow} waiting on the poll thread; later requests ride on it. */
     private final java.util.concurrent.atomic.AtomicBoolean detailRefreshQueued =
             new java.util.concurrent.atomic.AtomicBoolean();
@@ -2997,14 +2999,15 @@ public final class MainWindow {
     }
 
     /**
-     * Poll thread. The detail pane costs a status with the pieces bitfield; only for one shown
-     * torrent, and null for none or for one gone between the selection and the poll.
+     * Poll thread. The detail pane costs a status with the pieces bitfield, a call per file and
+     * per peer; only for one shown torrent and only the parts its tab shows, and null for none or
+     * for one gone between the selection and the poll.
      */
     private @Nullable TorrentDetail fetchDetail(Engine engine) {
         String id = detailWanted ? detailId : null;
         if (id == null) return null;
         try {
-            return engine.detail(id);
+            return engine.detail(id, detailParts);
         } catch (EngineException e) {
             return null;
         }
@@ -4828,7 +4831,13 @@ public final class MainWindow {
                     if (detailId == null && detailWanted) detail.clear();
                     refreshDetailNow();
                 });
+        // A tab asks for its own parts, and at once: a switch does not wait for the next tick.
+        detail.setOnTabShown(tab -> {
+            detailParts = DetailParts.of(tab);
+            refreshDetailNow();
+        });
         detail.selectTab(settings.get(Settings.DETAIL_TAB, "overview"));
+        detailParts = DetailParts.of(detail.activeTab());
         detail.setOnFilePriority((index, priority) -> {
             String id = detailId;
             if (id != null) onTorrent("status.prioritySet", id, (e, t) -> e.setFilePriority(t, index, priority));

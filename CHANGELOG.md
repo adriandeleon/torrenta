@@ -19,6 +19,11 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Changed
 
+- **The detail pane keeps up with a torrent of 50,000 files.** Each tick reads only what the
+  showing tab needs (the Files tab no longer pays for peers and pieces, the Peers tab for the
+  file list), the file list's fixed half is read once, the files and folders that did not change
+  are left alone, and the Overview's unavailable-pieces rule is one pass. The Peers tab keeps its
+  selection and scroll from one second to the next.
 - **The Sync page waits for its switch.** Until "Keep settings in sync" is ticked, the URL,
   branch, interval and buttons are disabled; ticking it with no URL puts the cursor in the URL
   field. Enter (or leaving the field) connects. Create on GitHub is offered only while no

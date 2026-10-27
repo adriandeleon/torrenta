@@ -1084,6 +1084,23 @@ class LibtorrentEngineTest {
 
             assertTrue(detail.peers().isEmpty(), "nobody is connected in a test");
 
+            // A tab's parts alone: the files read again from the kept layout, the rest not read.
+            TorrentDetail filesOnly = engine.detail(t.id(), Set.of(TorrentDetail.Part.FILES));
+            assertEquals(
+                    detail.files().stream().map(TorrentDetail.FileStatus::path).toList(),
+                    filesOnly.files().stream()
+                            .map(TorrentDetail.FileStatus::path)
+                            .toList());
+            assertEquals(
+                    detail.files().get(0).lastPiece(), filesOnly.files().get(0).lastPiece());
+            assertEquals(0, filesOnly.pieces().length);
+            assertTrue(filesOnly.trackers().isEmpty() && !filesOnly.has(TorrentDetail.Part.TRACKERS));
+            assertEquals(g.pieceCount(), filesOnly.general().piecesHave(), "the count without the bitfield");
+            TorrentDetail none = engine.detail(t.id(), TorrentDetail.Part.NONE);
+            assertTrue(none.files().isEmpty());
+            assertEquals(2, none.fileCount(), "the count is known without the list");
+            assertEquals(2, detail.fileCount());
+
             assertEquals(1, detail.trackers().size(), "the one the torrent was built with");
             assertEquals(
                     "udp://tracker.example.org:6969/announce",
