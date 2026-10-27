@@ -387,8 +387,11 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   minute's `Sparkline` each (zero before the session's first sample: it starts idle), the
   alternative-speed pill, free space on the download folder's volume (read every ten polls on the
   poll thread, `FreeSpace.sentence(disk, -1)`), the error pill.
-- **A resume-data answer can arrive after the torrent was removed.** The engine marks removed ids
-  and ignores late writes for them; without that, the remove test saw the blob come back.
+- **A resume-data answer can arrive after the torrent was removed.** The engine keeps the removed
+  torrent's handle by id and ignores late writes about that handle; without that, the remove test
+  saw the blob come back. By handle, never by id alone: libtorrent compares handles by the torrent
+  they point at, so the same torrent added again writes under its own, and an id-only mark kept
+  it out of the store for good (gone after a restart).
 - **The image does not contain the native library; it sits beside it.** The per-OS jar is
   resources only, and a resource in a named module is encapsulated unless its package is opened,
   so `-Pdist` unpacks `lib/<arch>/libtorrent4j.*` and hands it to jpackage as app content;
