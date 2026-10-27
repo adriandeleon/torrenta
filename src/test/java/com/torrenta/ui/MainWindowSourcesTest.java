@@ -138,6 +138,16 @@ class MainWindowSourcesTest {
         }
     }
 
+    /** The RSS tab's article list once it has a row, else null. */
+    private static javafx.scene.control.TableView<?> articles(WindowFixture f) {
+        for (Node n : f.stage.getScene().getRoot().lookupAll(".table-view")) {
+            if (n instanceof javafx.scene.control.TableView<?> t
+                    && !t.getItems().isEmpty()
+                    && t.getItems().get(0) instanceof ArticleRow) return t;
+        }
+        return null;
+    }
+
     /** The Search tab's table rows, read off its scene. */
     private static int searchRows(WindowFixture f) {
         for (Node n : f.stage.getScene().getRoot().lookupAll(".table-view")) {
@@ -197,7 +207,14 @@ class MainWindowSourcesTest {
             Fx.waitUntil("its torrent fetched", () -> asked.stream().anyMatch(u -> u.startsWith("/file")));
             Fx.waitUntil("the failure said", () -> !f.status().contains("debian.torrent"));
             f.action("rss:" + base(server) + "/feed.xml");
-            f.action("rss-keys:DOWN+ENTER");
+            // Once the feed is fetched, its article chosen in the list and Enter pressed there.
+            Fx.waitUntil("the article listed", () -> articles(f) != null);
+            Fx.run(() -> {
+                javafx.scene.control.TableView<?> list = articles(f);
+                list.requestFocus();
+                list.getSelectionModel().select(0);
+            });
+            f.action("rss-keys:ENTER");
             Fx.waitUntil(
                     "its torrent fetched",
                     () -> asked.stream().filter(u -> u.startsWith("/file")).count() >= 2);
