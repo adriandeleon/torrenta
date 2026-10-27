@@ -405,6 +405,15 @@
                         <torrenta.nativeDir>${project.build.directory}/native</torrenta.nativeDir>
                         <!-- com.torrenta.TestProgress: which test was running when a fork died. -->
                         <torrenta.testProgress>${project.build.directory}/surefire-reports/test-progress.log</torrenta.testProgress>
+                        <!-- The window tests' toolkit (ui.FxToolkit): JavaFX's headless platform and
+                             software rendering. Set here, before any test class loads, because Prism
+                             reads them once, in static initialisers that any test making a Node
+                             runs (IconsTest and others, long before the window tests): set later,
+                             the default ES2 pipeline is already chosen, and on a desktop with an
+                             NVIDIA GLX display the toolkit's start crashed the fork in
+                             libGLX_nvidia. CI's runners have no GPU, so they never saw it. -->
+                        <glass.platform>Headless</glass.platform>
+                        <prism.order>sw</prism.order>
                     </systemPropertyVariables>
                     <!-- The engine's JNI class calls System.load; see the javafx plugin options.
                          A crash report goes beside the test reports, which CI uploads on failure,

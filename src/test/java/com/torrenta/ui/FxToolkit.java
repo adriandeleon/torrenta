@@ -17,6 +17,13 @@ import org.junit.jupiter.api.extension.ExtensionContext;
  * CI machine. Started as the app starts it, minus what reaches outside: the English catalogue,
  * Inter, the default theme. The toolkit outlives every window ({@code implicitExit} off), and
  * every window is hidden after each test so the next one starts with none.
+ *
+ * <p>{@code glass.platform} and {@code prism.order} come from surefire's
+ * {@code systemPropertyVariables}, set before any test class loads. Setting them here is too late
+ * in a full run: Prism reads them once, in static initialisers, and any earlier test that makes a
+ * {@code Node} ({@code IconsTest}, …) runs those without starting the toolkit. ES2 was then chosen
+ * and the start crashed the fork in {@code libGLX_nvidia} on a desktop with an NVIDIA GPU. The
+ * lines below cover a run outside Maven, such as an IDE's of this class alone.
  */
 public final class FxToolkit implements BeforeAllCallback, AfterEachCallback {
 
