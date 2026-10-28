@@ -240,6 +240,82 @@ class AddDialogFxTest {
     }
 
     @Test
+    void theTagsThatExistAreChipsAndSuggestionsAsTheFieldIsTyped(@TempDir Path dir) {
+        Stage owner = owner();
+        AddDialog dialog = Fx.call(() -> new AddDialog(
+                owner,
+                new AddRequest.TorrentFile(new byte[] {1}, "film.torrent"),
+                preview(),
+                AddDialog.Via.FILE,
+                defaults(dir, false),
+                List.of()));
+        TagField tagField = Fx.call(dialog::tagFieldForCapture);
+        // No tag yet: no chips.
+        assertFalse(Fx.call(() -> tagField.chips().isVisible()));
+        Fx.run(() -> dialog.offerTags(List.of("linux", "hd", "4k-hdr", "keep")));
+        assertTrue(Fx.call(() -> tagField.chips().isVisible()));
+        var answer = show(dialog);
+        TextField tags = Fx.call(() -> fields(dialog).get(1));
+        Fx.run(tags::requestFocus);
+        Fx.waitUntil("the tags field to take the focus", tags::isFocused);
+
+        // Typing offers what it starts with, then what contains it.
+        // setText leaves the caret where it was, at the start: the list follows the caret once it moves.
+        Fx.run(() -> {
+            tags.setText("hd, h");
+            tags.end();
+        });
+        assertEquals(List.of("4k-hdr"), Fx.call(tagField::suggestions));
+        Fx.run(() -> {
+            tags.setText("h");
+            tags.end();
+        });
+        assertEquals(List.of("hd", "4k-hdr"), Fx.call(tagField::suggestions));
+        // Down then Enter takes the second; Enter does not add while the list is open.
+        Fx.run(() -> {
+            fieldKey(tags, KeyCode.DOWN);
+            fieldKey(tags, KeyCode.ENTER);
+        });
+        assertTrue(Fx.call(dialog::isShowing));
+        assertEquals("4k-hdr, ", Fx.call(tags::getText));
+        assertEquals(List.of("4k-hdr"), Fx.call(tagField::litChips));
+
+        // Down on an empty tag lists every tag not in the field; Escape closes the list, not the dialog.
+        Fx.run(() -> fieldKey(tags, KeyCode.DOWN));
+        assertEquals(List.of("hd", "keep", "linux"), Fx.call(tagField::suggestions));
+        Fx.run(() -> fieldKey(tags, KeyCode.ESCAPE));
+        assertEquals(List.of(), Fx.call(tagField::suggestions));
+        assertTrue(Fx.call(dialog::isShowing));
+
+        // A chip toggles its tag; the field's own text lights the chips.
+        Fx.run(() -> {
+            Dialogs.all(root(dialog), javafx.scene.control.ToggleButton.class).stream()
+                    .filter(b -> b.getText().equals("keep"))
+                    .findFirst()
+                    .orElseThrow()
+                    .fire();
+        });
+        assertEquals("4k-hdr, keep", Fx.call(tags::getText));
+        assertEquals(List.of("4k-hdr", "keep"), Fx.call(tagField::litChips));
+        assertEquals(List.of(), Fx.call(tagField::suggestions), "a chip does not open the list");
+        Fx.run(() -> tags.setText("4k-hdr, keep, new"));
+
+        // Simple mode hides the chips with the field.
+        Fx.run(() -> dialog.applySimple(true));
+        assertFalse(Fx.call(() -> tagField.chips().isVisible()));
+        Fx.run(() -> dialog.applySimple(false));
+        assertTrue(Fx.call(() -> tagField.chips().isVisible()));
+
+        Fx.run(dialog::confirm);
+        AddDialog.Choice choice = await(answer).orElseThrow();
+        assertEquals(List.of("4k-hdr", "keep", "new"), choice.request().labels().tags());
+    }
+
+    private static void fieldKey(TextField field, KeyCode code) {
+        Event.fireEvent(field, new KeyEvent(KeyEvent.KEY_PRESSED, "", "", code, false, false, false, false));
+    }
+
+    @Test
     void aMagnetWaitsForItsFilesThenAddsThem(@TempDir Path dir) {
         Stage owner = owner();
         AddDialog dialog = Fx.call(() -> new AddDialog(

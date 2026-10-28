@@ -1015,7 +1015,8 @@
     -fx-border-width: 0;
 }
 
-.search-chip {
+.search-chip,
+.tag-chip {
     -fx-background-color: -color-bg-default;
     -fx-background-insets: 0;
     -fx-background-radius: 12;
@@ -1027,11 +1028,13 @@
     -fx-font-size: 0.95em;
 }
 
-.search-chip:hover {
+.search-chip:hover,
+.tag-chip:hover {
     -fx-text-fill: -color-fg-default;
 }
 
-.search-chip:selected {
+.search-chip:selected,
+.tag-chip:selected {
     -fx-background-color: -color-accent-subtle;
     -fx-border-color: -color-accent-subtle;
     -fx-text-fill: -color-accent-fg;
@@ -1039,6 +1042,24 @@
 
 .search-chip:focused {
     -fx-border-color: -color-accent-emphasis;
+}
+
+/* The Add dialog's tags: the existing ones as chips under the field, the suggestions under the caret's tag. */
+.tag-chips-box,
+.tag-chips-box > .viewport {
+    -fx-background-color: transparent;
+    -fx-background-insets: 0;
+    -fx-border-width: 0;
+    -fx-padding: 6 0 0 0;
+}
+
+.tag-suggestions {
+    -fx-background-color: -color-bg-overlay;
+    -fx-border-color: -color-border-default;
+    -fx-border-width: 1;
+    -fx-background-radius: 6;
+    -fx-border-radius: 6;
+    -fx-padding: 2;
 }
 
 /*

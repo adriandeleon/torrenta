@@ -1588,6 +1588,11 @@ public final class MainWindow {
         } else if (action.startsWith("dialog-key:")) {
             if (currentDialog != null && currentDialog.isShowing())
                 currentDialog.keyForCapture(KeyCode.valueOf(action.substring("dialog-key:".length())));
+        } else if (action.startsWith("add-tags:")) {
+            // The Add dialog's tags, typed into the focused field; `~` for a space, `;` for a comma.
+            if (currentDialog != null && currentDialog.isShowing())
+                currentDialog.typeTagsForCapture(
+                        action.substring("add-tags:".length()).replace('~', ' ').replace(';', ','));
         } else if (action.startsWith("link-name:")) {
             // The Add Link dialog's name, typed in; `~` for a space, the action list being trimmed.
             String typed = action.substring("link-name:".length()).replace('~', ' ');
@@ -1833,6 +1838,7 @@ public final class MainWindow {
             System.out.println("capture: add-dialog=" + currentDialog.summaryForCapture());
             System.out.println("capture: content-check=" + currentDialog.contentForCapture());
             System.out.println("capture: dialog-hint=" + currentDialog.hint());
+            System.out.println("capture: add-tags=" + currentDialog.tagsForCapture());
         }
         if (limitsDialog != null && limitsDialog.isShowing())
             System.out.println("capture: dialog=" + limitsDialog.title());
@@ -2668,6 +2674,7 @@ public final class MainWindow {
         }
         AddDialog dialog = new AddDialog(stage, source, preview, via, addDefaults(), labels.categories());
         dialog.applyCapabilities(capabilities);
+        dialog.offerTags(labels.tags());
         dialog.applySimple(simpleOn.get());
         Engine current = engine;
         if (current != null && capabilities.has(Engine.Capability.DEDUP)) {
