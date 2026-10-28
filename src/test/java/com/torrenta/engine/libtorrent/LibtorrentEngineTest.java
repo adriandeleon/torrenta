@@ -7,6 +7,12 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
 
 import com.torrenta.engine.AddRequest;
@@ -298,6 +304,52 @@ class LibtorrentEngineTest {
                     () -> store.contains(MAGNET_ID) && elsewhere.equals(savePathStored(store)));
             engine.answerForTest(removedOne, first);
             assertEquals(elsewhere, savePathStored(store), "the removed torrent's answer is not put over it");
+        }
+    }
+
+    /**
+     * libtorrent4j hands a torrent's info out as a raw pointer, which lives only as long as the
+     * torrent does, and a remove is only posted: the network thread freed a torrent under the alert
+     * thread's read of its file list (macOS CI, in {@code file_storage::file_path}). A remove waits
+     * for a read in flight, and once it is posted no read starts on that torrent.
+     */
+    @Test
+    void aRemoveWaitsForAReadOfTheInfoAndNoReadStartsAfterIt(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "pair");
+        try (LibtorrentEngine engine = engine(dir);
+                ExecutorService threads = Executors.newVirtualThreadPerTaskExecutor()) {
+            engine.start();
+            String id = engine.add(AddRequest.defaults(new AddRequest.TorrentFile(torrent, "pair"), downloads))
+                    .id();
+            Object handle = engine.handleForTest(id);
+            CountDownLatch inside = new CountDownLatch(1);
+            CountDownLatch release = new CountDownLatch(1);
+            Future<Boolean> reading = threads.submit(() -> engine.readInfoForTest(handle, () -> {
+                inside.countDown();
+                try {
+                    release.await(30, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }));
+            assertTrue(inside.await(10, TimeUnit.SECONDS), "the read started");
+            Future<?> removing = threads.submit(() -> {
+                engine.remove(id, false);
+                return null;
+            });
+            assertThrows(
+                    TimeoutException.class,
+                    () -> removing.get(300, TimeUnit.MILLISECONDS),
+                    "the remove waits for the read in flight");
+            release.countDown();
+            assertTrue(reading.get(10, TimeUnit.SECONDS));
+            removing.get(10, TimeUnit.SECONDS);
+            assertFalse(
+                    engine.readInfoForTest(handle, () -> {
+                        throw new AssertionError("read after the remove was posted");
+                    }),
+                    "no read starts on a torrent being removed");
         }
     }
 
