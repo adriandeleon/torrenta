@@ -348,4 +348,57 @@ class SessionOnFakeEngineTest {
         Path real = Files.write(dir.resolve("real.torrent"), "d4:infod4:name1:xee".getBytes(StandardCharsets.US_ASCII));
         assertTrue(other.resolve(real.toString()) instanceof AddRequest.TorrentFile);
     }
+
+    /**
+     * The watch folders as the session runs them: the service's own thread and watch service, the
+     * file's add screened through the session, and the file set aside once added.
+     */
+    @Test
+    void aMagnetDroppedInAWatchedFolderIsAddedThroughTheSession() throws Exception {
+        Path watched = Files.createDirectories(dir.resolve("watched"));
+        new com.torrenta.store.WatchFolderStore(dir)
+                .set(List.of(new com.torrenta.engine.WatchFolder(
+                        watched.toString(),
+                        com.torrenta.engine.WatchFolder.AfterAdd.RENAME,
+                        com.torrenta.engine.WatchFolder.SaveTo.DEFAULT,
+                        "",
+                        "",
+                        true)));
+        Settings settings = settings();
+        Heard host = new Heard();
+        Session s = new Session(
+                settings,
+                dir,
+                new com.torrenta.store.LabelStore(dir),
+                loaded(new com.torrenta.store.WatchFolderStore(dir)),
+                new com.torrenta.rss.RssStore(dir),
+                Runnable::run,
+                host);
+        session = s;
+        FakeEngine fake = new FakeEngine();
+        s.start(fake);
+        await("watching", () -> s.watcher() != null && !s.watcher().entries().isEmpty());
+        String hash = "ef".repeat(20);
+        Files.writeString(watched.resolve("film.magnet"), "magnet:?xt=urn:btih:" + hash + "&dn=Film\n");
+        await(
+                "the add",
+                () -> fake.torrents().stream().anyMatch(t -> t.name().contains(hash) || t.id().contains(hash)));
+        await(
+                "set aside",
+                () -> Files.exists(watched.resolve("film.magnet" + com.torrenta.engine.WatchFolder.HANDLED_SUFFIX)));
+        assertTrue(
+                fake.calls().stream().anyMatch(c -> c.startsWith("add Magnet")),
+                fake.calls().toString());
+        Files.writeString(watched.resolve("junk.torrent"), "not a torrent");
+        await(
+                "refused",
+                () -> Files.exists(watched.resolve("junk.torrent" + com.torrenta.engine.WatchFolder.INVALID_SUFFIX)));
+        assertFalse(host.reports.isEmpty(), "the watcher's lines reach the owner");
+        s.stop();
+    }
+
+    private static com.torrenta.store.WatchFolderStore loaded(com.torrenta.store.WatchFolderStore store) {
+        store.load();
+        return store;
+    }
 }
