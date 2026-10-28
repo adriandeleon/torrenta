@@ -5,6 +5,8 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+## 0.4.0 — 2026-10-27
+
 ### Added
 
 - **Simple mode, Editora's Simple UI mode for a torrent client.** View → Simple Mode, the toolbar's
@@ -19,12 +21,10 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   detail pane its tab, and turning it off brings each back as it was. RSS rules, watch folders and
   automation keep running. A menu whose group empties, in this mode or for an engine that lacks a
   capability, no longer shows two separators together.
-
 - **Simple mode has its own columns.** Comfortable rows, whatever the saved density, with the
   name (its progress bar and status sentence inside), the size, the two rates and the time left;
   every other column stays in the table's column menu. Columns moved or shown in the mode are
   remembered for it alone (`table.columns.simple`), and the full list's are left as they were.
-
 - **Report a Problem, a GitHub issue from the debug log.** Help → Report a Problem… (also a
   button in the Debug Log window) shows a report of this session's and the last session's logs
   with the version, engine, Java and OS, already cleaned of home-folder paths, the user name,
@@ -34,6 +34,11 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   there too. `torrenta --report` does the same without starting Torrenta, for when it will not
   start: it writes the report to the current folder and opens the issue. Torrenta sends nothing
   itself.
+- **The Add dialog offers the tags you already have.** A chip for each one sits under the tags
+  field, lit while the tag is in it; a press adds or removes it. Typing suggests the tags that
+  match the one at the caret (those that start with it first); Down and Up move, Enter or Tab
+  takes one, and Escape closes the list rather than the dialog. Down on an empty tag lists them
+  all. The dialog is a little larger to give the chips room.
 
 ### Changed
 
@@ -47,33 +52,55 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   row, a tab, a column header, a status bar entry, a path in a dialog: any text ending in "…"
   shows its whole text as a tooltip, in every window and dialog. A label with a tooltip of its own
   keeps it.
-
+- **The Sync page waits for its switch.** Until "Keep settings in sync" is ticked, the URL,
+  branch, interval and buttons are disabled; ticking it with no URL puts the cursor in the URL
+  field. Enter (or leaving the field) connects. Create on GitHub is offered only while no
+  repository is named, and the one it makes is filled in and connected at once. A failed
+  connect leaves the box ticked and says why.
+- **Thousands of torrents no longer weigh on the window.** A sorted list is sorted once a second
+  instead of once per row, the sidebar counts all its entries in one pass, and the poll keeps
+  the session's handles between ticks and finds a torrent by its hash instead of walking the
+  list. A launch no longer rewrites every seed's resume data, the periodic save takes a twelfth
+  of the torrents every ten seconds instead of all of them every two minutes, and libtorrent's
+  alert queue is ten times longer, so a burst of saves no longer pushes out metadata and tracker
+  news (a drop is logged, at most once a minute). Dragging a divider saves the settings once, not
+  once per pixel, and a change to a setting that does not sync starts no sync round.
 - **A Transmission daemon with thousands of torrents is polled lightly.** Most seconds the list
   asks only for the torrents the daemon counts as recently active, without their tracker lists,
   in the daemon's table format, and keeps the rest as they were; the whole list is read every
   half minute and after anything Torrenta does. The detail pane reads a torrent's file names once
   and only their progress after that. Adds and removes from another client still show within a
   second.
-
 - **The detail pane keeps up with a torrent of 50,000 files.** Each tick reads only what the
   showing tab needs (the Files tab no longer pays for peers and pieces, the Peers tab for the
   file list), the file list's fixed half is read once, the files and folders that did not change
   are left alone, and the Overview's unavailable-pieces rule is one pass. The Peers tab keeps its
   selection and scroll from one second to the next.
-- **The Sync page waits for its switch.** Until "Keep settings in sync" is ticked, the URL,
-  branch, interval and buttons are disabled; ticking it with no URL puts the cursor in the URL
-  field. Enter (or leaving the field) connects. Create on GitHub is offered only while no
-  repository is named, and the one it makes is filled in and connected at once. A failed
-  connect leaves the box ticked and says why.
 - **A large IP blocklist costs a fraction of what it did.** A 300,000-line list parses in about
   70 ms instead of most of a second, is read from disk line by line, and is parsed again only
   when the file changes, so a peer ban or a settings edit no longer re-reads it. What stays in
   memory between uses is about 3 MiB instead of 40, and building the filter no longer holds up
   the list's once-a-second refresh. An out-of-range address such as `1.2.3.256` is no longer
   looked up as a host name.
+- **A long session stays within bounds.** Speed history is kept for the eight torrents selected
+  last rather than every one ever selected, the search cache holds at most 200 answers, the
+  session's log file starts again past 4 MiB (saying so) instead of growing without end, and a
+  feed that answers "not modified" or has nothing new no longer rewrites its whole article file.
 
 ### Fixed
 
+- **Removing a torrent while its files were being read could crash Torrenta.** libtorrent frees
+  a torrent's file list with the torrent, and a read on another thread (the content index, the
+  detail pane, a rename, an export) could land after a remove had freed it; it was seen once, as a
+  crash on macOS. Reads and removes now take turns.
+- **A torrent removed and added again was forgotten at the next start.** Nothing was saved for
+  it after the second add; it is now stored again however it comes back (file, magnet, the Add
+  dialog, a watch folder, an RSS rule), and a late save meant for the removed copy still cannot
+  overwrite the new one.
+- **The `.part` suffix and the move out of the incomplete folder could be lost** for a torrent
+  whose files were checked very quickly after the add, so they were neither suffixed nor moved
+  and a restart did not remember them. The torrent's storage choices are now recorded before the
+  add.
 - **A warning that keeps coming no longer buries the debug log.** One CSS warning repeated for
   every table cell wrote 28,000 lines in twelve minutes, pushing everything else, the first lines
   included, out of the Debug Log window and the session file. A line that repeats is now written
@@ -83,7 +110,6 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   network watch listened to every property change on the system bus, and dbus-java refused a
   long systemd device path with a warning and a stack trace each time. It now asks the bus for
   UPower's and NetworkManager's signals alone.
-
 - **Hidden to the tray or minimised, Torrenta stops drawing a window nobody sees.** The
   once-a-second poll used to fetch the detail pane's torrent (pieces, files, peers) and redraw the
   list, the sidebar and the status bar even with the window out of sight; now it keeps only what
