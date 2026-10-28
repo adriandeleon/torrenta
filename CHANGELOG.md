@@ -37,6 +37,17 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Changed
 
+- **The toolbar leaves Search and RSS to the view strip.** Their buttons repeated the Transfers ·
+  Search · RSS row right under it; `Ctrl+2`, `Ctrl+3`, the View menu and the palette still reach
+  them.
+- **A removal's button is red.** Every Remove question (torrents, with or without their files,
+  Move to trash, feeds, rules, watch folders, providers, profiles, categories, tags) draws its
+  Remove button in the danger colour instead of the accent green.
+- **A label cut short for space says the rest on hover.** A torrent's name in the list, a sidebar
+  row, a tab, a column header, a status bar entry, a path in a dialog: any text ending in "…"
+  shows its whole text as a tooltip, in every window and dialog. A label with a tooltip of its own
+  keeps it.
+
 - **A Transmission daemon with thousands of torrents is polled lightly.** Most seconds the list
   asks only for the torrents the daemon counts as recently active, without their tracker lists,
   in the daemon's table format, and keeps the rest as they were; the whole list is read every
