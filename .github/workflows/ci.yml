@@ -43,6 +43,21 @@ jobs:
           # other allocators ignore it).
           MALLOC_PERTURB_: '165'
 
+      # Line coverage differs by platform (OS-only code, tools on the PATH such as
+      # transmission-daemon), and the pom's floors are set from these numbers: the whole project,
+      # then each package, from the report the test phase wrote.
+      - name: Print line coverage
+        if: always()
+        shell: bash
+        run: |
+          csv=target/site/jacoco/jacoco.csv
+          [ -f "$csv" ] || { echo "no coverage report"; exit 0; }
+          awk -F, 'NR > 1 { m[$2] += $8; c[$2] += $9; tm += $8; tc += $9 }
+            END {
+              printf "TOTAL %.2f%% (%d of %d lines)\n", 100 * tc / (tm + tc), tc, tm + tc
+              for (p in m) printf "%-34s %6.2f%% (%d missed)\n", p, 100 * c[p] / (m[p] + c[p]), m[p] | "sort"
+            }' "$csv"
+
       # A native crash kills the fork with no test failure, and surefire names only the class.
       # TestProgress writes a line before and after every test: a start with no end is the test
       # the JVM died in. The fork's crash report goes beside it (-XX:ErrorFile in the pom), and on
