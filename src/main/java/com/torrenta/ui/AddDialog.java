@@ -168,6 +168,7 @@ final class AddDialog {
     private Label layoutLabel;
     private final ChoiceBox<String> category = new ChoiceBox<>();
     private final TextField tags = new TextField();
+    private final TagField tagField = new TagField(tags);
     private final CheckBox withoutAsking = new CheckBox(tr("dialog.add.withoutAsking"));
     /** Category, stop condition, layout, tags and the options: what Simple mode leaves to Settings. */
     private List<javafx.scene.Node> beyondSimple = List.of();
@@ -386,11 +387,13 @@ final class AddDialog {
                 filingBox,
                 tagsHeading,
                 tags,
+                tagField.chips(),
                 optionsHeading,
                 options);
-        right.setPrefWidth(300);
-        right.setMinWidth(300);
-        right.setMaxWidth(300);
+        // Wide enough for the tags' chips to sit several to a row.
+        right.setPrefWidth(360);
+        right.setMinWidth(360);
+        right.setMaxWidth(360);
 
         HBox body = new HBox(18, left);
         if (!existing) body.getChildren().add(right);
@@ -470,7 +473,7 @@ final class AddDialog {
         content.setPadding(new Insets(18, 20, 16, 20));
         content.getStyleClass().add("add-dialog");
 
-        Scene scene = new Scene(content, existing ? 560 : 780, 560);
+        Scene scene = new Scene(content, existing ? 560 : 860, 600);
         scene.getStylesheets()
                 .add(AddDialog.class.getResource("/com/torrenta/styles/app.css").toExternalForm());
         scene.getStylesheets()
@@ -609,6 +612,8 @@ final class AddDialog {
      */
     void applySimple(boolean on) {
         for (javafx.scene.Node n : beyondSimple) shown(n, !on);
+        // The chips also hide while no tag exists, so they keep their own switch.
+        tagField.setOffered(!on);
     }
 
     private static void shown(javafx.scene.Node node, boolean on) {
@@ -746,6 +751,28 @@ final class AddDialog {
     private void waitHere() {
         waiting.set(true);
         if (!tags.isFocused() && !savePath.isFocused()) add.requestFocus();
+    }
+
+    /** The tags that exist, offered as chips under the field and as it is typed. */
+    void offerTags(List<String> existing) {
+        tagField.setExisting(existing);
+    }
+
+    /** The tags field's helper, for tests and the capture hook. */
+    TagField tagFieldForCapture() {
+        return tagField;
+    }
+
+    /** Types into the tags field as a person would, the focus in it so the suggestions open. */
+    void typeTagsForCapture(String text) {
+        tags.requestFocus();
+        tagField.typeForCapture(text);
+    }
+
+    /** The field, the chips lit and the suggestions open, for the capture's {@code add-tags=} line. */
+    String tagsForCapture() {
+        return "\"" + tags.getText() + "\" lit=" + tagField.litChips() + " suggestions=" + tagField.suggestions()
+                + " chips=" + tagField.chips().isVisible();
     }
 
     private TorrentLabels labels() {
