@@ -389,7 +389,13 @@ class MainWindowEdgesTest {
             fireShownItem(tr("detail.files.copyStream"));
             f.awaitStatus(tr("status.streamCopied", "film.mkv"));
             f.action("files-stream:1");
-            Fx.waitUntil("the player run", () -> f.window.statusText().contains("film.mkv"));
+            // The copied URL's line names the file too: wait for the player's own, which is found off
+            // the FX thread (slowly on Windows) and would otherwise land over a later line.
+            String copied = tr("status.streamCopied", "film.mkv");
+            Fx.waitUntil("the player run", () -> {
+                String now = f.window.statusText();
+                return now.contains("film.mkv") && !now.equals(copied);
+            });
             // Trackers: reannounce, remove the selected one, add more through the prompt.
             f.action("detail:trackers");
             Fx.waitUntil("the trackers listed", () -> trackerTable(f) != null);
