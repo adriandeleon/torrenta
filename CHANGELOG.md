@@ -74,6 +74,16 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Fixed
 
+- **A warning that keeps coming no longer buries the debug log.** One CSS warning repeated for
+  every table cell wrote 28,000 lines in twelve minutes, pushing everything else, the first lines
+  included, out of the Debug Log window and the session file. A line that repeats is now written
+  three times, then once at 10, 100, 1,000… copies with the count; the rest are counted, not
+  written.
+- **No more D-Bus warnings from systemd's device signals on Linux.** The battery and metered
+  network watch listened to every property change on the system bus, and dbus-java refused a
+  long systemd device path with a warning and a stack trace each time. It now asks the bus for
+  UPower's and NetworkManager's signals alone.
+
 - **Hidden to the tray or minimised, Torrenta stops drawing a window nobody sees.** The
   once-a-second poll used to fetch the detail pane's torrent (pieces, files, peers) and redraw the
   list, the sidebar and the status bar even with the window out of sight; now it keeps only what
