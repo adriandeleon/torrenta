@@ -37,6 +37,17 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Changed
 
+- **The toolbar leaves Search and RSS to the view strip.** Their buttons repeated the Transfers ·
+  Search · RSS row right under it; `Ctrl+2`, `Ctrl+3`, the View menu and the palette still reach
+  them.
+- **A removal's button is red.** Every Remove question (torrents, with or without their files,
+  Move to trash, feeds, rules, watch folders, providers, profiles, categories, tags) draws its
+  Remove button in the danger colour instead of the accent green.
+- **A label cut short for space says the rest on hover.** A torrent's name in the list, a sidebar
+  row, a tab, a column header, a status bar entry, a path in a dialog: any text ending in "…"
+  shows its whole text as a tooltip, in every window and dialog. A label with a tooltip of its own
+  keeps it.
+
 - **A Transmission daemon with thousands of torrents is polled lightly.** Most seconds the list
   asks only for the torrents the daemon counts as recently active, without their tracker lists,
   in the daemon's table format, and keeps the rest as they were; the whole list is read every
@@ -62,6 +73,16 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   looked up as a host name.
 
 ### Fixed
+
+- **A warning that keeps coming no longer buries the debug log.** One CSS warning repeated for
+  every table cell wrote 28,000 lines in twelve minutes, pushing everything else, the first lines
+  included, out of the Debug Log window and the session file. A line that repeats is now written
+  three times, then once at 10, 100, 1,000… copies with the count; the rest are counted, not
+  written.
+- **No more D-Bus warnings from systemd's device signals on Linux.** The battery and metered
+  network watch listened to every property change on the system bus, and dbus-java refused a
+  long systemd device path with a warning and a stack trace each time. It now asks the bus for
+  UPower's and NetworkManager's signals alone.
 
 - **Hidden to the tray or minimised, Torrenta stops drawing a window nobody sees.** The
   once-a-second poll used to fetch the detail pane's torrent (pieces, files, peers) and redraw the

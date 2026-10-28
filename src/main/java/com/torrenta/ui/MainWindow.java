@@ -1192,6 +1192,14 @@ public final class MainWindow {
         if (popup != null) return popup.getScene();
         if (reportWindow != null && reportWindow.isShowing()) return reportWindow.scene();
         if (debugLogWindow != null && debugLogWindow.isShowing()) return debugLogWindow.scene();
+        // A question asked over the window (RemoveConfirm's), which nothing above holds.
+        for (javafx.stage.Window w : javafx.stage.Window.getWindows()) {
+            if (w instanceof Stage s
+                    && s != stage
+                    && s.isShowing()
+                    && s.getOwner() == stage
+                    && s.getModality() != javafx.stage.Modality.NONE) return s.getScene();
+        }
         return stage.getScene();
     }
 
@@ -1820,6 +1828,9 @@ public final class MainWindow {
         } else if (action.startsWith("palette:")) {
             palette.show(offeredCommands());
             palette.setQueryForCapture(action.substring("palette:".length()));
+        } else if (action.equals("remove") || action.equals("remove-data")) {
+            // Its question is a modal showAndWait, which a capture's timeline may not open.
+            Platform.runLater(command(action).run());
         } else {
             commands.stream()
                     .filter(c -> c.id().equals(action))
@@ -4713,7 +4724,8 @@ public final class MainWindow {
         paletteButton =
                 Icons.toolbarButton(Icons.palette(), paletteButtonName(), () -> palette.show(offeredCommands()));
         // Settings alone at the right end, as Editora keeps it, Simple mode's switch beside it in
-        // either mode, so the way back is one click; the palette with the other views.
+        // either mode, so the way back is one click. Search and RSS have no buttons: the view strip
+        // right under the toolbar already switches to them.
         simpleButton = toolButton("toggle-simple", Icons.simpleMode());
         toolbar = new ToolBar(
                 toolButton("create", Icons.newFile()),
@@ -4726,8 +4738,6 @@ public final class MainWindow {
                 toolButton("remove", Icons.trash()),
                 new Separator(),
                 toolButton("filter", Icons.find()),
-                toolButton("search", Icons.search()),
-                toolButton("rss", Icons.rss()),
                 toolButton("event-log", Icons.history()),
                 paletteButton,
                 spacer,

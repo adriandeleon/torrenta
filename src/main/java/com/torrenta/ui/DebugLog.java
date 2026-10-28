@@ -30,7 +30,8 @@ import org.jspecify.annotations.Nullable;
  * covers "it is misbehaving right now". A file beside the settings covers "it died", since a
  * crashed process cannot show its own window; it starts afresh each session, so it stays the story of
  * this run, and one that passes {@link #MAX_FILE_BYTES} starts again with a line saying so, so a
- * storm of warnings cannot fill the disk. The one before is kept beside it ({@value
+ * storm of warnings cannot fill the disk; a line that keeps coming is written three times and then
+ * only counted ({@link LogRepeats}), so the storm cannot push out the lines around it either. The one before is kept beside it ({@value
  * #PREVIOUS_FILE_NAME}): a crash is reported from the launch after it, and that launch must not erase
  * the log that recorded it. Both go into a problem report (Help → Report a Problem, {@code --report}).
  *
@@ -59,6 +60,9 @@ public final class DebugLog {
 
     private static final Deque<String> ENTRIES = new ArrayDeque<>();
 
+    /** A line that comes again and again is written a few times, then counted. */
+    private static final LogRepeats REPEATS = new LogRepeats();
+
     private static @Nullable Path file;
     /** Open on {@link #file} for the session; each line is one write, so a crash keeps the last. */
     private static @Nullable OutputStream out;
@@ -79,7 +83,7 @@ public final class DebugLog {
             @Override
             public void publish(LogRecord record) {
                 if (record.getLevel().intValue() < Level.WARNING.intValue()) return;
-                append(format(record));
+                DebugLog.publish(record);
             }
 
             @Override
@@ -163,6 +167,17 @@ public final class DebugLog {
         append(stamp(text));
     }
 
+    /** A record, unless it is one more copy of a line already written often enough ({@link LogRepeats}). */
+    static synchronized void publish(LogRecord record) {
+        String key =
+                record.getLevel().getName() + " " + shortName(record.getLoggerName()) + " — " + record.getMessage();
+        switch (REPEATS.seen(key)) {
+            case LogRepeats.Write w -> append(format(record));
+            case LogRepeats.Tally t -> append(stamp(LogRepeats.tallyText(t.count(), key)));
+            case LogRepeats.Drop d -> {}
+        }
+    }
+
     static synchronized void append(String line) {
         ENTRIES.addLast(line);
         while (ENTRIES.size() > MAX_ENTRIES) ENTRIES.removeFirst();
@@ -202,6 +217,7 @@ public final class DebugLog {
 
     public static synchronized void clear() {
         ENTRIES.clear();
+        REPEATS.clear();
     }
 
     /** The file being mirrored to, or null when there is none. */

@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
@@ -85,11 +84,14 @@ public final class SystemConditions {
         @Override
         public void onChange(Runnable listener) {
             try {
-                conn.addSigHandler(Properties.PropertiesChanged.class, signal -> {
-                    String path = signal.getPath();
-                    Map<String, Variant<?>> changed = signal.getPropertiesChanged();
-                    if ((UPOWER_PATH.equals(path) && changed.containsKey("OnBattery"))
-                            || (NM_PATH.equals(path) && changed.containsKey("Metered"))) listener.run();
+                // One match per object, so the bus sends these two and nothing else: unscoped, every
+                // systemd unit's PropertiesChanged came too, and dbus-java refused to decode a
+                // device unit's long object path with a WARNING each time.
+                conn.addSigHandler(Properties.PropertiesChanged.class, upower, signal -> {
+                    if (signal.getPropertiesChanged().containsKey("OnBattery")) listener.run();
+                });
+                conn.addSigHandler(Properties.PropertiesChanged.class, nm, signal -> {
+                    if (signal.getPropertiesChanged().containsKey("Metered")) listener.run();
                 });
             } catch (Exception e) {
                 LOG.log(Level.FINE, "No PropertiesChanged from the system bus; read once a minute", e);

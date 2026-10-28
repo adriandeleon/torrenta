@@ -45,17 +45,20 @@ public final class Fonts {
 
     /**
      * Puts the interface font on a scene. Per scene, not once in app.css: every window and dialog
-     * is a scene of its own, and a scene sheet survives a runtime theme switch.
+     * is a scene of its own, and a scene sheet survives a runtime theme switch. Every window and
+     * dialog comes through here, so the tooltips for cut-short labels ({@link TruncatedTips}) do too.
      */
     public static void installUiFont(Scene scene) {
         var css = Fonts.class.getResource(SHEET);
         if (css != null && !scene.getStylesheets().contains(css.toExternalForm()))
             scene.getStylesheets().add(css.toExternalForm());
+        TruncatedTips.install(scene);
     }
 
     /** The same, for a {@code Dialog}'s pane, whose scene does not exist until it is shown. */
     public static void installUiFont(DialogPane pane) {
         var css = Fonts.class.getResource(SHEET);
         if (css != null) pane.getStylesheets().add(css.toExternalForm());
+        TruncatedTips.install(pane);
     }
 }

@@ -7,6 +7,7 @@ import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
 import javafx.stage.Window;
 
+import atlantafx.base.theme.Styles;
 import org.jspecify.annotations.Nullable;
 
 import static com.torrenta.i18n.Messages.tr;
@@ -14,7 +15,7 @@ import static com.torrenta.i18n.Messages.tr;
 /**
  * The one question asked before something is removed: the torrent list, the RSS tab and every
  * list in Settings ask it the same way, with a Remove button and Cancel, so nothing goes on a
- * single click anywhere.
+ * single click anywhere. The Remove button is red ({@code danger}), never the accent.
  */
 final class RemoveConfirm {
 
@@ -74,6 +75,8 @@ final class RemoveConfirm {
         Fonts.installUiFont(confirm.getDialogPane());
         ButtonType yes = new ButtonType(button, ButtonType.OK.getButtonData());
         confirm.getButtonTypes().setAll(yes, StockButtons.cancel());
+        // Red, not the accent: the default button is the one that removes.
+        confirm.getDialogPane().lookupButton(yes).getStyleClass().add(Styles.DANGER);
         Optional<ButtonType> answer = confirm.showAndWait();
         return answer.isPresent() && answer.get() == yes;
     }
