@@ -701,6 +701,22 @@ public final class LibtorrentEngine implements Engine {
         if (info == null && request.stopCondition() == AddRequest.StopCondition.METADATA_RECEIVED)
             stopAfterMetadata.add(id);
         rememberTrackers(id, params.getTrackers());
+        // Recorded before the add, as the stop above is: a torrent with no files on disk is
+        // checked at once, and the checked alert, on its own thread, reads this to put the
+        // suffix on and owe the move. Recorded after, it could find nothing (a slow CI runner
+        // did), and that alert does not come again.
+        TorrentStorage before = storage.get(id);
+        TorrentStorage owed = new TorrentStorage(
+                        start.equals(destination) ? "" : destination.toString(), choices.partSuffix(), Set.of())
+                .withRenamed(laidOut, originals)
+                .withFound(info == null ? Map.of() : choices.found())
+                .withStopOnMetadata(stopAfterMetadata.contains(id));
+        try {
+            if (!owed.isEmpty()) writeStorage(id, owed);
+        } catch (EngineException e) {
+            stopAfterMetadata.remove(id);
+            throw e;
+        }
 
         // The synchronous add, so the caller gets a handle (and an error) straight away; the
         // add_torrent_alert that follows is what writes the first resume data.
@@ -709,16 +725,11 @@ public final class LibtorrentEngine implements Engine {
         Reference.reachabilityFence(known);
         if (ec.value() != 0) {
             stopAfterMetadata.remove(id);
+            if (!owed.isEmpty()) writeStorageQuietly(id, before == null ? TorrentStorage.NONE : before);
             throw new EngineException(ec.message());
         }
         TorrentHandle handle = new TorrentHandle(raw);
         if (!request.labels().isEmpty()) writeLabels(id, request.labels());
-        TorrentStorage owed = new TorrentStorage(
-                        start.equals(destination) ? "" : destination.toString(), choices.partSuffix(), Set.of())
-                .withRenamed(laidOut, originals)
-                .withFound(info == null ? Map.of() : choices.found())
-                .withStopOnMetadata(stopAfterMetadata.contains(id));
-        if (!owed.isEmpty()) writeStorage(id, owed);
 
         return snapshot(handle);
     }
