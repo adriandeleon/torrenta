@@ -5,6 +5,17 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Fixed
+
+- **A restart no longer downloads again a torrent whose `.part` names had come off.** With the
+  `.part` suffix on (Settings → Adding torrents), a torrent in a folder that had finished
+  downloading came back from a restart at 0 % and started again into new `.part` files beside
+  the complete ones: libtorrent's resume data keeps such a file under a name it reads back from
+  the wrong folder. The full name is now put back for every file it names. A torrent already
+  caught by this is repaired at the next start: the complete files are found under their own
+  names, their pieces are checked, and the leftover `.part` files are named in the Debug Log, to
+  be deleted.
+
 ## 0.4.0 — 2026-10-27
 
 ### Added

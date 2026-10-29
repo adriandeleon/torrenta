@@ -336,7 +336,11 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   the file (33 %, re-downloading). `TorrentStorage.renamed` (the `.storage` sidecar) holds every
   renamed file's full path; `restoreNames` puts them all back before the add, `detail()` shows
   them, and the `.part` suffix goes on and off the recorded name (`onDisk`), never the original.
-  `Engine.renamePath` does a file or a folder (`FileRenames.plan`/`problem`, tested); the
+  A file renamed back (its suffix off, its own name given back) is still a rename to libtorrent,
+  written root-relative, while the sidecar no longer lists it: `restoreNames` puts back every
+  index the resume data names too, or 0.4.0 re-downloaded every finished multi-file torrent at
+  restart. A record left saying suffixed over a whole plain file (`suffixCameOff`) is corrected
+  and the pieces cleared so the add checks. `Engine.renamePath` does a file or a folder (`FileRenames.plan`/`problem`, tested); the
   `file_renamed_alert` handler removes the folders a rename emptied, never the save path. A
   name given back as the original is no longer a rename, and an empty record drops the sidecar.
   Transmission renames through `torrent-rename-path` (checked by the same `FileRenames.problem`

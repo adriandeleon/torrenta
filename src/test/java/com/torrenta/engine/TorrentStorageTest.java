@@ -2,9 +2,13 @@ package com.torrenta.engine;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Map;
 import java.util.Set;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -27,6 +31,27 @@ class TorrentStorageTest {
         TorrentStorage owed = new TorrentStorage("/x", true, Set.of(0, 2));
         assertEquals(new TorrentStorage("", true, Set.of(0, 2)), owed.withDestination(""));
         assertEquals(new TorrentStorage("/x", true, Set.of(2)), owed.withSuffixed(Set.of(2)));
+    }
+
+    @Test
+    void aSuffixCameOffWhereTheOwnNameIsOnDiskWhole(@TempDir Path save) throws IOException {
+        Files.createDirectories(save.resolve("pair/sub"));
+        Files.write(save.resolve("pair/a.bin"), new byte[10]);
+        Files.write(save.resolve("pair/a.bin.part"), new byte[10]);
+        Files.write(save.resolve("pair/sub/b.bin"), new byte[3]);
+        Files.write(save.resolve("pair/x.bin"), new byte[7]);
+        Map<Integer, String> originals = Map.of(0, "pair/a.bin", 1, "pair/sub/b.bin", 2, "pair/c.bin", 3, "pair/d.bin");
+        long[] sizes = {10, 5, 4, 7};
+        TorrentStorage owed = new TorrentStorage("", true, Set.of(0, 1, 2, 3), Map.of(3, "pair/x.bin"), Map.of());
+
+        assertEquals(
+                Set.of(0, 3),
+                owed.suffixCameOff(save, originals::get, i -> sizes[i]),
+                "whole under its own name, or the name it was given; not one cut short, not one absent");
+        assertEquals(
+                Set.of(),
+                owed.withSuffixed(Set.of(1, 2)).suffixCameOff(save, originals::get, i -> sizes[i]),
+                "only the files the record has suffixed");
     }
 
     @Test

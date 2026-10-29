@@ -331,9 +331,13 @@ class MainWindowEdgesTest {
         }
     }
 
-    /** The saved view row's context menu item with this text, fired as a click on it does. */
+    /**
+     * The saved view row's context menu item with this text, fired as a click on it does. The
+     * settings hear of a saved view before the sidebar has drawn its row (a slow macOS runner
+     * looked in between), so the row is waited for, not looked up once.
+     */
     private static void fireViewItem(WindowFixture f, String text) {
-        Fx.run(() -> {
+        Fx.waitUntil("a saved view row with " + text, () -> {
             for (Node n : f.stage.getScene().getRoot().lookupAll(".cell")) {
                 if (n instanceof javafx.scene.control.Cell<?> cell && cell.getContextMenu() != null) {
                     ContextMenu menu = cell.getContextMenu();
@@ -341,12 +345,12 @@ class MainWindowEdgesTest {
                     for (MenuItem item : menu.getItems()) {
                         if (text.equals(item.getText())) {
                             item.fire();
-                            return;
+                            return true;
                         }
                     }
                 }
             }
-            throw new AssertionError("no saved view row with " + text);
+            return false;
         });
         Fx.pulse();
     }

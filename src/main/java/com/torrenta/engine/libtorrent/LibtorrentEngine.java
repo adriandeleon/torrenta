@@ -551,16 +551,41 @@ public final class LibtorrentEngine implements Engine {
      * torrent restarted with renamed files (the suffix, a name a person gave, the content
      * layout) would look for them beside its folder, not in it, and find nothing. The sidecar
      * knows every name; the full ones are put back here, before the add.
+     *
+     * <p>That includes every file the resume data names and the sidecar does not: a file whose
+     * suffix came off, or that was given its own name back, is still a rename to libtorrent, and
+     * its own name is the full one. Left as libtorrent wrote it, a restart found nothing and the
+     * file was downloaded again. A record that still says suffixed where the plain file is on
+     * disk, whole, is what that left behind: it is corrected, and the pieces are checked.
      */
     private void restoreNames(String id, add_torrent_params params) {
-        TorrentStorage owed = storage.get(id);
-        if (owed == null || (owed.suffixed().isEmpty() && owed.renamed().isEmpty())) return;
-        org.libtorrent4j.swig.torrent_info info = params.ti_ptr();
-        if (info == null || !info.is_valid()) return;
+        TorrentStorage owed = storage.getOrDefault(id, TorrentStorage.NONE);
         org.libtorrent4j.swig.int_string_map renamed =
                 new org.libtorrent4j.swig.int_string_map(params.get_renamed_files());
+        if (renamed.isEmpty() && owed.suffixed().isEmpty() && owed.renamed().isEmpty()) return;
+        org.libtorrent4j.swig.torrent_info info = params.ti_ptr();
+        if (info == null || !info.is_valid()) return;
         org.libtorrent4j.swig.file_storage files = info.files_impl();
-        Set<Integer> indices = new java.util.TreeSet<>(owed.suffixed());
+        java.util.function.IntFunction<String> original = index -> slashes(files.file_path(index));
+        Set<Integer> cameOff = owed.suffixCameOff(Path.of(params.getSave_path()), original, files::file_size);
+        if (!cameOff.isEmpty()) {
+            Set<Integer> left = new java.util.TreeSet<>(owed.suffixed());
+            left.removeAll(cameOff);
+            owed = owed.withSuffixed(left);
+            writeStorageQuietly(id, owed);
+            // The pieces recorded are the .part's, if any: with none, the add checks the files.
+            params.set_have_pieces(new org.libtorrent4j.swig.bitfield());
+            params.set_verified_pieces(new org.libtorrent4j.swig.bitfield());
+            params.set_unfinished_pieces(new org.libtorrent4j.swig.int_bitfield_map());
+            params.setFlags(params.getFlags().and_(org.libtorrent4j.TorrentFlags.SEED_MODE.inv()));
+            List<String> leftOver = new ArrayList<>();
+            for (int index : cameOff) leftOver.add(TorrentStorage.suffixed(owed.name(index, original.apply(index))));
+            LOG.warning("Torrent " + id + ": found " + cameOff.size()
+                    + " file(s) complete under their own name that the record had as .part; checking them."
+                    + " Any of these left in " + params.getSave_path() + " can be deleted: " + leftOver);
+        }
+        Set<Integer> indices = new java.util.TreeSet<>(renamed.keySet());
+        indices.addAll(owed.suffixed());
         indices.addAll(owed.renamed().keySet());
         for (int index : indices) {
             if (index < 0 || index >= files.num_files()) continue;
