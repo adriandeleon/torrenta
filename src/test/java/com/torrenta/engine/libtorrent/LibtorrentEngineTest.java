@@ -2554,6 +2554,90 @@ class LibtorrentEngineTest {
         }
     }
 
+    /**
+     * A file whose suffix came off is still a rename to libtorrent, which writes it into the
+     * resume data relative to the root folder ({@code a.bin}) and reads it back relative to the
+     * save path. The sidecar no longer lists it, so nothing put the full name back: the restart
+     * found nothing, rechecked to nothing, put the suffix on again and downloaded every file a
+     * second time beside the complete one.
+     */
+    @Test
+    void aFileWhoseSuffixCameOffIsFoundAfterARestart(@TempDir Path dir) throws Exception {
+        byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
+        Path downloads = dir.resolve("downloads");
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        String id;
+        try (LibtorrentEngine seed = seeder(dir, torrent);
+                LibtorrentEngine engine = downloader(dir, store)) {
+            engine.start();
+            id = engine.add(downloadsTorrent(dir, torrent).withStorage(new AddRequest.Storage(null, true, false)))
+                    .id();
+            awaitDownload(
+                    "downloaded",
+                    engine,
+                    id,
+                    seed,
+                    () -> engine.torrents().get(0).progress() >= 1.0 - 1e-6);
+            await(
+                    "the suffix is off",
+                    () -> engine.storageForTest(id).suffixed().isEmpty());
+            await("under its own name", () -> Files.isRegularFile(downloads.resolve("pair/a.bin")));
+        }
+        try (LibtorrentEngine again = engine(dir, store)) {
+            again.start();
+            await(
+                    "complete after the restart",
+                    () -> again.torrents().get(0).progress() >= 1.0 - 1e-6
+                            && again.torrents().get(0).state() == TorrentState.SEEDING);
+            assertTrue(again.storageForTest(id).suffixed().isEmpty(), "no suffix put back on");
+            assertFalse(Files.exists(downloads.resolve("pair/a.bin.part")));
+            assertFalse(Files.exists(downloads.resolve("pair/sub/b.bin.part")));
+        }
+    }
+
+    /**
+     * What that left behind: a record that says both files carry the suffix, a {@code .part}
+     * downloading again, and the complete files under their own names. The restart finds them,
+     * corrects the record and checks the pieces rather than trusting the {@code .part}'s.
+     */
+    @Test
+    void aStaleSuffixOverACompleteFileIsCorrectedAtStart(@TempDir Path dir) throws Exception {
+        Path downloads = dir.resolve("downloads");
+        byte[] torrent = twoFileTorrent(downloads, "pair");
+        TorrentStore store = new TorrentStore(dir.resolve("store"));
+        String id;
+        Set<Integer> files;
+        try (LibtorrentEngine engine = engine(dir, store)) {
+            engine.start();
+            id = engine.add(downloadsTorrent(dir, torrent).withStorage(new AddRequest.Storage(null, true, false)))
+                    .id();
+            await("seeding", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
+            // A hybrid's indices count its padding files: the real ones are read off the detail.
+            files = engine.detail(id).files().stream()
+                    .map(TorrentDetail.FileStatus::index)
+                    .collect(java.util.stream.Collectors.toSet());
+        }
+        assertEquals(2, files.size());
+        store.saveStorage(id, new TorrentStorage("", true, files).encode());
+        Path aPart = downloads.resolve("pair/a.bin.part");
+        Files.write(aPart, new byte[(int) Files.size(downloads.resolve("pair/a.bin"))]);
+
+        try (LibtorrentEngine again = engine(dir, store)) {
+            again.start();
+            assertTrue(again.storageForTest(id).suffixed().isEmpty(), "the record corrected before the add");
+            await(
+                    "complete under the files' own names",
+                    () -> again.torrents().get(0).progress() >= 1.0 - 1e-6
+                            && again.torrents().get(0).state() == TorrentState.SEEDING);
+            assertTrue(again.storageForTest(id).suffixed().isEmpty(), "no suffix put back on");
+        }
+        assertEquals(
+                Set.of(),
+                TorrentStorage.decode(store.loadStorage(id).orElseThrow()).suffixed(),
+                "and on disk");
+        assertTrue(Files.isRegularFile(aPart), "a leftover is the person's to delete, not the engine's");
+    }
+
     @Test
     void theMoveAndTheSuffixSurviveARestart(@TempDir Path dir) throws Exception {
         byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");

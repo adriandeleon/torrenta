@@ -3,10 +3,15 @@ package com.torrenta.engine;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.function.IntFunction;
+import java.util.function.IntToLongFunction;
 
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
@@ -128,6 +133,30 @@ public record TorrentStorage(
     public String onDisk(int index, String original) {
         String name = name(index, original);
         return suffixed.contains(index) ? suffixed(name) : name;
+    }
+
+    /**
+     * The files the record says carry the suffix but whose own name is on disk at full size: the
+     * suffix came off there, and the record is stale. 0.4.0 and earlier left that behind: a
+     * restart looked for a file whose suffix had come off in the wrong folder, found nothing, put
+     * the suffix back on and downloaded it again under {@code .part}, beside the complete one. A
+     * check decides what such a file really holds; this only says where to look.
+     *
+     * @param save the torrent's save path
+     * @param originals each file's own path inside the torrent, by index
+     * @param sizes each file's size, by index
+     */
+    public Set<Integer> suffixCameOff(Path save, IntFunction<String> originals, IntToLongFunction sizes) {
+        Set<Integer> off = new TreeSet<>();
+        for (int index : suffixed) {
+            try {
+                Path plain = save.resolve(name(index, originals.apply(index)));
+                if (Files.isRegularFile(plain) && Files.size(plain) == sizes.applyAsLong(index)) off.add(index);
+            } catch (IOException | InvalidPathException e) {
+                // Unreadable or unnameable: the record stands.
+            }
+        }
+        return off;
     }
 
     /** The name a file carries while incomplete. */
