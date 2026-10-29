@@ -5,6 +5,8 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+## 0.4.1 — 2026-10-28
+
 ### Fixed
 
 - **A restart no longer downloads again a torrent whose `.part` names had come off.** With the
