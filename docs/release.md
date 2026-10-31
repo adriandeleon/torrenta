@@ -63,6 +63,45 @@ tag), fix, and re-run the workflow's failed jobs. `immutableRelease` in `jreleas
 release as a draft, uploads every file, then publishes it, which is the only flow that works once
 GitHub's Immutable Releases are turned on for the repository; it rules out overwriting in place.
 
+## macOS signing and notarization
+
+The `macos-arm64` leg signs the app and dmg with the **Developer ID Application** certificate of
+team `8JKSF797L8` (Adrian De Leon Saldivar), has Apple notarize the dmg and staples the ticket to
+it, so Gatekeeper opens a downloaded Torrenta with no warning. The same certificate and API key sign
+Editora; the setup is shared.
+
+- **Import signing certificate (macOS)** puts the `.p12` into a throw-away keychain and exports
+  `TORRENTA_MAC_SIGN_IDENTITY` / `TORRENTA_MAC_KEYCHAIN`. On a tag, missing secrets fail the leg; a
+  dry run without them builds ad-hoc signed and warns.
+- [`scripts/sign-mac-app.sh`](../scripts/sign-mac-app.sh), run by the `dist` profile after the
+  Info.plist edits and before [`build-installers.sh`](../scripts/build-installers.sh), first sets
+  `<signed>true</signed>` in `Contents/app/.jpackage.xml` (jpackage's dmg wrap otherwise re-signs
+  its copy ad hoc, discarding ours), then signs every Mach-O file (the runtime, jspawnhelper,
+  `torrenta-nox`, libtorrent4j), the runtime bundle, and the app with the hardened runtime and
+  [`packaging/macos/Torrenta.entitlements`](../packaging/macos/Torrenta.entitlements) (JIT only;
+  library validation stays on, since libtorrent4j ships in the bundle under the same team ID).
+  `build-installers.sh` then signs the dmg. Without the identity (any local build) nothing changes.
+- The **smoke test** runs that signed app, so the engine is proven to start under the hardened
+  runtime before anything is uploaded.
+- **Notarize the dmg (macOS)** checks the app inside the dmg still verifies, runs
+  `notarytool submit --wait` with the App Store Connect API key, prints Apple's log, staples, and
+  checks the dmg and its app with `spctl` the way Gatekeeper will.
+
+Secrets (repository secrets on `adriandeleon/torrenta`, the same values as Editora's):
+
+| Secret | What it is |
+|---|---|
+| `MACOS_CERT_P12` | base64 of a `.p12` holding the Developer ID Application certificate, its private key and Apple's Developer ID G2 intermediate (exported with `openssl pkcs12 -export -legacy`) |
+| `MACOS_CERT_PASSWORD` | the `.p12` password |
+| `APPLE_API_KEY_P8` | base64 of the App Store Connect API key (`AuthKey_<id>.p8`, team key, Developer role) |
+| `APPLE_API_KEY_ID` | that key's 10-character ID |
+| `APPLE_API_ISSUER` | the issuer ID (a UUID) shown above the team key list |
+
+The certificate expires **2027-11-30** and the Apple Developer Program membership **2027-10-31**.
+Renew the membership first, then make a new certificate and replace `MACOS_CERT_P12` and
+`MACOS_CERT_PASSWORD` here and in Editora. Apps signed before expiry keep working: the secure
+timestamp proves when they were signed.
+
 ## The package managers
 
 Both need `PACKAGES_TOKEN`, a personal access token with `repo` scope that can push to

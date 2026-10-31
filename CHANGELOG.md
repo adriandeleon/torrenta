@@ -5,6 +5,13 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Changed
+
+- **The macOS app is signed and notarized.** The dmg is now signed with a Developer ID certificate
+  and notarized by Apple, so Torrenta opens on first launch with no Gatekeeper warning and no trip
+  to System Settings → Privacy & Security, and the Homebrew cask no longer carries that caveat. The
+  Windows and Linux packages are still unsigned.
+
 ## 0.4.1 — 2026-10-28
 
 ### Fixed

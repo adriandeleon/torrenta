@@ -4,8 +4,8 @@
 Applications. Intel Macs are not supported yet: the engine's native library is built for Apple
 Silicon only.
 
-Torrenta is not yet signed with an Apple Developer ID, so macOS will refuse to open it the first
-time. Allow it once under System Settings → Privacy & Security → Open Anyway.
+The app is signed with a Developer ID and notarized by Apple, so it opens on first launch like any
+other app.
 
 **Windows** — download and run the `windows-x64` MSI below. The build is unsigned, so SmartScreen
 may warn on first run.

@@ -92,10 +92,6 @@ distributions:
         name: homebrew-tap
         branch: main
         branchPush: main
-      extraProperties:
-        cask.caveats: |
-          Torrenta is not signed with an Apple Developer ID yet, so macOS refuses to open it the
-          first time. Allow it once under System Settings > Privacy & Security > Open Anyway.
 
   torrenta-windows:
     type: NATIVE_PACKAGE

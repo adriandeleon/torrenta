@@ -860,6 +860,22 @@
                                 </configuration>
                             </execution>
                             <execution>
+                                <!-- Developer ID signing, after every edit to the bundle and before
+                                     the installers wrap it. A no-op unless the release workflow set
+                                     TORRENTA_MAC_SIGN_IDENTITY; see the script. -->
+                                <id>sign-mac-app</id>
+                                <phase>package</phase>
+                                <goals><goal>exec</goal></goals>
+                                <configuration>
+                                    <executable>bash</executable>
+                                    <arguments>
+                                        <argument>${project.basedir}/scripts/sign-mac-app.sh</argument>
+                                        <argument>${project.build.directory}/dist/Torrenta.app</argument>
+                                    </arguments>
+                                    <skip>${skip.mac.version.fix}</skip>
+                                </configuration>
+                            </execution>
+                            <execution>
                                 <!-- Last, so it wraps a finished image. -->
                                 <id>build-installers</id>
                                 <phase>package</phase>
