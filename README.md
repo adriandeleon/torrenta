@@ -14,7 +14,7 @@
 
 A keyboard-first, cross-platform BitTorrent client built on JavaFX.
 
-**Website: [adriandeleon.github.io/torrenta-website](https://adriandeleon.github.io/torrenta-website/)**:
+**Website: [torrenta-project.dev](https://torrenta-project.dev/)**:
 features, documentation, keybindings and release news.
 
 <p align="center">
