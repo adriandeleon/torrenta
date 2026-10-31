@@ -42,6 +42,16 @@ build() {
 case "$(uname -s)" in
     Darwin)
         build dmg --mac-package-name Torrenta
+        # The disk image gets its own Developer ID signature when the app has one (see
+        # sign-mac-app.sh), so Gatekeeper can check it before mounting; release.yml then notarizes it.
+        if [ -n "${TORRENTA_MAC_SIGN_IDENTITY:-}" ]; then
+            sign=(codesign --force --timestamp)
+            [ -n "${TORRENTA_MAC_KEYCHAIN:-}" ] && sign+=(--keychain "$TORRENTA_MAC_KEYCHAIN")
+            for dmg in "$dest"/*.dmg; do
+                "${sign[@]}" --sign "$TORRENTA_MAC_SIGN_IDENTITY" "$dmg"
+                codesign --verify --verbose=2 "$dmg"
+            done
+        fi
         ;;
     Linux)
         # The resource directory overrides the desktop entry (for StartupWMClass and the categories;

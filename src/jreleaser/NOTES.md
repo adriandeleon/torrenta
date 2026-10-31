@@ -17,13 +17,14 @@ The `cask.appName` setting is meant to produce exactly that stanza. It is droppe
 configuration (`jreleaser config` shows the cask with `enabled`, `name` and `displayName` and no
 `appName`), so the template says it outright instead.
 
-Two other things live here rather than in `jreleaser.yml`:
+Another thing lives here rather than in `jreleaser.yml`:
 
-- **`caveats`.** The app is ad-hoc signed, not signed with a Developer ID and not notarised, so
-  Gatekeeper refuses a downloaded copy on first launch — `spctl -a` reports `rejected`. Passing this
-  through `extraProperties` did not reach the template, and an unexplained Gatekeeper dialog is a
-  bad first impression to leave to chance.
 - **`zap`.** Removes `~/.torrenta`, which holds settings and the session log.
+
+There are no `caveats`. Until the dmg was Developer ID signed and notarized (docs/release.md), the
+cask carried one telling users to allow the app under Privacy & Security; a notarized app needs no
+such step. (Passing caveats through `extraProperties` never reached the template, which is why it
+had been written here.)
 
 There is deliberately no `depends_on macos:`. The bundle's own `LSMinimumSystemVersion` is jpackage's
 default of 10.11, and the real floor — whatever JavaFX 27 and the jlink runtime actually require — has
