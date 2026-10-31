@@ -1364,7 +1364,10 @@ class LibtorrentEngineTest {
     void detailOfASeededTorrent(@TempDir Path dir) throws Exception {
         Path downloads = dir.resolve("downloads");
         byte[] torrent = twoFileTorrent(downloads, "pair");
-        try (LibtorrentEngine engine = engine(dir)) {
+        // Isolated: the payload is zeros, so every run of this test everywhere seeds the same
+        // info-hash, and with DHT on another CI run's seed connected (macOS, PR #176's run).
+        try (LibtorrentEngine engine =
+                new LibtorrentEngine(() -> downloads, new TorrentStore(dir.resolve("store")), isolated(ANY_PORT))) {
             engine.start();
             Torrent t = engine.add(downloadsTorrent(dir, torrent));
             await("seeding", () -> engine.torrents().get(0).state() == TorrentState.SEEDING);
