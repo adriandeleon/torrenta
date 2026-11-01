@@ -102,6 +102,38 @@ Renew the membership first, then make a new certificate and replace `MACOS_CERT_
 `MACOS_CERT_PASSWORD` here and in Editora. Apps signed before expiry keep working: the secure
 timestamp proves when they were signed.
 
+## Linux signing
+
+The **Sign Linux packages** job (`sign-linux`) signs the `linux-x64` leg's downloads once the build
+matrix is done, in a job of its own so the key is never on a runner that builds (those run whatever
+Maven resolves). `scripts/sign-linux-packages.sh` signs the `.rpm` with `rpmsign` and the `.deb` with
+an origin signature in debsigs' format (an `_gpgorigin` member; debsigs itself skips `.xz` members
+and exits 0), then writes an armoured `<file>.asc` beside both. `scripts/check-linux-signatures.sh`
+checks each one against the public key alone, with `gpgv`, `rpmkeys` and `debsig-verify`. The job
+uploads the signed files over the leg's artifact, so the publish job attaches only those, with
+`torrenta-signing-key.asc` beside them. `LinuxSigningTest` pins the job's place and the attachments.
+
+Users check a download with:
+
+```bash
+gpg --import torrenta-signing-key.asc
+gpg --verify Torrenta-0.4.2-linux-x64.deb.asc Torrenta-0.4.2-linux-x64.deb
+```
+
+`sudo rpm --import torrenta-signing-key.asc` lets `rpm -K` and dnf check the `.rpm`'s own signature.
+apt and dpkg check nothing about a downloaded `.deb`; its `.asc` is the check.
+
+- **One key for all three projects.** Termina, Editora and Torrenta sign with the same key,
+  "Adrian De Leon (release signing)", `8486A7AF4FC8FEE93D83CDB4EA5FA138C2C09C4A`, so users trust one
+  key for all of them; a leaked key taints all three at once. The scripts are shared too, and a fix to
+  one belongs in all three repositories. The key's creation, backup and renewal are in Termina's
+  README, "Linux signing".
+- **Secrets:** `LINUX_GPG_KEY` (the armoured secret key) and `LINUX_GPG_PASSPHRASE`, the same values
+  as Termina's and Editora's. The public half is committed as `packaging/linux/signing-key.asc`, and
+  a tag refuses to sign with any other key.
+- **On a tag the key is required.** A manual dry run without it signs with a key made for the run, so
+  the step is still exercised, and warns.
+
 ## The package managers
 
 Both need `PACKAGES_TOKEN`, a personal access token with `repo` scope that can push to
