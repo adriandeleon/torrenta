@@ -5,12 +5,19 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Added
+
+- **The Linux packages are signed.** The `.deb` and `.rpm` each have an OpenPGP signature beside them
+  (`.asc`), by the key attached to the release as `torrenta-signing-key.asc` — the same key that signs
+  Termina's and Editora's — and are signed inside as well, for `rpm -K`, dnf and `debsig-verify`.
+  Check a download with `gpg --verify <file>.asc <file>`.
+
 ### Changed
 
 - **The macOS app is signed and notarized.** The dmg is now signed with a Developer ID certificate
   and notarized by Apple, so Torrenta opens on first launch with no Gatekeeper warning and no trip
   to System Settings → Privacy & Security, and the Homebrew cask no longer carries that caveat. The
-  Windows and Linux packages are still unsigned.
+  Windows MSI is still unsigned.
 
 ## 0.4.1 — 2026-10-28
 

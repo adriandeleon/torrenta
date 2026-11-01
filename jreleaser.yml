@@ -131,8 +131,13 @@ distributions:
         branch: master
         branchPush: 'torrenta-{{projectVersion}}'
 
-# Attached to the release, but not fed to any packager: Linux has no packager configured yet.
+# Attached to the release, but not fed to any packager: Linux has no packager configured yet. Each
+# Linux download has its OpenPGP signature beside it (release.yml, sign-linux), and the key that made
+# them is attached too.
 files:
   artifacts:
     - path: 'artifacts/Torrenta-{{projectVersion}}-linux-x64.deb'
+    - path: 'artifacts/Torrenta-{{projectVersion}}-linux-x64.deb.asc'
     - path: 'artifacts/Torrenta-{{projectVersion}}-linux-x64.rpm'
+    - path: 'artifacts/Torrenta-{{projectVersion}}-linux-x64.rpm.asc'
+    - path: 'artifacts/torrenta-signing-key.asc'

@@ -13,4 +13,7 @@ may warn on first run.
 **Linux (x86_64)** — download the DEB or RPM below. On Debian or Ubuntu, install with
 `sudo apt install ./Torrenta-*.deb`; on Fedora, install with `sudo dnf install ./Torrenta-*.rpm`.
 
-Verify a download against `checksums_sha256.txt`.
+Verify a download against `checksums_sha256.txt`. The DEB and RPM are also signed: import
+`torrenta-signing-key.asc` (`gpg --import torrenta-signing-key.asc`) and run
+`gpg --verify <file>.asc <file>`. The RPM carries its signature inside as well, which
+`rpm --import torrenta-signing-key.asc` lets `rpm -K` and `dnf` check.
