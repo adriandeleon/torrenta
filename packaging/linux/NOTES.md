@@ -26,3 +26,29 @@ trimmed the database. The desktop's *default* for the two types is set by the ru
 
 CI asserts all of this against a built `.deb` rather than against this file, because every failure
 above produces a package that looks fine from the outside.
+
+# The GNOME Software listing
+
+`io.github.adriandeleon.Torrenta.metainfo.xml` is the AppStream listing — name, description,
+licence, homepage, screenshot, release notes — that GNOME Software and KDE Discover show on
+Torrenta's page once it is installed. It names its package (`<pkgname>torrenta</pkgname>`), since a
+downloaded package has no distribution catalogue to add that, and the icon by its theme name; the
+menu entry asks for the same name. Both are files the packages own: the rpm's through
+`torrenta.spec`, jpackage's own template (JDK 25) with two `install` lines added, and the deb's
+through `own_in_deb` in `build-installers.sh`, which unpacks the finished deb and rebuilds it with
+them, since jpackage's deb bundler packages `/opt/torrenta` and nothing else. Termina does the same,
+and its `packaging/linux/NOTES.md` has the detail. Keep the spec's jpackage tokens; after a JDK
+upgrade compare it with the new template.
+
+**Software has two pages, and only the installed one reads the listing.** Double-clicking a
+downloaded `.deb` opens an installation window built from the package's control fields alone:
+"torrenta" in lower case, a generic icon, Unknown License, the summary as the description, and the
+`Homepage` (`--about-url`), which is the one field a package can improve there. That holds for any
+downloaded deb. Check either page without root or a window:
+
+```bash
+/usr/libexec/gnome-software-cmd filename-to-app "$PWD/torrenta_<v>_amd64.deb" --show-results
+/usr/libexec/gnome-software-cmd installed --show-results --refine-flags=license,url,icon
+```
+
+**The `<releases>` are written by hand**, at each release (docs/release.md).

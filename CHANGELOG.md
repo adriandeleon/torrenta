@@ -7,6 +7,11 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Torrenta has a GNOME Software listing.** Once installed, its page shows the description, the
+  MIT licence, the homepage, a screenshot, its icon and release notes, where it showed only the
+  package's name and a generic icon. The window Software opens for a downloaded `.deb`, which
+  reads only the package's own fields, now has a working Project Website link too.
+
 - **The Linux packages are signed.** The `.deb` and `.rpm` each have an OpenPGP signature beside them
   (`.asc`), by the key attached to the release as `torrenta-signing-key.asc` — the same key that signs
   Termina's and Editora's — and are signed inside as well, for `rpm -K`, dnf and `debsig-verify`.

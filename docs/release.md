@@ -41,7 +41,11 @@ changed.
    - set `<version>` in `pom.xml` to the release number, without `-SNAPSHOT`;
    - rename `## Unreleased` in `CHANGELOG.md` to `## X.Y.Z — YYYY-MM-DD` and put a fresh, empty
      `## Unreleased` above it. A section that grew by merges can have its `### Added` / `### Fixed`
-     headings merged now; the release notes show each heading once either way.
+     headings merged now; the release notes show each heading once either way;
+   - add a `<release>` for the version, with its date and a sentence or two of `<description>`, at
+     the top of `<releases>` in `packaging/linux/io.github.adriandeleon.Torrenta.metainfo.xml`.
+     GNOME Software lists the newest one there as the latest, and says "No details for this
+     release" for one without a description.
 2. Once CI is green on the merge commit, tag it and push the tag:
 
    ```bash
