@@ -32,6 +32,11 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   to System Settings → Privacy & Security, and the Homebrew cask no longer carries that caveat. The
   Windows MSI is still unsigned.
 
+- **The sidebar's filters in force stand out.** A chosen status, category, tag, tracker or view
+  is drawn in the accent's wash with an accent bar down its left edge, its name and count bold in
+  the accent's ink; a section's own All, chosen whenever that section filters nothing, keeps the
+  quiet fill, so the filters really narrowing the list are the ones the eye finds.
+
 ## 0.4.1 — 2026-10-28
 
 ### Fixed
