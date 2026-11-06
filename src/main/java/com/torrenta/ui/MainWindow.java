@@ -89,6 +89,7 @@ import com.torrenta.net.ExitCheck;
 import com.torrenta.net.InterfaceWatch;
 import com.torrenta.net.LeakCheck;
 import com.torrenta.net.TorrentFetch;
+import com.torrenta.os.Autostart;
 import com.torrenta.os.Badge;
 import com.torrenta.os.BadgeState;
 import com.torrenta.os.Badges;
@@ -460,6 +461,10 @@ public final class MainWindow {
     private volatile String instanceDescription = "none";
     /** What the last handler registration said, for the capture hook. */
     private volatile String handlerOutcome = "";
+    /** {@code --minimized}: come up behind the tray icon, or minimised when there is none. */
+    private boolean startMinimized;
+    /** What the start's look at the start-at-login entry found, for the capture hook. */
+    private volatile String autostartOutcome = "";
     /** Which desktop open handlers are installed (macOS), or why none. */
     private volatile String openHandlers = "";
 
@@ -567,6 +572,7 @@ public final class MainWindow {
         settingsWindow.setOnTrayChanged(this::applyTraySetting);
         settingsWindow.setOnHandlerChanged(() -> applyHandlerSetting(true));
         settingsWindow.setOnBadgeChanged(this::applyBadgeSetting);
+        settingsWindow.setOnAutostartChanged(this::sayAutostart);
         settingsWindow.setProfiles(profiles, new ProfilesHost());
         applyAppearance();
         settingsWindow.setWatchFolders(watchStore, new WatchHost());
@@ -697,12 +703,60 @@ public final class MainWindow {
     }
 
     public void show() {
-        stage.show();
-        table.requestFocus();
+        if (startMinimized && settings.tray()) {
+            // Never shown until the icon is up: installTray shows the window if none comes, so a
+            // start at login can never leave a program with no way back to it.
+            hiddenToTray = true;
+        } else {
+            if (startMinimized) stage.setIconified(true);
+            stage.show();
+            table.requestFocus();
+        }
         installTray();
         installBadge();
         installOpenHandlers();
         applyHandlerSetting(false);
+        refreshAutostart();
+    }
+
+    /** From App, before {@link #show}: the command line's {@code --minimized}. */
+    public void startMinimized() {
+        startMinimized = true;
+    }
+
+    /**
+     * A start-at-login entry that runs but names another launcher (the app moved, a version in
+     * another folder) or the other {@code --minimized} is written again, on a worker; one the person
+     * turned off stays off, and a run from source touches nothing.
+     */
+    private void refreshAutostart() {
+        boolean inTray = settings.autostartInTray();
+        Thread.ofVirtual().name("autostart-refresh").start(() -> {
+            Autostart entry = Autostart.here();
+            if (!entry.available()) {
+                autostartOutcome = "not installed";
+                return;
+            }
+            boolean wrote = entry.refresh(inTray);
+            autostartOutcome = entry.state().name().toLowerCase(java.util.Locale.ROOT)
+                    + (wrote ? " (written again)" : "") + " " + entry.where();
+            if (wrote) LOG.info("Start-at-login entry written again: " + entry.where());
+        });
+    }
+
+    /** FX thread, from the Settings page: what turning start at login on or off came to. */
+    private void sayAutostart(Autostart.Result result) {
+        switch (result) {
+            case ON -> setStatus(tr("status.autostart.on", Autostart.here().where()));
+            case OFF -> setStatus(tr("status.autostart.off"));
+            case NOT_INSTALLED -> setStatus(tr("status.autostart.notInstalled"), EngineEvent.Level.WARNING);
+            case FAILED -> setStatus(tr("status.autostart.failed"), EngineEvent.Level.WARNING);
+        }
+    }
+
+    public String autostartDescription() {
+        return autostartOutcome + " · " + settingsWindow.autostartDescription() + " · minimized=" + startMinimized
+                + " hiddenToTray=" + hiddenToTray;
     }
 
     // ---- the desktop: badge, handlers, a second instance ----------------------------------------
@@ -859,6 +913,8 @@ public final class MainWindow {
             Platform.runLater(() -> {
                 if (attempt.tray().isEmpty()) {
                     trayReason = attempt.reason();
+                    // A start behind the icon with no icon: the window after all.
+                    if (hiddenToTray) showFromTray();
                     // Silence here is the bug a person actually hits: the setting is on, the box
                     // says so, and closing still quits, because no tray ever appeared.
                     setStatus(tr("status.noTray", attempt.reason(), AppInfo.NAME));
@@ -1484,6 +1540,10 @@ public final class MainWindow {
             // settings-sync-switch:on|off: the Sync page's switch, as a click.
             settingsWindow.show(stage);
             settingsWindow.syncSwitchForCapture(action.endsWith(":on"));
+        } else if (action.startsWith("settings-autostart:")) {
+            // settings-autostart:on|off|tray|window: General's start-at-login box, or its tray box, as a click.
+            settingsWindow.show(stage);
+            settingsWindow.autostartForCapture(action.substring("settings-autostart:".length()));
         } else if (action.startsWith("settings-sync-url:")) {
             // settings-sync-url:<url>: typed into the Sync page's field, then Enter.
             settingsWindow.show(stage);

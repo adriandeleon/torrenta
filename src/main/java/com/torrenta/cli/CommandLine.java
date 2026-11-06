@@ -20,6 +20,7 @@ public record CommandLine(
         boolean headless,
         boolean setRemotePassword,
         boolean simple,
+        boolean minimized,
         @Nullable String configDir,
         List<String> inputs,
         @Nullable String error) {
@@ -31,6 +32,7 @@ public record CommandLine(
         boolean headless = false;
         boolean setRemotePassword = false;
         boolean simple = false;
+        boolean minimized = false;
         String configDir = null;
         List<String> inputs = new ArrayList<>();
         for (int i = 0; i < args.length; i++) {
@@ -42,6 +44,7 @@ public record CommandLine(
                 case "--headless" -> headless = true;
                 case "--set-remote-password" -> setRemotePassword = true;
                 case "--simple" -> simple = true;
+                case "--minimized" -> minimized = true;
                 case "--config-dir" -> {
                     if (i + 1 >= args.length) return error("--config-dir needs a directory");
                     configDir = args[++i];
@@ -59,11 +62,20 @@ public record CommandLine(
             }
         }
         return new CommandLine(
-                help, version, report, headless, setRemotePassword, simple, configDir, List.copyOf(inputs), null);
+                help,
+                version,
+                report,
+                headless,
+                setRemotePassword,
+                simple,
+                minimized,
+                configDir,
+                List.copyOf(inputs),
+                null);
     }
 
     private static CommandLine error(String message) {
-        return new CommandLine(false, false, false, false, false, false, null, List.of(), message);
+        return new CommandLine(false, false, false, false, false, false, false, null, List.of(), message);
     }
 
     /** True when the application should come up; false when an option answered and stopped. */
@@ -108,6 +120,8 @@ public record CommandLine(
                                          to stdout, stop on SIGTERM
                       --simple           Start in Simple mode, the essentials only, for this
                                          session; the saved setting is left as it is
+                      --minimized        Start behind the tray icon (minimised where there is no
+                                         tray), as a start at login does
                       --set-remote-password
                                          Read a password for Remote access from the terminal (or
                                          a line of stdin), keep its hash in the settings and exit

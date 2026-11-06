@@ -188,6 +188,12 @@ public final class Settings {
     public static final String OS_HANDLER = "os.handler";
     /** The dock or launcher badge with the download activity; on by default. This machine's. */
     public static final String OS_BADGE = "os.badge";
+    /**
+     * Whether a start at login brings Torrenta up behind its tray icon ({@code --minimized} in the
+     * entry); on by default. The entry itself is the start-at-login switch (`os.Autostart`), not a
+     * key. This machine's.
+     */
+    public static final String OS_AUTOSTART_IN_TRAY = "os.autostartInTray";
 
     /**
      * Which engine profile to use at the next start: {@code local} (the default, libtorrent in
@@ -845,6 +851,14 @@ public final class Settings {
 
     public void setOsBadge(boolean on) {
         properties.setProperty(OS_BADGE, String.valueOf(on));
+    }
+
+    public boolean autostartInTray() {
+        return readBoolean(OS_AUTOSTART_IN_TRAY, true);
+    }
+
+    public void setAutostartInTray(boolean on) {
+        properties.setProperty(OS_AUTOSTART_IN_TRAY, String.valueOf(on));
     }
 
     public void setSidebar(boolean shown) {

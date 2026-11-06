@@ -5,6 +5,16 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ## Unreleased
 
+### Added
+
+- **Start Torrenta when you log in.** Settings → General → Operating system has a switch that adds
+  Torrenta to your login items: an entry in `~/.config/autostart` on Linux (GNOME, KDE and every
+  desktop that follows the XDG spec), a LaunchAgent on macOS, the `Run` key on Windows. The entry
+  is the truth: turned off in GNOME Tweaks, KDE's Autostart page or Task Manager, it shows
+  unticked here. **Start behind the tray icon** (on by default) brings it up behind its tray icon
+  instead of as a window, or minimised where there is no tray; `torrenta --minimized` does the same
+  by hand. An installed Torrenta only; a move to another folder is followed at the next start.
+
 ## 0.4.1 — 2026-10-28
 
 ### Fixed

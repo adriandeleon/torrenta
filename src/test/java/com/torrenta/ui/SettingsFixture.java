@@ -80,6 +80,7 @@ final class SettingsFixture {
         window.setOnTrayChanged(() -> told.add("tray"));
         window.setOnHandlerChanged(() -> told.add("handler"));
         window.setOnBadgeChanged(() -> told.add("badge"));
+        window.setOnAutostartChanged(result -> told.add("autostart " + result));
         window.setOnShowDebugLog(() -> told.add("debug-log"));
         window.setOnTestNotification(() -> told.add("test-notification"));
         window.setOnIpFilterChanged(force -> told.add("ip-filter " + force), () -> "filter status");

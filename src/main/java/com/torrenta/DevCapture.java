@@ -153,6 +153,7 @@ final class DevCapture {
         System.out.println("capture: badge=" + window.badgeDescription());
         System.out.println("capture: handler=" + window.handlerDescription());
         System.out.println("capture: openHandlers=" + window.openHandlersDescription());
+        System.out.println("capture: autostart=" + window.autostartDescription());
         // What a dialog opened on a later pulse than the action shows now, for the hook to read.
         for (String line : window.lateLinesForCapture()) System.out.println("capture: " + line);
         if (Boolean.getBoolean(LOG_PROBE_PROPERTY)) probeDebugLog();
