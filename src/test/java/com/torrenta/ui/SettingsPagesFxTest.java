@@ -116,6 +116,8 @@ class SettingsPagesFxTest {
         for (SettingsWindow.Category page : PLAIN) {
             f.page(page);
             for (RowControls row : rows(f)) {
+                // Start at login is the desktop's entry, not a key (SettingsAutostartFxTest).
+                if (row.title().equals(tr("settings.general.autostart"))) continue;
                 for (Node control : row.controls()) {
                     Map<String, String> before = f.saved();
                     int at = n++;

@@ -68,6 +68,19 @@ class MainWindowLifecycleTest {
         }
     }
 
+    /** {@code --minimized} with no tray (the test's settings have it off): minimised, never hidden. */
+    @Test
+    void minimizedWithoutATrayComesUpMinimisedAndNeverUnreachable(@TempDir Path dir) throws Exception {
+        FakeEngine engine = new FakeEngine().put(FakeEngine.torrent("aaaa", "Film"));
+        try (WindowFixture f = WindowFixture.open(dir, engine, true)) {
+            assertTrue(Fx.call(f.stage::isShowing), "shown, so the taskbar has it");
+            assertTrue(Fx.call(f.stage::isIconified), "and minimised");
+            assertTrue(Fx.call(f.window::autostartDescription).contains("minimized=true hiddenToTray=false"));
+            Fx.run(() -> f.stage.setIconified(false));
+            Fx.waitUntil("the list drawn once it is back", () -> Fx.call(f::rows) == 1);
+        }
+    }
+
     @Test
     void theUpdateCheckRunsOnItsOwnWhenDueAndSaysUpToDateWhenAsked(@TempDir Path dir) throws Exception {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);

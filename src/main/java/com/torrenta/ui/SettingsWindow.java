@@ -56,6 +56,7 @@ import com.torrenta.engine.EngineSettings;
 import com.torrenta.engine.ShareLimit;
 import com.torrenta.engine.WatchFolder;
 import com.torrenta.engine.transmission.TransmissionEngine;
+import com.torrenta.os.Autostart;
 import com.torrenta.rss.Feed;
 import com.torrenta.rss.RssService;
 import com.torrenta.rss.Rule;
@@ -175,7 +176,8 @@ final class SettingsWindow {
                 Settings.UI_TRAY,
                 Settings.UI_CLOSE_TO_TRAY,
                 Settings.OS_HANDLER,
-                Settings.OS_BADGE
+                Settings.OS_BADGE,
+                Settings.OS_AUTOSTART_IN_TRAY
             },
             concat(
                     concat(Settings.DOWNLOAD_KEYS, concat(Settings.AUTOMATION_KEYS, Settings.RSS_KEYS)),
@@ -197,6 +199,10 @@ final class SettingsWindow {
     private Runnable onTrayChanged = () -> {};
     /** Told after the handler switch changed; the main window (re)registers or unregisters. */
     private Runnable onHandlerChanged = () -> {};
+    /** Told what a change of the start-at-login entry came to; the main window says it. */
+    private java.util.function.Consumer<Autostart.Result> onAutostartChanged = result -> {};
+    /** The start-at-login entry; a test hands in one on a folder of its own. */
+    private Autostart autostartEntry = Autostart.here();
     /** Told after the badge switch changed; the main window brings the badge up or clears it. */
     private Runnable onBadgeChanged = () -> {};
 
@@ -540,6 +546,8 @@ final class SettingsWindow {
     private CheckBox closeToTray;
     private CheckBox osHandler;
     private CheckBox osBadge;
+    private CheckBox autostart;
+    private CheckBox autostartInTray;
     private CheckBox removeToTrash;
     private CheckBox addStartPaused;
     private CheckBox addSequential;
@@ -1160,6 +1168,31 @@ final class SettingsWindow {
         onBadgeChanged = handler;
     }
 
+    void setOnAutostartChanged(java.util.function.Consumer<Autostart.Result> handler) {
+        onAutostartChanged = handler;
+    }
+
+    /** For a test: the entry on a home folder of its own, re-read at once. */
+    void setAutostart(Autostart entry) {
+        autostartEntry = entry;
+        readAutostart();
+    }
+
+    /** The capture's click: {@code on}/{@code off} on the start-at-login box, {@code tray}/{@code window} on the next. */
+    void autostartForCapture(String what) {
+        switch (what) {
+            case "on", "off" -> autostart.setSelected(what.equals("on"));
+            case "tray", "window" -> autostartInTray.setSelected(what.equals("tray"));
+            default -> throw new IllegalArgumentException("settings-autostart:" + what);
+        }
+    }
+
+    /** The start-at-login box as it shows: ticked, enabled; for the capture hook. */
+    String autostartDescription() {
+        return "box=" + autostart.isSelected() + " enabled=" + !autostart.isDisable() + " inTray="
+                + autostartInTray.isSelected();
+    }
+
     void setOnIpFilterChanged(
             java.util.function.Consumer<Boolean> handler, java.util.function.Supplier<String> status) {
         onIpFilterChanged = handler;
@@ -1390,7 +1423,8 @@ final class SettingsWindow {
         THEME,
         TRAY,
         HANDLER,
-        BADGE
+        BADGE,
+        AUTOSTART
     }
 
     /** The hooks a Reset must run, from the owned keys' values before and after it (null: unset). */
@@ -1402,6 +1436,7 @@ final class SettingsWindow {
         if (changed.test(Settings.UI_TRAY) || changed.test(Settings.UI_CLOSE_TO_TRAY)) hooks.add(ResetHook.TRAY);
         if (changed.test(Settings.OS_HANDLER)) hooks.add(ResetHook.HANDLER);
         if (changed.test(Settings.OS_BADGE)) hooks.add(ResetHook.BADGE);
+        if (changed.test(Settings.OS_AUTOSTART_IN_TRAY)) hooks.add(ResetHook.AUTOSTART);
         return hooks;
     }
 
@@ -1440,6 +1475,51 @@ final class SettingsWindow {
         if (hooks.contains(ResetHook.TRAY)) onTrayChanged.run();
         if (hooks.contains(ResetHook.HANDLER)) onHandlerChanged.run();
         if (hooks.contains(ResetHook.BADGE)) onBadgeChanged.run();
+        if (hooks.contains(ResetHook.AUTOSTART) && autostart.isSelected()) writeAutostart(true);
+    }
+
+    // ---------------------------------------------------------------- start at login
+
+    /** Counts the reads and writes of the entry, so a late answer never draws over a newer one. */
+    private int autostartTurn;
+
+    /** FX thread. The box disabled while the entry is read on a virtual thread, then drawn from it. */
+    private void readAutostart() {
+        int turn = ++autostartTurn;
+        Autostart entry = autostartEntry;
+        autostart.setDisable(true);
+        Thread.ofVirtual().name("autostart-read").start(() -> {
+            Autostart.Result state = entry.state();
+            javafx.application.Platform.runLater(() -> showAutostart(turn, state));
+        });
+    }
+
+    /** FX thread. Writes the entry (or removes it) and draws what is true afterwards. */
+    private void writeAutostart(boolean on) {
+        int turn = ++autostartTurn;
+        Autostart entry = autostartEntry;
+        boolean inTray = settings.autostartInTray();
+        autostart.setDisable(true);
+        Thread.ofVirtual().name("autostart-write").start(() -> {
+            Autostart.Result result = entry.set(on, inTray);
+            Autostart.Result state = result == Autostart.Result.FAILED ? entry.state() : result;
+            javafx.application.Platform.runLater(() -> {
+                showAutostart(turn, state);
+                onAutostartChanged.accept(result);
+            });
+        });
+    }
+
+    private void showAutostart(int turn, Autostart.Result state) {
+        if (turn != autostartTurn) return;
+        boolean wasLoading = loading;
+        loading = true;
+        try {
+            autostart.setSelected(state == Autostart.Result.ON);
+        } finally {
+            loading = wasLoading;
+        }
+        autostart.setDisable(state == Autostart.Result.NOT_INSTALLED);
     }
 
     // ---------------------------------------------------------------- search
@@ -2203,6 +2283,39 @@ final class SettingsWindow {
                 tr("settings.general.osBadge.desc"),
                 osBadge,
                 tr("settings.general.osBadge.keywords"));
+        autostart = new CheckBox();
+        // Not a setting: the box shows the entry, read off the FX thread, and a click writes it.
+        autostart.setDisable(true);
+        autostart.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            writeAutostart(now);
+        });
+        row(
+                Category.GENERAL,
+                desktop,
+                tr("settings.general.autostart"),
+                tr("settings.general.autostart.desc"),
+                autostart,
+                tr("settings.general.autostart.keywords"));
+        autostartInTray = new CheckBox();
+        autostartInTray.selectedProperty().addListener((o, was, now) -> {
+            if (loading) return;
+            settings.setAutostartInTray(now);
+            settings.saveQuietly();
+            // The entry carries the argument, so one that runs is written again.
+            if (autostart.isSelected()) writeAutostart(true);
+        });
+        // Bound, never set: setDisable on a bound property throws.
+        autostartInTray
+                .disableProperty()
+                .bind(autostart.selectedProperty().not().or(autostart.disableProperty()));
+        row(
+                Category.GENERAL,
+                desktop,
+                tr("settings.general.autostartInTray"),
+                tr("settings.general.autostartInTray.desc"),
+                autostartInTray,
+                tr("settings.general.autostartInTray.keywords"));
 
         VBox downloads = section(page, tr("settings.general.downloads"));
         downloadDir = new TextField();
@@ -4532,6 +4645,7 @@ final class SettingsWindow {
 
     /** Puts the stored values into the controls, with the listeners held off. */
     private void reload() {
+        readAutostart();
         loading = true;
         try {
             reloadKeys();
@@ -4560,6 +4674,7 @@ final class SettingsWindow {
             closeToTray.setSelected(settings.closeToTray());
             osHandler.setSelected(settings.osHandler());
             osBadge.setSelected(settings.osBadge());
+            autostartInTray.setSelected(settings.autostartInTray());
             removeToTrash.setSelected(settings.removeToTrash());
             syncEnabled.setSelected(settings.syncEnabled());
             WebApiConfig remote = settings.webApi();

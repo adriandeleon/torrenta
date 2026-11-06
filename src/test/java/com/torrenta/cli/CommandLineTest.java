@@ -85,6 +85,16 @@ class CommandLineTest {
     }
 
     @Test
+    void minimizedIsWhatAStartAtLoginPasses() {
+        CommandLine cli = CommandLine.parse("--minimized", "a.torrent");
+        assertTrue(cli.minimized());
+        assertTrue(cli.shouldRun());
+        assertEquals(java.util.List.of("a.torrent"), cli.inputs());
+        assertFalse(CommandLine.parse("a.torrent").minimized());
+        assertTrue(CommandLine.usage("torrenta").contains("--minimized"));
+    }
+
+    @Test
     void theRemotePasswordIsAFlagOfItsOwn() {
         CommandLine cli = CommandLine.parse("--set-remote-password", "--config-dir", "/srv/torrenta");
         assertTrue(cli.setRemotePassword());

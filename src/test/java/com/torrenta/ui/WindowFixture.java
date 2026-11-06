@@ -40,6 +40,11 @@ public final class WindowFixture implements AutoCloseable {
     }
 
     public static WindowFixture open(Path dir, FakeEngine engine) {
+        return open(dir, engine, false);
+    }
+
+    /** As {@link #open(Path, FakeEngine)}, with the command line's {@code --minimized} when asked. */
+    public static WindowFixture open(Path dir, FakeEngine engine, boolean minimized) {
         Settings settings = Fx.quietSettings(dir);
         List<String> opened = new CopyOnWriteArrayList<>();
         WindowFixture fixture = Fx.call(() -> {
@@ -47,6 +52,7 @@ public final class WindowFixture implements AutoCloseable {
             MainWindow window = new MainWindow(stage, settings, dir, opened::add);
             WindowFixture f = new WindowFixture(engine, settings, window, stage, opened);
             window.setEngineFactory(profile -> engine);
+            if (minimized) window.startMinimized();
             window.show();
             window.startEngine(EngineProfile.LOCAL);
             return f;
@@ -54,6 +60,8 @@ public final class WindowFixture implements AutoCloseable {
         Fx.waitUntil(
                 "the engine to be up in the window",
                 () -> engine.description().equals(fixture.window.engineDescription()));
+        // A minimised window draws no poll until it is back on screen (PollWork).
+        if (minimized) return fixture;
         int expected = engine.torrents().size();
         Fx.waitUntil("the first poll to draw " + expected + " rows", () -> fixture.rows() == expected);
         return fixture;

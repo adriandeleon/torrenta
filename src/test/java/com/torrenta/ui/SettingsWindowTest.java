@@ -74,6 +74,10 @@ class SettingsWindowTest {
                 Set.of(SettingsWindow.ResetHook.THEME, SettingsWindow.ResetHook.TRAY, SettingsWindow.ResetHook.BADGE),
                 SettingsWindow.resetHooks(before, after));
         assertEquals(Set.of(), SettingsWindow.resetHooks(after, new HashMap<>()));
+        // The entry carries --minimized: a Reset that changes it writes a running entry again.
+        assertEquals(
+                Set.of(SettingsWindow.ResetHook.AUTOSTART),
+                SettingsWindow.resetHooks(Map.of(Settings.OS_AUTOSTART_IN_TRAY, "false"), after));
         Map<String, String> closeOnly = Map.of(Settings.UI_CLOSE_TO_TRAY, "false");
         assertEquals(Set.of(SettingsWindow.ResetHook.TRAY), SettingsWindow.resetHooks(closeOnly, after));
         assertEquals(
