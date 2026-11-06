@@ -792,7 +792,9 @@ result pre-filled. Searches are rate-limited per provider and cached for the ses
   up. FrostWire's jlibtorrent fork covers both, if demand appears.
 - **Resume data compatibility across libtorrent versions** is the one place data loss can happen:
   the resume file carries the info dict, so the worst case is a recheck, never a lost torrent;
-  run the restart test on every libtorrent4j bump.
+  run the restart test on every libtorrent4j bump. `UpgradeRestoreTest` restores a store written
+  by every release (renames, labels, the `.part` suffix, paused and partial torrents, a magnet)
+  and fails when a torrent comes back short of what that release recorded.
 - **Wayland.** JavaFX runs through XWayland; fractional scaling misreports geometry, as Termina
   found. Capture and check on a Wayland desktop before each release.
 - **Search providers** change and go away. Definitions as data, Torznab for the long tail, no

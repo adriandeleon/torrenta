@@ -1215,7 +1215,7 @@ class LibtorrentEngineTest {
     }
 
     /** Port 0: the system picks a free one as the session binds; {@code listenPortForTest} says which. */
-    private static final int ANY_PORT = 0;
+    static final int ANY_PORT = 0;
 
     /** Where every loopback session listens; see {@link #isolated}. */
     private static final String LOOPBACK = "127.0.0.1";
@@ -1262,7 +1262,7 @@ class LibtorrentEngineTest {
      * cannot fail. Discovery off also keeps the test's fixed info hash out of the public DHT,
      * where every CI run of this suite would otherwise find the others.
      */
-    private static com.torrenta.engine.EngineSettings isolated(int port) {
+    static com.torrenta.engine.EngineSettings isolated(int port) {
         com.torrenta.engine.EngineSettings d = onPort(port);
         com.torrenta.engine.EngineSettings.Protocol p = d.protocol();
         return new com.torrenta.engine.EngineSettings(
