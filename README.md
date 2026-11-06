@@ -417,17 +417,20 @@ scripts/render-icon.py            branding/torrenta-icon.svg → torrenta.png (P
 
 ## Not done
 
-- **Content layout without a root folder** in the Add dialog: libtorrent4j 2.1.0-39 has no
-  `torrent_info::rename_file`, and renaming through the handle after adding is confirmed by
-  libtorrent's alerts yet a recheck never finds the files under their new names.
 - **A port test** in Settings → Connection: libtorrent has none, it needs an outside service.
-- **Renaming a torrent or its paths** for a Transmission daemon: the RPC has it, the `Engine`
-  interface does not yet.
-- **Homebrew and winget.** 0.1.0 is published on GitHub only: the packagers wait for a
+- **A name of its own for a torrent on a Transmission daemon**: the RPC has nowhere to keep one,
+  so Rename Torrent is hidden there (`RENAME_TORRENT`). Its files and folders rename on both
+  engines.
+- **Undo of file priorities, queue moves and a bulk pause.** Remove (files kept), Set Location, a
+  category, tags, and limits typed in the omnibox are undoable; a rename is not, since the window
+  cannot tell a given name from the torrent's own.
+- **Start at login.**
+- **Homebrew and winget.** Releases are published on GitHub only: the packagers wait for a
   `PACKAGES_TOKEN` secret and the checks in [docs/release.md](docs/release.md).
 - **1.0.** The criteria in [docs/ROADMAP.md](docs/ROADMAP.md) (a week of daily use on each
   platform, resume data proven across upgrades, signed installers) are what stands between 0.x
-  and 1.0.
+  and 1.0. The macOS dmg is signed and notarized and the Linux packages are signed; the Windows
+  installer is not yet.
 
 ## License
 
