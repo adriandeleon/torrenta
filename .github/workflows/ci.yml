@@ -224,7 +224,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get install -y -qq desktop-file-utils
+          sudo apt-get install -y -qq desktop-file-utils appstream
           deb=$(ls target/installers/*.deb)
           echo "inspecting $deb"
           dpkg-deb --contents "$deb" > "$RUNNER_TEMP/deb-contents.txt"
@@ -244,6 +244,21 @@ jobs:
           grep -q "^MimeType=application/x-bittorrent;x-scheme-handler/magnet;$" "$entry" || {
             echo "::error::the entry does not declare .torrent files and magnet links"; exit 1; }
           grep -q "^Exec=.* %U$" "$entry" || { echo "::error::Exec takes no files or links (%U)"; exit 1; }
+          # GNOME Software's installed page reads the listing; its window for a downloaded .deb reads
+          # only the package's fields, of which Homepage is the one it shows.
+          metainfo=/usr/share/metainfo/io.github.adriandeleon.Torrenta.metainfo.xml
+          icon=/usr/share/icons/hicolor/512x512/apps/io.github.adriandeleon.Torrenta.png
+          grep -q " \.$metainfo$" "$RUNNER_TEMP/deb-contents.txt" || {
+            echo "::error::the package does not own its AppStream listing"; exit 1; }
+          grep -q " \.$icon$" "$RUNNER_TEMP/deb-contents.txt" || {
+            echo "::error::the package installs no icon in the theme"; exit 1; }
+          cmp -s "$RUNNER_TEMP/deb$icon" branding/torrenta.png || {
+            echo "::error::the theme icon is not branding/torrenta.png"; exit 1; }
+          grep -q "^Icon=io.github.adriandeleon.Torrenta$" "$entry" || {
+            echo "::error::the menu entry does not name the theme icon"; exit 1; }
+          appstreamcli validate --no-net "$RUNNER_TEMP/deb$metainfo"
+          [ "$(dpkg-deb --field "$deb" Homepage)" = "https://torrenta-project.dev" ] || {
+            echo "::error::the package has no Homepage, so Software's Project Website goes nowhere"; exit 1; }
           grep -q "MimeInfo.xml" "$RUNNER_TEMP/deb-contents.txt" || {
             echo "::error::the package carries no MIME XML for .torrent (jpackage --file-associations)"; exit 1; }
           if grep -q "APPLICATION_" "$entry"; then

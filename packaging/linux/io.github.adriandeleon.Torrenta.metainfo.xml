@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.adriandeleon.Torrenta</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+
+  <name>Torrenta</name>
+  <summary>A keyboard-first BitTorrent client</summary>
+  <developer id="io.github.adriandeleon">
+    <name>Adrian De Leon</name>
+  </developer>
+
+  <description>
+    <p>
+      Torrenta is a BitTorrent client driven from the keyboard, on libtorrent's engine. It is the
+      same application on Linux, macOS and Windows.
+    </p>
+    <ul>
+      <li>Torrents from a file, a magnet link, a URL, a drop or the clipboard</li>
+      <li>File selection and priorities, categories, tags and sequential downloading</li>
+      <li>RSS feeds with download rules, and search across providers</li>
+      <li>A Simple mode with only what someone new to torrents needs</li>
+      <li>A headless mode with a web interface, for a server or a home media box</li>
+    </ul>
+  </description>
+
+  <!-- The id jpackage installs the menu entry under: <package name>-<launcher name>. -->
+  <launchable type="desktop-id">torrenta-Torrenta.desktop</launchable>
+  <!-- Ties this listing to the deb and rpm of that name. A distribution's catalogue would add it;
+       a package installed from a download has no catalogue, so it is written here. -->
+  <pkgname>torrenta</pkgname>
+  <icon type="stock">io.github.adriandeleon.Torrenta</icon>
+
+  <categories>
+    <category>Network</category>
+    <category>P2P</category>
+    <category>FileTransfer</category>
+  </categories>
+  <keywords>
+    <keyword>torrent</keyword>
+    <keyword>bittorrent</keyword>
+    <keyword>magnet</keyword>
+    <keyword>download</keyword>
+  </keywords>
+
+  <provides>
+    <binary>torrenta</binary>
+    <mediatype>application/x-bittorrent</mediatype>
+    <mediatype>x-scheme-handler/magnet</mediatype>
+  </provides>
+
+  <url type="homepage">https://torrenta-project.dev</url>
+  <url type="bugtracker">https://github.com/adriandeleon/torrenta/issues</url>
+  <url type="vcs-browser">https://github.com/adriandeleon/torrenta</url>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>The torrent list with downloads and seeds, and the selected torrent's overview</caption>
+      <image>https://raw.githubusercontent.com/adriandeleon/torrenta/master/docs/screenshot.png</image>
+    </screenshot>
+  </screenshots>
+
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.4.1" date="2026-10-28">
+      <description>
+        <p>
+          A restart no longer downloads again a torrent whose .part names had come off, and a
+          torrent already caught by it is repaired at the next start.
+        </p>
+      </description>
+      <url type="details">https://github.com/adriandeleon/torrenta/releases/tag/v0.4.1</url>
+    </release>
+    <release version="0.4.0" date="2026-10-27">
+      <description>
+        <p>
+          Simple mode: only the list, the ways a torrent arrives and the actions someone new to
+          torrents needs, from View → Simple Mode, the toolbar or torrenta --simple.
+        </p>
+      </description>
+      <url type="details">https://github.com/adriandeleon/torrenta/releases/tag/v0.4.0</url>
+    </release>
+  </releases>
+</component>

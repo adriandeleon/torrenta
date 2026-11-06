@@ -148,6 +148,21 @@ class MainWindowSourcesTest {
         return null;
     }
 
+    /**
+     * Enter on the feed's first article, once the feed is fetched. Pressed where the focus happens to be,
+     * Down+Enter raced the fetch: with the articles not yet listed the focus was the feed list, Enter there
+     * did nothing, and the test waited 30 s for an Add dialog that never came.
+     */
+    private static void enterOnTheFirstArticle(WindowFixture f) {
+        Fx.waitUntil("the article listed", () -> articles(f) != null);
+        Fx.run(() -> {
+            javafx.scene.control.TableView<?> list = articles(f);
+            list.requestFocus();
+            list.getSelectionModel().select(0);
+        });
+        f.action("rss-keys:ENTER");
+    }
+
     /** The Search tab's table rows, read off its scene. */
     private static int searchRows(WindowFixture f) {
         for (Node n : f.stage.getScene().getRoot().lookupAll(".table-view")) {
@@ -165,8 +180,10 @@ class MainWindowSourcesTest {
         FakeEngine engine = new FakeEngine().put(FakeEngine.torrent("aaaa", "Film"));
         try (WindowFixture f = WindowFixture.open(dir, engine)) {
             f.action("rss:" + base(server) + "/feed.xml");
+            // The feed is named by its fetch: selected by that name only once its article is listed.
+            Fx.waitUntil("the article listed", () -> articles(f) != null);
             f.action("rss-feed:Stub feed");
-            f.action("rss-keys:DOWN+ENTER");
+            enterOnTheFirstArticle(f);
             f.awaitWindow(tr("dialog.add.title.magnet"));
             f.cancelDialogs();
             f.action("rss-download");
@@ -207,14 +224,7 @@ class MainWindowSourcesTest {
             Fx.waitUntil("its torrent fetched", () -> asked.stream().anyMatch(u -> u.startsWith("/file")));
             Fx.waitUntil("the failure said", () -> !f.status().contains("debian.torrent"));
             f.action("rss:" + base(server) + "/feed.xml");
-            // Once the feed is fetched, its article chosen in the list and Enter pressed there.
-            Fx.waitUntil("the article listed", () -> articles(f) != null);
-            Fx.run(() -> {
-                javafx.scene.control.TableView<?> list = articles(f);
-                list.requestFocus();
-                list.getSelectionModel().select(0);
-            });
-            f.action("rss-keys:ENTER");
+            enterOnTheFirstArticle(f);
             Fx.waitUntil(
                     "its torrent fetched",
                     () -> asked.stream().filter(u -> u.startsWith("/file")).count() >= 2);
