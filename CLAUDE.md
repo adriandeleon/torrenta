@@ -296,8 +296,10 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   reads `ui.extendedWindow` first and the setting applies on restart; the top of the window asks
   `stage.getStyle()`, never the setting, so the two cannot disagree. The menu bar is
   `HeaderDragType.NONE` (a header drags by default, and a menu that drags cannot open) and the title
-  `DRAGGABLE_SUBTREE` (`DRAGGABLE` misses the label's text node). The buttons' glyph colour follows
-  the desktop unless told: `matchButtonsToTheme` on every appearance change. macOS is gated out in
+  `DRAGGABLE_SUBTREE` (`DRAGGABLE` misses the label's text node). The buttons' style (and, on Windows
+  and macOS, every decorated window's frame) follows the scene's colour scheme, which is the
+  desktop's unless told: `WindowColorScheme` tells every window the theme's as it opens and
+  `Theme.apply()` again on a switch; an unfocused window's glyphs are `#777` in both styles. macOS is gated out in
   `supportedOn` (the menu belongs to the system bar there) and the row is disabled, not hidden.
 - **The interface font is Inter, bundled, loaded before any stylesheet** (`Fonts.load()` in
   `App.start`), and attached per scene and per dialog pane (`Fonts.installUiFont`), never in

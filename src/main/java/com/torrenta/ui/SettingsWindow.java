@@ -1465,8 +1465,7 @@ final class SettingsWindow {
         Set<ResetHook> hooks = resetHooks(before, ownedValues());
         reload();
         if (hooks.contains(ResetHook.THEME)) {
-            javafx.application.Application.setUserAgentStylesheet(
-                    Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
+            Theme.byId(settings.theme(), Theme.DEFAULT).apply();
         }
         onAppearanceChanged.run();
         onKeysChanged.run();
@@ -2130,9 +2129,8 @@ final class SettingsWindow {
             if (loading || now == null) return;
             settings.setTheme(now.id());
             settings.saveQuietly();
-            // Global: every open window restyles, this one included.
-            javafx.application.Application.setUserAgentStylesheet(now.stylesheet());
-            // The main window draws a few things from the theme itself (the window buttons).
+            // Global: every open window restyles, this one included, its frame and buttons too.
+            now.apply();
             onAppearanceChanged.run();
         });
         row(

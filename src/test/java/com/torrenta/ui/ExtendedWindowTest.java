@@ -1,10 +1,7 @@
 package com.torrenta.ui;
 
-import javafx.application.ColorScheme;
-
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -47,11 +44,5 @@ class ExtendedWindowTest {
         assertTrue(ExtendedWindow.restartNeeded(false, true), "switched off under a merged window");
         assertFalse(ExtendedWindow.restartNeeded(true, true));
         assertFalse(ExtendedWindow.restartNeeded(false, false), "the default, on every platform");
-    }
-
-    @Test
-    void theWindowButtonsFollowTheThemeNotTheDesktop() {
-        assertEquals(ColorScheme.DARK, ExtendedWindow.buttonScheme(true), "a dark theme: light glyphs");
-        assertEquals(ColorScheme.LIGHT, ExtendedWindow.buttonScheme(false));
     }
 }
