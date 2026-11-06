@@ -14,6 +14,7 @@ import com.torrenta.store.ConfigDir;
 import com.torrenta.store.Settings;
 import com.torrenta.ui.MainWindow;
 import com.torrenta.ui.Theme;
+import com.torrenta.ui.WindowColorScheme;
 import org.jspecify.annotations.Nullable;
 
 /** Torrenta — a keyboard-first BitTorrent client on JavaFX. */
@@ -127,9 +128,11 @@ public final class App extends Application {
         // The catalogue before any text is built: the window, the dialogs and the palette read it.
         Startup.language(settings);
 
-        // Applied before any window is built, so the first frame is already themed.
-        Application.setUserAgentStylesheet(
-                Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
+        // Applied before any window is built, so the first frame is already themed, the window
+        // chrome JavaFX draws included (every window is told the theme's light or dark as it opens).
+        Theme theme = Theme.byId(settings.theme(), Theme.DEFAULT);
+        WindowColorScheme.install(theme.isDark());
+        theme.apply();
 
         MainWindow window = new MainWindow(
                 stage, settings, configDir, uri -> getHostServices().showDocument(uri));

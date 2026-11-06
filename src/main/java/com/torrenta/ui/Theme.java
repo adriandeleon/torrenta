@@ -2,6 +2,8 @@ package com.torrenta.ui;
 
 import java.util.function.Supplier;
 
+import javafx.application.Application;
+
 import atlantafx.base.theme.CupertinoDark;
 import atlantafx.base.theme.CupertinoLight;
 import atlantafx.base.theme.NordDark;
@@ -11,8 +13,8 @@ import org.jspecify.annotations.Nullable;
 import static com.torrenta.i18n.Messages.tr;
 
 /**
- * A theme: the control stylesheet for the application's windows, applied with
- * {@code Application.setUserAgentStylesheet} and switched live from Settings.
+ * A theme: the control stylesheet for the application's windows and whether it is dark, applied with
+ * {@link #apply()} and switched live from Settings.
  *
  * <p>The Editora pair is "Caret &amp; Ink", carried over from Editora and Termina (same author):
  * Caret teal on Ink navy, authored on AtlantaFX's variables. Nord and Cupertino are AtlantaFX's own,
@@ -51,6 +53,15 @@ public enum Theme {
 
     public boolean isDark() {
         return dark;
+    }
+
+    /**
+     * Puts this theme on every window, open or opened later: the stylesheet, and the light or dark scheme
+     * JavaFX draws the window chrome with ({@link WindowColorScheme}). The one way a theme is applied.
+     */
+    public void apply() {
+        Application.setUserAgentStylesheet(stylesheet());
+        WindowColorScheme.apply(dark);
     }
 
     /** The user-agent stylesheet URL, as {@code Application.setUserAgentStylesheet} wants it. */

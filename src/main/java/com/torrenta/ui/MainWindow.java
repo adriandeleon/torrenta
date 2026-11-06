@@ -2114,8 +2114,7 @@ public final class MainWindow {
         @Override
         public void settingsApplied() {
             // The file changed under every reader: re-apply what the settings drive.
-            javafx.application.Application.setUserAgentStylesheet(
-                    Theme.byId(settings.theme(), Theme.DEFAULT).stylesheet());
+            Theme.byId(settings.theme(), Theme.DEFAULT).apply();
             applyEngineSettings();
             applyAppearance();
             applyKeybindings();
@@ -5906,13 +5905,11 @@ public final class MainWindow {
     }
 
     /**
-     * The window buttons' scheme (a dark theme wants light glyphs, whatever the desktop says), and
-     * the one appearance setting that cannot change live: the window's style is fixed once shown,
-     * so a setting that disagrees with the window is said in the status bar instead.
+     * The one appearance setting that cannot change live: the window's style is fixed once shown, so
+     * a setting that disagrees with the window is said in the status bar instead. (The window
+     * buttons follow the theme through {@link Theme#apply()}.)
      */
     private void applyWindowStyle() {
-        ExtendedWindow.matchButtonsToTheme(
-                stage, Theme.byId(settings.theme(), Theme.DEFAULT).isDark());
         boolean wanted = ExtendedWindow.enabled(settings.extendedWindow(), System.getProperty("os.name"));
         if (ExtendedWindow.restartNeeded(wanted, stage.getStyle() == StageStyle.EXTENDED)) {
             setStatus(tr("status.restartWindowStyle"));

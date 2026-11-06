@@ -2,7 +2,6 @@ package com.torrenta.ui;
 
 import java.util.Locale;
 
-import javafx.application.ColorScheme;
 import javafx.scene.Node;
 import javafx.scene.control.Label;
 import javafx.scene.layout.HeaderBar;
@@ -18,7 +17,8 @@ import javafx.stage.StageStyle;
  * the system window buttons</b>, so none of minimise/maximise/close, drag-to-move, double-click-to-
  * maximise, edge resize or snapping has to be reimplemented, which is what {@code UNDECORATED} would
  * have meant. {@link HeaderBar} reports where those buttons are ({@code leftSystemInset} on macOS,
- * {@code rightSystemInset} on Windows and Linux) and reserves the space itself.
+ * {@code rightSystemInset} on Windows and Linux) and reserves the space itself. Their light or dark style
+ * follows the theme through {@link WindowColorScheme}.
  *
  * <p><b>Experimental.</b> Not because the API is: it is cross-platform. Because a menu bar drawn
  * inside the window is <em>wrong</em> on macOS, where the menu belongs to the system bar at the top
@@ -88,27 +88,5 @@ public final class ExtendedWindow {
         header.setLeftSystemPadding(true);
         header.setRightSystemPadding(true);
         return header;
-    }
-
-    /**
-     * Draws the system window buttons (minimise, maximise, close) for a light or dark theme.
-     *
-     * <p>JavaFX picks their glyph colour from the scene's colour scheme, which defaults to the <em>OS</em>
-     * setting, not from what the header actually looks like. Torrenta themes itself, so on a light desktop
-     * with a dark theme the buttons came out dark on dark and all but invisible (Editora's bug). Only the
-     * buttons are told: the scene's own colour-scheme preference is left alone, since it reaches further.
-     *
-     * <p>Called on every appearance change, so a theme switch takes effect without a restart. A stage
-     * that is not extended has no such buttons, and is left untouched.
-     */
-    public static void matchButtonsToTheme(Stage stage, boolean darkTheme) {
-        if (stage != null && stage.getStyle() == StageStyle.EXTENDED) {
-            HeaderBar.setSystemColorScheme(stage, buttonScheme(darkTheme));
-        }
-    }
-
-    /** The button colour scheme for a light or dark theme. Pure. */
-    public static ColorScheme buttonScheme(boolean darkTheme) {
-        return darkTheme ? ColorScheme.DARK : ColorScheme.LIGHT;
     }
 }

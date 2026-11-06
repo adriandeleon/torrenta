@@ -37,6 +37,15 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   the accent's ink; a section's own All, chosen whenever that section filters nothing, keeps the
   quiet fill, so the filters really narrowing the list are the ones the eye finds.
 
+### Fixed
+
+- **Title bars follow the theme's light or dark, not the system's.** On Windows and macOS the
+  Settings window, the dialogs and the main window (when the menu bar is not in its title bar) kept
+  a light frame under a dark theme, or a dark one under a light theme, whenever the theme and the
+  system's setting disagreed. Every window is now told the theme's as it opens and again on a
+  switch. On Linux the desktop draws those frames and keeps its own choice; the window buttons
+  beside the menu bar already followed the theme there.
+
 ## 0.4.1 — 2026-10-28
 
 ### Fixed
