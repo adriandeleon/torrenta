@@ -424,13 +424,12 @@ scripts/render-icon.py            branding/torrenta-icon.svg → torrenta.png (P
 - **Undo of file priorities, queue moves and a bulk pause.** Remove (files kept), Set Location, a
   category, tags, and limits typed in the omnibox are undoable; a rename is not, since the window
   cannot tell a given name from the torrent's own.
-- **Start at login.**
 - **Homebrew and winget.** Releases are published on GitHub only: the packagers wait for a
   `PACKAGES_TOKEN` secret and the checks in [docs/release.md](docs/release.md).
-- **1.0.** The criteria in [docs/ROADMAP.md](docs/ROADMAP.md) (a week of daily use on each
-  platform, resume data proven across upgrades, signed installers) are what stands between 0.x
-  and 1.0. The macOS dmg is signed and notarized and the Linux packages are signed; the Windows
-  installer is not yet.
+- **1.0.** Of the criteria in [docs/ROADMAP.md](docs/ROADMAP.md), two are left: a week of daily
+  use on each platform, and a signed Windows installer (the macOS dmg is signed and notarized,
+  the Linux packages are signed). Resume data is proven across upgrades by `UpgradeRestoreTest`,
+  which restores a store written by every release.
 
 ## License
 
