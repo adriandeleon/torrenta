@@ -55,6 +55,11 @@ final class Sidebar extends VBox {
 
     private static final PseudoClass SECTION = PseudoClass.getPseudoClass("section");
     private static final PseudoClass CHOSEN = PseudoClass.getPseudoClass("chosen");
+    /**
+     * A section's own All, which is chosen whenever that section filters nothing: drawn quieter
+     * when chosen, so the filters really in force are the ones that stand out.
+     */
+    private static final PseudoClass SECTION_ALL = PseudoClass.getPseudoClass("section-all");
     /** A saved view whose query no longer reads: struck through, the reason in its tooltip. */
     private static final PseudoClass BROKEN = PseudoClass.getPseudoClass("broken");
 
@@ -516,6 +521,7 @@ final class Sidebar extends VBox {
                 setContextMenu(null);
                 pseudoClassStateChanged(SECTION, false);
                 pseudoClassStateChanged(CHOSEN, false);
+                pseudoClassStateChanged(SECTION_ALL, false);
                 pseudoClassStateChanged(BROKEN, false);
                 return;
             }
@@ -531,6 +537,8 @@ final class Sidebar extends VBox {
             pseudoClassStateChanged(SECTION, section);
             mark(markFor(entry));
             pseudoClassStateChanged(CHOSEN, entry.chosenIn(selection));
+            pseudoClassStateChanged(
+                    SECTION_ALL, !section && entry.filter.kind() == SidebarFilter.Kind.ALL && entry.axis != Axis.ALL);
             if (section) {
                 tail(chevron);
                 chevron.rotateProperty()
