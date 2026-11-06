@@ -127,8 +127,25 @@ public final class EventLog {
         return handler;
     }
 
+    /** The bridge installed, while it is: taken off by {@link #removeLogBridge}. */
+    private @org.jspecify.annotations.Nullable Handler installed;
+
     /** Installs the bridge on the application's logger namespace. */
     public void installLogBridge(Consumer<Runnable> onOwnerThread) {
-        Logger.getLogger("com.torrenta").addHandler(logBridge(onOwnerThread));
+        removeLogBridge();
+        Handler bridge = logBridge(onOwnerThread);
+        installed = bridge;
+        Logger.getLogger("com.torrenta").addHandler(bridge);
+    }
+
+    /**
+     * Takes the bridge off again. The logger lives as long as the JVM, so a handler left on it
+     * keeps this log reachable and, through the tables observing {@link #events}, the whole window
+     * it belongs to: one per test in a test JVM, which ran macOS CI out of heap.
+     */
+    public void removeLogBridge() {
+        Handler bridge = installed;
+        installed = null;
+        if (bridge != null) Logger.getLogger("com.torrenta").removeHandler(bridge);
     }
 }

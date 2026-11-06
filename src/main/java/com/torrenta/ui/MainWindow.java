@@ -1109,6 +1109,7 @@ public final class MainWindow {
         shutDown = true;
         rememberDivider();
         rememberWindow();
+        log.removeLogBridge();
         session.close();
         webApi.close();
         updates.shutdown();
