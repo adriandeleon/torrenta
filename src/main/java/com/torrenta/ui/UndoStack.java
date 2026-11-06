@@ -9,8 +9,9 @@ import com.torrenta.engine.EngineException;
 
 /**
  * What can be taken back, newest first: a removal (its files kept), Set Location, a category,
- * tags, a name. The status bar offers the newest for {@link #OFFER_MS}; Shortcut+Z takes the
- * newest back for {@link #KEEP_MS}, after which it is forgotten; at most {@link #SIZE} are kept.
+ * tags, limits, a file's priority, a queue move, a pause or a resume. The status bar offers the
+ * newest for {@link #OFFER_MS}; Shortcut+Z takes the newest back for {@link #KEEP_MS}, after which
+ * it is forgotten; at most {@link #SIZE} are kept.
  *
  * <p>The rule is pure: the clock is passed in, and an entry's {@link Undo} runs where the window
  * runs engine calls, on a worker.

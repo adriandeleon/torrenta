@@ -45,6 +45,16 @@ class QueueOrderTest {
         List<String> of(List<String> ids) {
             return order.stream().filter(ids::contains).toList();
         }
+
+        /** {@code setQueuePosition}: to that place, the ones in between shifting. */
+        void set(String id, int position) {
+            order.remove(id);
+            order.add(position, id);
+        }
+
+        void undo(List<String> before) {
+            for (QueueOrder.Step step : QueueOrder.restore(before, List.copyOf(order))) set(step.id(), step.position());
+        }
     }
 
     private static void apply(Queue queue, List<String> selected, QueueMove move) {
@@ -102,5 +112,59 @@ class QueueOrderTest {
                 QueueOrder.plan(List.of(seed, third, first), QueueMove.TOP).stream()
                         .map(Torrent::id)
                         .toList());
+    }
+
+    @Test
+    void undoingAMovePutsTheWholeQueueBackForEverySelectionAndMove() {
+        List<String> ids = List.of("a", "b", "c", "d", "e");
+        for (int mask = 1; mask < 1 << ids.size(); mask++) {
+            List<String> selected = new ArrayList<>();
+            for (int i = 0; i < ids.size(); i++) if ((mask & 1 << i) != 0) selected.add(ids.get(i));
+            for (QueueMove move : QueueMove.values()) {
+                Queue q = new Queue(ids.toArray(String[]::new));
+                apply(q, selected, move);
+                q.undo(ids);
+                assertEquals(ids, q.order, selected + " " + move + " undone");
+            }
+        }
+    }
+
+    @Test
+    void undoingSeveralMovesInTurnPutsEachOrderBack() {
+        Queue q = new Queue("a", "b", "c", "d", "e", "f");
+        List<String> first = List.copyOf(q.order);
+        apply(q, List.of("e", "b"), QueueMove.TOP);
+        List<String> second = List.copyOf(q.order);
+        apply(q, List.of("a", "f"), QueueMove.UP);
+        q.undo(second);
+        assertEquals(second, q.order);
+        q.undo(first);
+        assertEquals(first, q.order);
+    }
+
+    @Test
+    void aQueueAlreadyInOrderNeedsNoCall() {
+        assertEquals(List.of(), QueueOrder.restore(List.of("a", "b", "c"), List.of("a", "b", "c")));
+        assertEquals(
+                List.of(new QueueOrder.Step("a", 0)),
+                QueueOrder.restore(List.of("a", "b", "c"), List.of("b", "c", "a")),
+                "one call puts the one moved back; the others shift with it");
+    }
+
+    @Test
+    void aTorrentAddedSinceKeepsItsPlaceAndOneGoneIsLeftOut() {
+        // "x" arrived after the move, "c" was removed: the others get their old order back around x.
+        Queue q = new Queue("d", "x", "a", "b");
+        q.undo(List.of("a", "b", "c", "d"));
+        assertEquals(List.of("a", "x", "b", "d"), q.order);
+    }
+
+    @Test
+    void theOrderIsByPositionWithoutSeedsOrLinks() {
+        Torrent seed = T.seeding().id("s").build();
+        Torrent link = T.downloading().id("url-0123").queued(0).build();
+        Torrent second = T.downloading().id("b").queued(1).build();
+        Torrent first = T.downloading().id("a").queued(0).build();
+        assertEquals(List.of("a", "b"), QueueOrder.order(List.of(seed, second, link, first)));
     }
 }

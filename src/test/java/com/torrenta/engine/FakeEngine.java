@@ -464,6 +464,76 @@ public class FakeEngine implements Engine {
     public synchronized void queueMove(String id, QueueMove move) throws EngineException {
         call("queueMove", id, move);
         existing(id);
+        List<String> order = queueOrder();
+        int at = order.indexOf(id);
+        if (at < 0) return;
+        order.remove(at);
+        int to =
+                switch (move) {
+                    case TOP -> 0;
+                    case UP -> Math.max(0, at - 1);
+                    case DOWN -> Math.min(order.size(), at + 1);
+                    case BOTTOM -> order.size();
+                };
+        order.add(to, id);
+        requeue(order);
+    }
+
+    @Override
+    public synchronized void setQueuePosition(String id, int position) throws EngineException {
+        call("setQueuePosition", id, position);
+        existing(id);
+        List<String> order = queueOrder();
+        if (!order.remove(id)) return;
+        order.add(Math.min(Math.max(position, 0), order.size()), id);
+        requeue(order);
+    }
+
+    /** A torrent placed in the queue, as {@link #queueMove} keeps it: the others not in it stay at -1. */
+    public static Torrent atQueuePosition(Torrent t, int position) {
+        return new Torrent(
+                t.id(),
+                t.name(),
+                t.size(),
+                t.done(),
+                t.progress(),
+                t.state(),
+                t.downloadRate(),
+                t.uploadRate(),
+                t.peers(),
+                t.seeds(),
+                t.uploaded(),
+                t.downloaded(),
+                t.added(),
+                t.completed(),
+                t.tracker(),
+                t.savePath(),
+                t.paused(),
+                t.sequential(),
+                t.seedingTime(),
+                t.category(),
+                t.tags(),
+                t.error(),
+                t.trackers(),
+                t.trackerError(),
+                t.queued(),
+                position,
+                t.moving(),
+                t.superSeeding());
+    }
+
+    /** The queued ids by position: a list to change and hand to {@link #requeue}. */
+    private List<String> queueOrder() {
+        return new ArrayList<>(torrents.values().stream()
+                .filter(t -> t.queuePosition() >= 0)
+                .sorted(java.util.Comparator.comparingInt(Torrent::queuePosition))
+                .map(Torrent::id)
+                .toList());
+    }
+
+    private void requeue(List<String> order) {
+        for (int i = 0; i < order.size(); i++)
+            torrents.put(order.get(i), atQueuePosition(torrents.get(order.get(i)), i));
     }
 
     @Override

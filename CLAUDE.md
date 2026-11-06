@@ -47,7 +47,8 @@ one), `message-log` / `message-log:<query>` (the status bar's history card; its 
   said), `remove-data-confirmed` (Remove with files on the selection, answered yes; run with
   `XDG_DATA_HOME` pointed at a scratch folder, or the files land in your own trash),
   `export-to:<folder>` for Export .torrent past its native chooser, `save-view:<name>` (Save Filter as View on the omnibox's query, `~` for a space), `pick-view:<n>` (the n-th saved view), `remove-confirmed` (Remove on the selection, its question answered yes) and `undo-after:<ms>` (Shortcut+Z that much later; an `undo=` line first), `rename:<name>` (`~` for a
-  space) to fill and confirm the Rename dialog, `files-rename:<row>:<name>` for a Files-tab row,
+  space) to fill and confirm the Rename dialog, `files-rename:<row>:<name>` for a Files-tab row, `files-priority:<row>:<IGNORE|LOW|NORMAL|HIGH>` to
+  set one as its cell does,
   `web-seeds-add:<urls>` (`~` between URLs) and `web-seed-remove:<row>` for the Trackers tab's web
   seeds (a `web-seeds=` line, with `editable=`, while that tab shows),
   `files-stream:<row>` for Stream in Player on that visible row (back to the tab that showed
@@ -699,9 +700,15 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   a restart of an unfinished torrent reads them again. The RAR fixtures in the test resources
   were built to the format by hand and checked with unrar (`unrar lt` calls them encrypted, `t`
   passes the plain ones); there is no RAR creator here.
-- **Undo takes back Remove (its files kept), Set Location, a category and tags** (`ui.UndoStack`:
-  the last ten, the status bar's Undo for ten seconds, Shortcut+Z for ten minutes, Torrent → Undo).
-  Each is an `onTorrentsUndoable` action that hands back its inverse. A removal goes through
+- **Undo takes back Remove (its files kept), Set Location, a category and tags, limits, a file's
+  priority, a queue move, a pause or a resume** (`ui.UndoStack`: the last ten, the status bar's Undo
+  for ten seconds, Shortcut+Z for ten minutes, Torrent → Undo). Each is an `onTorrentsUndoable` (or,
+  for the Files tab's priority, `onTorrentUndoable`) action that hands back its inverse, null when
+  it changed nothing: a pause takes back only what it paused, a priority reads the old one first. A
+  queue move's inverse is the whole order from before (`QueueOrder.order`, then `restore`: one
+  `Engine.setQueuePosition` per place that differs, from the top down, since each shifts the ones
+  in between and moving the moved ones back alone lands them wrong); a torrent force-started before
+  a pause comes back queued, as a snapshot does not say it was forced. A removal goes through
   `Engine.detach`/`reattach` (`Capability.UNDO_REMOVE`, libtorrent's): detach asks for resume data
   with the disk cache flushed and waits for that torrent's own answer (`saveWaits`, bounded as
   `stop()` is), since the periodic blob can be two minutes old; reattach writes blob and sidecars

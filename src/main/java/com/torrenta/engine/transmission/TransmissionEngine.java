@@ -560,6 +560,13 @@ public final class TransmissionEngine implements Engine {
         action("queue-move-" + move.name().toLowerCase(Locale.ROOT), id);
     }
 
+    /** {@code torrent-set}'s {@code queuePosition}, which shifts the others as the moves do. */
+    @Override
+    public void setQueuePosition(String id, int position) throws EngineException {
+        checkRunning();
+        set(id, Map.of("queuePosition", position));
+    }
+
     /**
      * {@inheritDoc}
      *

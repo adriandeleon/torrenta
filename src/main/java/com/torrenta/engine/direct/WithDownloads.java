@@ -216,6 +216,12 @@ public final class WithDownloads implements Engine {
     }
 
     @Override
+    public void setQueuePosition(String id, int position) throws EngineException {
+        torrentOnly(id);
+        torrents.setQueuePosition(id, position);
+    }
+
+    @Override
     public void moveStorage(String id, String destination, boolean moveFiles) throws EngineException {
         if (DirectDownload.isId(id)) links.moveStorage(id, destination, moveFiles);
         else torrents.moveStorage(id, destination, moveFiles);

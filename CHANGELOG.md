@@ -7,6 +7,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
 
 ### Added
 
+- **Undo covers pausing, resuming, queue moves and file priorities.** Shortcut+Z (or the status
+  bar's Undo) now takes back a pause or resume of the selection, resuming or pausing again only
+  the torrents it changed; a move in the queue, putting the whole queue back in the order it had;
+  and a file's priority in the Files tab. The omnibox's `>pause`, `>resume` and `>queue` are
+  undoable the same way, and `>queue` now keeps the selection's own order as the menu's moves do.
+
 - **Start Torrenta when you log in.** Settings → General → Operating system has a switch that adds
   Torrenta to your login items: an entry in `~/.config/autostart` on Linux (GNOME, KDE and every
   desktop that follows the XDG spec), a LaunchAgent on macOS, the `Run` key on Windows. The entry

@@ -3602,6 +3602,19 @@ class LibtorrentEngineTest {
             engine.queueMove(ids.get(1), Engine.QueueMove.UP);
             await("the first cannot go higher", () -> positions(engine, ids).equals(List.of(2, 0, 1)));
             assertThrows(EngineException.class, () -> engine.queueMove("ff".repeat(20), Engine.QueueMove.TOP));
+
+            // An undo's call: to a place, the ones in between shifting; QueueOrder.restore plans them.
+            engine.setQueuePosition(ids.get(0), 0);
+            await("q1 set to the top", () -> positions(engine, ids).equals(List.of(0, 1, 2)));
+            engine.setQueuePosition(ids.get(0), 2);
+            await(
+                    "q1 set to the bottom, past both",
+                    () -> positions(engine, ids).equals(List.of(2, 0, 1)));
+            for (com.torrenta.engine.QueueOrder.Step step : com.torrenta.engine.QueueOrder.restore(
+                    ids, com.torrenta.engine.QueueOrder.order(engine.torrents())))
+                engine.setQueuePosition(step.id(), step.position());
+            await("restored to add order", () -> positions(engine, ids).equals(List.of(0, 1, 2)));
+            assertThrows(EngineException.class, () -> engine.setQueuePosition("ff".repeat(20), 0));
         }
     }
 

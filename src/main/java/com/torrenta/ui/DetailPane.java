@@ -1148,11 +1148,8 @@ final class DetailPane extends VBox {
                 },
                 com.torrenta.engine.Priority.values()));
         priority.setOnEditCommit(e -> {
-            FileRows.Row row = e.getRowValue().getValue();
-            if (row.isFile() && e.getNewValue() != null) {
-                row.priorityProperty().set(e.getNewValue());
-                onFilePriority.accept(row.index(), e.getNewValue());
-            }
+            com.torrenta.engine.Priority chosen = e.getNewValue();
+            if (chosen != null) commitPriority(e.getRowValue().getValue(), chosen);
         });
         files.getColumns().addAll(List.of(name, size, progress, priority));
         Headers.uppercase(files);
@@ -1264,6 +1261,34 @@ final class DetailPane extends VBox {
         files.getSelectionModel().clearAndSelect(n);
         renameForCapture = name;
         selectedFileRow().ifPresent(this::askRename);
+    }
+
+    /** A priority chosen in the Files tab: shown at once, then asked of the engine. */
+    private void commitPriority(FileRows.Row row, com.torrenta.engine.Priority chosen) {
+        if (!row.isFile()) return;
+        row.priorityProperty().set(chosen);
+        onFilePriority.accept(row.index(), chosen);
+    }
+
+    /** For the capture hook: the {@code n}th visible row of the Files tab given that priority, as its cell commits one. */
+    void setFilePriorityForCapture(int n, com.torrenta.engine.Priority chosen) {
+        selectTab("files");
+        if (files.getRoot() == null) {
+            files.rootProperty().addListener(new javafx.beans.value.ChangeListener<>() {
+                @Override
+                public void changed(
+                        javafx.beans.value.ObservableValue<? extends TreeItem<FileRows.Row>> o,
+                        TreeItem<FileRows.Row> was,
+                        TreeItem<FileRows.Row> now) {
+                    if (now == null) return;
+                    files.rootProperty().removeListener(this);
+                    setFilePriorityForCapture(n, chosen);
+                }
+            });
+            return;
+        }
+        files.getSelectionModel().clearAndSelect(n);
+        selectedFileRow().ifPresent(row -> commitPriority(row, chosen));
     }
 
     private Optional<FileRows.Row> selectedFileRow() {

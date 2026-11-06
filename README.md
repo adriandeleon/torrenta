@@ -421,9 +421,6 @@ scripts/render-icon.py            branding/torrenta-icon.svg → torrenta.png (P
 - **A name of its own for a torrent on a Transmission daemon**: the RPC has nowhere to keep one,
   so Rename Torrent is hidden there (`RENAME_TORRENT`). Its files and folders rename on both
   engines.
-- **Undo of file priorities, queue moves and a bulk pause.** Remove (files kept), Set Location, a
-  category, tags, and limits typed in the omnibox are undoable; a rename is not, since the window
-  cannot tell a given name from the torrent's own.
 - **Start at login.**
 - **Homebrew and winget.** Releases are published on GitHub only: the packagers wait for a
   `PACKAGES_TOKEN` secret and the checks in [docs/release.md](docs/release.md).
