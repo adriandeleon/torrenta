@@ -48,6 +48,21 @@ final class SidebarCounts {
         return new SidebarCounts(torrents);
     }
 
+    /** Every category some torrent carries (the empty name for none). */
+    java.util.Set<String> categoryNames() {
+        return categories.keySet();
+    }
+
+    /** Every tag some torrent carries. */
+    java.util.Set<String> tagNames() {
+        return tags.keySet();
+    }
+
+    /** Every tracker host some torrent has. */
+    java.util.Set<String> hostNames() {
+        return hosts.keySet();
+    }
+
     /**
      * Each name once per torrent, as {@code contains} counts it: a list that names a tag twice is
      * still one torrent with that tag.

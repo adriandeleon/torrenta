@@ -51,8 +51,6 @@ final class Icons {
 
     /** Every toolbar glyph is 17px tall, the redesign's size: a 16-unit kit box scaled up a hair. */
     private static final double LINE_SCALE = 17.0 / 16.0;
-    /** A Material 24dp glyph at the same visual size. None is on the toolbar now; kept for dialogs. */
-    private static final double ICON_SCALE = 17.0 / 24.0;
     /** A glyph beside a sidebar row: smaller than the toolbar's. */
     private static final double SMALL_SCALE = 13.0 / 16.0;
 
@@ -98,16 +96,6 @@ final class Icons {
         svg.setScaleX(scale);
         svg.setScaleY(scale);
         return new Glyph(svg, 16);
-    }
-
-    /** A Material 24dp glyph (filled); see {@code .toolbar-icon} in app.css. */
-    static Glyph of(String content) {
-        SVGPath svg = new SVGPath();
-        svg.setContent(content);
-        svg.getStyleClass().add("toolbar-icon");
-        svg.setScaleX(ICON_SCALE);
-        svg.setScaleY(ICON_SCALE);
-        return new Glyph(svg, 24);
     }
 
     /**
@@ -515,25 +503,10 @@ final class Icons {
         return line("M2.5 5L8 2.5 13.5 5v6L8 13.5 2.5 11zM2.5 5L8 7.5 13.5 5M8 7.5v6");
     }
 
-    /** A folder with an arrow out of it: Open Folder in the Files tab. */
-    static Glyph folderOpen() {
-        return line("M2 12.5V3.5h4.2l1.5 2h6.3v7zM6 10.5l3.5-3.5M6.8 7h2.7v2.7");
-    }
-
-    /** A folder with an arrow up out of it: Open Parent Folder. */
-    static Glyph folderUp() {
-        return line("M2 12.5V3.5h4.2l1.5 2h6.3v7zM8 11V7.2M6.3 8.8L8 7.1l1.7 1.7");
-    }
-
     /** Two people: the Peers tab. */
     static Glyph peers() {
         return line("M4 5.5a2 2 0 1 0 4 0a2 2 0 1 0-4 0M1.8 13.2c0-2.4 1.9-3.9 4.2-3.9s4.2 1.5 4.2 3.9"
                 + "M10.3 3.7a2 2 0 0 1 0 3.6M11.6 9.6c1.6.5 2.6 1.8 2.6 3.6");
-    }
-
-    /** Four squares: the Pieces tab. */
-    static Glyph pieces() {
-        return line("M2.5 2.5h4.5v4.5H2.5zM9 2.5h4.5v4.5H9zM2.5 9h4.5v4.5H2.5zM9 9h4.5v4.5H9z");
     }
 
     /** A plus, for Add. */

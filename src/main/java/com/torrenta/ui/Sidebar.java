@@ -348,10 +348,6 @@ final class Sidebar extends VBox {
         tree.refresh();
     }
 
-    SidebarSelection selected() {
-        return selection;
-    }
-
     /** Collapses these sections, opens the rest; at start, from the settings. */
     void setCollapsed(Set<Axis> axes) {
         rebuilding = true;

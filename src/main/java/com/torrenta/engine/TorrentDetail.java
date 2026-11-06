@@ -182,11 +182,6 @@ public record TorrentDetail(
             this(index, path, size, done, priority, -1, -1);
         }
 
-        /** Whether piece {@code piece} holds some of this file's bytes. */
-        public boolean touches(int piece) {
-            return firstPiece >= 0 && piece >= firstPiece && piece <= lastPiece;
-        }
-
         public double progress() {
             return size == 0 ? 1.0 : (double) done / size;
         }

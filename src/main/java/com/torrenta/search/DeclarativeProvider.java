@@ -62,10 +62,6 @@ public final class DeclarativeProvider implements SearchProvider {
         this.clock = clock;
     }
 
-    public Definition definition() {
-        return definition;
-    }
-
     @Override
     public String name() {
         return definition.name();

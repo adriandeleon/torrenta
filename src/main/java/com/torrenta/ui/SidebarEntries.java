@@ -183,22 +183,23 @@ final class SidebarEntries {
             views.entries = List.copyOf(entries);
             rebuilt.add(views);
         }
-        List<String> c = SidebarFilter.names(categoryNames, torrents, false);
+        // One pass over the torrents for every count and every name in use; the sections' name
+        // lists come from the counts' keys, so nothing walks the torrents three times more.
+        SidebarCounts counts = SidebarCounts.of(torrents);
+        List<String> c = SidebarFilter.names(categoryNames, counts.categoryNames());
         if (!c.equals(categories.names)) {
             categories.names = c;
             categories.entries = labelled(Axis.CATEGORY, c, SidebarFilter::category, SidebarFilter.UNCATEGORISED);
             rebuilt.add(categories);
         }
-        List<String> t = SidebarFilter.names(tagNames, torrents, true);
+        List<String> t = SidebarFilter.names(tagNames, counts.tagNames());
         if (!t.equals(tags.names)) {
             tags.names = t;
             tags.entries = labelled(Axis.TAG, t, SidebarFilter::tag, SidebarFilter.UNTAGGED);
             rebuilt.add(tags);
         }
-        // One pass for every count; the filters' own count is what the test holds it to.
-        SidebarCounts counts = SidebarCounts.of(torrents);
         // "Tracker error" is listed only while some torrent has one: part of the section's shape.
-        List<String> hostNames = SidebarFilter.trackerHosts(torrents);
+        List<String> hostNames = SidebarFilter.trackerHosts(counts.hostNames());
         List<String> hosts = new ArrayList<>(hostNames);
         if (counts.anyTrackerError()) hosts.add(SidebarFilter.TRACKER_ERROR.format());
         if (!hosts.equals(trackers.names)) {
@@ -214,9 +215,10 @@ final class SidebarEntries {
         for (Entry e : entries()) e.count.set(counts.of(e.filter));
         for (int i = 0; i < savedViews.size(); i++) {
             FilterQuery q = savedViews.get(i).query();
+            int n = 0;
+            for (Torrent torrent : torrents) if (q.matches(torrent)) n++;
             // The section's own All comes first; the views follow in order.
-            views.entries.get(i + 1).count.set((int)
-                    torrents.stream().filter(q::matches).count());
+            views.entries.get(i + 1).count.set(n);
         }
         return rebuilt;
     }

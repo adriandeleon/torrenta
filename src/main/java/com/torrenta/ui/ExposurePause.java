@@ -32,6 +32,8 @@ final class ExposurePause {
     static Step next(LeakCheck.Verdict verdict, boolean enabled, List<Torrent> torrents, Set<String> held) {
         boolean release = !enabled || verdict == LeakCheck.Verdict.PROTECTED || verdict == LeakCheck.Verdict.UNBOUND;
         if (release) {
+            // The usual tick (the check off, or Protected) with nothing held: no set of every id.
+            if (held.isEmpty()) return new Step(List.of(), List.of(), Set.of());
             // A held torrent removed in the meantime is not resumed: it is no longer there.
             Set<String> present = new LinkedHashSet<>();
             for (Torrent t : torrents) present.add(t.id());

@@ -6,11 +6,7 @@ public final class PieceMath {
     private PieceMath() {}
 
     /** The pieces from {@code first} to {@code last}, inclusive. */
-    public record Span(int first, int last) {
-        public int count() {
-            return last - first + 1;
-        }
-    }
+    public record Span(int first, int last) {}
 
     /**
      * The pieces bytes {@code from} to {@code to} (inclusive, counted from the file's start) of a

@@ -57,11 +57,6 @@ public record CreateRequest(
         return parent == null ? path.toAbsolutePath().normalize() : parent;
     }
 
-    /** The trackers flattened, tier order kept. */
-    public List<String> allTrackers() {
-        return trackers.stream().flatMap(List::stream).toList();
-    }
-
     /** Which piece hashes the torrent carries. */
     public enum Format {
         HYBRID("hybrid"),

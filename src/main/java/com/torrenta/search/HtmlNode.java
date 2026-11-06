@@ -1,7 +1,6 @@
 package com.torrenta.search;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -107,10 +106,6 @@ public final class HtmlNode {
         return parent;
     }
 
-    public List<HtmlNode> children() {
-        return Collections.unmodifiableList(children);
-    }
-
     /** The attribute's value, entities decoded; empty when absent or valueless. */
     public String attr(String name) {
         String v = attrs.get(name.toLowerCase(Locale.ROOT));
@@ -119,10 +114,6 @@ public final class HtmlNode {
 
     public boolean hasAttr(String name) {
         return attrs.containsKey(name.toLowerCase(Locale.ROOT));
-    }
-
-    public Map<String, String> attrs() {
-        return Collections.unmodifiableMap(attrs);
     }
 
     /** The {@code class} attribute's words. */

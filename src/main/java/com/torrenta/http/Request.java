@@ -78,10 +78,6 @@ public final class Request {
         return secure;
     }
 
-    public byte[] body() {
-        return body.clone();
-    }
-
     /** The body as a form: an urlencoded one, else the multipart's plain fields; empty for anything else. */
     public Form form() {
         String type = header("content-type").orElse("").toLowerCase(Locale.ROOT);

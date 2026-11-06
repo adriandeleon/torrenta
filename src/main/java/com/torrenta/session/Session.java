@@ -1186,7 +1186,7 @@ public final class Session {
                     .add(nowSeconds, t.downloadRate(), t.uploadRate());
             followed.add(t.id(), nowSeconds, t.downloadRate(), t.uploadRate());
         }
-        recent.keySet().retainAll(present);
+        if (recent.size() != present.size()) recent.keySet().retainAll(present);
         followed.retainAll(present);
     }
 

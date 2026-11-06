@@ -182,7 +182,10 @@ public final class MainWindow {
     /** 0 until the first reading. */
     private long freeCheckedAt;
 
-    private Optional<NetworkStatus.Free> free = Optional.empty();
+    /** Written by the reading thread after the first look; the poll reads the latest. */
+    private volatile Optional<NetworkStatus.Free> free = Optional.empty();
+
+    private volatile boolean freeReading;
     private final TorrentRows rows = new TorrentRows();
     private final FilteredList<TorrentRow> filtered = new FilteredList<>(rows.list());
     private final TextField filter = new TextField();
@@ -4111,12 +4114,25 @@ public final class MainWindow {
                 snapshot);
     }
 
-    /** The saved views as the sidebar lists them, each query read with this clock. */
+    /**
+     * The saved views as the sidebar lists them, each query read with this clock. Parsed again
+     * when the settings' list changed (one instance per change) or a minute passed, for the terms
+     * that read the clock ({@code added<1d}); every tick re-parsed every view before.
+     */
     private List<SidebarEntries.View> sidebarViews(long now) {
-        return settings.savedViews().stream()
+        List<com.torrenta.store.SavedView> views = settings.savedViews();
+        if (views == sidebarViewsFrom && now - sidebarViewsAt < 60) return sidebarViewsParsed;
+        sidebarViewsParsed = views.stream()
                 .map(v -> new SidebarEntries.View(v.slug(), v.name(), FilterQuery.parse(v.query(), now)))
                 .toList();
+        sidebarViewsFrom = views;
+        sidebarViewsAt = now;
+        return sidebarViewsParsed;
     }
+
+    private @Nullable List<com.torrenta.store.SavedView> sidebarViewsFrom;
+    private List<SidebarEntries.View> sidebarViewsParsed = List.of();
+    private long sidebarViewsAt;
 
     /** The n-th saved view (1 first), chosen; nothing when there are fewer. */
     private void chooseSavedView(int n) {
@@ -5870,7 +5886,14 @@ public final class MainWindow {
         // tick's one update change (TorrentRows) re-filters and re-sorts once, without a sort() call.
         SortedList<TorrentRow> sorted = new SortedList<>(filtered);
         TableView<TorrentRow> table = new TableView<>(sorted);
-        sorted.comparatorProperty().bind(table.comparatorProperty());
+        // The rows' own comparator, not the table's: JavaFX's compares two rows by calling each
+        // sort column's cell value factory (a binding, a RowView, a StatusLine per call), which
+        // the tick's one re-sort ran O(n log n) times: measured 10-17 ms a tick sorted by Name at
+        // 5,000 rows, 2-4 ms otherwise. Ours reads the snapshot straight (rowComparators). The
+        // default sort policy wants the SortedList bound to the table's comparator itself and
+        // reverts a header click otherwise; the mapped binding does the same job.
+        sorted.comparatorProperty().bind(table.comparatorProperty().map(c -> rowComparator(table)));
+        table.setSortPolicy(t -> true);
         table.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
         // Widths are remembered, so they are not stretched to fit; the last column does not flex.
         table.setColumnResizePolicy(TableView.UNCONSTRAINED_RESIZE_POLICY);
@@ -6202,9 +6225,30 @@ public final class MainWindow {
      */
     record RowView(String name, StatusLine line, double progress, boolean direct) {}
 
+    /**
+     * Each column's order over the rows themselves, from the snapshot, for the table's sort; a
+     * column without one does not sort. Filled as the columns are built.
+     */
+    private final Map<TableColumn<TorrentRow, ?>, java.util.Comparator<TorrentRow>> rowComparators =
+            new java.util.HashMap<>();
+
+    /** The sort order's columns' comparators chained, each reversed where its header says; null unsorted. */
+    private java.util.@Nullable Comparator<TorrentRow> rowComparator(TableView<TorrentRow> table) {
+        java.util.Comparator<TorrentRow> out = null;
+        for (TableColumn<TorrentRow, ?> column : table.getSortOrder()) {
+            java.util.Comparator<TorrentRow> c = rowComparators.get(column);
+            if (c == null) continue;
+            if (column.getSortType() == TableColumn.SortType.DESCENDING) c = c.reversed();
+            out = out == null ? c : out.thenComparing(c);
+        }
+        return out;
+    }
+
     private TableColumn<TorrentRow, RowView> nameColumn() {
         TableColumn<TorrentRow, RowView> column = new TableColumn<>(tr("common.name"));
         column.setId("name");
+        rowComparators.put(
+                column, java.util.Comparator.comparing(row -> row.torrent().name(), String.CASE_INSENSITIVE_ORDER));
         column.setPrefWidth(360);
         column.setCellValueFactory(cell -> {
             TorrentRow row = cell.getValue();
@@ -6286,7 +6330,7 @@ public final class MainWindow {
      * sort compares numbers, not their text — rendered through {@code text}. The value observes the
      * row's torrent property, so a new snapshot refreshes the cell in place.
      */
-    private static <T extends Comparable<? super T>> TableColumn<TorrentRow, T> column(
+    private <T extends Comparable<? super T>> TableColumn<TorrentRow, T> column(
             String id,
             String title,
             double width,
@@ -6295,6 +6339,7 @@ public final class MainWindow {
             Function<T, String> text) {
         TableColumn<TorrentRow, T> column = new TableColumn<>(title);
         column.setId(id);
+        rowComparators.put(column, java.util.Comparator.comparing((TorrentRow row) -> value.apply(row.torrent())));
         column.setPrefWidth(width);
         column.setVisible(visible);
         column.setCellValueFactory(cell -> cell.getValue().torrentProperty().map(value));
@@ -6321,6 +6366,11 @@ public final class MainWindow {
     private TableColumn<TorrentRow, StatusLine> statusColumn() {
         TableColumn<TorrentRow, StatusLine> column = new TableColumn<>(tr("column.state"));
         column.setId("state");
+        // By state in RowState's order, then by name: the sentence is not built per compare.
+        rowComparators.put(
+                column,
+                java.util.Comparator.comparing((TorrentRow row) -> RowState.of(row.torrent(), row.quietSeconds()))
+                        .thenComparing(row -> row.torrent().name(), String.CASE_INSENSITIVE_ORDER));
         column.setPrefWidth(300);
         column.setCellValueFactory(cell -> {
             TorrentRow row = cell.getValue();
@@ -6662,10 +6712,29 @@ public final class MainWindow {
             return Optional.empty();
         }
         if (freeCheckedAt > 0 && nowSeconds - freeCheckedAt < 5) return free;
+        boolean first = freeCheckedAt == 0;
         freeCheckedAt = nowSeconds;
         Path dir = settings.downloadDir();
-        free = FreeSpace.disk(dir).map(d -> NetworkStatus.free(d, folderText(dir)));
+        // The first look at once, so the bar has it from the first frame; the others on a
+        // virtual thread, since a file-store query can block on a network mount and a tick that
+        // waits delays every listener and the window's frame with it.
+        if (first) {
+            free = readFree(dir);
+        } else if (!freeReading) {
+            freeReading = true;
+            Thread.startVirtualThread(() -> {
+                try {
+                    free = readFree(dir);
+                } finally {
+                    freeReading = false;
+                }
+            });
+        }
         return free;
+    }
+
+    private static Optional<NetworkStatus.Free> readFree(Path dir) {
+        return FreeSpace.disk(dir).map(d -> NetworkStatus.free(d, folderText(dir)));
     }
 
     /**
@@ -6753,6 +6822,12 @@ public final class MainWindow {
 
     private long boundCheckedAt;
 
+    /** The interfaces as last enumerated on a virtual thread; the ones the poll last used. */
+    private volatile @Nullable List<InterfaceWatch.Nic> nicsRead;
+
+    private @Nullable List<InterfaceWatch.Nic> nicsUsed;
+    private volatile boolean nicsReading;
+
     /**
      * Poll thread: the interface the settings bind to, read every five seconds ({@link
      * InterfaceWatch}). A binding that stops reaching anyone, or comes back, is said in the log
@@ -6765,8 +6840,28 @@ public final class MainWindow {
         if (bound != null && nowSeconds - boundCheckedAt < 5) return bound;
         boundCheckedAt = nowSeconds;
         InterfaceWatch.State before = bound;
-        InterfaceWatch.State now =
-                InterfaceWatch.of(settings.get(Settings.CONN_INTERFACE, ""), InterfaceWatch.system());
+        // Enumerating the interfaces takes 50-500 ms on Windows and on hosts with many virtual
+        // ones: at once for the first look, then on a virtual thread, the poll using the last
+        // list read (one period behind) and skipping the look while nothing new came.
+        List<InterfaceWatch.Nic> nics;
+        if (before == null) {
+            nics = InterfaceWatch.system();
+        } else {
+            if (!nicsReading) {
+                nicsReading = true;
+                Thread.startVirtualThread(() -> {
+                    try {
+                        nicsRead = InterfaceWatch.system();
+                    } finally {
+                        nicsReading = false;
+                    }
+                });
+            }
+            nics = nicsRead;
+            if (nics == null || nics == nicsUsed) return before;
+        }
+        nicsUsed = nics;
+        InterfaceWatch.State now = InterfaceWatch.of(settings.get(Settings.CONN_INTERFACE, ""), nics);
         bound = now;
         InterfaceWatch.change(before, now)
                 .ifPresent(change -> Platform.runLater(() -> {

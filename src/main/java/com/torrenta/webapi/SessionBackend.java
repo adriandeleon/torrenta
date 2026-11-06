@@ -46,12 +46,27 @@ public final class SessionBackend implements WebApi.Backend {
     private final LabelStore labels;
     /** When each torrent last moved a byte, epoch seconds, from the session's polls. */
     private final Map<String, Long> lastActive = new ConcurrentHashMap<>();
+    /**
+     * The session's last poll, what {@link #torrents} answers with: a status walk of the engine
+     * per request (a WebUI asks every 1.5 s, the *arr apps too) contended with the poll for the
+     * engine's lock. Null after a write through the API, so the next ask reads the engine until
+     * the next poll lands, and a client that adds and then looks sees its torrent.
+     */
+    private volatile @Nullable List<Torrent> lastPoll;
+    /** Free space on the download folder, read at most every {@link #FREE_SPACE_MILLIS}. */
+    private volatile long freeSpaceReadAt;
+
+    private volatile long freeSpaceBytes = -1;
+    private volatile @Nullable Path freeSpaceDir;
+
+    static final long FREE_SPACE_MILLIS = 5_000;
 
     public SessionBackend(Session session, Settings settings, LabelStore labels) {
         this.session = session;
         this.settings = settings;
         this.labels = labels;
         session.addListener(poll -> {
+            lastPoll = poll.torrents();
             for (Torrent t : poll.torrents())
                 if (t.downloadRate() > 0 || t.uploadRate() > 0) lastActive.put(t.id(), poll.nowSeconds());
             if (lastActive.size() > poll.torrents().size() * 2 + 16) {
@@ -70,15 +85,22 @@ public final class SessionBackend implements WebApi.Backend {
     @Override
     public List<Torrent> torrents() {
         Engine e = session.engine();
-        return e == null ? List.of() : e.torrents();
+        if (e == null) return List.of();
+        List<Torrent> polled = lastPoll;
+        return polled != null ? polled : e.torrents();
     }
 
     @Override
     public Optional<TorrentDetail> detail(String id) {
+        return detail(id, TorrentDetail.Part.ALL);
+    }
+
+    @Override
+    public Optional<TorrentDetail> detail(String id, java.util.Set<TorrentDetail.Part> parts) {
         Engine e = session.engine();
         if (e == null) return Optional.empty();
         try {
-            return Optional.ofNullable(e.detail(id));
+            return Optional.ofNullable(e.detail(id, parts));
         } catch (EngineException | RuntimeException ex) {
             LOG.log(Level.FINE, "No detail for " + id, ex);
             return Optional.empty();
@@ -148,14 +170,15 @@ public final class SessionBackend implements WebApi.Backend {
     @Override
     public WebApi.Transfer transfer() {
         Engine e = session.engine();
-        EngineSettings.Speed speed = settings.engineSettings().speed();
+        EngineSettings engineSettings = settings.engineSettings(); // once: ~45 property reads
+        EngineSettings.Speed speed = engineSettings.speed();
         boolean alternative = alternativeInForce();
         long down = speed.downloadBytes(alternative);
         long up = speed.uploadBytes(alternative);
         if (e == null) return new WebApi.Transfer(0, 0, 0, 0, down, up, 0, "disconnected");
         Engine.Rates rates = e.rates();
         SessionStats stats = e.stats();
-        EngineSettings.Queue queue = settings.engineSettings().queue();
+        EngineSettings.Queue queue = engineSettings.queue();
         return new WebApi.Transfer(
                 rates.download(),
                 rates.upload(),
@@ -168,12 +191,23 @@ public final class SessionBackend implements WebApi.Backend {
                 Math.max(0, stats.allTimeDownload()),
                 Math.max(0, stats.allTimeUpload()),
                 Math.max(0, stats.peersConnected()),
-                e.capabilities().has(Engine.Capability.LOCAL_FILES) ? freeSpace(settings.downloadDir()) : -1,
+                e.capabilities().has(Engine.Capability.LOCAL_FILES) ? cachedFreeSpace(settings.downloadDir()) : -1,
                 alternative,
                 queue.activeDownloads() > 0 || queue.activeSeeds() > 0 || queue.activeLimit() > 0,
                 e.connectivity().externalAddress(),
                 Math.max(0, stats.queuedDiskJobs()),
                 Math.max(0, stats.wasted()));
+    }
+
+    /** {@link #freeSpace}, read again only after {@link #FREE_SPACE_MILLIS} or for another folder: a statfs per request otherwise. */
+    private long cachedFreeSpace(Path dir) {
+        long now = System.currentTimeMillis();
+        if (dir.equals(freeSpaceDir) && now - freeSpaceReadAt < FREE_SPACE_MILLIS) return freeSpaceBytes;
+        long bytes = freeSpace(dir);
+        freeSpaceDir = dir;
+        freeSpaceBytes = bytes;
+        freeSpaceReadAt = now;
+        return bytes;
     }
 
     /** Usable bytes on the volume of {@code dir}, or of its nearest folder that exists; -1 unknown. */
@@ -199,8 +233,10 @@ public final class SessionBackend implements WebApi.Backend {
         return c.incoming() ? "connected" : "firewalled";
     }
 
+    /** The engine is asked for only to act on it (Writes, Edits): the list is read fresh next. */
     @Override
     public @Nullable Engine engine() {
+        lastPoll = null;
         return session.engine();
     }
 
@@ -208,6 +244,7 @@ public final class SessionBackend implements WebApi.Backend {
     public Torrent add(AddRequest request) throws EngineException {
         Engine e = session.engine();
         if (e == null) throw new EngineException(tr("status.engineNotRunning"));
+        lastPoll = null;
         return session.add(e, request);
     }
 

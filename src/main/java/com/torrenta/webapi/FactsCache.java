@@ -21,10 +21,20 @@ import com.torrenta.engine.TorrentLimits;
 final class FactsCache {
 
     static final long MAX_AGE_MILLIS = 60_000;
+    /**
+     * Taken off the age per id, so entries filled in one request expire over a quarter of the
+     * minute rather than all in one request; none lives past {@link #MAX_AGE_MILLIS}.
+     */
+    static final long JITTER_MILLIS = 15_000;
+    /** A torrent still without its metadata is asked again this often, not on every request. */
+    static final long NO_METADATA_MILLIS = 5_000;
+
+    /** What the facts need of a detail: the general facts (always read) and the file list. */
+    static final Set<TorrentDetail.Part> PARTS = Set.of(TorrentDetail.Part.FILES);
 
     record Known(QbitTorrent.Facts facts, TorrentLimits limits) {}
 
-    private record Entry(Known known, String savePath, String name, long readAt) {}
+    private record Entry(Known known, String savePath, String name, long expiresAt) {}
 
     private final WebApi.Backend backend;
     private final Map<String, Entry> entries = new ConcurrentHashMap<>();
@@ -35,17 +45,21 @@ final class FactsCache {
 
     Known get(Torrent t, long now) {
         Entry e = entries.get(t.id());
-        if (e != null
-                && e.known().facts().metadata()
-                && e.savePath().equals(t.savePath())
-                && e.name().equals(t.name())
-                && now - e.readAt() < MAX_AGE_MILLIS) return e.known();
-        Optional<TorrentDetail> detail = backend.detail(t.id());
+        if (e != null && e.savePath().equals(t.savePath()) && e.name().equals(t.name()) && now < e.expiresAt())
+            return e.known();
+        // The files alone: the whole detail copies every piece and every peer, under the engine's lock.
+        Optional<TorrentDetail> detail = backend.detail(t.id(), PARTS);
         QbitTorrent.Facts facts = detail.map(d -> QbitTorrent.Facts.of(t, d, backend.magnet(t.id())))
                 .orElseGet(() -> QbitTorrent.Facts.unknown(t));
         Known known = new Known(facts, backend.limits(t.id()));
-        entries.put(t.id(), new Entry(known, t.savePath(), t.name(), now));
+        long age = facts.metadata() ? MAX_AGE_MILLIS - jitter(t.id()) : NO_METADATA_MILLIS;
+        entries.put(t.id(), new Entry(known, t.savePath(), t.name(), now + age));
         return known;
+    }
+
+    /** 0 to {@link #JITTER_MILLIS}, fixed per id. */
+    static long jitter(String id) {
+        return Math.floorMod(id.hashCode(), JITTER_MILLIS);
     }
 
     /** Read again at the next ask: an edit through the API changed what is kept. */

@@ -327,11 +327,6 @@ final class RuleDialog {
                 + (matches.getItems().isEmpty() ? "" : " | " + String.join(" | ", matches.getItems()));
     }
 
-    /** Whether a preview is still being worked out: a capture waits for it. */
-    boolean evaluating() {
-        return settle.getStatus() == javafx.animation.Animation.Status.RUNNING || lastMatched < 0;
-    }
-
     void cancel() {
         result = null;
         stage.hide();

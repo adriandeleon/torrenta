@@ -44,6 +44,8 @@ public final class ContentIndex {
     private final Map<String, List<Entry>> byRoot = new HashMap<>();
     private final Map<String, List<Entry>> byTorrent = new HashMap<>();
     private final boolean frozen;
+    /** Bumped by every change, so a reader can tell whether anything moved without walking it. */
+    private final java.util.concurrent.atomic.AtomicLong version = new java.util.concurrent.atomic.AtomicLong();
 
     public ContentIndex() {
         this(false);
@@ -56,6 +58,7 @@ public final class ContentIndex {
     /** The torrent's complete files, replacing whatever was known of it; none forgets it. */
     public synchronized void put(String torrentId, List<Entry> files) {
         if (frozen) return;
+        version.incrementAndGet();
         forget(torrentId);
         List<Entry> kept = new ArrayList<>();
         for (Entry e : files) {
@@ -68,7 +71,13 @@ public final class ContentIndex {
 
     /** The torrent is gone, or no longer has a file worth sharing. */
     public synchronized void remove(String torrentId) {
+        if (byTorrent.containsKey(torrentId)) version.incrementAndGet();
         forget(torrentId);
+    }
+
+    /** A number that changes with every change to the index; equal means nothing moved. */
+    public long version() {
+        return version.get();
     }
 
     private void forget(String torrentId) {
@@ -106,7 +115,14 @@ public final class ContentIndex {
     /** A v2 root as this index keys it: 64 hex digits, not all zeros (libtorrent's "no root"). */
     public static boolean isRoot(String root) {
         String r = normal(root);
-        return r.length() == 64 && r.chars().allMatch(c -> Character.digit(c, 16) >= 0) && !r.matches("0+");
+        if (r.length() != 64) return false;
+        boolean nonZero = false;
+        for (int i = 0; i < r.length(); i++) {
+            char c = r.charAt(i);
+            if (Character.digit(c, 16) < 0) return false;
+            if (c != '0') nonZero = true;
+        }
+        return nonZero;
     }
 
     /** A key this index takes: a v2 root, or a v1 key. */
