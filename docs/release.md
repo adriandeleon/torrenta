@@ -61,6 +61,10 @@ changed.
    hour. A failed run stops it; if the failure had nothing to do with the code, re-run CI and then
    the Release workflow.
 4. After the release, reopen `master`: the next commit sets `<version>` to the next `-SNAPSHOT`.
+   The same pull request records the release's torrent store for `UpgradeRestoreTest`:
+   `scripts/upgrade-fixture.sh vX.Y.Z` (Linux, a few minutes) writes
+   `src/test/resources/com/torrenta/engine/libtorrent/upgrade/X.Y.Z/`, and the version goes into
+   the test's `@ValueSource`. Every later build then proves it brings that release's torrents back.
 
 A failed publish on the same tag: delete the release (`gh release delete vX.Y.Z`, which keeps the
 tag), fix, and re-run the workflow's failed jobs. `immutableRelease` in `jreleaser.yml` creates the
