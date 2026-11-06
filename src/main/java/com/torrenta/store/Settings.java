@@ -432,9 +432,15 @@ public final class Settings {
     /**
      * Every torrent's own share limit, parsed: the poll thread reads it each second, so it is not
      * a walk of the file's keys each time. Rebuilt by the writer whenever a share key changes,
-     * under {@link #rebuildShareOverrides}' lock, and published whole.
+     * under {@link #rebuildTorrentMarks}' lock, and published whole.
      */
     private volatile Map<String, ShareLimit> shareOverrides = Map.of();
+
+    /** {@link #unsafeContentPending}, kept as the share overrides are: the poll asks every second. */
+    private volatile Map<String, String> unsafePending = Map.of();
+
+    /** {@link #savedViews}, read once per change: the sidebar asks every tick. Null until asked. */
+    private volatile @Nullable List<SavedView> savedViews;
 
     public Settings(Path file) {
         this.file = file;
@@ -459,7 +465,7 @@ public final class Settings {
             LOG.log(Level.WARNING, "Could not read " + file + "; using defaults", e);
             properties.clear();
         } finally {
-            rebuildShareOverrides();
+            rebuildTorrentMarks();
         }
     }
 
@@ -497,7 +503,7 @@ public final class Settings {
         merged.forEach((key, value) -> {
             if (com.torrenta.sync.SyncKeys.isSynced(key) && value != null) properties.setProperty(key, value);
         });
-        rebuildShareOverrides(); // none of them travels today; cheap enough not to rely on it
+        rebuildTorrentMarks(); // none of them travels today; cheap enough not to rely on it
     }
 
     /** Remote access as set; off, on {@code 127.0.0.1:8080}, until someone changes it. */
@@ -647,14 +653,6 @@ public final class Settings {
         properties.setProperty(RSS_AUTO_DOWNLOAD, String.valueOf(on));
     }
 
-    public long syncLastEpochMs() {
-        try {
-            return Long.parseLong(properties.getProperty(SYNC_LAST, "0").trim());
-        } catch (NumberFormatException e) {
-            return 0;
-        }
-    }
-
     public void setSyncLastEpochMs(long epochMs) {
         properties.setProperty(SYNC_LAST, String.valueOf(epochMs));
     }
@@ -671,7 +669,7 @@ public final class Settings {
 
     public void set(String key, String value) {
         properties.setProperty(key, value);
-        if (isShareKey(key)) rebuildShareOverrides();
+        if (isMarkKey(key)) rebuildTorrentMarks();
     }
 
     /** For callers that have nowhere to report a failed write but the log: a UI change listener. */
@@ -1002,12 +1000,19 @@ public final class Settings {
 
     /** The saved views, in their order ({@link SavedView#read}). */
     public List<SavedView> savedViews() {
+        List<SavedView> views = savedViews;
+        if (views != null) return views;
         Map<String, String> keys = new java.util.HashMap<>();
         for (String key : properties.stringPropertyNames()) {
-            if (key.startsWith(SavedView.PREFIX) || key.equals(SavedView.ORDER))
-                keys.put(key, properties.getProperty(key));
+            if (isViewKey(key)) keys.put(key, properties.getProperty(key));
         }
-        return SavedView.read(keys);
+        views = List.copyOf(SavedView.read(keys));
+        savedViews = views;
+        return views;
+    }
+
+    private static boolean isViewKey(String key) {
+        return key.startsWith(SavedView.PREFIX) || key.equals(SavedView.ORDER);
     }
 
     /** Replaces the saved views: their keys written, a view's keys no longer there removed. */
@@ -1015,6 +1020,7 @@ public final class Settings {
         for (String key : List.copyOf(properties.stringPropertyNames()))
             if (key.startsWith(SavedView.PREFIX)) properties.remove(key);
         properties.putAll(SavedView.keys(views));
+        savedViews = null;
     }
 
     public void setFilesToPick(String torrentId, boolean pending) {
@@ -1079,14 +1085,11 @@ public final class Settings {
 
     /** Every torrent still waiting for its content check, by id, with the mark's value. */
     public java.util.Map<String, String> unsafeContentPending() {
-        java.util.Map<String, String> pending = new java.util.HashMap<>();
-        for (String key : properties.stringPropertyNames()) {
-            if (key.startsWith(TORRENT_PREFIX) && key.endsWith(UNSAFE_PENDING_SUFFIX)) {
-                String id = key.substring(TORRENT_PREFIX.length(), key.length() - UNSAFE_PENDING_SUFFIX.length());
-                pending.put(id, properties.getProperty(key));
-            }
-        }
-        return pending;
+        return unsafePending;
+    }
+
+    private static boolean isUnsafePendingKey(String key) {
+        return key.startsWith(TORRENT_PREFIX) && key.endsWith(UNSAFE_PENDING_SUFFIX);
     }
 
     /** Marks a torrent for its content check once its files are known; null clears the mark. */
@@ -1094,6 +1097,7 @@ public final class Settings {
         String key = TORRENT_PREFIX + torrentId + UNSAFE_PENDING_SUFFIX;
         if (value != null) properties.setProperty(key, value);
         else properties.remove(key);
+        rebuildTorrentMarks();
     }
 
     public boolean addSequential() {
@@ -1267,7 +1271,7 @@ public final class Settings {
         String key = TORRENT_PREFIX + torrentId + SHARE_SUFFIX;
         if (limit == null) properties.remove(key);
         else properties.setProperty(key, limit.format());
-        rebuildShareOverrides();
+        rebuildTorrentMarks();
     }
 
     /** Every torrent's own share limit, by id; immutable, and cheap from any thread. */
@@ -1279,18 +1283,31 @@ public final class Settings {
         return key.startsWith(TORRENT_PREFIX) && key.endsWith(SHARE_SUFFIX);
     }
 
+    /** A key read every second or every tick (the poll's marks, the sidebar's views): kept apart. */
+    private static boolean isMarkKey(String key) {
+        return isShareKey(key) || isUnsafePendingKey(key) || isViewKey(key);
+    }
+
     /**
-     * Re-reads the share keys after a write that may have touched one. Locked, so two writers on
-     * different threads publish in order and the last map read every write before it.
+     * Re-reads the share keys and the content-check marks after a write that may have touched
+     * one. Locked, so two writers on different threads publish in order and the last map read
+     * every write before it.
      */
-    private synchronized void rebuildShareOverrides() {
-        Map<String, ShareLimit> out = new java.util.HashMap<>();
+    private synchronized void rebuildTorrentMarks() {
+        Map<String, ShareLimit> shares = new java.util.HashMap<>();
+        Map<String, String> pending = new java.util.HashMap<>();
         for (String key : properties.stringPropertyNames()) {
-            if (!isShareKey(key)) continue;
-            String id = key.substring(TORRENT_PREFIX.length(), key.length() - SHARE_SUFFIX.length());
-            ShareLimit.parse(properties.getProperty(key)).ifPresent(limit -> out.put(id, limit));
+            if (isShareKey(key)) {
+                String id = key.substring(TORRENT_PREFIX.length(), key.length() - SHARE_SUFFIX.length());
+                ShareLimit.parse(properties.getProperty(key)).ifPresent(limit -> shares.put(id, limit));
+            } else if (isUnsafePendingKey(key)) {
+                String id = key.substring(TORRENT_PREFIX.length(), key.length() - UNSAFE_PENDING_SUFFIX.length());
+                pending.put(id, properties.getProperty(key));
+            }
         }
-        shareOverrides = Map.copyOf(out);
+        shareOverrides = Map.copyOf(shares);
+        unsafePending = Map.copyOf(pending);
+        savedViews = null;
     }
 
     /** A decimal between the bounds; anything unreadable or outside them is the default. */
@@ -1308,10 +1325,12 @@ public final class Settings {
         return parseMinutes(properties.getProperty(key, "")).orElse(fallback);
     }
 
+    private static final java.util.regex.Pattern CLOCK_TIME =
+            java.util.regex.Pattern.compile("^\\s*(\\d{1,2}):(\\d{2})\\s*$");
+
     public static java.util.OptionalInt parseMinutes(String text) {
         if (text == null) return java.util.OptionalInt.empty();
-        java.util.regex.Matcher m =
-                java.util.regex.Pattern.compile("^\\s*(\\d{1,2}):(\\d{2})\\s*$").matcher(text);
+        java.util.regex.Matcher m = CLOCK_TIME.matcher(text);
         if (!m.matches()) return java.util.OptionalInt.empty();
         int h = Integer.parseInt(m.group(1));
         int min = Integer.parseInt(m.group(2));
@@ -1360,9 +1379,9 @@ public final class Settings {
         boolean share = false;
         for (String key : keys) {
             properties.remove(key);
-            share |= isShareKey(key);
+            share |= isMarkKey(key);
         }
-        if (share) rebuildShareOverrides();
+        if (share) rebuildTorrentMarks();
     }
 
     /** A boolean as a person might have typed it: anything that is not {@code false} is true. */
@@ -1451,14 +1470,6 @@ public final class Settings {
     public com.torrenta.engine.direct.DirectDownloads.Options directOptions() {
         return new com.torrenta.engine.direct.DirectDownloads.Options(
                 properties.getProperty(DIRECT_CURL, ""), readInt(DIRECT_ACTIVE, 3, 1, 20));
-    }
-
-    public void setDirectCurl(String program) {
-        properties.setProperty(DIRECT_CURL, program == null ? "" : program.strip());
-    }
-
-    public void setDirectActive(int n) {
-        properties.setProperty(DIRECT_ACTIVE, String.valueOf(Math.max(1, Math.min(20, n))));
     }
 
     /** Where a torrent saved to {@code destination} starts, by the incomplete-folder settings. */

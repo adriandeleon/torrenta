@@ -60,10 +60,6 @@ public record EngineSettings(
         public static Queue defaults() {
             return new Queue(3, 5, 15, true, ShareLimit.NONE);
         }
-
-        public Queue withShare(ShareLimit share) {
-            return new Queue(activeDownloads, activeSeeds, activeLimit, ignoreSlowTorrents, share);
-        }
     }
 
     /**
@@ -125,20 +121,6 @@ public record EngineSettings(
         /** A pair's upload limit, bytes per second, 0 for none. */
         public int uploadBytes(boolean alternative) {
             return (alternative ? alternativeUpload : upload) * 1024;
-        }
-
-        public Speed withAlternativeOn(boolean on) {
-            return new Speed(
-                    download,
-                    upload,
-                    alternativeDownload,
-                    alternativeUpload,
-                    on,
-                    scheduleOn,
-                    scheduleFrom,
-                    scheduleTo,
-                    scheduleDays,
-                    countOverhead);
         }
     }
 

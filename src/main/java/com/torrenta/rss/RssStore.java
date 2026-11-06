@@ -56,10 +56,6 @@ public final class RssStore {
         this.dir = configDir.resolve(DIR);
     }
 
-    public Path dir() {
-        return dir;
-    }
-
     /** Reads the feed list, every feed's articles and the rules; missing is empty, unreadable is empty and a log line. */
     public synchronized void load() {
         feeds.clear();
@@ -139,12 +135,23 @@ public final class RssStore {
 
     /** Keeps and writes the state, capped to {@link #MAX_ARTICLES}; returns what was kept. */
     public synchronized FeedState setState(String feedId, FeedState state) throws IOException {
+        FeedState kept = keepState(feedId, state);
+        writeState(feedId);
+        return kept;
+    }
+
+    /** Keeps the state in memory alone, capped; {@link #writeState} puts it on disk. */
+    public synchronized FeedState keepState(String feedId, FeedState state) {
         FeedState kept = state.capped(MAX_ARTICLES);
         states.put(feedId, kept);
-        write(articlesFile(feedId), formatState(kept));
+        return kept;
+    }
+
+    /** Writes the state kept for the feed, as {@link #setState} does. */
+    public synchronized void writeState(String feedId) throws IOException {
+        write(articlesFile(feedId), formatState(state(feedId)));
         // The articles file has the facts now; an older facts file must not override them on load.
         Files.deleteIfExists(factsFile(feedId));
-        return kept;
     }
 
     /**

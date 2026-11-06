@@ -132,15 +132,6 @@ public final class Bencode {
                 v2);
     }
 
-    /** The v1 info-hash, hex, or empty when the torrent carries no v1 pieces. */
-    static String infoHashV1(byte[] torrent) throws IOException {
-        Bencode b = new Bencode(torrent);
-        Map<String, Object> top = map(b.read(0));
-        Map<String, Object> info = map(top.get("info"));
-        if (b.infoStart < 0 || !(info.get("pieces") instanceof byte[])) return "";
-        return hex(digest("SHA-1", java.util.Arrays.copyOfRange(torrent, b.infoStart, b.infoEnd)));
-    }
-
     private static void walkTree(Map<String, Object> node, List<String> path, List<String[]> leaves) {
         List<String> keys = new ArrayList<>(node.keySet());
         java.util.Collections.sort(keys);

@@ -133,6 +133,11 @@ final class PieceStrip extends Pane {
             int[] counts,
             boolean[] unwanted,
             com.torrenta.engine.PieceMath.@Nullable Span readahead) {
+        // The detail arrives every second with fresh arrays; equal contents draw the same strip.
+        if (java.util.Arrays.equals(have, pieces)
+                && java.util.Arrays.equals(availability, counts)
+                && java.util.Arrays.equals(skipped, unwanted)
+                && java.util.Objects.equals(window, readahead)) return;
         have = pieces;
         availability = counts;
         skipped = unwanted;
@@ -179,6 +184,7 @@ final class PieceStrip extends Pane {
         Cell[] next = cells(have, availability, skipped, columns * ROWS);
         boolean[] nextMarks = marks(window, have.length, columns * ROWS);
         List<javafx.scene.Node> kids = getChildren();
+        boolean changed = kids.size() != next.length;
         while (kids.size() > next.length) kids.removeLast();
         while (kids.size() < next.length) {
             Region r = new Region();
@@ -190,13 +196,14 @@ final class PieceStrip extends Pane {
             Region r = (Region) kids.get(i);
             boolean mark = i < nextMarks.length && nextMarks[i];
             if (i < shown.length && shown[i] == next[i] && i < marked.length && marked[i] == mark) continue;
+            changed = true;
             r.getStyleClass().removeAll("have", "missing", "rare", "skipped", "readahead");
             r.getStyleClass().add(next[i].styleClass);
             if (mark) r.getStyleClass().add("readahead");
         }
         shown = next;
         marked = nextMarks;
-        requestLayout();
+        if (changed) requestLayout();
     }
 
     @Override

@@ -1108,10 +1108,24 @@ final class AddDialog {
         updateDisk();
     }
 
-    /** The window's poll: the index and the torrents' names may have moved since the line was drawn. */
+    /**
+     * The window's poll: the index and the torrents' names may have moved since the line was
+     * drawn. Redrawn when the index changed, and every few seconds for the free space, not every
+     * second: the line costs a file-store query and a look per file found, on the FX thread.
+     */
     void refreshFromDisk() {
-        if (dedupMode.links() && result == null) updateDisk();
+        if (!dedupMode.links() || result != null) return;
+        long version = fromDisk.version();
+        long now = System.nanoTime();
+        if (version == drawnIndexVersion && now - drawnAt < REDRAW_NANOS) return;
+        drawnIndexVersion = version;
+        drawnAt = now;
+        updateDisk();
     }
+
+    private long drawnIndexVersion = -1;
+    private long drawnAt;
+    private static final long REDRAW_NANOS = 5_000_000_000L;
 
     /**
      * The lines follow the ticks, the folder and the layout: planned again each time, as the add

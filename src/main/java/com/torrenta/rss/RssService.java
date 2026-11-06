@@ -139,6 +139,7 @@ public final class RssService {
     public synchronized void stop() {
         if (scheduler != null) scheduler.shutdownNow();
         scheduler = null;
+        for (String feedId : List.copyOf(writesOwed)) writeOwed(feedId);
     }
 
     // ---- reading --------------------------------------------------------------------------------
@@ -251,10 +252,50 @@ public final class RssService {
                     changed = true;
                 }
             }
-            if (changed) save(feedId, s.withArticles(list));
+            if (changed) keep(feedId, s.withArticles(list));
         }
         if (changed) notify(feedId);
     }
+
+    /**
+     * Keeps the state and writes it once the marks have settled: the table marks an article
+     * read for every row a person arrows through, on the FX thread, and each write was the
+     * feed's whole articles file. Written at once while the service is not started (no
+     * scheduler), and at {@link #stop}. Under the service's lock.
+     */
+    private void keep(String feedId, FeedState state) {
+        store.keepState(feedId, state);
+        ScheduledExecutorService s = scheduler;
+        if (s == null) {
+            writeOwed(feedId);
+            return;
+        }
+        if (writesOwed.add(feedId)) {
+            try {
+                s.schedule(() -> flushOwed(feedId), WRITE_SETTLE_MS, TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.RejectedExecutionException e) {
+                writeOwed(feedId);
+            }
+        }
+    }
+
+    private synchronized void flushOwed(String feedId) {
+        if (writesOwed.remove(feedId)) writeOwed(feedId);
+    }
+
+    private void writeOwed(String feedId) {
+        writesOwed.remove(feedId);
+        try {
+            store.writeState(feedId);
+        } catch (IOException e) {
+            LOG.log(Level.WARNING, "Could not write the articles of feed " + feedId, e);
+        }
+    }
+
+    /** The feeds whose kept state is not yet on disk. */
+    private final Set<String> writesOwed = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    static final long WRITE_SETTLE_MS = 500;
 
     /** Marks every article of the feed read. */
     public void markFeedRead(String feedId) {
@@ -310,14 +351,6 @@ public final class RssService {
     public @Nullable Rule rule(String name) {
         for (Rule r : store.rules()) if (r.name().equals(name)) return r;
         return null;
-    }
-
-    /** Replaces the rules; listeners hear a list change. */
-    public void setRules(List<Rule> list) throws IOException {
-        synchronized (rulesLock) {
-            store.setRules(list);
-        }
-        notify(null);
     }
 
     /**

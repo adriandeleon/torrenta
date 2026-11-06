@@ -318,11 +318,6 @@ final class SearchPane extends VBox {
         return t == null ? SearchCategory.ALL : (SearchCategory) t.getUserData();
     }
 
-    /** The providers the chips leave on. */
-    List<SearchProvider> chosenProviders() {
-        return SearchChips.chosen(host.enabledProviders(), providersOff);
-    }
-
     void focusQuery() {
         query.requestFocus();
         query.selectAll();

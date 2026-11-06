@@ -4,8 +4,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-import org.jspecify.annotations.Nullable;
-
 /**
  * The rates a graph is drawn from: one sample a second for the last ten minutes, then one average
  * a minute up to a day. Two ring buffers, indexed by the time itself, so adding is O(1) and
@@ -45,7 +43,11 @@ public final class SpeedHistory {
     private final long[] coarseUp;
     private final int[] coarseCount;
     private long lastAt = Long.MIN_VALUE;
-    private @Nullable Sample latest;
+    /** The last sample's fields: a record per add was one allocation per torrent per second. */
+    private boolean any;
+
+    private long latestDown;
+    private long latestUp;
 
     /** The full history: ten minutes a second, a day a minute. */
     public SpeedHistory() {
@@ -77,7 +79,7 @@ public final class SpeedHistory {
      */
     public synchronized SpeedHistory widened() {
         SpeedHistory full = new SpeedHistory();
-        if (latest == null) return full;
+        if (!any) return full;
         for (long t = lastAt - fineSize + 1; t <= lastAt; t++) {
             int slot = slot(t, fineSize);
             if (fineAt[slot] == t) full.add(t, fineDown[slot], fineUp[slot]);
@@ -89,7 +91,9 @@ public final class SpeedHistory {
     public synchronized void add(long atSeconds, long download, long upload) {
         if (atSeconds <= lastAt) return;
         lastAt = atSeconds;
-        latest = new Sample(atSeconds, download, upload);
+        any = true;
+        latestDown = download;
+        latestUp = upload;
         int slot = slot(atSeconds, fineSize);
         fineAt[slot] = atSeconds;
         fineDown[slot] = download;
@@ -153,11 +157,11 @@ public final class SpeedHistory {
 
     /** The last sample added, whatever its age. */
     public synchronized Optional<Sample> latest() {
-        return Optional.ofNullable(latest);
+        return any ? Optional.of(new Sample(lastAt, latestDown, latestUp)) : Optional.empty();
     }
 
     public synchronized boolean isEmpty() {
-        return latest == null;
+        return !any;
     }
 
     private static int slot(long t, int size) {

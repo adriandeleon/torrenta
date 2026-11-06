@@ -134,8 +134,10 @@ public final class MainData {
     static final class Memory {
 
         static final int KEEP = 64;
+        /** A snapshot older than this is let go: its session has idled out ({@link Sessions#IDLE_MILLIS}). */
+        static final long KEEP_SECONDS = Sessions.IDLE_MILLIS / 1000;
 
-        private record Kept(long rid, Snapshot snapshot) {}
+        private record Kept(long rid, Snapshot snapshot, long atSeconds) {}
 
         private final Map<String, Kept> kept = new LinkedHashMap<>(16, 0.75f, true) {
             @Override
@@ -154,8 +156,18 @@ public final class MainData {
 
         /** Remembers {@code snapshot} as {@code key}'s latest; the rid to answer with. */
         synchronized long remember(String key, Snapshot snapshot) {
+            return remember(key, snapshot, 0);
+        }
+
+        /**
+         * The same at {@code nowSeconds}, letting go of every snapshot a session's idle time older:
+         * a client that logs in again and again (a new session each time) filled all {@link #KEEP}
+         * with lists that outlived their sessions.
+         */
+        synchronized long remember(String key, Snapshot snapshot, long nowSeconds) {
             long rid = next++;
-            kept.put(key, new Kept(rid, snapshot));
+            kept.put(key, new Kept(rid, snapshot, nowSeconds));
+            kept.values().removeIf(k -> nowSeconds - k.atSeconds() > KEEP_SECONDS);
             return rid;
         }
     }

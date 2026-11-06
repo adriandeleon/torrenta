@@ -445,7 +445,7 @@ final class Reads {
                 new MainData.Snapshot(rows, categories, backend.tags(), serverState(backend.transfer()));
         String key = client(request);
         MainData.Snapshot previous = mainMemory.since(key, rid(params(request))).orElse(null);
-        long rid = mainMemory.remember(key, current);
+        long rid = mainMemory.remember(key, current, now);
         return Response.json(JsonOut.write(MainData.maindata(previous, current, rid)));
     }
 

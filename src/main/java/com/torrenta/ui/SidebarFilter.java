@@ -220,12 +220,22 @@ public record SidebarFilter(
      * case, each once. For categories pass each torrent's category; for tags, its tags.
      */
     public static List<String> names(List<String> existing, List<Torrent> torrents, boolean tags) {
+        java.util.Set<String> inUse = new java.util.HashSet<>();
+        for (Torrent t : torrents) {
+            if (tags) inUse.addAll(t.tags());
+            else inUse.add(t.category());
+        }
+        return names(existing, inUse);
+    }
+
+    /**
+     * The same from the names in use as already counted ({@link SidebarCounts}): a pass over
+     * the distinct names, not over every torrent again. An empty name is no category.
+     */
+    static List<String> names(List<String> existing, java.util.Collection<String> inUse) {
         TreeSet<String> out = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
         for (String name : existing) if (name != null && !name.isBlank()) out.add(name.trim());
-        for (Torrent t : torrents) {
-            if (tags) out.addAll(t.tags());
-            else if (!t.category().isEmpty()) out.add(t.category());
-        }
+        for (String name : inUse) if (!name.isEmpty()) out.add(name);
         return List.copyOf(out);
     }
 
@@ -234,5 +244,10 @@ public record SidebarFilter(
         TreeSet<String> out = new TreeSet<>();
         for (Torrent t : torrents) out.addAll(t.trackers());
         return List.copyOf(out);
+    }
+
+    /** The same from the hosts already counted. */
+    static List<String> trackerHosts(java.util.Collection<String> hosts) {
+        return List.copyOf(new TreeSet<>(hosts));
     }
 }

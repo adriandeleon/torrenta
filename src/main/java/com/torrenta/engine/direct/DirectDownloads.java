@@ -502,8 +502,10 @@ public final class DirectDownloads {
                         dirty = true;
                     }
                 }
+                // An idle download's part does not grow: measured once it stops, then kept.
                 for (DirectDownload d : downloads.values()) {
-                    if (!d.finished() && !running.containsKey(d.id())) sizes.put(d.id(), sizeOf(partOf(d)));
+                    if (!d.finished() && !running.containsKey(d.id()) && !sizes.containsKey(d.id()))
+                        sizes.put(d.id(), sizeOf(partOf(d)));
                 }
                 // A share that moved (the limit changed, the alternative pair came in, a download
                 // started or ended): those curls start again with it, carrying on where they were.

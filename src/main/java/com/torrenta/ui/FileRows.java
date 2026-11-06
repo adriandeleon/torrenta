@@ -88,10 +88,6 @@ public final class FileRows {
         public com.torrenta.engine.@Nullable FoundFile found() {
             return found;
         }
-
-        List<Row> children() {
-            return children;
-        }
     }
 
     /**

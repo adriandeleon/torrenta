@@ -616,7 +616,7 @@ final class DetailPane extends VBox {
                                 filesToChoose.test(torrent.id())));
 
         piecesValue.setText(g.pieceCount() == 0 ? "—" : OverviewText.pieces(g.piecesHave(), g.pieceCount()));
-        pieceStrip.show(detail.pieces(), detail.availability(), PieceStrip.skipped(detail), streamWindow);
+        pieceStrip.show(detail.pieces(), detail.availability(), skippedPieces(detail), streamWindow);
         if (torrent != null) {
             overviewDown.setText("↓ " + Bytes.rate(torrent.downloadRate()));
             overviewUp.setText("↑ " + Bytes.rate(torrent.uploadRate()));
@@ -1619,7 +1619,22 @@ final class DetailPane extends VBox {
         return column;
     }
 
-    /** Unused: kept the pane's API symmetrical for the window. */
+    /**
+     * {@link PieceStrip#skipped}, computed again only when the file list or the piece count moved:
+     * two arrays the length of the pieces per tick otherwise.
+     */
+    private boolean[] skippedPieces(TorrentDetail detail) {
+        if (skippedFor != null && skippedPieces.length == detail.pieces().length && skippedFor.equals(detail.files()))
+            return skippedPieces;
+        skippedFor = detail.files();
+        skippedPieces = PieceStrip.skipped(detail);
+        return skippedPieces;
+    }
+
+    private java.util.@Nullable List<TorrentDetail.FileStatus> skippedFor;
+    private boolean[] skippedPieces = new boolean[0];
+
+    /** The pane's own placeholder, for the test that holds the pane's API symmetrical. */
     Region placeholder() {
         return empty;
     }

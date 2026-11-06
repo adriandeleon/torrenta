@@ -43,10 +43,6 @@ public final class SearchProviderStore {
         this.dir = dir;
     }
 
-    public Path dir() {
-        return dir;
-    }
-
     /** Reads the file; missing is empty, unreadable is empty and a log line. */
     public synchronized void load() {
         entries.clear();

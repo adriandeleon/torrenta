@@ -122,7 +122,6 @@ public final class TransmissionEngine implements Engine {
             "error",
             "errorString",
             "labels",
-            "isFinished",
             "queuePosition",
             "secondsSeeding",
             "metadataPercentComplete",
@@ -262,11 +261,6 @@ public final class TransmissionEngine implements Engine {
     @Override
     public String description() {
         return tr("engine.transmission.description", version, String.valueOf(rpcVersion), profile.hostLine());
-    }
-
-    /** The daemon's version alone, for the window title and the profile page. */
-    public String version() {
-        return version;
     }
 
     @Override

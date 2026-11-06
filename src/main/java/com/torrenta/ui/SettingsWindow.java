@@ -518,6 +518,9 @@ final class SettingsWindow {
 
     private final Settings settings;
     private final Stage stage = new Stage();
+    /** An RSS change heard while hidden; the tables are filled when the window shows. */
+    private boolean rssReloadOwed;
+
     private final Map<Category, Region> pages = new EnumMap<>(Category.class);
     private final List<Row> rows = new ArrayList<>();
     private final ListView<Object> sidebar = new ListView<>();
@@ -1261,6 +1264,12 @@ final class SettingsWindow {
         if (owner != null && stage.getOwner() == null) {
             stage.initOwner(owner);
             stage.initModality(Modality.NONE);
+        }
+        if (rssReloadOwed && !stage.isShowing()) {
+            stage.setOnShown(e -> {
+                stage.setOnShown(null);
+                reloadRss();
+            });
         }
         if (stage.isShowing()) {
             stage.toFront();
@@ -3090,6 +3099,12 @@ final class SettingsWindow {
     /** The service's list into the table; keeps the selection where it can. */
     private void reloadRss() {
         if (rssService == null || rssTable == null) return;
+        // Every feed refresh and every article read fires this; a hidden window reloads on show.
+        if (!stage.isShowing()) {
+            rssReloadOwed = true;
+            return;
+        }
+        rssReloadOwed = false;
         Feed selected = rssTable.getSelectionModel().getSelectedItem();
         List<Feed> feeds = rssService.feeds();
         rssTable.getItems().setAll(feeds);

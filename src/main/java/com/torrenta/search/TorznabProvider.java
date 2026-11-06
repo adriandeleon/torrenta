@@ -66,10 +66,6 @@ public final class TorznabProvider implements SearchProvider {
         return SearchHttp.defaultClient();
     }
 
-    public TorznabEndpoint endpoint() {
-        return endpoint;
-    }
-
     @Override
     public String name() {
         return endpoint.name();

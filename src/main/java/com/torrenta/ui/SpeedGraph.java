@@ -126,10 +126,6 @@ final class SpeedGraph extends VBox {
         }
     }
 
-    int window() {
-        return windowSeconds;
-    }
-
     /** FX thread. The history to draw, as of {@code nowSeconds} (the history's clock); none is {@link #clear}. */
     void show(@Nullable SpeedHistory history, long nowSeconds) {
         this.history = history;

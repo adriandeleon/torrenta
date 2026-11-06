@@ -72,6 +72,14 @@ public final class WebApi {
         /** One torrent's detail; empty when it is gone or no engine is up. */
         Optional<TorrentDetail> detail(String id);
 
+        /**
+         * The same with only {@code parts} read (the general facts always are): the list's facts
+         * need the files alone, never a copy per piece and per peer. Everything by default.
+         */
+        default Optional<TorrentDetail> detail(String id, java.util.Set<TorrentDetail.Part> parts) {
+            return detail(id);
+        }
+
         /** The torrent as a magnet link; empty when the engine cannot say. */
         String magnet(String id);
 

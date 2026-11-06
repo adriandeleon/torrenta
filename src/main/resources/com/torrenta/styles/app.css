@@ -328,18 +328,6 @@
     -fx-stroke: -color-fg-subtle;
 }
 
-.toolbar-icon {
-    -fx-fill: -color-fg-muted;
-}
-
-.button:hover .toolbar-icon {
-    -fx-fill: -color-fg-default;
-}
-
-.button:disabled .toolbar-icon {
-    -fx-fill: -color-fg-subtle;
-}
-
 /* A glyph beside a menu item: the muted ink, the item's own ink while it is the one under the
    cursor. Disabled items fade whole (AtlantaFX's opacity), so the glyph needs no rule of its own. */
 .menu-item .icon-line {

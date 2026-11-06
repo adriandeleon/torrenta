@@ -140,8 +140,15 @@ public final class FilterQuery {
     }
 
     private static Predicate<Torrent> name(String word) {
-        String needle = word.toLowerCase(Locale.ROOT);
-        return t -> t.name().toLowerCase(Locale.ROOT).contains(needle);
+        return t -> containsIgnoreCase(t.name(), word);
+    }
+
+    /** {@code contains} ignoring case, without a lower-cased copy of the name per row per test. */
+    static boolean containsIgnoreCase(String text, String word) {
+        int n = word.length();
+        if (n == 0) return true;
+        for (int i = 0; i + n <= text.length(); i++) if (text.regionMatches(true, i, word, 0, n)) return true;
+        return false;
     }
 
     private static Term state(String value) {
