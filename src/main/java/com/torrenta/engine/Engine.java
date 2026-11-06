@@ -146,6 +146,13 @@ public interface Engine extends AutoCloseable {
     void queueMove(String id, QueueMove move) throws EngineException;
 
     /**
+     * Puts the torrent at that place in the queue, counted from 0, the ones in between shifting to
+     * make room: how an undone move puts the order back ({@link QueueOrder#restore}). A seed, which
+     * libtorrent keeps out of the download queue, is left where it is.
+     */
+    void setQueuePosition(String id, int position) throws EngineException;
+
+    /**
      * Changes where the torrent's files live. With {@code moveFiles} the files are moved there,
      * never over a file already at the destination (one that is there is kept and used); without
      * it the torrent is only pointed at the folder, where the files are expected to be already.

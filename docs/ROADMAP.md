@@ -68,7 +68,7 @@ delivers it. ✓ has it, ◐ partial, ✗ does not. Rows marked **later** are de
 | Status bar: session rates, DHT nodes, free space on the download disk, alt-speed toggle, port state | ✓ | ✓ | 0.4 |
 | Saved filters as sidebar views, with live counts | ✗ | ✗ | 1.1 |
 | Commands with arguments from the filter box, over every match | ✗ | ✗ | 1.1 |
-| Undo: remove, Set Location, category and tags, limits from the omnibox (priorities and queue moves not yet; rename left out: the window cannot tell a given name from the torrent's own) | ✗ | ✗ | ◐ 1.1 |
+| Undo: remove, Set Location, category and tags, limits from the omnibox, file priorities, queue moves, pause and resume (rename left out: the window cannot tell a given name from the torrent's own) | ✗ | ✗ | 1.1 |
 
 ### Per-torrent actions
 

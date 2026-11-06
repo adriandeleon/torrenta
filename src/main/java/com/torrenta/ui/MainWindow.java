@@ -1109,6 +1109,7 @@ public final class MainWindow {
         shutDown = true;
         rememberDivider();
         rememberWindow();
+        log.removeLogBridge();
         session.close();
         webApi.close();
         updates.shutdown();
@@ -1818,6 +1819,12 @@ public final class MainWindow {
             String[] parts = action.substring("files-rename:".length()).split(":", 2);
             showDetail();
             detail.renameFileForCapture(Integer.parseInt(parts[0]), parts[1].replace('~', ' '));
+        } else if (action.startsWith("files-priority:")) {
+            // files-priority:<row>:<IGNORE|LOW|NORMAL|HIGH>: that visible row's priority, as its cell sets it.
+            String[] parts = action.substring("files-priority:".length()).split(":", 2);
+            showDetail();
+            detail.setFilePriorityForCapture(
+                    Integer.parseInt(parts[0]), com.torrenta.engine.Priority.valueOf(parts[1]));
         } else if (action.startsWith("files-stream:")) {
             // files-stream:<row>: Stream in Player on that visible row of the Files tab.
             showDetail();
@@ -3455,7 +3462,7 @@ public final class MainWindow {
 
     /** An action on one torrent that hands back how to take it back; null when there is nothing to. */
     private interface UndoableAction {
-        UndoStack.Undo apply(Engine engine, Torrent torrent) throws EngineException;
+        UndoStack.@Nullable Undo apply(Engine engine, Torrent torrent) throws EngineException;
     }
 
     /** What can be taken back; Shortcut+Z, Torrent → Undo, and the status bar's Undo. */
@@ -3634,20 +3641,9 @@ public final class MainWindow {
                         command.on() ? tr("actions.verb.sequentialOn") : tr("actions.verb.sequentialOff"),
                         targets,
                         (e, t) -> e.setSequential(t.id(), command.on()));
-            case QUEUE -> {
-                Engine.QueueMove move = Objects.requireNonNull(command.move(), "a queue command has its move");
-                onTorrents(
-                        switch (move) {
-                            case TOP -> tr("actions.verb.queueTop");
-                            case UP -> tr("actions.verb.queueUp");
-                            case DOWN -> tr("actions.verb.queueDown");
-                            case BOTTOM -> tr("actions.verb.queueBottom");
-                        },
-                        targets,
-                        (e, t) -> e.queueMove(t.id(), move));
-            }
-            case PAUSE -> onTorrents(tr("actions.verb.paused"), targets, (e, t) -> e.pause(t.id()));
-            case RESUME -> onTorrents(tr("actions.verb.resumed"), targets, (e, t) -> e.resume(t.id()));
+            case QUEUE -> queueMove(Objects.requireNonNull(command.move(), "a queue command has its move"), targets);
+            case PAUSE -> pauseOrResume(true, targets);
+            case RESUME -> pauseOrResume(false, targets);
             case RECHECK -> onTorrents(tr("actions.verb.rechecking"), targets, (e, t) -> e.recheck(t.id()));
             case REANNOUNCE -> onTorrents(tr("actions.verb.reannounced"), targets, (e, t) -> e.reannounce(t.id()));
             case REMOVE -> {
@@ -3727,9 +3723,23 @@ public final class MainWindow {
     }
 
     private void togglePause() {
-        if (Actions.shouldResume(selectedTorrents()))
-            onSelection(tr("actions.verb.resumed"), (e, t) -> e.resume(t.id()));
-        else onSelection(tr("actions.verb.paused"), (e, t) -> e.pause(t.id()));
+        List<Torrent> selected = selectedTorrents();
+        pauseOrResume(!Actions.shouldResume(selected), selected);
+    }
+
+    /**
+     * Pauses or resumes the targets, undoable: the undo resumes what this paused, or pauses what
+     * this resumed, and leaves alone a torrent that was that way already. A torrent that had been
+     * force-started comes back to the queue, since a snapshot does not say it was forced.
+     */
+    private void pauseOrResume(boolean pausing, List<Torrent> targets) {
+        onTorrentsUndoable(pausing ? tr("actions.verb.paused") : tr("actions.verb.resumed"), targets, (e, t) -> {
+            String id = t.id();
+            if (pausing) e.pause(id);
+            else e.resume(id);
+            if (t.paused() == pausing) return null;
+            return pausing ? eng -> eng.resume(id) : eng -> eng.pause(id);
+        });
     }
 
     /**
@@ -3845,6 +3855,17 @@ public final class MainWindow {
 
     /** Torrent → Queue → …: every selected torrent, in the order that keeps their order ({@link QueueOrder}). */
     private void queueMove(Engine.QueueMove move) {
+        queueMove(move, torrentsSelected());
+    }
+
+    /**
+     * Moves the targets in the queue, in the order that keeps theirs ({@link QueueOrder#plan}), on
+     * a worker. The undo puts the whole queue back in the order it had before ({@link
+     * QueueOrder#restore}): moving each torrent back alone would shift the others again.
+     */
+    private void queueMove(Engine.QueueMove move, List<Torrent> targets) {
+        List<Torrent> planned = QueueOrder.plan(Actions.torrentsOnly(targets), move);
+        if (planned.isEmpty() || engine == null) return;
         String verb =
                 switch (move) {
                     case TOP -> tr("actions.verb.queueTop");
@@ -3852,7 +3873,30 @@ public final class MainWindow {
                     case DOWN -> tr("actions.verb.queueDown");
                     case BOTTOM -> tr("actions.verb.queueBottom");
                 };
-        onTorrents(verb, QueueOrder.plan(torrentsSelected(), move), (e, t) -> e.queueMove(t.id(), move));
+        Engine e = engine;
+        Thread.ofVirtual().name("engine-action").start(() -> {
+            List<String> before = QueueOrder.order(e.torrents());
+            int done = 0;
+            List<String> failures = new ArrayList<>();
+            for (Torrent t : planned) {
+                try {
+                    e.queueMove(t.id(), move);
+                    done++;
+                } catch (EngineException ex) {
+                    failures.add(ex.getMessage());
+                }
+            }
+            String text = Actions.outcome(verb, done, failures);
+            boolean moved = done > 0;
+            Platform.runLater(() -> {
+                setStatus(text);
+                if (moved)
+                    remember(text, eng -> {
+                        for (QueueOrder.Step step : QueueOrder.restore(before, QueueOrder.order(eng.torrents())))
+                            eng.setQueuePosition(step.id(), step.position());
+                    });
+            });
+        });
     }
 
     /** Torrent → Set Location…: one folder for the whole selection; the engine moves on its own thread. */
@@ -5261,7 +5305,12 @@ public final class MainWindow {
         detailParts = DetailParts.of(detail.activeTab());
         detail.setOnFilePriority((index, priority) -> {
             String id = detailId;
-            if (id != null) onTorrent("status.prioritySet", id, (e, t) -> e.setFilePriority(t, index, priority));
+            if (id == null) return;
+            onTorrentUndoable("status.prioritySet", id, (e, t) -> {
+                com.torrenta.engine.Priority was = filePriority(e, t, index);
+                e.setFilePriority(t, index, priority);
+                return was == null || was == priority ? null : eng -> eng.setFilePriority(t, index, was);
+            });
         });
         detail.setOnOpenFile(row -> {
             Torrent t = detailTorrent();
@@ -5589,6 +5638,42 @@ public final class MainWindow {
     }
 
     /** {@code key} names the status sentence for success; the torrent's name is its one placeholder. */
+    /** An action on one torrent by id that hands back how to take it back; null when there is nothing to. */
+    private interface UndoableIdAction {
+        UndoStack.@Nullable Undo apply(Engine engine, String id) throws EngineException;
+    }
+
+    /** {@link #onTorrent}, keeping how to take it back under the outcome's words. */
+    private void onTorrentUndoable(String key, String id, UndoableIdAction action) {
+        if (engine == null) return;
+        Engine e = engine;
+        TorrentRow row = rows.get(id);
+        String name = row == null ? id : row.torrent().name();
+        Thread.ofVirtual().name("engine-detail-action").start(() -> {
+            try {
+                UndoStack.Undo inverse = action.apply(e, id);
+                String text = tr(key, name);
+                Platform.runLater(() -> {
+                    setStatus(text);
+                    if (inverse != null) remember(text, inverse);
+                });
+            } catch (EngineException ex) {
+                String text = ex.getMessage();
+                Platform.runLater(() -> setStatus(text));
+            }
+        });
+    }
+
+    /** A file's priority as the engine has it now, or null when the file is not there. On a worker. */
+    private static com.torrenta.engine.@Nullable Priority filePriority(Engine e, String id, int index)
+            throws EngineException {
+        return e.detail(id, Set.of(TorrentDetail.Part.FILES)).files().stream()
+                .filter(f -> f.index() == index)
+                .map(TorrentDetail.FileStatus::priority)
+                .findFirst()
+                .orElse(null);
+    }
+
     private void onTorrent(String key, String id, IdAction action) {
         if (engine == null) return;
         Engine e = engine;

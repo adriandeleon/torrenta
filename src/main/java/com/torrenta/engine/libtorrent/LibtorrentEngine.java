@@ -2115,6 +2115,11 @@ public final class LibtorrentEngine implements Engine {
         }
     }
 
+    @Override
+    public synchronized void setQueuePosition(String id, int position) throws EngineException {
+        handle(id).queuePositionSet(position);
+    }
+
     /**
      * {@inheritDoc}
      *
