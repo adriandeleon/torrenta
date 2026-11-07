@@ -46,19 +46,36 @@ public record EngineSettings(
      * @param activeDownloads torrents downloading at once; the rest wait in the queue
      * @param activeSeeds torrents seeding at once
      * @param activeLimit torrents active at once, downloading and seeding together
+     * @param activeChecking torrents checking their files at once, 1 at least: libtorrent starts a
+     *     waiting check only at its once-a-second pass, so at 1 an import of torrents whose files
+     *     are already there finishes one torrent a second whatever their size (measured: 30 of 500
+     *     4 KiB torrents in 30 s, 240 at 8); several at once share the disk, which a hard drive
+     *     feels on large torrents
      * @param ignoreSlowTorrents a torrent moving under a few KiB/s does not take a slot
      * @param share the global share limit, which a torrent's own override replaces
      */
     public record Queue(
-            int activeDownloads, int activeSeeds, int activeLimit, boolean ignoreSlowTorrents, ShareLimit share) {
+            int activeDownloads,
+            int activeSeeds,
+            int activeLimit,
+            int activeChecking,
+            boolean ignoreSlowTorrents,
+            ShareLimit share) {
+
+        /** Checks at once, at most: the spinner's ceiling and the clamp's. */
+        public static final int MAX_CHECKING = 100;
 
         public Queue {
             if (share == null) share = ShareLimit.NONE;
         }
 
-        /** libtorrent's defaults: 3 downloading, 5 seeding, 15 in all, slow ones not counted. */
+        /**
+         * libtorrent's defaults (3 downloading, 5 seeding, 15 in all, slow ones not counted) but
+         * for the checks: 4 at once rather than libtorrent's 1, so a batch of small torrents is
+         * not paced to one a second, while a hard drive is not asked to hash dozens at once.
+         */
         public static Queue defaults() {
-            return new Queue(3, 5, 15, true, ShareLimit.NONE);
+            return new Queue(3, 5, 15, 4, true, ShareLimit.NONE);
         }
     }
 

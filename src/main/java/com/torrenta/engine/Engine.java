@@ -554,6 +554,8 @@ public interface Engine extends AutoCloseable {
         STORAGE_OPTIONS,
         /** A limit on torrents active in all, over the download and seed counts. */
         ACTIVE_TOTAL_LIMIT,
+        /** How many torrents check their files at once. */
+        CHECKING_LIMIT,
         /** Trusting the files on disk as complete when adding (seed mode, "skip check"). */
         SEED_MODE,
         /** Stopping by itself once the metadata or the file check is in. */

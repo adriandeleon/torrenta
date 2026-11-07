@@ -295,6 +295,7 @@ public final class Settings {
 
     public static final String QUEUE_ACTIVE_SEEDS = "queue.activeSeeds";
     public static final String QUEUE_ACTIVE_LIMIT = "queue.activeLimit";
+    public static final String QUEUE_ACTIVE_CHECKING = "queue.activeChecking";
     public static final String QUEUE_IGNORE_SLOW = "queue.ignoreSlowTorrents";
     public static final String SHARE_RATIO = "share.ratio";
     public static final String SHARE_SEED_MINUTES = "share.seedMinutes";
@@ -304,6 +305,7 @@ public final class Settings {
         QUEUE_ACTIVE_DOWNLOADS,
         QUEUE_ACTIVE_SEEDS,
         QUEUE_ACTIVE_LIMIT,
+        QUEUE_ACTIVE_CHECKING,
         QUEUE_IGNORE_SLOW,
         SHARE_RATIO,
         SHARE_SEED_MINUTES,
@@ -1226,6 +1228,7 @@ public final class Settings {
                 readInt(QUEUE_ACTIVE_DOWNLOADS, qd.activeDownloads(), 0, 10_000),
                 readInt(QUEUE_ACTIVE_SEEDS, qd.activeSeeds(), 0, 10_000),
                 readInt(QUEUE_ACTIVE_LIMIT, qd.activeLimit(), 0, 10_000),
+                readInt(QUEUE_ACTIVE_CHECKING, qd.activeChecking(), 1, EngineSettings.Queue.MAX_CHECKING),
                 readBoolean(QUEUE_IGNORE_SLOW, qd.ignoreSlowTorrents()),
                 shareLimit());
         return new EngineSettings(

@@ -1815,6 +1815,7 @@ class LibtorrentEngineTest {
                 2,
                 0,
                 7,
+                12,
                 false,
                 new com.torrenta.engine.ShareLimit(1.5, 30, com.torrenta.engine.ShareLimit.Action.PAUSE));
         com.torrenta.engine.EngineSettings settings =
@@ -1825,11 +1826,13 @@ class LibtorrentEngineTest {
             assertEquals(2, engine.activeLimitsForTest()[0], "applied at start");
             assertEquals(-1, engine.activeLimitsForTest()[1], "0 to a person is -1 to libtorrent");
             assertEquals(7, engine.activeLimitsForTest()[2]);
-            engine.applySettings(settings.withQueue(
-                    new com.torrenta.engine.EngineSettings.Queue(4, 5, 6, true, com.torrenta.engine.ShareLimit.NONE)));
+            assertEquals(12, engine.activeLimitsForTest()[3], "checks at once, never -1");
+            engine.applySettings(settings.withQueue(new com.torrenta.engine.EngineSettings.Queue(
+                    4, 5, 6, 1, true, com.torrenta.engine.ShareLimit.NONE)));
             assertEquals(4, engine.activeLimitsForTest()[0], "applied live");
             assertEquals(5, engine.activeLimitsForTest()[1]);
             assertEquals(6, engine.activeLimitsForTest()[2]);
+            assertEquals(1, engine.activeLimitsForTest()[3]);
         }
     }
 
@@ -3509,9 +3512,6 @@ class LibtorrentEngineTest {
         }
     }
 
-    @Test
-    void statsCountTheBytesALoopbackPairMovesAndTheTotalsSurviveARestart(@TempDir Path dir) throws Exception {
-        byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
     /**
      * libtorrent4j's start() writes its own alert mask (every category but the logs) over the
      * pack's, so the engine applies its own after the start: the four categories that post an
@@ -3548,6 +3548,9 @@ class LibtorrentEngineTest {
         }
     }
 
+    @Test
+    void statsCountTheBytesALoopbackPairMovesAndTheTotalsSurviveARestart(@TempDir Path dir) throws Exception {
+        byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
         TorrentStore store = new TorrentStore(dir.resolve("store"));
         StatsStore statsStore = new StatsStore(dir.resolve("config").resolve(StatsStore.FILE_NAME));
         long size;

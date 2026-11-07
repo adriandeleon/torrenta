@@ -575,6 +575,12 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   seeds for the queue (`seed_rank`); the pausing or removing is `ShareLimit.decide` in the session's
   poll (`Session.enforceShareLimits`), once a second, against `Torrent.seedingTime` (`finished_duration`, so a torrent with files
   left out counts). Active counts are `-1` for "no limit" in the pack; `0` would park every torrent.
+  `active_checking` is never -1 and never 0: libtorrent starts a waiting check only at its
+  once-a-second auto-manage pass, so at its default of 1 an import of torrents whose files are
+  there finishes one torrent a second whatever their size (measured: 30 of 500 4 KiB torrents in
+  30 s, 240 at 8); `Queue.activeChecking` is 4 by default, 1 to `MAX_CHECKING`, `queue.activeChecking`,
+  `Capability.CHECKING_LIMIT` (Transmission has no such knob), and qBittorrent's
+  `max_active_checking_torrents` both ways in `Preferences`.
   A torrent's own share limit is `torrent.<hash>.share` in the settings file (the `torrent.` prefix
   never syncs); its rate caps and counts are the handle's and travel in the resume data.
 - **The IP filter is replaced whole, never merged**: `set_ip_filter` takes a complete

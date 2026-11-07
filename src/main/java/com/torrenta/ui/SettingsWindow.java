@@ -1229,6 +1229,7 @@ final class SettingsWindow {
     private Spinner<Integer> activeDownloads;
     private Spinner<Integer> activeSeeds;
     private Spinner<Integer> activeLimit;
+    private Spinner<Integer> activeChecking;
     private CheckBox ignoreSlow;
     private Spinner<Double> shareRatio;
     private Spinner<Integer> shareMinutes;
@@ -4527,6 +4528,15 @@ final class SettingsWindow {
                 activeLimit,
                 tr("settings.queue.activeLimit.keywords"),
                 Engine.Capability.ACTIVE_TOTAL_LIMIT);
+        activeChecking = intSpinner(1, EngineSettings.Queue.MAX_CHECKING, Settings.QUEUE_ACTIVE_CHECKING);
+        row(
+                Category.QUEUE,
+                queue,
+                tr("settings.queue.activeChecking"),
+                tr("settings.queue.activeChecking.desc"),
+                activeChecking,
+                tr("settings.queue.activeChecking.keywords"),
+                Engine.Capability.CHECKING_LIMIT);
         ignoreSlow = bool(Settings.QUEUE_IGNORE_SLOW);
         row(
                 Category.QUEUE,
@@ -4778,6 +4788,7 @@ final class SettingsWindow {
             activeDownloads.getValueFactory().setValue(q.activeDownloads());
             activeSeeds.getValueFactory().setValue(q.activeSeeds());
             activeLimit.getValueFactory().setValue(q.activeLimit());
+            activeChecking.getValueFactory().setValue(q.activeChecking());
             ignoreSlow.setSelected(q.ignoreSlowTorrents());
             shareRatio.getValueFactory().setValue(q.share().ratio());
             shareMinutes.getValueFactory().setValue(q.share().seedingMinutes());

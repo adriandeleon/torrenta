@@ -3245,6 +3245,9 @@ public final class LibtorrentEngine implements Engine {
         pack.activeDownloads(unlimitedAsMinusOne(queue.activeDownloads()));
         pack.activeSeeds(unlimitedAsMinusOne(queue.activeSeeds()));
         pack.activeLimit(unlimitedAsMinusOne(queue.activeLimit()));
+        // Never -1 here: libtorrent starts a waiting check only at its once-a-second pass, and the
+        // record keeps the count at 1 or more, so a batch of small torrents is not paced to one a second.
+        pack.setInteger(settings_pack.int_types.active_checking.swigValue(), queue.activeChecking());
         pack.setBoolean(settings_pack.bool_types.dont_count_slow_torrents.swigValue(), queue.ignoreSlowTorrents());
         // libtorrent reads these only to rank seeds for the queue (one past its limits yields its
         // slot first); pausing or removing by them is the window's job, from its poll.
@@ -3262,10 +3265,15 @@ public final class LibtorrentEngine implements Engine {
         return count <= 0 ? -1 : count;
     }
 
-    /** The session's active counts as libtorrent has them (downloads, seeds, all); for the test. */
+    /** The session's active counts as libtorrent has them (downloads, seeds, all, checking); for the test. */
     int[] activeLimitsForTest() throws EngineException {
         SettingsPack current = running().settings();
-        return new int[] {current.activeDownloads(), current.activeSeeds(), current.activeLimit()};
+        return new int[] {
+            current.activeDownloads(),
+            current.activeSeeds(),
+            current.activeLimit(),
+            current.getInteger(settings_pack.int_types.active_checking.swigValue())
+        };
     }
 
     @Override

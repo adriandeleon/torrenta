@@ -361,6 +361,7 @@ class SettingsTest {
                         "\n",
                         Settings.QUEUE_ACTIVE_DOWNLOADS + "=0",
                         Settings.QUEUE_ACTIVE_SEEDS + "=-3", // outside the range: default
+                        Settings.QUEUE_ACTIVE_CHECKING + "=0", // 1 at least: default
                         Settings.QUEUE_IGNORE_SLOW + "=false",
                         Settings.SHARE_RATIO + "=1.5",
                         Settings.SHARE_SEED_MINUTES + "=90",
@@ -372,6 +373,7 @@ class SettingsTest {
         assertEquals(0, q.activeDownloads(), "0 is no limit");
         assertEquals(5, q.activeSeeds());
         assertEquals(15, q.activeLimit());
+        assertEquals(4, q.activeChecking(), "0 is not 'no limit' here: the default, 4");
         assertFalse(q.ignoreSlowTorrents());
         assertEquals(
                 new com.torrenta.engine.ShareLimit(1.5, 90, com.torrenta.engine.ShareLimit.Action.REMOVE), q.share());
