@@ -3512,6 +3512,42 @@ class LibtorrentEngineTest {
     @Test
     void statsCountTheBytesALoopbackPairMovesAndTheTotalsSurviveARestart(@TempDir Path dir) throws Exception {
         byte[] torrent = twoFileTorrent(dir.resolve("seed"), "pair");
+    /**
+     * libtorrent4j's start() writes its own alert mask (every category but the logs) over the
+     * pack's, so the engine applies its own after the start: the four categories that post an
+     * alert per block are out, since nothing here reads them (32,768 of them per 256 MiB on each
+     * side, measured), and everything the listener reads stays in.
+     */
+    @Test
+    void theAlertMaskLeavesOutTheBlockAlertsAndKeepsWhatIsRead(@TempDir Path dir) throws Exception {
+        try (LibtorrentEngine engine = new LibtorrentEngine(
+                () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(ANY_PORT))) {
+            engine.start();
+            int mask = engine.alertMaskForTest();
+            assertEquals(LibtorrentEngine.alertMask(), mask, "the mask in force is the engine's, not libtorrent4j's");
+            for (org.libtorrent4j.swig.alert_category_t out : List.of(
+                    org.libtorrent4j.swig.alert.block_progress_notification,
+                    org.libtorrent4j.swig.alert.upload_notification,
+                    org.libtorrent4j.swig.alert.incoming_request_notification,
+                    org.libtorrent4j.swig.alert.torrent_log_notification))
+                assertEquals(0, mask & out.to_int(), "out: " + out.to_int());
+            for (org.libtorrent4j.swig.alert_category_t in : List.of(
+                    org.libtorrent4j.swig.alert.status_notification,
+                    org.libtorrent4j.swig.alert.storage_notification,
+                    org.libtorrent4j.swig.alert.piece_progress_notification,
+                    org.libtorrent4j.swig.alert.file_progress_notification,
+                    org.libtorrent4j.swig.alert.tracker_notification,
+                    org.libtorrent4j.swig.alert.connect_notification,
+                    org.libtorrent4j.swig.alert.peer_notification,
+                    org.libtorrent4j.swig.alert.dht_notification,
+                    org.libtorrent4j.swig.alert.dht_operation_notification,
+                    org.libtorrent4j.swig.alert.port_mapping_notification,
+                    org.libtorrent4j.swig.alert.ip_block_notification,
+                    org.libtorrent4j.swig.alert.error_notification))
+                assertEquals(in.to_int(), mask & in.to_int(), "in: " + in.to_int());
+        }
+    }
+
         TorrentStore store = new TorrentStore(dir.resolve("store"));
         StatsStore statsStore = new StatsStore(dir.resolve("config").resolve(StatsStore.FILE_NAME));
         long size;

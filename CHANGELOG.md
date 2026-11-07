@@ -43,6 +43,12 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   the accent's ink; a section's own All, chosen whenever that section filters nothing, keeps the
   quiet fill, so the filters really narrowing the list are the ones the eye finds.
 
+- **The engine no longer asks libtorrent for an alert per block.** Downloading, finishing,
+  uploading and being asked for each 16 KiB block posted an alert nobody read: 65,000 of them per
+  256 MiB, a tenth of the process's CPU during a fast transfer and most of what went through the
+  alert queue ahead of the answers the engine waits for at quit. Those four categories are now
+  left out of the session's alert mask.
+
 ### Fixed
 
 - **Title bars follow the theme's light or dark, not the system's.** On Windows and macOS the
