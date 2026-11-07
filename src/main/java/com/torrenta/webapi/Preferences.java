@@ -61,6 +61,7 @@ public final class Preferences {
         m.put("max_active_downloads", orNone(queue.activeDownloads()));
         m.put("max_active_uploads", orNone(queue.activeSeeds()));
         m.put("max_active_torrents", orNone(queue.activeLimit()));
+        m.put("max_active_checking_torrents", queue.activeChecking());
         m.put("dont_count_slow_torrents", queue.ignoreSlowTorrents());
         m.put("max_ratio_enabled", share.ratio() > 0);
         m.put("max_ratio", share.ratio() > 0 ? share.ratio() : -1);
@@ -217,6 +218,7 @@ public final class Preferences {
                         case "max_active_downloads" -> count(settings, Settings.QUEUE_ACTIVE_DOWNLOADS, v);
                         case "max_active_uploads" -> count(settings, Settings.QUEUE_ACTIVE_SEEDS, v);
                         case "max_active_torrents" -> count(settings, Settings.QUEUE_ACTIVE_LIMIT, v);
+                        case "max_active_checking_torrents" -> checking(settings, v);
                         case "dont_count_slow_torrents" -> bool(settings, Settings.QUEUE_IGNORE_SLOW, v);
                         case "max_ratio_enabled" -> {
                             if (v instanceof Boolean on && !on) settings.set(Settings.SHARE_RATIO, "0");
@@ -321,6 +323,14 @@ public final class Preferences {
         if (!(v instanceof Number)) return false;
         long n = (long) number(v);
         return set(settings, key, String.valueOf(n < 0 ? 0 : n));
+    }
+
+    /** qBittorrent's -1 (no limit) is the most this engine checks at once; the rest is clamped into range. */
+    private static boolean checking(Settings settings, Object v) {
+        if (!(v instanceof Number)) return false;
+        long n = (long) number(v);
+        int max = EngineSettings.Queue.MAX_CHECKING;
+        return set(settings, Settings.QUEUE_ACTIVE_CHECKING, String.valueOf(n <= 0 ? max : Math.min(n, max)));
     }
 
     /** Bytes per second onto KiB per second, rounded up so a limit never loosens; 0 or less is none. */

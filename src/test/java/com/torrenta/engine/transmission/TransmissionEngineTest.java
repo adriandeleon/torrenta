@@ -139,6 +139,7 @@ class TransmissionEngineTest {
                 Capability.OVERHEAD_IN_LIMITS,
                 Capability.STORAGE_OPTIONS,
                 Capability.ACTIVE_TOTAL_LIMIT,
+                Capability.CHECKING_LIMIT,
                 Capability.SEED_MODE,
                 Capability.STOP_CONDITION,
                 Capability.SUPER_SEEDING,
@@ -1080,7 +1081,8 @@ class TransmissionEngineTest {
     @Test
     void sessionArgumentsNameEveryKeyTheDaemonHasAWordFor() {
         EngineSettings s = EngineSettings.defaults()
-                .withQueue(new EngineSettings.Queue(0, 4, 99, false, new ShareLimit(1.5, 90, ShareLimit.Action.PAUSE)))
+                .withQueue(
+                        new EngineSettings.Queue(0, 4, 99, 4, false, new ShareLimit(1.5, 90, ShareLimit.Action.PAUSE)))
                 .withSpeed(new EngineSettings.Speed(
                         0,
                         50,

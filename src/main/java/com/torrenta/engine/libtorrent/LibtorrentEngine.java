@@ -109,6 +109,8 @@ import org.libtorrent4j.alerts.TrackerErrorAlert;
 import org.libtorrent4j.alerts.TrackerWarningAlert;
 import org.libtorrent4j.swig.add_torrent_params;
 import org.libtorrent4j.swig.address;
+import org.libtorrent4j.swig.alert;
+import org.libtorrent4j.swig.alert_category_t;
 import org.libtorrent4j.swig.announce_entry;
 import org.libtorrent4j.swig.announce_entry_vector;
 import org.libtorrent4j.swig.create_file_entry;
@@ -193,6 +195,34 @@ public final class LibtorrentEngine implements Engine {
 
     /** A burst of dropped alerts is said once, then not again for this long. */
     static final long DROP_WARNING_MS = 60_000;
+
+    /**
+     * The alert categories the session posts: every one but the logs and the four that post an
+     * alert per 16 KiB block, which {@link Listener} never reads. Measured on a 256 MiB loopback
+     * download: 32,768 block alerts on each side (downloading and finished here, uploaded and
+     * requested on the seeder) against a thousand of everything else, 120 ms of the alert
+     * threads' CPU per 256 MiB and a tenth of the process's, and 65,000 entries through a
+     * {@link #ALERT_QUEUE_SIZE} queue, crowding the resume-data answers {@code stop()} waits for.
+     * Computed in a method, never a static field: the categories are SWIG objects (see
+     * {@link StatusQuery}).
+     */
+    static int alertMask() {
+        alert_category_t dropped = alert.block_progress_notification
+                .or_(alert.upload_notification)
+                .or_(alert.incoming_request_notification)
+                .or_(alert.session_log_notification)
+                .or_(alert.torrent_log_notification)
+                .or_(alert.peer_log_notification)
+                .or_(alert.dht_log_notification)
+                .or_(alert.port_mapping_log_notification)
+                .or_(alert.picker_log_notification);
+        return alert.all_categories.and_(dropped.inv()).to_int();
+    }
+
+    /** The mask the running session has, for the test. */
+    int alertMaskForTest() throws EngineException {
+        return running().settings().getInteger(settings_pack.int_types.alert_mask.swigValue());
+    }
 
     private static final long STOP_FLUSH_TIMEOUT_MS = 5000;
     /** How often the all-time totals are written; a crash costs at most this much counting. */
@@ -457,6 +487,9 @@ public final class LibtorrentEngine implements Engine {
             // never listened, with neither answer recorded).
             s.addListener(new Listener());
             s.start(new SessionParams(toPack(engineSettings, alternativeInForce)));
+            // After the start, not in the pack: libtorrent4j's start() writes its own alert_mask
+            // (every category but the logs) over whatever the params carry.
+            s.applySettings(new SettingsPack().setInteger(settings_pack.int_types.alert_mask.swigValue(), alertMask()));
         } catch (LinkageError e) {
             // The JNI static initialiser wraps a failed System.load in a LinkageError whose own
             // message is a pointer to the project page; the cause says what actually went wrong.
@@ -3212,6 +3245,9 @@ public final class LibtorrentEngine implements Engine {
         pack.activeDownloads(unlimitedAsMinusOne(queue.activeDownloads()));
         pack.activeSeeds(unlimitedAsMinusOne(queue.activeSeeds()));
         pack.activeLimit(unlimitedAsMinusOne(queue.activeLimit()));
+        // Never -1 here: libtorrent starts a waiting check only at its once-a-second pass, and the
+        // record keeps the count at 1 or more, so a batch of small torrents is not paced to one a second.
+        pack.setInteger(settings_pack.int_types.active_checking.swigValue(), queue.activeChecking());
         pack.setBoolean(settings_pack.bool_types.dont_count_slow_torrents.swigValue(), queue.ignoreSlowTorrents());
         // libtorrent reads these only to rank seeds for the queue (one past its limits yields its
         // slot first); pausing or removing by them is the window's job, from its poll.
@@ -3229,10 +3265,15 @@ public final class LibtorrentEngine implements Engine {
         return count <= 0 ? -1 : count;
     }
 
-    /** The session's active counts as libtorrent has them (downloads, seeds, all); for the test. */
+    /** The session's active counts as libtorrent has them (downloads, seeds, all, checking); for the test. */
     int[] activeLimitsForTest() throws EngineException {
         SettingsPack current = running().settings();
-        return new int[] {current.activeDownloads(), current.activeSeeds(), current.activeLimit()};
+        return new int[] {
+            current.activeDownloads(),
+            current.activeSeeds(),
+            current.activeLimit(),
+            current.getInteger(settings_pack.int_types.active_checking.swigValue())
+        };
     }
 
     @Override

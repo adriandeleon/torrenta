@@ -307,6 +307,13 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   (libtorrent's default is 2,000, and libtorrent4j subscribes to every category but the logs): a
   full queue drops alerts silently, a dropped resume answer holds `stop()` its full 5 s, so
   `alerts_dropped_alert` is a WARNING, once a minute.
+  **The alert mask is the engine's, applied after `start()`**: libtorrent4j's `start` writes its own
+  (every category but the logs) over the pack's, so `alertMask()` goes in with an `applySettings`
+  right after it, leaving out the four categories that post an alert per 16 KiB block
+  (`block_progress`, `upload`, `incoming_request`, and the logs), which the listener never read.
+  Measured on a 256 MiB loopback download: 32,768 block alerts a side against a thousand of
+  everything else, 120 ms of the alert threads' CPU per 256 MiB, a tenth of the process's. A new
+  alert kind the listener reads must be in a category the mask keeps.
 - **The add alert's params are enough to bring a magnet back.** `add_torrent_alert.params()` written
   as resume data holds the hashes, name, trackers and save path, so a magnet survives a crash before
   its metadata arrives; the real resume data replaces the blob later.
@@ -568,6 +575,12 @@ CLI cannot read a git worktree; dry-run it in a clone. Termina's process with Ed
   seeds for the queue (`seed_rank`); the pausing or removing is `ShareLimit.decide` in the session's
   poll (`Session.enforceShareLimits`), once a second, against `Torrent.seedingTime` (`finished_duration`, so a torrent with files
   left out counts). Active counts are `-1` for "no limit" in the pack; `0` would park every torrent.
+  `active_checking` is never -1 and never 0: libtorrent starts a waiting check only at its
+  once-a-second auto-manage pass, so at its default of 1 an import of torrents whose files are
+  there finishes one torrent a second whatever their size (measured: 30 of 500 4 KiB torrents in
+  30 s, 240 at 8); `Queue.activeChecking` is 4 by default, 1 to `MAX_CHECKING`, `queue.activeChecking`,
+  `Capability.CHECKING_LIMIT` (Transmission has no such knob), and qBittorrent's
+  `max_active_checking_torrents` both ways in `Preferences`.
   A torrent's own share limit is `torrent.<hash>.share` in the settings file (the `torrent.` prefix
   never syncs); its rate caps and counts are the handle's and travel in the resume data.
 - **The IP filter is replaced whole, never merged**: `set_ip_filter` takes a complete

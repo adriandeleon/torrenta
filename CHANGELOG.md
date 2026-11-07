@@ -43,6 +43,18 @@ Notable changes, newest first. Versions follow [semantic versioning](https://sem
   the accent's ink; a section's own All, chosen whenever that section filters nothing, keeps the
   quiet fill, so the filters really narrowing the list are the ones the eye finds.
 
+- **The engine no longer asks libtorrent for an alert per block.** Downloading, finishing,
+  uploading and being asked for each 16 KiB block posted an alert nobody read: 65,000 of them per
+  256 MiB, a tenth of the process's CPU during a fast transfer and most of what went through the
+  alert queue ahead of the answers the engine waits for at quit. Those four categories are now
+  left out of the session's alert mask.
+
+- **Several torrents check their files at once.** libtorrent checked one torrent at a time and
+  started the next only at its once-a-second pass, so an import of many small torrents over files
+  already on disk finished exactly one torrent a second whatever their size (2,000 took 33 minutes).
+  Settings → Queue and share limits has a new Checking at once, 4 by default and 1 to 100; a hard
+  drive with large torrents may prefer 1.
+
 ### Fixed
 
 - **Title bars follow the theme's light or dark, not the system's.** On Windows and macOS the

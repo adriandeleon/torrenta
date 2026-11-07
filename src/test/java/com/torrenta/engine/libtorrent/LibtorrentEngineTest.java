@@ -1815,6 +1815,7 @@ class LibtorrentEngineTest {
                 2,
                 0,
                 7,
+                12,
                 false,
                 new com.torrenta.engine.ShareLimit(1.5, 30, com.torrenta.engine.ShareLimit.Action.PAUSE));
         com.torrenta.engine.EngineSettings settings =
@@ -1825,11 +1826,13 @@ class LibtorrentEngineTest {
             assertEquals(2, engine.activeLimitsForTest()[0], "applied at start");
             assertEquals(-1, engine.activeLimitsForTest()[1], "0 to a person is -1 to libtorrent");
             assertEquals(7, engine.activeLimitsForTest()[2]);
-            engine.applySettings(settings.withQueue(
-                    new com.torrenta.engine.EngineSettings.Queue(4, 5, 6, true, com.torrenta.engine.ShareLimit.NONE)));
+            assertEquals(12, engine.activeLimitsForTest()[3], "checks at once, never -1");
+            engine.applySettings(settings.withQueue(new com.torrenta.engine.EngineSettings.Queue(
+                    4, 5, 6, 1, true, com.torrenta.engine.ShareLimit.NONE)));
             assertEquals(4, engine.activeLimitsForTest()[0], "applied live");
             assertEquals(5, engine.activeLimitsForTest()[1]);
             assertEquals(6, engine.activeLimitsForTest()[2]);
+            assertEquals(1, engine.activeLimitsForTest()[3]);
         }
     }
 
@@ -3506,6 +3509,42 @@ class LibtorrentEngineTest {
             assertEquals(1, warnings.size(), "once per burst: " + warnings);
         } finally {
             log.removeHandler(handler);
+        }
+    }
+
+    /**
+     * libtorrent4j's start() writes its own alert mask (every category but the logs) over the
+     * pack's, so the engine applies its own after the start: the four categories that post an
+     * alert per block are out, since nothing here reads them (32,768 of them per 256 MiB on each
+     * side, measured), and everything the listener reads stays in.
+     */
+    @Test
+    void theAlertMaskLeavesOutTheBlockAlertsAndKeepsWhatIsRead(@TempDir Path dir) throws Exception {
+        try (LibtorrentEngine engine = new LibtorrentEngine(
+                () -> dir.resolve("downloads"), new TorrentStore(dir.resolve("store")), isolated(ANY_PORT))) {
+            engine.start();
+            int mask = engine.alertMaskForTest();
+            assertEquals(LibtorrentEngine.alertMask(), mask, "the mask in force is the engine's, not libtorrent4j's");
+            for (org.libtorrent4j.swig.alert_category_t out : List.of(
+                    org.libtorrent4j.swig.alert.block_progress_notification,
+                    org.libtorrent4j.swig.alert.upload_notification,
+                    org.libtorrent4j.swig.alert.incoming_request_notification,
+                    org.libtorrent4j.swig.alert.torrent_log_notification))
+                assertEquals(0, mask & out.to_int(), "out: " + out.to_int());
+            for (org.libtorrent4j.swig.alert_category_t in : List.of(
+                    org.libtorrent4j.swig.alert.status_notification,
+                    org.libtorrent4j.swig.alert.storage_notification,
+                    org.libtorrent4j.swig.alert.piece_progress_notification,
+                    org.libtorrent4j.swig.alert.file_progress_notification,
+                    org.libtorrent4j.swig.alert.tracker_notification,
+                    org.libtorrent4j.swig.alert.connect_notification,
+                    org.libtorrent4j.swig.alert.peer_notification,
+                    org.libtorrent4j.swig.alert.dht_notification,
+                    org.libtorrent4j.swig.alert.dht_operation_notification,
+                    org.libtorrent4j.swig.alert.port_mapping_notification,
+                    org.libtorrent4j.swig.alert.ip_block_notification,
+                    org.libtorrent4j.swig.alert.error_notification))
+                assertEquals(in.to_int(), mask & in.to_int(), "in: " + in.to_int());
         }
     }
 
