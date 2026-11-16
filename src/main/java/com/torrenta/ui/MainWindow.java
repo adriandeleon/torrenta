@@ -466,6 +466,10 @@ public final class MainWindow {
     private volatile String handlerOutcome = "";
     /** {@code --minimized}: come up behind the tray icon, or minimised when there is none. */
     private boolean startMinimized;
+    /** How the tray icon is made; a test's stand-in through {@link #setTrayMaker}. */
+    private TrayMaker trayMaker = TrayMaker.SYSTEM;
+    /** How many times this run's tray has failed to come up, for {@link TrayStart#tryAgain}. */
+    private int trayFailures;
     /** What the start's look at the start-at-login entry found, for the capture hook. */
     private volatile String autostartOutcome = "";
     /** Which desktop open handlers are installed (macOS), or why none. */
@@ -727,6 +731,31 @@ public final class MainWindow {
         startMinimized = true;
     }
 
+    /** Makes the tray icon, and says how soon to ask again when one that failed may still come. */
+    interface TrayMaker {
+        Trays.Attempt create(Runnable onActivate, Runnable onQuit);
+
+        /** How long to wait before asking again, or empty where no tray will come later. */
+        Optional<java.time.Duration> retryEvery();
+
+        TrayMaker SYSTEM = new TrayMaker() {
+            @Override
+            public Trays.Attempt create(Runnable onActivate, Runnable onQuit) {
+                return Trays.create(onActivate, onQuit);
+            }
+
+            @Override
+            public Optional<java.time.Duration> retryEvery() {
+                return Trays.canComeLater() ? Optional.of(TrayStart.RETRY_EVERY) : Optional.empty();
+            }
+        };
+    }
+
+    /** Tests, before {@link #show}: a tray of their own instead of the desktop's. */
+    void setTrayMaker(TrayMaker maker) {
+        trayMaker = maker;
+    }
+
     /**
      * A start-at-login entry that runs but names another launcher (the app moved, a version in
      * another folder) or the other {@code --minimized} is written again, on a worker; one the person
@@ -912,12 +941,23 @@ public final class MainWindow {
         if (!settings.tray() || tray != null) return;
         Thread.ofPlatform().daemon().name("tray-init").start(() -> {
             Trays.Attempt attempt =
-                    Trays.create(() -> Platform.runLater(this::showFromTray), () -> Platform.runLater(this::quit));
+                    trayMaker.create(() -> Platform.runLater(this::showFromTray), () -> Platform.runLater(this::quit));
             Platform.runLater(() -> {
                 if (attempt.tray().isEmpty()) {
+                    trayFailures++;
+                    Optional<java.time.Duration> again = trayMaker.retryEvery();
+                    if (!quitting && TrayStart.tryAgain(hiddenToTray, again.isPresent(), trayFailures)) {
+                        // A login start can beat the desktop's tray: ask again, still hidden.
+                        javafx.animation.PauseTransition wait = new javafx.animation.PauseTransition(
+                                javafx.util.Duration.millis(again.get().toMillis()));
+                        wait.setOnFinished(e -> installTray());
+                        wait.play();
+                        return;
+                    }
                     trayReason = attempt.reason();
-                    // A start behind the icon with no icon: the window after all.
-                    if (hiddenToTray) showFromTray();
+                    // A start behind the icon with no icon: minimised after all, never a full
+                    // window the person asked not to see, never a process with no way back.
+                    if (hiddenToTray) comeUpMinimized();
                     // Silence here is the bug a person actually hits: the setting is on, the box
                     // says so, and closing still quits, because no tray ever appeared.
                     setStatus(tr("status.noTray", attempt.reason(), AppInfo.NAME));
@@ -1061,6 +1101,13 @@ public final class MainWindow {
         rememberWindow();
         hiddenToTray = true;
         stage.hide();
+    }
+
+    /** A start behind the tray icon that found none: on the taskbar or dock, minimised. */
+    private void comeUpMinimized() {
+        hiddenToTray = false;
+        stage.setIconified(true);
+        stage.show();
     }
 
     private void showFromTray() {

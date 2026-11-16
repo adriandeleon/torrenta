@@ -42,6 +42,15 @@ public final class Trays {
         return trayWanted && !isLinux(osName);
     }
 
+    /**
+     * Whether a tray that is not there now can still appear: Linux's StatusNotifierWatcher is a
+     * program of the desktop's that may start after this one (GNOME's AppIndicator extension at
+     * login); AWT's tray is there from the start or never.
+     */
+    public static boolean canComeLater() {
+        return isLinux(System.getProperty("os.name", ""));
+    }
+
     private static boolean isLinux(String osName) {
         return osName != null && osName.toLowerCase(Locale.ROOT).contains("linux");
     }

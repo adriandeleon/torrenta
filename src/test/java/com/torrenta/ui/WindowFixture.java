@@ -3,6 +3,7 @@ package com.torrenta.ui;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BiConsumer;
 
 import javafx.application.Platform;
 import javafx.scene.Node;
@@ -45,6 +46,12 @@ public final class WindowFixture implements AutoCloseable {
 
     /** As {@link #open(Path, FakeEngine)}, with the command line's {@code --minimized} when asked. */
     public static WindowFixture open(Path dir, FakeEngine engine, boolean minimized) {
+        return open(dir, engine, minimized, (settings, window) -> {});
+    }
+
+    /** As {@link #open(Path, FakeEngine, boolean)}, with the settings and the window set up before it shows. */
+    public static WindowFixture open(
+            Path dir, FakeEngine engine, boolean minimized, BiConsumer<Settings, MainWindow> beforeShow) {
         Settings settings = Fx.quietSettings(dir);
         List<String> opened = new CopyOnWriteArrayList<>();
         WindowFixture fixture = Fx.call(() -> {
@@ -53,6 +60,7 @@ public final class WindowFixture implements AutoCloseable {
             WindowFixture f = new WindowFixture(engine, settings, window, stage, opened);
             window.setEngineFactory(profile -> engine);
             if (minimized) window.startMinimized();
+            beforeShow.accept(settings, window);
             window.show();
             window.startEngine(EngineProfile.LOCAL);
             return f;
