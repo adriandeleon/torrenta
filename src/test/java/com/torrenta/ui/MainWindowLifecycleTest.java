@@ -4,7 +4,10 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import javafx.scene.Node;
 import javafx.scene.control.CheckBox;
@@ -18,6 +21,9 @@ import com.torrenta.AppInfo;
 import com.torrenta.engine.EngineProfile;
 import com.torrenta.engine.FakeEngine;
 import com.torrenta.store.ProfileStore;
+import com.torrenta.tray.TorrentaTray;
+import com.torrenta.tray.TrayDisplay;
+import com.torrenta.tray.Trays;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
@@ -78,6 +84,86 @@ class MainWindowLifecycleTest {
             assertTrue(Fx.call(f.window::autostartDescription).contains("minimized=true hiddenToTray=false"));
             Fx.run(() -> f.stage.setIconified(false));
             Fx.waitUntil("the list drawn once it is back", () -> Fx.call(f::rows) == 1);
+        }
+    }
+
+    /** A tray maker that fails {@code failures} times, then succeeds; counts its attempts. */
+    private static final class FlakyTray implements MainWindow.TrayMaker {
+        final AtomicInteger attempts = new AtomicInteger();
+        private final int failures;
+        private final Optional<Duration> retryEvery;
+
+        FlakyTray(int failures, Optional<Duration> retryEvery) {
+            this.failures = failures;
+            this.retryEvery = retryEvery;
+        }
+
+        @Override
+        public Trays.Attempt create(Runnable onActivate, Runnable onQuit) {
+            if (attempts.incrementAndGet() <= failures) {
+                return new Trays.Attempt(Optional.empty(), "no StatusNotifierWatcher on the session bus");
+            }
+            return new Trays.Attempt(
+                    Optional.of(new TorrentaTray() {
+                        @Override
+                        public void update(TrayDisplay display, String line) {}
+
+                        @Override
+                        public void dispose() {}
+
+                        @Override
+                        public String backend() {
+                            return "test";
+                        }
+                    }),
+                    "");
+        }
+
+        @Override
+        public Optional<Duration> retryEvery() {
+            return retryEvery;
+        }
+    }
+
+    private static WindowFixture openMinimizedWithTray(Path dir, FlakyTray tray) {
+        return WindowFixture.open(dir, new FakeEngine(), true, (settings, window) -> {
+            settings.setTray(true);
+            window.setTrayMaker(tray);
+        });
+    }
+
+    /** GNOME's AppIndicator extension still loading at login: the tray is asked for again, the window kept hidden. */
+    @Test
+    void aMinimizedStartWaitsHiddenForATrayThatComesLate(@TempDir Path dir) throws Exception {
+        FlakyTray tray = new FlakyTray(2, Optional.of(Duration.ofMillis(20)));
+        try (WindowFixture f = openMinimizedWithTray(dir, tray)) {
+            Fx.waitUntil("the third attempt", () -> tray.attempts.get() == 3);
+            Fx.waitUntil("the icon up", () -> Fx.call(f.window::trayDescription).startsWith("test"));
+            assertFalse(Fx.call(f.stage::isShowing), "never shown");
+            assertTrue(Fx.call(f.window::autostartDescription).contains("hiddenToTray=true"));
+        }
+    }
+
+    /** Stock GNOME, no extension: after the retries, minimised, never the full window. */
+    @Test
+    void aMinimizedStartWithNoTrayEverComesUpMinimisedNotShown(@TempDir Path dir) throws Exception {
+        FlakyTray tray = new FlakyTray(Integer.MAX_VALUE, Optional.of(Duration.ofMillis(10)));
+        try (WindowFixture f = openMinimizedWithTray(dir, tray)) {
+            Fx.waitUntil("the window back", () -> Fx.call(f.stage::isShowing));
+            assertTrue(Fx.call(f.stage::isIconified), "minimised");
+            assertEquals(TrayStart.RETRIES + 1, tray.attempts.get(), "asked again, then gave up");
+            assertTrue(Fx.call(f.window::autostartDescription).contains("hiddenToTray=false"));
+        }
+    }
+
+    /** Windows and macOS: AWT's tray will not come later, so no waiting. */
+    @Test
+    void aTrayThatCannotComeLaterIsNotWaitedFor(@TempDir Path dir) throws Exception {
+        FlakyTray tray = new FlakyTray(Integer.MAX_VALUE, Optional.empty());
+        try (WindowFixture f = openMinimizedWithTray(dir, tray)) {
+            Fx.waitUntil("the window back", () -> Fx.call(f.stage::isShowing));
+            assertTrue(Fx.call(f.stage::isIconified), "minimised");
+            assertEquals(1, tray.attempts.get());
         }
     }
 
